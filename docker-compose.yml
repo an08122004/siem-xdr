@@ -1,0 +1,283 @@
+# SIEM/XDR lab — pipeline theo BTL/SIEM.txt:
+#   Agent / Syslog -> Manager (HTTPS) -> Kafka (+Zookeeper) -> Analyzer (Rule) -> Elasticsearch (TLS + RBAC) -> Grafana
+#                                                           -> SOAR -> lệnh phản ứng -> Agent (XDR)
+#
+# Bảo mật nội bộ:
+#   - TLS: CA nội bộ do es-certs sinh (volume certs). Elasticsearch HTTPS + transport TLS; manager HTTPS.
+#   - RBAC: mỗi service một user Elasticsearch với quyền tối thiểu (security/setup.sh).
+#   - Bí mật: file trong ./secrets (tạo bằng `python tools/init_secrets.py`), mount qua Docker secrets,
+#     KHÔNG nằm trong .env / biến môi trường. Mật khẩu superuser `elastic` nằm trong keystore của Elasticsearch.
+# Giới hạn còn lại: Kafka/Zookeeper chạy plaintext trong mạng docker nội bộ `soc-lab` (không publish ra ngoài).
+
+x-app-env: &app-env
+  KAFKA_BOOTSTRAP: kafka:9092
+  ES_URL: https://elasticsearch:9200
+  ES_CA_CERT: /certs/ca/ca.crt
+  DATA_DIR: /data
+
+x-ca-mount: &ca-mount
+  type: volume
+  source: certs
+  target: /certs/ca
+  read_only: true
+  volume: {subpath: ca}
+
+x-app: &app
+  build: ./server
+  image: siem-xdr-server:latest
+  restart: unless-stopped
+  env_file: .env
+  networks: [soc]
+  depends_on:
+    kafka: {condition: service_healthy}
+    elasticsearch: {condition: service_healthy}
+    es-setup: {condition: service_completed_successfully}
+
+services:
+  # ---------------------------------------------------------------- bảo mật
+  es-certs:   # bước 1: CA + chứng chỉ TLS (chạy trước Elasticsearch)
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    user: "0"
+    command: ["bash", "/security/setup.sh", "certs"]
+    environment:
+      MANAGER_TLS_IPS: ${MANAGER_TLS_IPS:-}
+    volumes:
+      - certs:/usr/share/elasticsearch/config/certs
+      - ./security:/security:ro
+    secrets: [elastic_password]
+    networks: [soc]
+
+  es-setup:   # bước 2: role + user RBAC (chạy sau khi Elasticsearch healthy)
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    user: "0"
+    command: ["bash", "/security/setup.sh", "users"]
+    depends_on:
+      elasticsearch: {condition: service_healthy}
+    volumes:
+      - certs:/usr/share/elasticsearch/config/certs:ro
+      - ./security:/security:ro
+    secrets: [elastic_password, manager_es_password, analyzer_es_password, soar_es_password, grafana_es_password, analyst_es_password, ai_es_password]
+    networks: [soc]
+
+  # ---------------------------------------------------------------- hạ tầng
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.7.1
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks: [soc]
+
+  kafka:
+    image: confluentinc/cp-kafka:7.7.1
+    restart: unless-stopped
+    depends_on: [zookeeper]
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_RETENTION_HOURS: 72
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+    networks: [soc]
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    restart: unless-stopped
+    depends_on: [kafka]
+    ports: ["127.0.0.1:8088:8080"]   # chỉ truy cập từ máy chạy docker
+    environment:
+      KAFKA_CLUSTERS_0_NAME: soc
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    networks: [soc]
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    restart: unless-stopped
+    depends_on:
+      es-certs: {condition: service_completed_successfully}
+    environment:
+      discovery.type: single-node
+      ES_JAVA_OPTS: -Xms1g -Xmx1g
+      # es-certs chép từ Docker secret sang đây (quyền 600); image ghi vào keystore (bootstrap.password)
+      ELASTIC_PASSWORD_FILE: /usr/share/elasticsearch/config/certs/bootstrap/elastic_password
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "true"
+      xpack.security.http.ssl.key: certs/elasticsearch/elasticsearch.key
+      xpack.security.http.ssl.certificate: certs/elasticsearch/elasticsearch.crt
+      xpack.security.http.ssl.certificate_authorities: certs/ca/ca.crt
+      xpack.security.transport.ssl.enabled: "true"
+      xpack.security.transport.ssl.verification_mode: certificate
+      xpack.security.transport.ssl.key: certs/elasticsearch/elasticsearch.key
+      xpack.security.transport.ssl.certificate: certs/elasticsearch/elasticsearch.crt
+      xpack.security.transport.ssl.certificate_authorities: certs/ca/ca.crt
+    ports: ["127.0.0.1:9200:9200"]
+    volumes:
+      - certs:/usr/share/elasticsearch/config/certs:ro
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s --cacert config/certs/ca/ca.crt https://localhost:9200 | grep -q 'missing authentication credentials'"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+    networks: [soc]
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    restart: unless-stopped
+    depends_on:
+      es-setup: {condition: service_completed_successfully}
+    ports: ["3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/siem-overview.json
+    secrets: [grafana_admin_password, grafana_es_password]
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+      - *ca-mount
+    networks: [soc]
+
+  # ---------------------------------------------------------------- SIEM/XDR
+  manager:
+    <<: *app
+    command: ["uvicorn", "siem.manager.api:app", "--host", "0.0.0.0", "--port", "8000",
+              "--ssl-keyfile", "/certs/manager/manager.key", "--ssl-certfile", "/certs/manager/manager.crt"]
+    ports: ["8000:8000"]
+    environment:
+      <<: *app-env
+      ES_USER: siem_manager
+      ES_PASSWORD_FILE: /run/secrets/manager_es_password
+      ENROLLMENT_KEY_FILE: /run/secrets/enrollment_key
+      SERVER_SECRET_FILE: /run/secrets/server_secret
+      API_KEY_FILE: /run/secrets/api_key
+      DATASETS_DIR: /datasets   # bộ mẫu vàng để kiểm tra lại đề xuất AI ngay trước khi triển khai
+    secrets: [manager_es_password, enrollment_key, server_secret, api_key]
+    volumes:
+      - *ca-mount
+      - {type: volume, source: certs, target: /certs/manager, read_only: true, volume: {subpath: manager}}
+      # duyệt đề xuất AI: manager CHỈ ghi được 2 thư mục rules/ai và rules/exceptions, rule gốc chỉ đọc
+      - ./server/rules:/app/rules:ro
+      - ./server/rules/ai:/app/rules/ai
+      - ./server/rules/exceptions:/app/rules/exceptions
+      - ./datasets/processed:/datasets:ro
+
+  syslog:
+    <<: *app
+    command: ["python", "-m", "siem.collector.syslog_server"]
+    user: root   # bind cổng 514
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+    ports: ["514:514/udp", "514:514/tcp"]
+    depends_on:
+      kafka: {condition: service_healthy}
+
+  analyzer:
+    <<: *app
+    command: ["python", "-m", "siem.analyzer"]
+    environment:
+      <<: *app-env
+      ES_USER: siem_analyzer
+      ES_PASSWORD_FILE: /run/secrets/analyzer_es_password
+    secrets: [analyzer_es_password]
+    volumes:
+      - ./server/rules:/app/rules:ro
+      - ./server/config:/app/config:ro
+      - mldata:/data
+      - *ca-mount
+
+  soar:
+    <<: *app
+    command: ["python", "-m", "siem.soar"]
+    environment:
+      <<: *app-env
+      ES_USER: siem_soar
+      ES_PASSWORD_FILE: /run/secrets/soar_es_password
+    secrets: [soar_es_password]
+    volumes:
+      - ./server/config:/app/config:ro
+      - *ca-mount
+
+  # ---------------------------------------------------------------- AI hỗ trợ viết rule (profile ai)
+  # LLM chạy nội bộ, không publish cổng ra ngoài. GPU: thêm -f docker-compose.gpu.yml
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    profiles: [ai]
+    environment:
+      OLLAMA_KEEP_ALIVE: 30m
+    volumes: [ollama:/root/.ollama]
+    networks: [soc]
+
+  ai-worker:
+    <<: *app
+    profiles: [ai]
+    command: ["python", "-m", "siem.ai"]
+    environment:
+      <<: *app-env
+      ES_USER: siem_ai
+      ES_PASSWORD_FILE: /run/secrets/ai_es_password
+      OLLAMA_URL: http://ollama:11434
+      DATASETS_DIR: /datasets
+    secrets: [ai_es_password]
+    volumes:
+      - ./server/rules:/app/rules:ro
+      - ./server/config:/app/config:ro
+      - ./datasets/processed:/datasets:ro
+      - *ca-mount
+    depends_on:
+      elasticsearch: {condition: service_healthy}
+      es-setup: {condition: service_completed_successfully}
+      ollama: {condition: service_started}
+
+  # Máy chủ web demo (S001) có cài agent — dùng để kiểm tra luồng XDR end-to-end
+  demo-web:
+    build: {context: ., dockerfile: demo/web/Dockerfile}
+    restart: unless-stopped
+    profiles: [demo]
+    hostname: web-01
+    cap_add: [NET_ADMIN]
+    environment:
+      SIEM_ENROLLMENT_KEY_FILE: /run/secrets/enrollment_key
+    secrets: [enrollment_key]
+    volumes:
+      - *ca-mount
+    ports: ["127.0.0.1:8081:80"]
+    depends_on: [manager]
+    networks: [soc]
+
+secrets:
+  elastic_password:       {file: ./secrets/elastic_password}
+  manager_es_password:    {file: ./secrets/manager_es_password}
+  analyzer_es_password:   {file: ./secrets/analyzer_es_password}
+  soar_es_password:       {file: ./secrets/soar_es_password}
+  grafana_es_password:    {file: ./secrets/grafana_es_password}
+  analyst_es_password:    {file: ./secrets/analyst_es_password}
+  grafana_admin_password: {file: ./secrets/grafana_admin_password}
+  enrollment_key:         {file: ./secrets/enrollment_key}
+  server_secret:          {file: ./secrets/server_secret}
+  api_key:                {file: ./secrets/api_key}
+  ai_es_password:         {file: ./secrets/ai_es_password}
+
+networks:
+  soc:
+    name: soc-lab
+
+volumes:
+  certs:
+  esdata:
+  grafanadata:
+  mldata:
+  ollama:

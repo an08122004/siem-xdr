@@ -1,0 +1,84 @@
+# Luật về xác thực (SSH / PAM / sudo trên Linux; dùng chung cho mọi nguồn authentication)
+- id: AUTH-001
+  title: Brute-force đăng nhập (SSH/Linux)
+  description: ">= 5 lần đăng nhập thất bại từ cùng 1 IP trong 60 giây"
+  severity: high
+  mitre: {tactic: Credential Access, technique: [T1110.001]}
+  tags: [auth, bruteforce, ssh]
+  type: threshold
+  condition:
+    all:
+      - {field: event.category, op: eq, value: authentication}
+      - {field: event.outcome, op: eq, value: failure}
+      - {field: event.module, op: in, value: [auth, syslog, mock]}
+  threshold: {count: 5, window: 60, group_by: [source.ip]}
+
+- id: AUTH-002
+  title: Brute-force THÀNH CÔNG (thất bại liên tiếp rồi đăng nhập được)
+  description: ">= 5 lần thất bại sau đó 1 lần thành công từ cùng IP trong 10 phút — khả năng cao tài khoản đã bị chiếm"
+  severity: critical
+  mitre: {tactic: Credential Access, technique: [T1110, T1078]}
+  tags: [auth, bruteforce, compromise]
+  type: sequence
+  sequence:
+    group_by: [source.ip]
+    within: 600
+    steps:
+      - count: 5
+        condition:
+          all:
+            - {field: event.category, op: eq, value: authentication}
+            - {field: event.outcome, op: eq, value: failure}
+      - condition:
+          all:
+            - {field: event.category, op: eq, value: authentication}
+            - {field: event.outcome, op: eq, value: success}
+
+- id: AUTH-003
+  title: Password Spraying
+  description: Một IP thử >= 5 tài khoản khác nhau trong 2 phút
+  severity: high
+  mitre: {tactic: Credential Access, technique: [T1110.003]}
+  tags: [auth, spraying]
+  type: threshold
+  condition:
+    all:
+      - {field: event.category, op: eq, value: authentication}
+      - {field: event.outcome, op: eq, value: failure}
+  threshold: {count: 5, window: 120, group_by: [source.ip], distinct: user.name}
+
+- id: AUTH-004
+  title: Đăng nhập SSH bằng root
+  severity: medium
+  mitre: {tactic: Privilege Escalation, technique: [T1078.003]}
+  tags: [auth, root]
+  type: match
+  condition:
+    all:
+      - {field: event.action, op: eq, value: ssh_login}
+      - {field: event.outcome, op: eq, value: success}
+      - {field: user.name, op: eq, value: root}
+
+- id: AUTH-005
+  title: Tạo tài khoản người dùng mới trên Linux
+  severity: medium
+  mitre: {tactic: Persistence, technique: [T1136.001]}
+  tags: [iam, linux]
+  type: match
+  condition:
+    all:
+      - {field: event.action, op: eq, value: user_created}
+      - {field: event.module, op: in, value: [auth, syslog]}
+
+- id: AUTH-006
+  title: Sudo mở shell root / sudo thất bại
+  severity: medium
+  mitre: {tactic: Privilege Escalation, technique: [T1548.003]}
+  tags: [linux, sudo]
+  type: match
+  condition:
+    all:
+      - {field: event.action, op: eq, value: sudo}
+      - any:
+          - {field: event.outcome, op: eq, value: failure}
+          - {field: process.command_line, op: regex, value: "(/bin/(ba|z|da)?sh|su\\s+-?$|su$|-i$)"}

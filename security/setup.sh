@@ -1,0 +1,94 @@
+#!/bin/bash
+# Khởi tạo bảo mật nội bộ cho Elasticsearch (chạy 1 lần bởi service es-setup trong docker-compose):
+#   1. Tạo CA nội bộ + chứng chỉ TLS cho elasticsearch và manager (nếu chưa có)
+#   2. Phân quyền file khóa: mỗi service chỉ đọc được khóa của chính nó
+#   3. Chờ Elasticsearch lên rồi tạo role + user theo nguyên tắc quyền tối thiểu (RBAC)
+# Mật khẩu đọc từ Docker secrets (/run/secrets/*), không nằm trong file cấu hình.
+#
+# Dùng: setup.sh certs  -> chỉ bước 1-2 (chạy TRƯỚC Elasticsearch, service es-certs)
+#       setup.sh users  -> chỉ bước 3   (chạy SAU khi Elasticsearch healthy, service es-setup)
+set -euo pipefail
+MODE=${1:-all}
+CERTS=/usr/share/elasticsearch/config/certs
+S=/run/secrets
+cd /usr/share/elasticsearch
+
+if [ "$MODE" = "certs" ] || [ "$MODE" = "all" ]; then
+
+if [ ! -f "$CERTS/ca/ca.crt" ]; then
+  echo "[setup] tạo CA nội bộ"
+  bin/elasticsearch-certutil ca --silent --pem -out "$CERTS/ca.zip"
+  unzip -q -o "$CERTS/ca.zip" -d "$CERTS" && rm "$CERTS/ca.zip"
+fi
+
+if [ ! -f "$CERTS/manager/manager.crt" ]; then
+  echo "[setup] tạo chứng chỉ cho elasticsearch, manager (IP thêm: ${MANAGER_TLS_IPS:-không có})"
+  cat > "$CERTS/instances.yml" <<YML
+instances:
+  - name: elasticsearch
+    dns: [elasticsearch, localhost]
+    ip: [127.0.0.1]
+  - name: manager
+    dns: [manager, localhost]
+    ip: [127.0.0.1${MANAGER_TLS_IPS:+, $MANAGER_TLS_IPS}]
+YML
+  bin/elasticsearch-certutil cert --silent --pem -out "$CERTS/certs.zip" --in "$CERTS/instances.yml" \
+    --ca-cert "$CERTS/ca/ca.crt" --ca-key "$CERTS/ca/ca.key"
+  unzip -q -o "$CERTS/certs.zip" -d "$CERTS" && rm "$CERTS/certs.zip"
+fi
+
+# Quyền file: CA công khai cho mọi service; khóa CA chỉ root; khóa ES cho uid 1000; khóa manager cho uid 10001
+chown -R root:root "$CERTS"
+chmod 755 "$CERTS" "$CERTS"/*/
+chmod 644 "$CERTS"/*/*.crt
+chmod 600 "$CERTS/ca/ca.key"
+chown 1000:0 "$CERTS/elasticsearch/elasticsearch.key"; chmod 600 "$CERTS/elasticsearch/elasticsearch.key"
+chown 10001:0 "$CERTS/manager/manager.key";           chmod 600 "$CERTS/manager/manager.key"
+
+# Mật khẩu superuser cho Elasticsearch: ES yêu cầu file quyền 400/600, nhưng bind mount từ Windows luôn là 777
+# -> chép vào thư mục riêng trong volume certs (chỉ container elasticsearch mount thư mục này)
+mkdir -p "$CERTS/bootstrap"
+install -m 600 -o 1000 -g 0 "$S/elastic_password" "$CERTS/bootstrap/elastic_password"
+chown 1000:0 "$CERTS/bootstrap"; chmod 700 "$CERTS/bootstrap"
+
+echo "[setup] chứng chỉ sẵn sàng"
+fi
+[ "$MODE" = "certs" ] && exit 0
+
+echo "[setup] chờ Elasticsearch (HTTPS)..."
+until curl -s --cacert "$CERTS/ca/ca.crt" https://elasticsearch:9200 | grep -q "missing authentication credentials"; do
+  sleep 5
+done
+
+EP=$(cat "$S/elastic_password")
+api() {  # api METHOD PATH JSON
+  curl -sf --cacert "$CERTS/ca/ca.crt" -u "elastic:$EP" -H "Content-Type: application/json" \
+       -X "$1" "https://elasticsearch:9200$2" -d "$3" > /dev/null \
+    || { echo "[setup] LỖI khi gọi $1 $2"; exit 1; }
+}
+role() { api PUT "/_security/role/$1" "$2"; echo "[setup] role $1"; }
+user() { api POST "/_security/user/$1" "{\"password\":\"$(cat "$S/$2")\",\"roles\":[\"$3\"],\"full_name\":\"$4\"}"; echo "[setup] user $1 -> $3"; }
+
+META='"cluster": ["monitor", "manage_index_templates"]'
+role siem_manager  "{$META, \"indices\": [
+  {\"names\": [\"siem-agents\", \"siem-actions\", \"siem-alerts\", \"siem-cases\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]},
+  {\"names\": [\"siem-events-*\"], \"privileges\": [\"read\", \"view_index_metadata\"]},
+  {\"names\": [\"ai-*\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]}]}"
+role siem_analyzer "{$META, \"indices\": [
+  {\"names\": [\"siem-events-*\", \"siem-alerts\"], \"privileges\": [\"create_index\", \"create_doc\", \"write\", \"auto_configure\", \"view_index_metadata\"]}]}"
+role siem_soar     "{$META, \"indices\": [
+  {\"names\": [\"siem-alerts\"], \"privileges\": [\"read\", \"write\", \"view_index_metadata\"]},
+  {\"names\": [\"siem-actions\", \"siem-cases\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]},
+  {\"names\": [\"siem-agents\"], \"privileges\": [\"read\", \"view_index_metadata\"]}]}"
+role siem_ai      "{\"cluster\": [\"monitor\"], \"indices\": [
+  {\"names\": [\"siem-events-*\", \"siem-alerts\", \"siem-cases\"], \"privileges\": [\"read\", \"view_index_metadata\"]},
+  {\"names\": [\"ai-*\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]}]}"
+role siem_reader   '{"cluster": ["monitor"], "indices": [{"names": ["siem-*"], "privileges": ["read", "view_index_metadata"]}]}'
+
+user siem_manager  manager_es_password  siem_manager  "SIEM manager API"
+user siem_analyzer analyzer_es_password siem_analyzer "SIEM analyzer"
+user siem_soar     soar_es_password     siem_soar     "SIEM SOAR"
+user siem_ai       ai_es_password       siem_ai       "SIEM AI worker (chỉ đọc siem-*, chỉ ghi ai-*)"
+user grafana       grafana_es_password  siem_reader   "Grafana (chỉ đọc)"
+user analyst       analyst_es_password  siem_reader   "SOC analyst (chỉ đọc)"
+echo "[setup] hoàn tất"

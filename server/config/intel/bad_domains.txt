@@ -1,0 +1,3 @@
+# Domain độc hại (khớp cả subdomain). Dùng TLD .example / .test (RFC 2606) cho demo.
+evil-c2.example
+malware-download.test

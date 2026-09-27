@@ -1,0 +1,78 @@
+# Luật mạng (firewall syslog, Suricata IDS, Sysmon network) + Threat Intelligence
+- id: NET-001
+  title: Quét cổng (Port scan)
+  description: Một IP kết nối tới >= 20 port đích khác nhau trong 60 giây
+  severity: medium
+  mitre: {tactic: Discovery, technique: [T1046]}
+  tags: [network, scan]
+  type: threshold
+  condition:
+    all:
+      - {field: event.category, op: eq, value: network}
+      - {field: destination.port, op: exists}
+  threshold: {count: 20, window: 60, group_by: [source.ip], distinct: destination.port}
+
+- id: NET-002
+  title: Lượng lớn kết nối bị firewall chặn
+  severity: medium
+  mitre: {tactic: Reconnaissance, technique: [T1595.001]}
+  tags: [network, firewall]
+  type: threshold
+  condition:
+    all:
+      - {field: event.category, op: eq, value: network}
+      - {field: event.action, op: eq, value: deny}
+  threshold: {count: 50, window: 60, group_by: [source.ip]}
+
+- id: NET-003
+  title: Kết nối từ Internet tới dịch vụ quản trị nhạy cảm
+  description: Firewall CHO PHÉP IP public truy cập SSH/RDP/SMB/Telnet/DB
+  severity: high
+  mitre: {tactic: Initial Access, technique: [T1133]}
+  tags: [network, exposure]
+  type: match
+  suppress: 600
+  group_by: [source.ip, destination.port]
+  condition:
+    all:
+      - {field: event.category, op: eq, value: network}
+      - {field: event.action, op: eq, value: allow}
+      - {field: source.ip_scope, op: eq, value: public}
+      - {field: destination.port, op: in, value: [22, 23, 445, 1433, 3306, 3389, 5432, 5985, 6379]}
+
+- id: NET-004
+  title: Cảnh báo IDS Suricata mức cao
+  severity: high
+  mitre: {tactic: Initial Access, technique: [T1190]}
+  tags: [network, ids, suricata]
+  type: match
+  suppress: 120
+  group_by: [source.ip, suricata.signature_id]
+  condition:
+    all:
+      - {field: event.category, op: eq, value: intrusion_detection}
+      - {field: suricata.severity, op: lte, value: 2}
+
+- id: NET-005
+  title: Dò quét SMB nội bộ (Lateral movement)
+  description: Một máy kết nối port 445 tới >= 10 IP khác nhau trong 60 giây
+  severity: high
+  mitre: {tactic: Lateral Movement, technique: [T1021.002]}
+  tags: [network, lateral]
+  type: threshold
+  condition:
+    all:
+      - {field: event.category, op: eq, value: network}
+      - {field: destination.port, op: eq, value: 445}
+  threshold: {count: 10, window: 60, group_by: [source.ip], distinct: destination.ip}
+
+- id: TI-001
+  title: Kết nối với IOC trong Threat Intelligence
+  description: IP / domain / hash khớp danh sách mối đe dọa đã biết (config/intel)
+  severity: high
+  mitre: {tactic: Command and Control, technique: [T1071]}
+  tags: [threat-intel]
+  type: match
+  suppress: 300
+  group_by: [threat.indicator.value]
+  condition: {field: threat.matched, op: eq, value: true}

@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SIEM/XDR Console</title>
+<style>
+  :root { --bg:#0f1419; --panel:#171e26; --line:#26313d; --fg:#d6dde5; --mute:#8595a6;
+          --low:#4f9dde; --medium:#e0b93b; --high:#e7793a; --critical:#e2474b; --ok:#3fb27f; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui, Segoe UI, sans-serif; }
+  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:12px 20px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:17px; margin:0 12px 0 0; }
+  header input { background:var(--panel); border:1px solid var(--line); color:var(--fg); padding:6px 8px; border-radius:6px; width:230px; }
+  main { padding:16px 20px; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:16px; }
+  .tile { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
+  .tile b { display:block; font-size:24px; font-variant-numeric:tabular-nums; }
+  .tile span { color:var(--mute); font-size:12px; }
+  nav { display:flex; gap:4px; margin-bottom:10px; flex-wrap:wrap; }
+  nav button { background:none; border:1px solid var(--line); color:var(--mute); padding:6px 14px; border-radius:6px; cursor:pointer; }
+  nav button.on { color:var(--fg); background:var(--panel); border-color:#3a4b5d; }
+  .wrap { overflow-x:auto; background:var(--panel); border:1px solid var(--line); border-radius:8px; }
+  table { border-collapse:collapse; width:100%; min-width:900px; }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mute); font-weight:500; font-size:12px; position:sticky; top:0; background:var(--panel); }
+  tr:hover td { background:#1c2530; }
+  .sev { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:600; color:#10151a; }
+  .sev.low{background:var(--low)} .sev.medium{background:var(--medium)} .sev.high{background:var(--high)} .sev.critical{background:var(--critical)}
+  .st { font-size:12px; color:var(--mute); }
+  .st.online,.st.success{color:var(--ok)} .st.failed,.st.offline,.st.timeout{color:var(--critical)}
+  .btn { background:#233040; border:1px solid #33475c; color:var(--fg); padding:3px 8px; border-radius:5px; cursor:pointer; font-size:12px; margin:1px; }
+  .btn:hover { background:#2d3e52; }
+  .btn.danger { border-color:#7a3336; }
+  .mono { font-family:ui-monospace, Consolas, monospace; font-size:12px; word-break:break-all; }
+  .small { color:var(--mute); font-size:12px; }
+  #toast { position:fixed; right:16px; bottom:16px; background:var(--panel); border:1px solid var(--line); padding:10px 14px; border-radius:8px; display:none; max-width:420px; }
+  details summary { cursor:pointer; color:var(--mute); font-size:12px; }
+  pre { white-space:pre-wrap; margin:6px 0 0; max-height:260px; overflow:auto; }
+  .prio { font-weight:700; } .prio.P1{color:var(--critical)} .prio.P2{color:var(--high)} .prio.P3{color:var(--medium)} .prio.P4{color:var(--low)}
+  .late { color:var(--critical); font-weight:600; }
+  .bar { height:6px; background:var(--line); border-radius:3px; min-width:90px; margin-top:4px; }
+  .bar i { display:block; height:100%; background:var(--ok); border-radius:3px; }
+  .case { padding:10px 12px 14px; }
+  .case h4 { margin:12px 0 4px; font-size:13px; color:var(--mute); font-weight:600; }
+  .case label { display:flex; gap:8px; align-items:flex-start; padding:2px 0; cursor:pointer; }
+  .case label.done span:first-of-type { color:var(--mute); text-decoration:line-through; }
+  .appr { font-size:11px; color:var(--high); border:1px solid #6b4a2a; border-radius:8px; padding:0 6px; margin-left:4px; white-space:nowrap; }
+  .case textarea, .case input[type=text] { background:var(--bg); border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:6px; font:inherit; }
+  .case textarea { width:100%; min-height:54px; }
+  .ok { color:var(--ok); } .bad { color:var(--critical); } .warn { color:var(--medium); }
+  .aibar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:10px 12px; border-bottom:1px solid var(--line); }
+  .aibar select { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px; }
+  .chk { font-size:12px; padding:1px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🛡️ SIEM/XDR Console</h1>
+  <input id="key" type="password" placeholder="API key (X-API-Key)">
+  <input id="who" placeholder="Tên analyst (ghi vào lịch sử case)" style="width:200px">
+  <button class="btn" id="save">Lưu</button>
+  <span class="small" id="updated"></span>
+  <span style="flex:1"></span>
+  <a class="small" href="http://localhost:3000" target="_blank" style="color:var(--mute)">Grafana ↗</a>
+</header>
+<main>
+  <div class="tiles" id="tiles"></div>
+  <nav id="tabs">
+    <button data-t="alerts" class="on">Alerts</button>
+    <button data-t="agents">Agents</button>
+    <button data-t="actions">Response actions</button>
+    <button data-t="cases">Cases</button>
+    <button data-t="ai">Đề xuất AI</button>
+  </nav>
+  <div class="wrap"><table id="tbl"></table></div>
+</main>
+<div id="toast"></div>
+<script>
+const $ = s => document.querySelector(s);
+let KEY = '', TAB = 'alerts';
+try { KEY = localStorage.getItem('siem_key') || ''; } catch (e) {}
+let WHO = '';
+try { WHO = localStorage.getItem('siem_who') || ''; } catch (e) {}
+$('#key').value = KEY; $('#who').value = WHO;
+$('#save').onclick = () => {
+  KEY = $('#key').value.trim(); WHO = $('#who').value.trim();
+  try { localStorage.setItem('siem_key', KEY); localStorage.setItem('siem_who', WHO); } catch (e) {}
+  refresh();
+};
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.remove('on'));
+  b.classList.add('on'); TAB = b.dataset.t; refresh();
+});
+
+async function api(path, opt = {}) {
+  const r = await fetch(path, { ...opt, headers: { 'X-API-Key': KEY, 'Content-Type': 'application/json' } });
+  if (!r.ok) throw new Error(r.status + ' ' + (await r.text()));
+  return r.json();
+}
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 4000); }
+// Dựng DOM an toàn bằng textContent — log chứa payload tấn công (XSS) nên KHÔNG dùng innerHTML với dữ liệu.
+function el(tag, props = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) { if (k === 'on') e.onclick = v; else if (k === 'cls') e.className = v; else e.setAttribute(k, v); }
+  for (const k of kids.flat()) if (k != null) e.append(k instanceof Node ? k : String(k));
+  return e;
+}
+const g = (o, p) => p.split('.').reduce((a, k) => a == null ? a : a[k], o);
+const fmt = t => t ? new Date(t).toLocaleString('vi-VN') : '';
+const btn = (label, fn, danger) => el('button', { cls: 'btn' + (danger ? ' danger' : ''), on: fn }, label);
+
+async function act(agent_id, type, params, alert_id) {
+  try { await api('/api/v1/actions', { method: 'POST', body: JSON.stringify({ agent_id, type, params, alert_id }) }); toast(`Đã gửi lệnh ${type} tới ${agent_id}`); refresh(); }
+  catch (e) { toast('Lỗi: ' + e.message); }
+}
+async function setStatus(id, status) {
+  try { await api('/api/v1/alerts/' + id, { method: 'PATCH', body: JSON.stringify({ status }) }); refresh(); }
+  catch (e) { toast('Lỗi: ' + e.message); }
+}
+let OPEN_CASE = null;
+async function updateCase(id, body) {
+  if (!WHO) { toast('Nhập tên analyst ở thanh trên rồi bấm Lưu trước khi xử lý case'); return; }
+  try {
+    await api('/api/v1/cases/' + id, { method: 'PATCH', body: JSON.stringify({ analyst: WHO, ...body }) });
+    toast('Đã cập nhật case'); OPEN_CASE = id; refresh();
+  } catch (e) { toast('Lỗi: ' + e.message); }
+}
+function caseDetail(c) {
+  const box = el('div', { cls: 'case' });
+  let phase = null;
+  (c.tasks || []).forEach((t, i) => {
+    if (t.phase !== phase) { phase = t.phase; box.append(el('h4', {}, phase)); }
+    const cb = el('input', { type: 'checkbox' }); cb.checked = !!t.done;
+    cb.onchange = () => updateCase(c.id, { task_index: i, task_done: cb.checked });
+    box.append(el('label', { cls: t.done ? 'done' : '' }, cb, el('span', {}, t.title),
+      t.approval ? el('span', { cls: 'appr' }, 'cần duyệt: ' + t.approval) : null,
+      t.done ? el('span', { cls: 'small' }, ` — ${t.done_by}, ${fmt(t.done_at)}`) : null));
+  });
+  const note = el('textarea', { placeholder: 'Ghi chú / kết luận (bắt buộc khi đóng case)' });
+  const who = el('input', { type: 'text', placeholder: 'giao cho…', value: c.assignee || '' });
+  const st = s => () => updateCase(c.id, { status: s, note: note.value });
+  box.append(el('h4', {}, 'Xử lý'), note,
+    el('div', { style: 'margin-top:6px;display:flex;gap:4px;flex-wrap:wrap;align-items:center' },
+      who, btn('Giao', () => updateCase(c.id, { assignee: who.value.trim(), note: note.value })),
+      btn('Ghi chú', () => updateCase(c.id, { note: note.value })),
+      btn('Đang xử lý', st('in_progress')), btn('Đã ngăn chặn', st('contained')),
+      btn('Đóng', st('closed'), true), btn('False positive', st('false_positive'))),
+    el('h4', {}, 'Lịch sử'),
+    el('div', { cls: 'small mono' }, (c.notes || []).slice().reverse().map(n => el('div', {}, `${fmt(n.at)} · ${n.by}: ${n.text}`))),
+    el('h4', {}, 'Alert liên quan'), el('div', { cls: 'small mono' }, (c.alert_ids || []).join(', ')));
+  if (OPEN_CASE === c.id) queueMicrotask(() => { const d = box.closest('details'); if (d) d.open = true; });
+  return box;
+}
+let AI_FILTER = 'pending';
+const KIND = { exception: 'Ngoại lệ (giảm cảnh báo)', new_rule: 'Rule mới' };
+async function aiDo(id, action, needReason) {
+  if (!WHO) { toast('Nhập tên analyst ở thanh trên rồi bấm Lưu trước'); return; }
+  let reason = '';
+  if (needReason) { reason = prompt('Lý do (bắt buộc — AI dùng lý do này để không lặp lại):') || ''; if (!reason.trim()) return; }
+  try {
+    const r = await api(`/api/v1/ai/proposals/${id}/${action}`, { method: 'POST', body: JSON.stringify({ analyst: WHO, reason }) });
+    toast(r.status === 'approved' ? `Đã triển khai ${r.file}` : `Đã ghi nhận (${r.status}, ${r.approvals ? r.approvals.length : 0}/${r.required_approvals} duyệt)`);
+    refresh();
+  } catch (e) { toast('Lỗi: ' + e.message); }
+}
+async function aiRun() {
+  if (!WHO) { toast('Nhập tên analyst trước'); return; }
+  try { await api('/api/v1/ai/run', { method: 'POST', body: JSON.stringify({ analyst: WHO }) }); toast('Đã gửi yêu cầu, AI worker sẽ chạy trong ~10 giây'); refresh(); }
+  catch (e) { toast('Lỗi: ' + e.message); }
+}
+function aiDetail(p) {
+  const v = p.validation || {};
+  return el('div', { cls: 'case' },
+    el('h4', {}, 'Lý do AI đưa ra'), el('div', {}, p.rationale || ''),
+    el('h4', {}, 'Kiểm định tự động (độc lập với AI)'),
+    ...(v.checks || []).map(c => el('div', { cls: 'chk' }, el('span', { cls: c.ok ? 'ok' : (c.blocking ? 'bad' : 'warn') }, c.ok ? '✓ ' : (c.blocking ? '✗ ' : '! ')),
+      el('b', {}, c.name + ': '), c.detail)),
+    el('h4', {}, 'Nội dung sẽ triển khai'), el('pre', { cls: 'mono' }, p.yaml || ''),
+    el('h4', {}, 'Lịch sử'), el('div', { cls: 'small mono' }, (p.history || []).map(h => el('div', {}, `${fmt(h.at)} · ${h.by}: ${h.text}`))),
+    el('div', { cls: 'small', style: 'margin-top:8px' }, `Model ${p.llm?.model || ''} · ${p.llm?.seconds ?? ''}s · ${p.llm?.prompt_tokens ?? ''}+${p.llm?.output_tokens ?? ''} token`));
+}
+function head(cols) { return el('thead', {}, el('tr', {}, cols.map(c => el('th', {}, c)))); }
+
+const views = {
+  async alerts() {
+    const rows = await api('/api/v1/alerts?size=200');
+    return [head(['Thời gian', 'Mức', 'Rule', 'Nguồn / Host', 'MITRE', 'Trạng thái', 'SOAR', 'Phản ứng']),
+      el('tbody', {}, rows.map(a => {
+        const ip = g(a, 'source.ip'), agent = g(a, 'agent.id'), pid = g(a, 'process.pid'), pname = g(a, 'process.name');
+        const soar = (g(a, 'soar.results') || []).map(r => `${r.action}: ${r.status}${r.target ? ' ' + r.target : ''}`).join('\n');
+        return el('tr', {},
+          el('td', { cls: 'small' }, fmt(a['@timestamp'])),
+          el('td', {}, el('span', { cls: 'sev ' + a.severity }, a.severity), el('div', { cls: 'small' }, 'risk ' + (a.risk_score ?? ''))),
+          el('td', {}, el('b', {}, g(a, 'rule.id') + ' '), g(a, 'rule.name'), el('div', { cls: 'small' }, `count=${a.count}`),
+             el('details', {}, el('summary', {}, 'chi tiết'), el('pre', { cls: 'mono' }, JSON.stringify({ rule: a.rule, ml: a.ml, trigger_event: a.trigger_event }, null, 2)))),
+          el('td', { cls: 'mono' }, ip || '', el('div', { cls: 'small' }, [g(a, 'user.name'), g(a, 'host.name') || agent].filter(Boolean).join(' @ '))),
+          el('td', { cls: 'small' }, [g(a, 'rule.mitre.tactic'), (g(a, 'rule.mitre.technique') || []).join(', ')].filter(Boolean).join(' · ')),
+          el('td', { cls: 'st' }, g(a, 'alert.status')),
+          el('td', { cls: 'small mono' }, soar),
+          el('td', {},
+            btn('Ack', () => setStatus(a._id, 'acknowledged')), btn('Đóng', () => setStatus(a._id, 'closed')),
+            btn('False +', () => setStatus(a._id, 'false_positive')),
+            agent && ip ? btn('Chặn IP', () => act(agent, 'block_ip', { ip }, a._id), true) : null,
+            agent && (pid || pname) ? btn('Kill', () => act(agent, 'kill_process', pid ? { pid } : { name: pname }, a._id), true) : null,
+            agent && !agent.startsWith('syslog-') ? btn('Cô lập', () => act(agent, 'isolate_host', {}, a._id), true) : null));
+      }))];
+  },
+  async agents() {
+    const rows = await api('/api/v1/agents');
+    return [head(['Agent ID', 'Hostname', 'OS', 'IP', 'Phiên bản', 'Last seen', 'Trạng thái', 'Phản ứng']),
+      el('tbody', {}, rows.map(a => el('tr', {},
+        el('td', { cls: 'mono' }, a.agent_id), el('td', {}, a.hostname), el('td', {}, a.os), el('td', { cls: 'mono' }, a.ip),
+        el('td', {}, a.version), el('td', { cls: 'small' }, fmt(a.last_seen)), el('td', { cls: 'st ' + a.status }, a.status),
+        el('td', {},
+          btn('Chặn IP…', () => { const ip = prompt('IP cần chặn'); if (ip) act(a.agent_id, 'block_ip', { ip }); }),
+          btn('Kill…', () => { const v = prompt('PID hoặc tên tiến trình'); if (v) act(a.agent_id, 'kill_process', /^\d+$/.test(v) ? { pid: +v } : { name: v }); }),
+          btn('Cô lập', () => act(a.agent_id, 'isolate_host', {}), true), btn('Bỏ cô lập', () => act(a.agent_id, 'unisolate_host', {}))))))];
+  },
+  async actions() {
+    const rows = await api('/api/v1/actions?size=200');
+    return [head(['Tạo lúc', 'Agent', 'Lệnh', 'Mục tiêu', 'Nguồn', 'Trạng thái', 'Hết hạn', 'Output', '']),
+      el('tbody', {}, rows.map(a => el('tr', {},
+        el('td', { cls: 'small' }, fmt(a.created_at)), el('td', { cls: 'mono' }, a.agent_id), el('td', {}, a.type),
+        el('td', { cls: 'mono' }, a.target), el('td', {}, a.source), el('td', { cls: 'st ' + a.status }, a.status + (a.reverted ? ' (đã gỡ)' : '')),
+        el('td', { cls: 'small' }, fmt(a.expires_at)), el('td', { cls: 'mono small' }, (a.output || '').slice(0, 300)),
+        el('td', {}, a.type === 'block_ip' && a.status === 'success' && !a.reverted ? btn('Gỡ chặn', () => act(a.agent_id, 'unblock_ip', { ip: a.target })) : null))))];
+  },
+  async ai() {
+    const [st, rows] = await Promise.all([api('/api/v1/ai/status'), api('/api/v1/ai/proposals?size=200' + (AI_FILTER ? '&status=' + AI_FILTER : ''))]);
+    const w = st.worker || {};
+    const sel = el('select', {}, ...['pending', 'approved', 'invalid', 'rejected', 'rolled_back', 'no_action', ''].map(x => {
+      const o = el('option', { value: x }, x || 'tất cả'); if (x === AI_FILTER) o.selected = true; return o; }));
+    sel.onchange = () => { AI_FILTER = sel.value; refresh(); };
+    const bar = el('tr', {}, el('td', { colspan: '9', style: 'padding:0' }, el('div', { cls: 'aibar' },
+      btn('Chạy phân tích AI ngay', aiRun), el('span', { cls: 'small' }, 'Lọc:'), sel,
+      el('span', { cls: 'small' }, w.model ? `Worker: ${w.model} · ${w.model_ready ? 'sẵn sàng' : 'đang tải model'} · ${w.running ? 'ĐANG CHẠY' : 'rảnh'} · lần chạy cuối ${fmt(w.last_run) || '—'}` : 'AI worker chưa chạy (docker compose --profile ai up -d)'),
+      w.datasets ? el('span', { cls: 'small' }, `Dataset: ${w.datasets.attack} mẫu tấn công, ${w.datasets.normal} bình thường, ${w.datasets.sigma} rule Sigma`) : null,
+      w.last_error ? el('span', { cls: 'bad small' }, 'Lỗi: ' + w.last_error) : null)));
+    return [head(['Tạo lúc', 'Loại', 'Đề xuất', 'Rủi ro', 'Kiểm định', 'Số liệu', 'Duyệt', 'Trạng thái', '']),
+      el('tbody', {}, bar, ...rows.flatMap(p => {
+        const v = p.validation || {}, m = v.metrics || {};
+        const nums = p.kind === 'exception'
+          ? `báo nhầm khớp ${m.fp_matched ?? '?'}/${m.fp_total ?? '?'} · case thật khớp ${m.tp_matched ?? 0}/${m.tp_total ?? 0} · mẫu vàng mất ${m.golden_matched ?? 0}/${m.golden_total ?? 0} · replay ${m.alerts_before ?? '?'}→${m.alerts_after ?? '?'} alert`
+          : `bắt ${m.test_detected ?? '?'}/${m.test_total ?? '?'} mẫu kiểm tra · báo nhầm ${m.normal_hits ?? '—'}/${m.normal_total ?? '—'} · ~${m.alerts_per_day ?? '?'} alert/ngày`;
+        const row = el('tr', {},
+          el('td', { cls: 'small' }, fmt(p.created_at)),
+          el('td', { cls: 'small' }, KIND[p.kind] || p.kind),
+          el('td', {}, p.title, el('div', { cls: 'small' }, (p.rationale || '').slice(0, 160))),
+          el('td', { cls: p.risk === 'cao' ? 'bad' : 'small' }, p.risk || ''),
+          el('td', { cls: v.passed ? 'ok' : 'bad' }, p.validation ? (v.passed ? 'đạt' : 'KHÔNG đạt') : '—'),
+          el('td', { cls: 'small' }, p.validation ? nums : ''),
+          el('td', { cls: 'small' }, p.required_approvals ? `${(p.approvals || []).length}/${p.required_approvals}` : '—',
+             el('div', {}, (p.approvals || []).map(a => a.by).join(', '))),
+          el('td', { cls: 'st' }, p.status),
+          el('td', {},
+            p.status === 'pending' ? btn('Duyệt', () => aiDo(p.id, 'approve')) : null,
+            ['pending', 'invalid'].includes(p.status) ? btn('Từ chối', () => aiDo(p.id, 'reject', true)) : null,
+            p.status === 'approved' ? btn('Gỡ', () => aiDo(p.id, 'rollback', true), true) : null));
+        return [row, el('tr', {}, el('td', { colspan: '9', style: 'padding:0' },
+          el('details', {}, el('summary', { style: 'padding:4px 12px' }, 'chi tiết kiểm định, nội dung, lịch sử'), aiDetail(p))))];
+      }))];
+  },
+  async cases() {
+    const rows = await api('/api/v1/cases');
+    const now = Date.now();
+    return [head(['Tạo lúc', 'Ưu tiên', 'Case', 'Playbook', 'Thực thể', 'Alert', 'Người xử lý', 'Hạn triage', 'Tiến độ', 'Trạng thái']),
+      el('tbody', {}, rows.flatMap(c => {
+        const tasks = c.tasks || [], done = tasks.filter(t => t.done).length;
+        const late = c.status === 'open' && c.sla_due && new Date(c.sla_due).getTime() < now;
+        const row = el('tr', {},
+          el('td', { cls: 'small' }, fmt(c.created_at)),
+          el('td', { cls: 'prio ' + (c.priority || '') }, c.priority || ''),
+          el('td', {}, c.title, el('div', {}, el('span', { cls: 'sev ' + c.severity }, c.severity))),
+          el('td', { cls: 'small' }, c.playbook ? `${c.playbook.id} — ${c.playbook.name}` : ''),
+          el('td', { cls: 'mono' }, c.entity),
+          el('td', {}, c.alert_count),
+          el('td', {}, c.assignee || el('span', { cls: 'small' }, 'chưa giao')),
+          el('td', { cls: late ? 'late' : 'small' }, fmt(c.sla_due) + (late ? ' (QUÁ HẠN)' : '')),
+          el('td', { cls: 'small' }, `${done}/${tasks.length}`,
+             el('div', { cls: 'bar' }, el('i', { style: `width:${tasks.length ? 100 * done / tasks.length : 0}%` }))),
+          el('td', { cls: 'st' }, c.status));
+        const detail = el('tr', {}, el('td', { colspan: '10', style: 'padding:0' },
+          el('details', {}, el('summary', { style: 'padding:4px 12px' }, 'mở case: checklist, xử lý, lịch sử'), caseDetail(c))));
+        return [row, detail];
+      }))];
+  },
+};
+
+async function refresh() {
+  if (!KEY) { $('#tbl').replaceChildren(el('tbody', {}, el('tr', {}, el('td', {}, 'Nhập API key (biến API_KEY trong .env) rồi bấm Lưu.')))); return; }
+  try {
+    const s = await api('/api/v1/stats');
+    const labels = { events_24h: 'Event 24h', alerts_24h: 'Alert 24h', alerts_open: 'Alert đang mở', agents_online: 'Agent online', agents_total: 'Tổng agent', actions_pending: 'Lệnh đang chờ', cases_open: 'Case đang mở' };
+    $('#tiles').replaceChildren(...Object.entries(labels).map(([k, l]) => el('div', { cls: 'tile' }, el('b', {}, (s[k] ?? 0).toLocaleString('vi-VN')), el('span', {}, l))));
+    $('#tbl').replaceChildren(...await views[TAB]());
+    $('#updated').textContent = 'cập nhật ' + new Date().toLocaleTimeString('vi-VN');
+  } catch (e) { $('#updated').textContent = 'Lỗi: ' + e.message; }
+}
+refresh();
+setInterval(() => { if (!document.querySelector('details[open]')) refresh(); }, 5000);
+</script>
+</body>
+</html>

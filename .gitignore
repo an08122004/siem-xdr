@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+agent/bin/
+queue-data/
+secrets/
+datasets/raw/
+datasets/processed/
+.pytest_cache/
+# file tạm / bản CA export ra để test (lấy lại bằng docker compose cp)
+*.tmp
+*.part
+/ca.crt

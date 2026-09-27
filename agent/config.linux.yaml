@@ -1,0 +1,35 @@
+# Cấu hình agent mẫu cho Linux (Ubuntu-01 / Web-01 Apache)
+agent_id: "S001-Web-01"
+
+server:
+  url: "https://192.168.1.10:8000"     # IP máy chạy docker-compose (phải có trong MANAGER_TLS_IPS)
+  ca_file: "/etc/siem-agent/ca.crt"   # copy từ volume certs: ca/ca.crt
+  enrollment_key: "change-me-enrollment-key"  # hoặc đặt biến môi trường SIEM_ENROLLMENT_KEY
+  timeout_seconds: 10
+  retry_interval_seconds: 5
+  batch_size: 100
+
+queue:
+  dir: "/var/lib/siem-agent"
+
+log:
+  level: "info"
+  path: "/var/log/siem-agent.log"
+
+collectors:
+  mock: false
+  process: true
+  process_interval_seconds: 2
+
+# loại_log: đường dẫn (nhiều file cách nhau bởi dấu phẩy)
+# loại hỗ trợ: apache_access, apache_error, auth, suricata, syslog
+filetail:
+  apache_access: "/var/log/apache2/access.log"
+  apache_error: "/var/log/apache2/error.log"
+  auth: "/var/log/auth.log, /var/log/secure"
+  suricata: "/var/log/suricata/eve.json"
+
+response:
+  enabled: true
+  dry_run: false          # true = chỉ log lệnh, không thực thi
+  poll_interval_seconds: 5

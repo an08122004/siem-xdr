@@ -1,0 +1,201 @@
+# Case playbook — quy trình XỬ LÝ SỰ CỐ cho analyst (khác với playbooks.yml là phản ứng TỰ ĐỘNG).
+# Khi SOAR tạo case, playbook đầu tiên có `match` khớp rule.id của alert sẽ được gắn vào case,
+# kèm checklist task theo 5 giai đoạn của NIST SP 800-61. Thứ tự quan trọng: playbook cụ thể đặt trước.
+#
+# `approval` trên task: hành động cần người có thẩm quyền quyết định (xem bảng phân quyền trong README).
+
+# Mức ưu tiên và thời hạn triage (phút) theo severity của alert
+priority:
+  critical: {level: P1, sla_minutes: 15}
+  high:     {level: P2, sla_minutes: 60}
+  medium:   {level: P3, sla_minutes: 480}
+  low:      {level: P4, sla_minutes: 1440}
+
+playbooks:
+  - id: PB-07
+    name: Xóa dấu vết / nghi ngờ Ransomware
+    match: [WIN-002, WIN-010]
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - Xác định máy, tài khoản thực hiện và thời điểm (event gốc trong alert)
+          - Kiểm tra các máy khác có cùng hành vi trong 24h (Grafana / Elasticsearch theo host.name, user.name)
+          - Kiểm tra dấu hiệu mã hóa file hàng loạt, file ghi chú đòi tiền chuộc
+      - name: Ngăn chặn
+        tasks:
+          - {title: Cô lập ngay máy bị ảnh hưởng (isolate_host trên console), approval: Trưởng nhóm IR}
+          - {title: Vô hiệu hóa tài khoản liên quan, approval: Trưởng nhóm IR}
+          - Ngắt các ổ chia sẻ mạng đang được máy này kết nối
+      - name: Loại bỏ
+        tasks:
+          - Thu thập chứng cứ (bộ nhớ, log còn lại) TRƯỚC khi can thiệp
+          - Xác định mẫu mã độc và cách xâm nhập ban đầu
+      - name: Khôi phục
+        tasks:
+          - {title: Cài lại máy từ bản sạch và khôi phục dữ liệu từ backup đã kiểm tra, approval: Trưởng nhóm IR + chủ hệ thống}
+          - Đổi toàn bộ mật khẩu từng dùng trên máy
+          - Theo dõi tăng cường máy và tài khoản trong 14 ngày
+      - name: Rút kinh nghiệm
+        tasks:
+          - Viết báo cáo sau sự cố (timeline, phạm vi, nguyên nhân gốc)
+          - Kiểm tra lại chính sách backup và quyền ghi ổ chia sẻ
+
+  - id: PB-01
+    name: Tấn công dò mật khẩu / tài khoản có thể bị chiếm
+    match: [AUTH-001, AUTH-002, AUTH-003, AUTH-004, WIN-001, WEB-007]
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - Xác định IP nguồn, tài khoản bị nhắm tới, số lần thử
+          - Kiểm tra IP này có đăng nhập THÀNH CÔNG sau chuỗi thất bại không (rule AUTH-002)
+          - Đối chiếu hoạt động đã biết (quét lỗ hổng định kỳ, admin quên mật khẩu)
+          - Tra IP trên nguồn threat intel (nội bộ / AbuseIPDB)
+      - name: Ngăn chặn
+        tasks:
+          - Xác nhận SOAR đã chặn IP (tab Response actions); chưa chặn thì chặn thủ công
+          - {title: Chặn vĩnh viễn trên firewall biên nếu IP từ Internet, approval: Analyst L1}
+          - {title: Nếu đã đăng nhập thành công - khóa tài khoản và cô lập máy, approval: Trưởng nhóm IR}
+      - name: Loại bỏ
+        tasks:
+          - Nếu tài khoản bị chiếm - rà ~/.ssh/authorized_keys, crontab, user mới, service mới trên máy
+          - Rà các phiên đăng nhập còn mở của tài khoản
+      - name: Khôi phục
+        tasks:
+          - Đổi mật khẩu tài khoản bị nhắm tới
+          - Tắt đăng nhập SSH bằng mật khẩu, bật khóa công khai / MFA cho RDP
+      - name: Rút kinh nghiệm
+        tasks:
+          - Ghi kết luận vào case; nếu là false positive thì đề xuất tinh chỉnh ngưỡng rule
+
+  - id: PB-02
+    name: Tấn công ứng dụng Web
+    match: ["WEB-*", NET-004]
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - Xem URL, tham số, user-agent trong event gốc; xác định lỗ hổng bị nhắm tới
+          - Kiểm tra mã phản hồi HTTP - tấn công có thành công (2xx) hay bị từ chối (4xx)
+          - Tìm các request khác từ cùng IP trong 24h
+          - Kiểm tra web server có sinh tiến trình lạ ngay sau đó không (rule LNX-002)
+      - name: Ngăn chặn
+        tasks:
+          - Xác nhận IP nguồn đã bị chặn
+          - {title: Nếu có dấu hiệu thực thi mã - cô lập web server, approval: Trưởng nhóm IR}
+          - Bật chặn tạm trên WAF / reverse proxy cho mẫu request này
+      - name: Loại bỏ
+        tasks:
+          - Tìm và xóa file lạ trong thư mục upload / web root
+          - Vá lỗ hổng trong mã nguồn hoặc cập nhật phiên bản ứng dụng
+      - name: Khôi phục
+        tasks:
+          - Triển khai lại ứng dụng từ bản build sạch
+          - Đổi thông tin kết nối CSDL và secret mà ứng dụng dùng nếu nghi bị lộ
+      - name: Rút kinh nghiệm
+        tasks:
+          - Bổ sung kiểm thử bảo mật cho chức năng bị tấn công
+
+  - id: PB-03
+    name: Thực thi mã độc / hành vi độc hại trên endpoint
+    match: ["LNX-*", WIN-005, WIN-006, WIN-007, WIN-008, WIN-009, WIN-011, WIN-012, WIN-013]
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - Xem cây tiến trình (process.parent, command_line) và tài khoản chạy
+          - Kiểm tra kết nối mạng và file mới quanh thời điểm cảnh báo
+          - Xác nhận SOAR đã kill tiến trình (tab Response actions)
+      - name: Ngăn chặn
+        tasks:
+          - {title: Cô lập máy khỏi mạng, giữ nguyên trạng thái để thu chứng cứ, approval: Trưởng nhóm IR}
+          - Chặn IP / domain đích mà tiến trình kết nối tới
+      - name: Loại bỏ
+        tasks:
+          - Thu thập chứng cứ (bộ nhớ, file nghi ngờ, hash) trước khi xóa
+          - Gỡ cơ chế duy trì (service, scheduled task, cron, registry Run key)
+      - name: Khôi phục
+        tasks:
+          - {title: Cài lại máy từ bản sạch nếu không chắc đã loại bỏ hết, approval: Trưởng nhóm IR + chủ hệ thống}
+          - Đổi mọi thông tin đăng nhập từng có trên máy
+      - name: Rút kinh nghiệm
+        tasks:
+          - Thêm hash / IOC mới vào config/intel để phát hiện ở máy khác
+
+  - id: PB-04
+    name: Thay đổi tài khoản và đặc quyền trái phép
+    match: [WIN-003, WIN-004, AUTH-005, AUTH-006]
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - Ai tạo / cấp quyền, cho tài khoản nào, lúc nào
+          - Đối chiếu với yêu cầu thay đổi đã được duyệt (ticket)
+      - name: Ngăn chặn
+        tasks:
+          - {title: Vô hiệu hóa tài khoản mới hoặc gỡ khỏi nhóm quản trị nếu không có yêu cầu hợp lệ, approval: Trưởng nhóm IR}
+      - name: Loại bỏ
+        tasks:
+          - Rà các thay đổi khác do tài khoản thực hiện thay đổi làm trong 7 ngày
+      - name: Khôi phục
+        tasks:
+          - Đổi mật khẩu tài khoản đã thực hiện thay đổi
+      - name: Rút kinh nghiệm
+        tasks:
+          - Cập nhật danh sách tài khoản đặc quyền được phép
+
+  - id: PB-05
+    name: Trinh sát / quét mạng
+    match: [NET-001, NET-002, NET-003, NET-005]
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - Nguồn quét là trong hay ngoài mạng? Có phải máy quét lỗ hổng được phép?
+          - Nếu nguồn nội bộ - coi máy nguồn là có thể đã bị xâm nhập (xem PB-03)
+          - Kiểm tra cổng / dịch vụ bị quét có đang mở ra ngoài không cần thiết
+      - name: Ngăn chặn
+        tasks:
+          - Chặn IP nguồn trên firewall nếu từ Internet
+      - name: Loại bỏ
+        tasks:
+          - Đóng các dịch vụ quản trị lộ ra Internet (SSH/RDP/SMB/DB)
+      - name: Khôi phục
+        tasks:
+          - Xác nhận lại cấu hình firewall
+      - name: Rút kinh nghiệm
+        tasks:
+          - Thêm máy quét được phép vào SOAR_WHITELIST để tránh báo nhầm
+
+  - id: PB-06
+    name: Kết nối tới IOC đã biết (Threat Intel)
+    match: [TI-001]
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - IOC là IP, domain hay hash? Nguồn intel nào, độ tin cậy?
+          - Máy nào trong mạng đã liên lạc với IOC, hướng kết nối (vào / ra)
+      - name: Ngăn chặn
+        tasks:
+          - Xác nhận IOC đã bị chặn trên mọi agent
+          - {title: Nếu có kết nối RA ngoài tới C2 - cô lập máy, approval: Trưởng nhóm IR}
+      - name: Loại bỏ
+        tasks:
+          - Tìm tiến trình tạo kết nối và xử lý theo PB-03
+      - name: Khôi phục
+        tasks:
+          - Theo dõi tăng cường máy liên quan 7 ngày
+      - name: Rút kinh nghiệm
+        tasks:
+          - Cập nhật feed threat intel
+
+  - id: PB-00
+    name: Điều tra chung
+    match: ["*"]
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - Đọc rule, event gốc, thực thể liên quan (IP, user, host)
+          - Tra hoạt động 24h quanh thời điểm cảnh báo
+          - Kết luận thật / giả; chưa chắc thì escalate
+      - name: Ngăn chặn
+        tasks:
+          - Chọn hành động phản ứng phù hợp trên console nếu là sự cố thật
+      - name: Rút kinh nghiệm
+        tasks:
+          - Ghi kết luận vào case

@@ -1,0 +1,149 @@
+# Luật cho Windows (Security log, Sysmon, PowerShell, Defender)
+- id: WIN-001
+  title: Brute-force đăng nhập Windows (RDP/SMB)
+  description: ">= 5 sự kiện 4625 từ cùng IP trong 60 giây"
+  severity: high
+  mitre: {tactic: Credential Access, technique: [T1110.001]}
+  tags: [windows, bruteforce]
+  type: threshold
+  condition:
+    all:
+      - {field: event.module, op: eq, value: windows}
+      - {field: event.code, op: eq, value: 4625}
+  threshold: {count: 5, window: 60, group_by: [source.ip]}
+
+- id: WIN-002
+  title: Xóa nhật ký bảo mật (Audit log cleared)
+  severity: critical
+  mitre: {tactic: Defense Evasion, technique: [T1070.001]}
+  tags: [windows, anti-forensics]
+  type: match
+  condition: {field: event.action, op: eq, value: audit_log_cleared}
+
+- id: WIN-003
+  title: Tạo tài khoản Windows mới
+  severity: medium
+  mitre: {tactic: Persistence, technique: [T1136.001]}
+  tags: [windows, iam]
+  type: match
+  condition:
+    all:
+      - {field: event.module, op: eq, value: windows}
+      - {field: event.code, op: eq, value: 4720}
+
+- id: WIN-004
+  title: Thêm tài khoản vào nhóm quản trị
+  severity: high
+  mitre: {tactic: Privilege Escalation, technique: [T1098]}
+  tags: [windows, iam]
+  type: match
+  condition:
+    all:
+      - {field: event.action, op: eq, value: group_member_added}
+      - {field: group.name, op: regex, value: "(administrators|domain admins|enterprise admins|remote desktop users)"}
+
+- id: WIN-005
+  title: PowerShell chạy lệnh mã hóa (-EncodedCommand)
+  severity: high
+  mitre: {tactic: Execution, technique: [T1059.001, T1027]}
+  tags: [windows, powershell]
+  type: match
+  condition:
+    all:
+      - {field: event.category, op: eq, value: process}
+      - {field: process.name, op: in, value: [powershell.exe, pwsh.exe]}
+      - {field: process.command_line, op: regex, value: "\\s-(e|en|enc|enco|encod|encode|encoded|encodedcommand)\\s+[A-Za-z0-9+/=]{20,}"}
+
+- id: WIN-006
+  title: Script PowerShell độc hại (download cradle / bypass AMSI / Mimikatz)
+  severity: critical
+  mitre: {tactic: Execution, technique: [T1059.001]}
+  tags: [windows, powershell]
+  type: match
+  condition:
+    any:
+      - {field: powershell.script_block, op: regex, value: ["iex\\s*\\(?\\s*\\(?new-object\\s+net\\.webclient", "downloadstring\\(", "invoke-mimikatz", "amsiutils|amsiinitfailed", "invoke-shellcode", "frombase64string\\(.*\\)\\s*\\|\\s*iex"]}
+      - all:
+          - {field: process.name, op: in, value: [powershell.exe, pwsh.exe]}
+          - {field: process.command_line, op: regex, value: ["downloadstring\\(", "iwr\\s+.*\\|\\s*iex", "invoke-webrequest.*\\|\\s*iex", "-nop.*-w\\s+hidden"]}
+
+- id: WIN-007
+  title: Đánh cắp thông tin đăng nhập (Mimikatz / dump LSASS)
+  severity: critical
+  mitre: {tactic: Credential Access, technique: [T1003.001]}
+  tags: [windows, credential-dumping]
+  type: match
+  condition:
+    any:
+      - {field: process.command_line, op: regex, value: ["sekurlsa::", "lsadump::", "procdump.*lsass", "comsvcs\\.dll.*minidump", "rundll32.*comsvcs.*#24"]}
+      - {field: process.name, op: in, value: [mimikatz.exe]}
+      - all:
+          - {field: event.action, op: eq, value: process_access}
+          - {field: process.target.name, op: eq, value: lsass.exe}
+          - {field: process.target.granted_access, op: in, value: ["0x1010", "0x1410", "0x1fffff", "0x143a"]}
+
+- id: WIN-008
+  title: Ứng dụng Office sinh ra shell (macro độc hại)
+  severity: high
+  mitre: {tactic: Execution, technique: [T1204.002, T1566.001]}
+  tags: [windows, phishing, macro]
+  type: match
+  condition:
+    all:
+      - {field: event.category, op: eq, value: process}
+      - {field: process.parent.name, op: in, value: [winword.exe, excel.exe, powerpnt.exe, outlook.exe, mspub.exe]}
+      - {field: process.name, op: in, value: [cmd.exe, powershell.exe, pwsh.exe, wscript.exe, cscript.exe, mshta.exe, rundll32.exe, regsvr32.exe]}
+
+- id: WIN-009
+  title: Cài đặt service đáng ngờ
+  severity: high
+  mitre: {tactic: Persistence, technique: [T1543.003]}
+  tags: [windows, service]
+  type: match
+  condition:
+    all:
+      - {field: event.action, op: eq, value: service_installed}
+      - {field: process.command_line, op: regex, value: ["\\\\(temp|appdata|public|programdata)\\\\", "powershell", "cmd(\\.exe)?\\s+/c", "%comspec%"]}
+
+- id: WIN-010
+  title: Xóa Shadow Copy (dấu hiệu Ransomware)
+  severity: critical
+  mitre: {tactic: Impact, technique: [T1490]}
+  tags: [windows, ransomware]
+  type: match
+  condition:
+    all:
+      - {field: event.category, op: eq, value: process}
+      - {field: process.command_line, op: regex, value: ["vssadmin(\\.exe)?\\s+delete\\s+shadows", "wmic(\\.exe)?\\s+shadowcopy\\s+delete", "bcdedit.*recoveryenabled\\s+no", "wbadmin\\s+delete\\s+catalog"]}
+
+- id: WIN-011
+  title: Windows Defender phát hiện mã độc
+  severity: high
+  mitre: {tactic: Execution, technique: [T1204]}
+  tags: [windows, malware, av]
+  type: match
+  condition: {field: event.category, op: eq, value: malware}
+
+- id: WIN-012
+  title: Lạm dụng LOLBins để tải/thực thi mã
+  severity: high
+  mitre: {tactic: Defense Evasion, technique: [T1218, T1105]}
+  tags: [windows, lolbin]
+  type: match
+  condition:
+    all:
+      - {field: event.category, op: eq, value: process}
+      - {field: process.command_line, op: regex, value: ["certutil(\\.exe)?.*-urlcache.*http", "certutil(\\.exe)?.*-decode", "mshta(\\.exe)?\\s+(http|javascript|vbscript)", "regsvr32(\\.exe)?.*/i:http", "rundll32(\\.exe)?.*javascript:", "bitsadmin(\\.exe)?.*/transfer"]}
+
+- id: WIN-013
+  title: Tạo Scheduled Task (cơ chế duy trì truy cập)
+  severity: medium
+  mitre: {tactic: Persistence, technique: [T1053.005]}
+  tags: [windows, persistence]
+  type: match
+  condition:
+    any:
+      - {field: event.action, op: eq, value: scheduled_task_created}
+      - all:
+          - {field: process.name, op: eq, value: schtasks.exe}
+          - {field: process.command_line, op: contains, value: /create}

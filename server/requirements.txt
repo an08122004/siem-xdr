@@ -1,0 +1,9 @@
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30
+pydantic>=2.7,<3
+confluent-kafka>=2.6,<3
+elasticsearch>=8.15,<9
+PyYAML>=6.0.2
+numpy>=1.26,<3
+scikit-learn>=1.5,<2
+joblib>=1.4

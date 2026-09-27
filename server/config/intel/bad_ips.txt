@@ -1,0 +1,4 @@
+# IP độc hại đã biết (1 dòng 1 IP hoặc CIDR). Có thể cập nhật từ feed (abuse.ch, AlienVault OTX...)
+# Các giá trị dưới đây là dải TEST-NET dành cho tài liệu (RFC 5737) — dùng để demo.
+203.0.113.66
+198.51.100.0/24

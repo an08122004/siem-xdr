@@ -1,0 +1,57 @@
+# Playbook SOAR: khi alert khớp điều kiện `when` -> thực hiện lần lượt `steps`.
+#   rule_ids: hỗ trợ wildcard (WEB-*), min_severity: low|medium|high|critical
+#   sources: [rule, ml]
+# Các action: block_ip, kill_process, isolate_host, notify, create_case
+#   block_ip: target (trường chứa IP, mặc định source.ip), scope: origin|all, duration (giây, 0 = vĩnh viễn)
+#   approval: true -> không tự chạy, chỉ đề xuất cho analyst duyệt trên console
+playbooks:
+  - name: Chặn IP tấn công brute-force
+    when:
+      rule_ids: [AUTH-001, AUTH-003, WIN-001]
+      min_severity: high
+    steps:
+      - {action: block_ip, target: source.ip, scope: all, duration: 3600}
+      - {action: notify}
+      - {action: create_case}
+
+  - name: Tài khoản có thể đã bị chiếm (brute-force thành công)
+    when:
+      rule_ids: [AUTH-002]
+    steps:
+      - {action: block_ip, target: source.ip, scope: all, duration: 86400}
+      - {action: isolate_host, approval: true}
+      - {action: notify}
+      - {action: create_case}
+
+  - name: Chặn nguồn tấn công Web nghiêm trọng
+    when:
+      rule_ids: ["WEB-*"]
+      min_severity: high
+    steps:
+      - {action: block_ip, target: source.ip, scope: origin, duration: 1800}
+      - {action: notify}
+      - {action: create_case}
+
+  - name: Diệt tiến trình độc hại trên endpoint
+    when:
+      rule_ids: [LNX-001, LNX-002, LNX-004, WIN-006, WIN-007, WIN-010]
+    steps:
+      - {action: kill_process}
+      - {action: isolate_host, approval: true}
+      - {action: notify}
+      - {action: create_case}
+
+  - name: IOC từ Threat Intelligence
+    when:
+      rule_ids: [TI-001]
+    steps:
+      - {action: block_ip, target: threat.indicator.value, scope: all, duration: 86400}
+      - {action: notify}
+      - {action: create_case}
+
+  - name: Cảnh báo chung mức critical
+    when:
+      rule_ids: ["*"]
+      min_severity: critical
+    steps:
+      - {action: notify}

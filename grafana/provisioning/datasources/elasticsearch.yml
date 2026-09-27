@@ -1,0 +1,49 @@
+# Grafana kết nối Elasticsearch qua HTTPS, xác thực chứng chỉ bằng CA nội bộ, đăng nhập bằng user
+# `grafana` (role siem_reader: CHỈ ĐỌC siem-*). Mật khẩu đọc từ Docker secret, không ghi trong file này.
+apiVersion: 1
+datasources:
+  - &es
+    name: SIEM Events
+    uid: siem-events
+    type: elasticsearch
+    access: proxy
+    url: https://elasticsearch:9200
+    basicAuth: true
+    basicAuthUser: grafana
+    secureJsonData:
+      basicAuthPassword: $__file{/run/secrets/grafana_es_password}
+      tlsCACert: $__file{/certs/ca/ca.crt}
+    jsonData:
+      tlsAuthWithCACert: true
+      index: "siem-events-*"
+      timeField: "@timestamp"
+      logMessageField: message
+      logLevelField: event.outcome
+      maxConcurrentShardRequests: 5
+  - <<: *es
+    name: SIEM Alerts
+    uid: siem-alerts
+    isDefault: true
+    jsonData:
+      tlsAuthWithCACert: true
+      index: "siem-alerts"
+      timeField: "@timestamp"
+      logMessageField: message
+      logLevelField: severity
+      maxConcurrentShardRequests: 5
+  - <<: *es
+    name: SIEM Actions
+    uid: siem-actions
+    jsonData:
+      tlsAuthWithCACert: true
+      index: "siem-actions"
+      timeField: "created_at"
+      maxConcurrentShardRequests: 5
+  - <<: *es
+    name: SIEM Cases
+    uid: siem-cases
+    jsonData:
+      tlsAuthWithCACert: true
+      index: "siem-cases"
+      timeField: "created_at"
+      maxConcurrentShardRequests: 5

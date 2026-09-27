@@ -1,0 +1,11 @@
+# Bật GPU NVIDIA cho Ollama (cần driver NVIDIA hỗ trợ WSL2 trên Windows / nvidia-container-toolkit trên Linux):
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai up -d
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -1,0 +1,69 @@
+# Luật cho tiến trình Linux (process collector của agent)
+- id: LNX-001
+  title: Reverse shell
+  severity: critical
+  mitre: {tactic: Execution, technique: [T1059.004]}
+  tags: [linux, reverse-shell]
+  type: match
+  condition:
+    all:
+      - {field: event.category, op: eq, value: process}
+      - {field: process.command_line, op: regex, value: ["bash\\s+-i\\s+>&\\s*/dev/tcp/", "/dev/tcp/\\d+\\.\\d+\\.\\d+\\.\\d+/\\d+", "\\bnc(at)?\\b.*\\s-e\\s+/bin/(ba)?sh", "socat.*exec:", "python[23]?\\s+-c.*socket.*connect", "pty\\.spawn", "mkfifo\\s+/tmp/"]}
+
+- id: LNX-002
+  title: Web server sinh ra shell (khả năng webshell / RCE)
+  severity: critical
+  mitre: {tactic: Persistence, technique: [T1505.003, T1059.004]}
+  tags: [linux, webshell]
+  type: match
+  condition:
+    all:
+      - {field: event.category, op: eq, value: process}
+      - {field: process.parent.name, op: in, value: [apache2, httpd, nginx, php-fpm, php, lighttpd, tomcat, java]}
+      - {field: process.name, op: in, value: [sh, bash, dash, zsh, nc, ncat, python, python3, perl, curl, wget, whoami, id, uname]}
+
+- id: LNX-003
+  title: Tải về và thực thi script (curl/wget | sh)
+  severity: high
+  mitre: {tactic: Execution, technique: [T1105, T1059.004]}
+  tags: [linux, download]
+  type: match
+  condition:
+    all:
+      - {field: event.category, op: eq, value: process}
+      - {field: process.command_line, op: regex, value: ["(curl|wget)\\s+[^|]*\\|\\s*(ba)?sh", "(curl|wget).*(-O|-o)\\s*/tmp/.*&&\\s*chmod\\s+\\+x"]}
+
+- id: LNX-004
+  title: Crypto miner
+  severity: high
+  mitre: {tactic: Impact, technique: [T1496]}
+  tags: [linux, miner]
+  type: match
+  condition:
+    any:
+      - {field: process.name, op: in, value: [xmrig, minerd, cpuminer, kdevtmpfsi, kinsing]}
+      - {field: process.command_line, op: regex, value: ["stratum\\+tcp://", "--donate-level", "pool\\.(minexmr|supportxmr)"]}
+
+- id: LNX-005
+  title: Trinh sát hệ thống sau xâm nhập
+  description: ">= 4 lệnh trinh sát khác nhau trên 1 máy trong 60 giây"
+  severity: medium
+  mitre: {tactic: Discovery, technique: [T1082, T1033, T1016]}
+  tags: [linux, recon]
+  type: threshold
+  condition:
+    all:
+      - {field: event.category, op: eq, value: process}
+      - {field: process.name, op: in, value: [whoami, id, uname, hostname, ifconfig, ip, netstat, ss, ps, w, last, cat]}
+  threshold: {count: 4, window: 60, group_by: [agent.id], distinct: process.name}
+
+- id: LNX-006
+  title: Can thiệp cơ chế duy trì (crontab / authorized_keys / systemd)
+  severity: high
+  mitre: {tactic: Persistence, technique: [T1053.003, T1098.004, T1543.002]}
+  tags: [linux, persistence]
+  type: match
+  condition:
+    all:
+      - {field: event.category, op: eq, value: process}
+      - {field: process.command_line, op: regex, value: [">>?\\s*\\S*\\.ssh/authorized_keys", "crontab\\s+-[lr]?\\s*\\S*/tmp", "echo.*>>?\\s*/etc/cron", "systemctl\\s+enable\\s+\\S+.*/tmp"]}
