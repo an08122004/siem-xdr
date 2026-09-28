@@ -1,209 +1,417 @@
 // Package queue cài đặt một hàng đợi bền vững (persistent) trên đĩa.
 //
-// Thiết kế: theo mô hình "append-only log + offset con trỏ" (giống ý tưởng
-// của Kafka ở quy mô rất nhỏ, chạy local trên 1 file):
+// Thiết kế: log chỉ ghi nối (append-only) chia thành nhiều SEGMENT + con trỏ ack
+// (giống Kafka ở quy mô rất nhỏ, chạy local). Mỗi dòng trong 00000000000000000001.seg,
+// 00000000000000000002.seg, ... là 1 event (JSON); queue.ack chứa "<segment> <byte offset>"
+// đã gửi thành công.
 //
-//	queue.log     -> mỗi dòng là 1 event (JSON), chỉ được APPEND, không bao giờ sửa giữa file
-//	queue.offset  -> con trỏ byte offset của event cuối cùng đã gửi thành công (đã "ack")
+// Ghi: nối vào segment cuối, đầy SegmentBytes thì mở segment mới; mỗi lô fsync một lần.
+// Đọc: từ vị trí ack trở đi, hết segment thì sang segment kế.
+// Ack: ghi con trỏ (write-tmp-then-rename) rồi XÓA các segment đã gửi xong, nên queue không phình mãi.
+// Tổng dung lượng vượt MaxBytes thì Enqueue trả ErrFull: bên ghi phải chờ (đẩy ngược áp lực về
+// collector; collector chưa lưu offset nên không mất dữ liệu nguồn), không vứt event.
 //
-// Nhờ vậy: nếu agent bị kill/crash giữa chừng, khi khởi động lại, agent đọc
-// lại queue.offset để biết đã gửi tới đâu, rồi tiếp tục đọc queue.log từ đó
-// -> KHÔNG mất event, và không gửi trùng (trừ trường hợp crash đúng lúc giữa
-// gửi thành công và ghi offset - đây là đánh đổi "at-least-once" chấp nhận được
-// cho một agent giám sát).
+// Crash giữa lúc gửi thành công và ghi ack -> gửi lại lô đó (at-least-once, chấp nhận trùng).
+// Crash giữa lúc ghi một lô -> dòng dở dang cuối segment bị cắt khi mở lại.
 package queue
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 
 	"siem-agent/core"
 )
 
 const (
-	logFileName    = "queue.log"
-	offsetFileName = "queue.offset"
-	offsetTmpFile  = "queue.offset.tmp"
+	ackFileName = "queue.ack"
+	segSuffix   = ".seg"
+
+	// định dạng cũ (một file duy nhất), chỉ đọc để chuyển đổi
+	legacyLogName    = "queue.log"
+	legacyOffsetName = "queue.offset"
+
+	DefaultSegmentBytes = 16 << 20
+	DefaultMaxBytes     = 512 << 20
 )
 
-// Queue là hàng đợi bền vững trên đĩa, an toàn khi dùng đồng thời (concurrent-safe).
+// ErrFull: queue đã đạt MaxBytes, bên ghi cần chờ sender gửi bớt.
+var ErrFull = errors.New("queue đầy")
+
+// Position là vị trí trong queue: segment và byte offset ngay SAU event.
+type Position struct {
+	Seg uint64
+	Off int64
+}
+
+type Options struct {
+	SegmentBytes int64 // kích thước để chuyển sang segment mới
+	MaxBytes     int64 // tổng dung lượng tối đa trên đĩa (0 = không giới hạn)
+}
+
+// Queue là hàng đợi bền vững trên đĩa, an toàn khi dùng đồng thời.
 type Queue struct {
-	mu         sync.Mutex
-	dir        string
-	logPath    string
-	offsetPath string
+	mu   sync.Mutex
+	dir  string
+	opts Options
 
-	writeFile *os.File // file handle mở ở chế độ append, dùng để Enqueue
-	readFile  *os.File // file handle riêng dùng để Dequeue tuần tự
-	reader    *bufio.Reader
+	sizes map[uint64]int64 // kích thước từng segment còn trên đĩa
+	total int64
 
-	readOffset int64 // vị trí byte đã ĐỌC (đã gửi cho sender, chưa chắc đã ack)
-	ackOffset  int64 // vị trí byte đã ACK (server xác nhận nhận thành công), persist ra đĩa
+	wSeg  uint64
+	wFile *os.File
+
+	rSeg    uint64
+	rOff    int64
+	rFile   *os.File
+	rReader *bufio.Reader
+
+	ack Position
+}
+
+func segPath(dir string, id uint64) string {
+	return filepath.Join(dir, fmt.Sprintf("%020d%s", id, segSuffix))
 }
 
 // New mở (hoặc tạo mới) queue tại thư mục dir.
-func New(dir string) (*Queue, error) {
+func New(dir string, opts Options) (*Queue, error) {
+	if opts.SegmentBytes <= 0 {
+		opts.SegmentBytes = DefaultSegmentBytes
+	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("không tạo được thư mục queue '%s': %w", dir, err)
 	}
-
-	q := &Queue{
-		dir:        dir,
-		logPath:    filepath.Join(dir, logFileName),
-		offsetPath: filepath.Join(dir, offsetFileName),
-	}
-
-	if err := q.restoreOffset(); err != nil {
+	q := &Queue{dir: dir, opts: opts, sizes: map[uint64]int64{}}
+	if err := q.migrateLegacy(); err != nil {
 		return nil, err
 	}
-
-	wf, err := os.OpenFile(q.logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
+	ids, err := q.listSegments()
 	if err != nil {
-		return nil, fmt.Errorf("không mở được queue log để ghi: %w", err)
+		return nil, err
 	}
-	q.writeFile = wf
-
-	rf, err := os.Open(q.logPath)
-	if err != nil {
-		return nil, fmt.Errorf("không mở được queue log để đọc: %w", err)
+	if len(ids) == 0 {
+		ids = []uint64{1}
+		if err := os.WriteFile(segPath(dir, 1), nil, 0o640); err != nil {
+			return nil, fmt.Errorf("không tạo được segment đầu tiên: %w", err)
+		}
 	}
-	q.readFile = rf
-
-	// Con trỏ đọc bắt đầu từ vị trí đã ack (những gì chưa ack coi như chưa gửi,
-	// sẽ được gửi lại - an toàn hơn là mất dữ liệu).
-	q.readOffset = q.ackOffset
-	if _, err := q.readFile.Seek(q.readOffset, 0); err != nil {
-		return nil, fmt.Errorf("không seek được tới offset đã lưu: %w", err)
+	for _, id := range ids {
+		info, err := os.Stat(segPath(dir, id))
+		if err != nil {
+			return nil, err
+		}
+		q.sizes[id] = info.Size()
 	}
-	q.reader = bufio.NewReader(q.readFile)
+	last := ids[len(ids)-1]
+	if err := q.repairTail(last); err != nil {
+		return nil, err
+	}
+	for _, size := range q.sizes {
+		q.total += size
+	}
 
+	q.ack = q.readAck(ids[0])
+	// Con trỏ ack nằm ngoài dải segment hiện có (file ack cũ/hỏng) -> kẹp lại, ưu tiên gửi lại hơn bỏ sót.
+	if _, ok := q.sizes[q.ack.Seg]; !ok || q.ack.Seg < ids[0] {
+		q.ack = Position{Seg: ids[0]}
+	}
+	if q.ack.Off > q.sizes[q.ack.Seg] {
+		q.ack.Off = q.sizes[q.ack.Seg]
+	}
+	q.dropBefore(q.ack.Seg) // crash giữa lúc ack và xóa segment cũ
+
+	q.wSeg = last
+	if q.wFile, err = os.OpenFile(segPath(dir, last), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640); err != nil {
+		return nil, fmt.Errorf("không mở được segment để ghi: %w", err)
+	}
+	if err := q.openReader(q.ack.Seg, q.ack.Off); err != nil {
+		return nil, err
+	}
 	return q, nil
 }
 
-// restoreOffset đọc offset đã lưu từ lần chạy trước, nếu chưa có thì offset = 0.
-func (q *Queue) restoreOffset() error {
-	raw, err := os.ReadFile(q.offsetPath)
-	if os.IsNotExist(err) {
-		q.ackOffset = 0
-		return nil
-	}
+func (q *Queue) listSegments() ([]uint64, error) {
+	entries, err := os.ReadDir(q.dir)
 	if err != nil {
-		return fmt.Errorf("không đọc được offset file: %w", err)
+		return nil, fmt.Errorf("không đọc được thư mục queue: %w", err)
 	}
-	var offset int64
-	if _, err := fmt.Sscanf(string(raw), "%d", &offset); err != nil {
-		// File offset hỏng (ví dụ crash giữa lúc ghi) -> an toàn nhất là về 0,
-		// chấp nhận gửi lại từ đầu còn hơn bỏ sót dữ liệu.
-		q.ackOffset = 0
+	var ids []uint64
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, segSuffix) {
+			continue
+		}
+		if id, err := strconv.ParseUint(strings.TrimSuffix(name, segSuffix), 10, 64); err == nil && id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids, nil
+}
+
+// migrateLegacy chuyển queue.log + queue.offset của bản cũ thành segment 1, giữ nguyên event chưa gửi.
+func (q *Queue) migrateLegacy() error {
+	legacy := filepath.Join(q.dir, legacyLogName)
+	if _, err := os.Stat(legacy); err != nil {
 		return nil
 	}
-	q.ackOffset = offset
+	if ids, _ := q.listSegments(); len(ids) > 0 {
+		return nil // đã chuyển rồi
+	}
+	var off int64
+	if raw, err := os.ReadFile(filepath.Join(q.dir, legacyOffsetName)); err == nil {
+		fmt.Sscanf(strings.TrimSpace(string(raw)), "%d", &off)
+	}
+	if err := os.Rename(legacy, segPath(q.dir, 1)); err != nil {
+		return fmt.Errorf("không chuyển được queue.log cũ: %w", err)
+	}
+	if err := q.writeAck(Position{Seg: 1, Off: off}); err != nil {
+		return err
+	}
+	os.Remove(filepath.Join(q.dir, legacyOffsetName))
 	return nil
 }
 
-// Enqueue ghi một event mới vào cuối queue log, fsync ngay để đảm bảo bền vững
-// (chấp nhận đánh đổi hiệu năng lấy độ an toàn - phù hợp với agent giám sát
-// nơi mất event log an ninh là không chấp nhận được).
-func (q *Queue) Enqueue(evt core.Event) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	data, err := json.Marshal(evt)
+// repairTail cắt phần dòng ghi dở ở cuối segment (agent chết giữa lúc ghi).
+func (q *Queue) repairTail(id uint64) error {
+	size := q.sizes[id]
+	if size == 0 {
+		return nil
+	}
+	f, err := os.OpenFile(segPath(q.dir, id), os.O_RDWR, 0)
 	if err != nil {
-		return fmt.Errorf("không serialize được event: %w", err)
+		return fmt.Errorf("không mở được segment %d: %w", id, err)
+	}
+	defer f.Close()
+	buf := make([]byte, 64<<10)
+	end := size
+	for end > 0 {
+		start := end - int64(len(buf))
+		if start < 0 {
+			start = 0
+		}
+		chunk := buf[:end-start]
+		if _, err := f.ReadAt(chunk, start); err != nil && err != io.EOF {
+			return err
+		}
+		if i := bytes.LastIndexByte(chunk, '\n'); i >= 0 {
+			end = start + int64(i) + 1
+			break
+		}
+		end = start
+	}
+	if end == size {
+		return nil
+	}
+	if err := f.Truncate(end); err != nil {
+		return fmt.Errorf("không cắt được dòng dở ở segment %d: %w", id, err)
+	}
+	q.sizes[id] = end
+	return f.Sync()
+}
+
+func (q *Queue) readAck(first uint64) Position {
+	raw, err := os.ReadFile(filepath.Join(q.dir, ackFileName))
+	if err != nil {
+		return Position{Seg: first}
+	}
+	var p Position
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(raw)), "%d %d", &p.Seg, &p.Off); err != nil || p.Off < 0 {
+		return Position{Seg: first} // file ack hỏng -> gửi lại từ đầu còn hơn bỏ sót
+	}
+	return p
+}
+
+func (q *Queue) writeAck(p Position) error {
+	path := filepath.Join(q.dir, ackFileName)
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o640)
+	if err != nil {
+		return fmt.Errorf("không ghi được ack tạm: %w", err)
+	}
+	_, err = fmt.Fprintf(f, "%d %d", p.Seg, p.Off)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return fmt.Errorf("không ghi được ack tạm: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("không rename được file ack: %w", err)
+	}
+	return nil
+}
+
+// dropBefore xóa các segment có id < seg (đã gửi xong toàn bộ).
+func (q *Queue) dropBefore(seg uint64) {
+	for id, size := range q.sizes {
+		if id >= seg {
+			continue
+		}
+		if err := os.Remove(segPath(q.dir, id)); err != nil && !os.IsNotExist(err) {
+			continue // thử lại ở lần ack sau
+		}
+		q.total -= size
+		delete(q.sizes, id)
+	}
+}
+
+func (q *Queue) openReader(seg uint64, off int64) error {
+	if q.rFile != nil {
+		q.rFile.Close()
+	}
+	f, err := os.Open(segPath(q.dir, seg))
+	if err != nil {
+		return fmt.Errorf("không mở được segment %d để đọc: %w", seg, err)
+	}
+	if _, err := f.Seek(off, io.SeekStart); err != nil {
+		f.Close()
+		return fmt.Errorf("không seek được tới vị trí đã lưu: %w", err)
+	}
+	q.rFile, q.rSeg, q.rOff = f, seg, off
+	q.rReader = bufio.NewReaderSize(f, 64<<10)
+	return nil
+}
+
+// Enqueue ghi một lô event vào cuối queue và fsync MỘT lần cho cả lô. Khi hàm trả về nil,
+// các event đã nằm bền trên đĩa -> collector mới được phép lưu offset/bookmark của mình.
+func (q *Queue) Enqueue(evts ...core.Event) error {
+	if len(evts) == 0 {
+		return nil
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf) // Encode tự thêm '\n' sau mỗi event
+	enc.SetEscapeHTML(false)
+	for i := range evts {
+		if err := enc.Encode(&evts[i]); err != nil {
+			return fmt.Errorf("không serialize được event: %w", err)
+		}
 	}
 
-	line := append(data, '\n')
-	if _, err := q.writeFile.Write(line); err != nil {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	n := int64(buf.Len())
+	if q.opts.MaxBytes > 0 && q.total > 0 && q.total+n > q.opts.MaxBytes {
+		return ErrFull
+	}
+	if q.sizes[q.wSeg] > 0 && q.sizes[q.wSeg]+n > q.opts.SegmentBytes {
+		if err := q.rotate(); err != nil {
+			return err
+		}
+	}
+	if _, err := q.wFile.Write(buf.Bytes()); err != nil {
 		return fmt.Errorf("không ghi được event vào queue: %w", err)
 	}
-	if err := q.writeFile.Sync(); err != nil {
-		return fmt.Errorf("không fsync được queue log: %w", err)
+	if err := q.wFile.Sync(); err != nil {
+		return fmt.Errorf("không fsync được queue: %w", err)
 	}
+	q.sizes[q.wSeg] += n
+	q.total += n
 	return nil
 }
 
-// Dequeue đọc event tiếp theo chưa được gửi. Trả về (nil, nil) nếu queue rỗng
-// (không phải lỗi - đây là trạng thái bình thường khi không có gì mới).
-func (q *Queue) Dequeue() (*core.Event, int64, error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	line, err := q.reader.ReadBytes('\n')
+func (q *Queue) rotate() error {
+	if err := q.wFile.Close(); err != nil {
+		return fmt.Errorf("không đóng được segment %d: %w", q.wSeg, err)
+	}
+	next := q.wSeg + 1
+	f, err := os.OpenFile(segPath(q.dir, next), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
 	if err != nil {
-		if len(line) == 0 {
-			return nil, 0, nil // chưa có dữ liệu mới, không phải lỗi
-		}
-		// Dòng cuối đang được ghi dở -> bufio đã "nuốt" phần đầu dòng, phải seek
-		// lại về readOffset để lần sau đọc trọn vẹn cả dòng, không làm lệch offset.
-		if _, serr := q.readFile.Seek(q.readOffset, 0); serr != nil {
-			return nil, 0, fmt.Errorf("không seek lại được queue: %w", serr)
-		}
-		q.reader.Reset(q.readFile)
-		return nil, 0, nil
+		return fmt.Errorf("không tạo được segment %d: %w", next, err)
 	}
-
-	var evt core.Event
-	if err := json.Unmarshal(line, &evt); err != nil {
-		// Dòng hỏng -> log lỗi ở tầng gọi, nhưng vẫn phải tiến offset để không kẹt queue mãi
-		q.readOffset += int64(len(line))
-		return nil, q.readOffset, fmt.Errorf("event hỏng trong queue, đã bỏ qua: %w", err)
-	}
-
-	q.readOffset += int64(len(line))
-	return &evt, q.readOffset, nil
-}
-
-// Ack xác nhận đã gửi thành công tới server, tới vị trí offset cho trước.
-// Ghi offset ra đĩa theo kiểu "write-tmp-then-rename" để đảm bảo atomic,
-// tránh trường hợp crash giữa lúc ghi làm hỏng file offset.
-func (q *Queue) Ack(offset int64) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	tmpPath := filepath.Join(q.dir, offsetTmpFile)
-	if err := os.WriteFile(tmpPath, []byte(fmt.Sprintf("%d", offset)), 0o640); err != nil {
-		return fmt.Errorf("không ghi được offset tạm: %w", err)
-	}
-	if err := os.Rename(tmpPath, q.offsetPath); err != nil {
-		return fmt.Errorf("không rename được offset file: %w", err)
-	}
-
-	q.ackOffset = offset
+	q.wFile, q.wSeg = f, next
+	q.sizes[next] = 0
 	return nil
 }
 
-// Pending trả về số byte chưa được ack - dùng để giám sát/log độ trễ của queue.
+// Dequeue đọc event tiếp theo chưa gửi. Trả về (nil, _, nil) nếu hiện không có gì mới.
+// Position trả về dùng để Ack sau khi gửi thành công.
+func (q *Queue) Dequeue() (*core.Event, Position, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for {
+		line, err := q.rReader.ReadBytes('\n')
+		if err == nil {
+			q.rOff += int64(len(line))
+			pos := Position{Seg: q.rSeg, Off: q.rOff}
+			var evt core.Event
+			if jerr := json.Unmarshal(line, &evt); jerr != nil {
+				// Dòng hỏng: vẫn phải tiến lên để không kẹt queue mãi
+				return nil, pos, fmt.Errorf("event hỏng trong queue, đã bỏ qua: %w", jerr)
+			}
+			return &evt, pos, nil
+		}
+		// Chưa đủ một dòng: bufio đã nuốt phần đầu dòng, seek lại để lần sau đọc trọn.
+		if _, serr := q.rFile.Seek(q.rOff, io.SeekStart); serr != nil {
+			return nil, Position{}, fmt.Errorf("không seek lại được queue: %w", serr)
+		}
+		q.rReader.Reset(q.rFile)
+		if q.rSeg >= q.wSeg || q.rOff < q.sizes[q.rSeg] {
+			return nil, Position{}, nil
+		}
+		// Đọc hết một segment đã đóng -> sang segment kế
+		if err := q.openReader(q.rSeg+1, 0); err != nil {
+			return nil, Position{}, err
+		}
+	}
+}
+
+// Ack xác nhận server đã nhận tới vị trí p, rồi xóa các segment đã gửi xong.
+func (q *Queue) Ack(p Position) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if p.Seg == 0 {
+		return nil
+	}
+	if err := q.writeAck(p); err != nil {
+		return err
+	}
+	q.ack = p
+	q.dropBefore(p.Seg)
+	return nil
+}
+
+// Pending trả về số byte chưa được ack.
 func (q *Queue) Pending() int64 {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-
-	info, err := os.Stat(q.logPath)
-	if err != nil {
-		return 0
+	if p := q.total - q.ack.Off; p > 0 {
+		return p
 	}
-	pending := info.Size() - q.ackOffset
-	if pending < 0 {
-		return 0
-	}
-	return pending
+	return 0
 }
 
-// Close đóng các file handle. Nên gọi khi agent tắt (graceful shutdown).
+// DiskBytes trả về tổng dung lượng các segment đang nằm trên đĩa.
+func (q *Queue) DiskBytes() int64 {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.total
+}
+
+// Close đóng các file handle. Nên gọi khi agent tắt.
 func (q *Queue) Close() error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-
 	var firstErr error
-	if err := q.writeFile.Close(); err != nil {
+	if err := q.wFile.Close(); err != nil {
 		firstErr = err
 	}
-	if err := q.readFile.Close(); err != nil && firstErr == nil {
-		firstErr = err
+	if q.rFile != nil {
+		if err := q.rFile.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
 	return firstErr
 }

@@ -184,6 +184,54 @@ playbooks:
         tasks:
           - Cập nhật feed threat intel
 
+  - id: PB-08
+    name: Tấn công vào hệ thống giám sát (giả mạo / chiếm agent)
+    match: ["AGENT-*"]
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - Máy nào (source.ip) xin token cho agent_id nào; agent_id đó thật sự nằm ở máy nào (tab Agents)
+          - Coi máy ở source.ip là đã bị chiếm quyền (đọc được khóa enroll trong file cấu hình agent)
+          - Rà alert khác từ máy đó trong 24h
+      - name: Ngăn chặn
+        tasks:
+          - {title: Thu hồi token của agent bị nhắm tới nếu nghi đã bị lấy (nút Thu hồi), approval: Analyst L1}
+          - {title: Cô lập máy ở source.ip, approval: Trưởng nhóm IR}
+      - name: Loại bỏ
+        tasks:
+          - Đổi khóa enroll (secrets/enrollment_key) và cập nhật lên các agent còn tin cậy
+          - Xử lý máy bị chiếm theo PB-03
+      - name: Khôi phục
+        tasks:
+          - {title: Cho agent thật enroll lại, giới hạn theo IP của máy đó, approval: Analyst L1}
+          - Kiểm tra lại các lệnh phản ứng gửi tới agent bị nhắm trong thời gian nghi bị giả mạo
+      - name: Rút kinh nghiệm
+        tasks:
+          - Siết quyền đọc file cấu hình agent trên endpoint
+
+  - id: PB-09
+    name: Thay đổi file trái phép (FIM)
+    match: ["FIM-*"]
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - File nào, thêm / sửa / xóa, hash trước và sau, lúc nào (event gốc trong alert)
+          - Đối chiếu với thay đổi có kế hoạch (cập nhật, triển khai, ticket)
+          - Tìm tiến trình và tài khoản hoạt động trên máy quanh thời điểm đó (process, auth, Sysmon)
+      - name: Ngăn chặn
+        tasks:
+          - {title: Nếu là webshell hoặc file hệ thống bị thay - cô lập máy, approval: Trưởng nhóm IR}
+      - name: Loại bỏ
+        tasks:
+          - Lưu bản sao file bị thay đổi làm chứng cứ, rồi khôi phục bản gốc
+          - Tìm cách kẻ tấn công ghi được file (lỗ hổng upload, tài khoản bị chiếm)
+      - name: Khôi phục
+        tasks:
+          - Xác nhận hash file đã trở về giá trị gốc ở lần quét FIM tiếp theo
+      - name: Rút kinh nghiệm
+        tasks:
+          - Bổ sung đường dẫn cần giám sát nếu phát hiện muộn
+
   - id: PB-00
     name: Điều tra chung
     match: ["*"]

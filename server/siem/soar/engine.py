@@ -119,7 +119,8 @@ class Soar:
             pid, name = get(alert, "process.pid"), get(alert, "process.name")
             if not pid and not name:
                 return {"status": "skipped", "detail": "không có thông tin tiến trình"}
-            params = {"pid": pid} if pid else {"name": name}
+            # Gửi kèm tên: agent đối chiếu trước khi kill, tránh giết nhầm khi PID đã bị tái sử dụng.
+            params = {k: v for k, v in (("pid", pid), ("name", name)) if v}
             a = store.create_action(self.es, agent_id, "kill_process", params,
                                     alert_id=get(alert, "alert.id"), source="soar")
             return {"status": "queued", "action_id": a["id"], "agent_id": agent_id, "target": str(pid or name)}

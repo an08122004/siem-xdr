@@ -1,0 +1,64 @@
+# Luật giám sát toàn vẹn file (event "fim" do agent quét định kỳ: file thêm / sửa / xóa)
+- id: FIM-001
+  title: Thay đổi file hệ thống / cơ chế duy trì quan trọng
+  description: >-
+    File tài khoản, sudo, SSH, cron, systemd, PAM, preload, nhị phân hệ thống hoặc thư mục Startup
+    / file hosts của Windows bị thêm, sửa hoặc xóa. Đối chiếu với thay đổi có kế hoạch (cập nhật gói, ticket).
+  severity: high
+  mitre: {tactic: Persistence, technique: [T1098.004, T1053.003, T1543.002, T1547.001, T1556.003, T1574.006]}
+  tags: [fim, persistence]
+  type: match
+  condition:
+    all:
+      - {field: event.module, op: eq, value: fim}
+      - &fim_critical
+        field: file.path
+        op: regex
+        value:
+          - '^/etc/(passwd|shadow|group|gshadow|sudoers|crontab|rc\.local|ld\.so\.preload|hosts)$'
+          - '^/etc/(sudoers\.d|cron\.[a-z]+|pam\.d|systemd/system|profile\.d)/'
+          - '^/etc/ssh/sshd_config'
+          - '^/(root|home/[^/]+)/\.ssh/'
+          - '^/(usr/)?(s)?bin/'
+          - '^[a-z]:\\windows\\system32\\drivers\\etc\\hosts$'
+          - '^[a-z]:\\windows\\system32\\[^\\]+\.(exe|dll|sys)$'
+          - '\\start menu\\programs\\startup\\'
+
+- id: FIM-002
+  title: Script / webshell mới trong thư mục web
+  description: >-
+    File script máy chủ (php, jsp, aspx, cgi...) xuất hiện hoặc bị sửa trong thư mục web.
+    Thường là webshell sau khi khai thác lỗ hổng upload / thực thi mã.
+  severity: high
+  mitre: {tactic: Persistence, technique: [T1505.003]}
+  tags: [fim, webshell]
+  type: match
+  condition:
+    all:
+      - {field: event.module, op: eq, value: fim}
+      - {field: event.action, op: in, value: [file_created, file_modified]}
+      - &fim_webshell_dir
+        field: file.path
+        op: regex
+        value: ['/(var/www|srv/www|htdocs|cgi-bin|public_html)/', '\\(inetpub|wwwroot|htdocs)\\']
+      - &fim_webshell_ext
+        field: file.extension
+        op: in
+        value: [php, php5, phtml, phar, jsp, jspx, asp, aspx, ashx, asmx, cgi, pl, py, sh]
+
+- id: FIM-003
+  title: Thay đổi file trong vùng giám sát
+  description: File trong fim.paths bị thêm / sửa / xóa (không thuộc FIM-001, FIM-002). Dùng để rà soát.
+  severity: low
+  mitre: {tactic: Impact, technique: [T1565.001]}
+  tags: [fim]
+  type: match
+  condition:
+    all:
+      - {field: event.module, op: eq, value: fim}
+      - not: *fim_critical
+      - not:
+          all:
+            - {field: event.action, op: in, value: [file_created, file_modified]}
+            - *fim_webshell_dir
+            - *fim_webshell_ext

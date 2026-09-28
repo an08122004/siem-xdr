@@ -10,10 +10,18 @@ server:
 
 queue:
   dir: "/var/lib/siem-agent"
+  max_mb: 256
 
 collectors:
   process: true
   process_interval_seconds: 1
+  # container có network/PID namespace riêng nên netlink không dùng được: quét /proc
+  process_mode: poll
+
+# FIM: file PHP/CGI mới trong web root -> FIM-002 (webshell)
+fim:
+  paths: "/usr/local/apache2/htdocs, /usr/local/apache2/cgi-bin, /etc/passwd"
+  interval_seconds: 30
 
 filetail:
   apache_access: "/usr/local/apache2/logs/access_log"

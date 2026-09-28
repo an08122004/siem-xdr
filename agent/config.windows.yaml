@@ -1,5 +1,6 @@
-# Cấu hình agent mẫu cho Windows (PC-01). Chạy agent với quyền Administrator
-# để đọc được channel Security và thực thi lệnh netsh.
+# Cấu hình agent mẫu cho Windows (PC-01). Nên đặt file này trong C:\ProgramData\siem-agent
+# (agent tự siết quyền thư mục: chỉ SYSTEM/Administrators đọc được, vì file chứa enrollment_key),
+# rồi cài service bằng PowerShell Administrator:  .\siem-agent.exe -install -config C:\ProgramData\siem-agent\config.yaml
 agent_id: "A001-PC-01"
 
 server:
@@ -12,6 +13,7 @@ server:
 
 queue:
   dir: "C:\ProgramData\siem-agent"
+  max_mb: 512
 
 log:
   level: "info"
@@ -22,6 +24,11 @@ collectors:
   windows_interval_seconds: 5
   # Cài Sysmon (config SwiftOnSecurity) để có telemetry process/network chi tiết
   windows_channels: "Security, System, Microsoft-Windows-Sysmon/Operational, Microsoft-Windows-PowerShell/Operational, Microsoft-Windows-Windows Defender/Operational"
+
+# Giám sát toàn vẹn file: file hosts, thư mục Startup (cơ chế duy trì), web root IIS
+fim:
+  paths: "C:\Windows\System32\drivers\etc, C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp, C:\inetpub\wwwroot"
+  interval_seconds: 300
 
 response:
   enabled: true

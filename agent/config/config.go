@@ -24,6 +24,9 @@ type Config struct {
 	// vd: "apache_access" -> ["/var/log/apache2/access.log"]
 	FileTail map[string][]string
 	Response ResponseConfig
+	FIM      FIMConfig
+	// Path: đường dẫn file cấu hình đã nạp (để kiểm tra quyền đọc vì file chứa khóa enroll).
+	Path string
 }
 
 type ServerConfig struct {
@@ -38,7 +41,17 @@ type ServerConfig struct {
 }
 
 type QueueConfig struct {
-	Dir string
+	Dir       string
+	MaxMB     int // dung lượng tối đa của queue trên đĩa; đầy thì collector chờ (không vứt event)
+	SegmentMB int // kích thước mỗi segment; segment đã gửi xong bị xóa
+}
+
+// FIMConfig: giám sát toàn vẹn file bằng cách băm định kỳ.
+type FIMConfig struct {
+	Paths           []string // file hoặc thư mục (quét đệ quy)
+	Exclude         []string // mẫu tên file bỏ qua, vd *.log, *.tmp
+	IntervalSeconds int
+	MaxFileMB       int // file lớn hơn chỉ so kích thước / thời gian sửa, không băm
 }
 
 type LogConfig struct {
@@ -53,6 +66,7 @@ type CollectorsConfig struct {
 	WindowsEventLog        bool
 	WindowsChannels        []string
 	WindowsIntervalSeconds int
+	ProcessMode            string // auto | netlink | poll (chỉ Linux)
 }
 
 type ResponseConfig struct {
@@ -83,8 +97,12 @@ func Load(path string) (*Config, error) {
 			RetryIntervalSeconds: atoiDefault(flat["server.retry_interval_seconds"], 5),
 			BatchSize:            atoiDefault(flat["server.batch_size"], 100),
 		},
-		Queue: QueueConfig{Dir: flat["queue.dir"]},
-		Log:   LogConfig{Level: flat["log.level"], Path: flat["log.path"]},
+		Queue: QueueConfig{
+			Dir:       flat["queue.dir"],
+			MaxMB:     atoiDefault(flat["queue.max_mb"], 512),
+			SegmentMB: atoiDefault(flat["queue.segment_mb"], 16),
+		},
+		Log: LogConfig{Level: flat["log.level"], Path: flat["log.path"]},
 		Collectors: CollectorsConfig{
 			Mock:                   flat["collectors.mock"] == "true",
 			Process:                flat["collectors.process"] == "true",
@@ -92,6 +110,7 @@ func Load(path string) (*Config, error) {
 			WindowsEventLog:        flat["collectors.windows_eventlog"] == "true",
 			WindowsChannels:        splitList(flat["collectors.windows_channels"]),
 			WindowsIntervalSeconds: atoiDefault(flat["collectors.windows_interval_seconds"], 5),
+			ProcessMode:            flat["collectors.process_mode"],
 		},
 		FileTail: map[string][]string{},
 		Response: ResponseConfig{
@@ -99,6 +118,13 @@ func Load(path string) (*Config, error) {
 			DryRun:              flat["response.dry_run"] == "true",
 			PollIntervalSeconds: atoiDefault(flat["response.poll_interval_seconds"], 5),
 		},
+		FIM: FIMConfig{
+			Paths:           splitList(flat["fim.paths"]),
+			Exclude:         splitList(flat["fim.exclude"]),
+			IntervalSeconds: atoiDefault(flat["fim.interval_seconds"], 300),
+			MaxFileMB:       atoiDefault(flat["fim.max_file_mb"], 32),
+		},
+		Path: path,
 	}
 	if v := os.Getenv("SIEM_SERVER_URL"); v != "" {
 		cfg.Server.URL = strings.TrimRight(v, "/")
@@ -151,6 +177,17 @@ func validate(cfg *Config) error {
 	}
 	if cfg.Server.BatchSize < 1 {
 		cfg.Server.BatchSize = 1
+	}
+	switch cfg.Collectors.ProcessMode {
+	case "", "auto", "netlink", "poll":
+	default:
+		return fmt.Errorf("collectors.process_mode phải là auto, netlink hoặc poll")
+	}
+	if cfg.Queue.SegmentMB < 1 || cfg.Queue.MaxMB < cfg.Queue.SegmentMB*2 {
+		return fmt.Errorf("queue.max_mb phải >= 2 x queue.segment_mb")
+	}
+	if cfg.FIM.IntervalSeconds < 10 {
+		cfg.FIM.IntervalSeconds = 10
 	}
 	return nil
 }

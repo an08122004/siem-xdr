@@ -49,6 +49,21 @@ playbooks:
       - {action: notify}
       - {action: create_case}
 
+  - name: Nghi giả mạo agent (chỉ báo và mở case, không tự phản ứng)
+    when:
+      rule_ids: ["AGENT-*"]
+    steps:
+      - {action: notify}
+      - {action: create_case}
+
+  - name: Thay đổi file trái phép (FIM) — báo và mở case, cô lập do người quyết định
+    when:
+      rule_ids: [FIM-001, FIM-002]
+    steps:
+      - {action: notify}
+      - {action: create_case}
+      - {action: isolate_host, approval: true}
+
   - name: Cảnh báo chung mức critical
     when:
       rule_ids: ["*"]

@@ -6,6 +6,7 @@
 package mock
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -31,8 +32,8 @@ func New(agentID string, interval time.Duration) *Collector {
 
 func (c *Collector) Name() string { return "mock_collector" }
 
-// Start sinh event định kỳ, đẩy vào channel out cho tới khi Stop() được gọi.
-func (c *Collector) Start(out chan<- core.Event) error {
+// Start sinh event định kỳ, ghi qua emit cho tới khi Stop() được gọi.
+func (c *Collector) Start(emit core.Emit) error {
 	ticker := time.NewTicker(c.Interval)
 	defer ticker.Stop()
 
@@ -57,7 +58,11 @@ func (c *Collector) Start(out chan<- core.Event) error {
 					"message": "Đây là sự kiện giả lập dùng để kiểm thử pipeline core",
 				},
 			}
-			out <- evt
+			if err := emit([]core.Event{evt}); errors.Is(err, core.ErrStopping) {
+				return nil
+			} else if err != nil {
+				log.Printf("[mock] không ghi được event: %v", err)
+			}
 		}
 	}
 }
