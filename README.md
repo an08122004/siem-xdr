@@ -7,7 +7,7 @@ và danh mục tài sản `BTL/asset.txt`. Toàn bộ backend đóng gói bằng
  Endpoint / Server                       Backend (docker-compose)
  ┌───────────────────┐   HTTPS/JSON   ┌──────────┐   ┌─────────────────┐   ┌────────────┐   ┌──────────────┐   ┌─────────┐
  │ siem-agent (Go)   │ ─────────────▶ │ Manager  │──▶│ Kafka           │──▶│ Analyzer   │──▶│ Elasticsearch│──▶│ Grafana │
- │ file/eventlog/proc│ ◀── lệnh XDR ──│ API      │   │ (+ Zookeeper)   │   │ normalize  │   │ events/alerts│   └─────────┘
+ │ file/eventlog/proc│ ◀── lệnh XDR ──│ API      │   │ (KRaft)         │   │ normalize  │   │ events/alerts│   └─────────┘
  └───────────────────┘                └──────────┘   │ siem.raw        │   │ enrich (TI)│   └──────────────┘
  ┌───────────────────┐   syslog 514   ┌──────────┐   │ siem.alerts     │   │ rules + ML │
  │ Firewall/Suricata │ ─────────────▶ │ Syslog   │──▶│                 │◀──┘            │
@@ -28,7 +28,7 @@ và danh mục tài sản `BTL/asset.txt`. Toàn bộ backend đóng gói bằng
 | Agent đa nền tảng (Windows/Linux) | Go, không dependency ngoài | `agent/` |
 | Manager API + SOC console | FastAPI | `server/siem/manager/` |
 | Syslog collector (UDP/TCP 514) | asyncio | `server/siem/collector/` |
-| Message bus | Kafka + Zookeeper | `docker-compose.yml` |
+| Message bus | Kafka 7.7 (Confluent) chế độ **KRaft**, không dùng ZooKeeper | `docker-compose.yml` |
 | Chuẩn hóa log (ECS rút gọn) + làm giàu | Python | `server/siem/pipeline/` |
 | Phân tích dựa trên luật | Rule engine YAML (match / threshold / sequence) | `server/siem/detection/rules.py`, `server/rules/` |
 | Phân tích dựa trên ML (**tạm dừng**) | Isolation Forest (scikit-learn) | `server/siem/detection/ml.py` |
@@ -85,6 +85,14 @@ Phần AI (`--profile ai`, xem mục 5) và máy web demo (`--profile demo`, xem
 | http://127.0.0.1:8088 | Kafka UI (chỉ từ máy chạy docker) | |
 | https://127.0.0.1:9200 | Elasticsearch (chỉ từ máy chạy docker) | `analyst` / `secrets/analyst_es_password` (chỉ đọc) |
 | UDP/TCP 514 | Syslog từ firewall F001 / Suricata | |
+
+**Kafka chạy KRaft** (Kafka tự quản lý metadata, không cần ZooKeeper): 1 node vừa là broker vừa là controller,
+controller dùng listener riêng `CONTROLLER:9093` chỉ trong mạng nội bộ. Dữ liệu nằm ở volume `kafkadata`, `CLUSTER_ID` cố định
+trong `docker-compose.yml`, nên tạo lại container không mất dữ liệu. Kiểm tra controller:
+`docker compose exec kafka kafka-metadata-quorum --bootstrap-server localhost:9092 describe --status`.
+KRaft là điều kiện bắt buộc để sau này nâng lên Kafka 4.x (bản 4.0 đã bỏ hẳn ZooKeeper). Chuyển sang KRaft không làm tăng
+khả năng chịu tải: ZooKeeper không nằm trên đường đi của log, broker nhận khoảng 227–243 nghìn msg/s ở cả hai chế độ
+(`kafka-producer-perf-test`, 200 byte/msg).
 
 Trình duyệt sẽ cảnh báo chứng chỉ của `https://localhost:8000` vì nó do **CA nội bộ** ký.
 Để hết cảnh báo, lấy CA rồi import vào *Trusted Root Certification Authorities* của Windows:
@@ -301,7 +309,7 @@ Sinh lại dashboard Grafana: `python tools/gen_dashboard.py`.
 3. Có thể đặt enrollment key qua `SIEM_ENROLLMENT_KEY_FILE` thay vì ghi trong config.
 
 **Giới hạn còn lại**:
-- Kafka/Zookeeper chạy plaintext trong mạng docker nội bộ.
+- Kafka chạy plaintext trong mạng docker nội bộ.
 - Console dùng một API key chung, còn tên analyst là do người dùng tự khai (chưa có đăng nhập theo từng người).
 - Đổi `elastic_password` sau lần chạy đầu phải đổi qua API của ES, hoặc xóa volume `esdata`.
 - Ollama gọi qua HTTP thường trong mạng docker nội bộ (không publish cổng ra ngoài).

@@ -1,5 +1,5 @@
 # SIEM/XDR lab — pipeline theo BTL/SIEM.txt:
-#   Agent / Syslog -> Manager (HTTPS) -> Kafka (+Zookeeper) -> Analyzer (Rule) -> Elasticsearch (TLS + RBAC) -> Grafana
+#   Agent / Syslog -> Manager (HTTPS) -> Kafka (KRaft) -> Analyzer (Rule) -> Elasticsearch (TLS + RBAC) -> Grafana
 #                                                           -> SOAR -> lệnh phản ứng -> Agent (XDR)
 #
 # Bảo mật nội bộ:
@@ -7,7 +7,7 @@
 #   - RBAC: mỗi service một user Elasticsearch với quyền tối thiểu (security/setup.sh).
 #   - Bí mật: file trong ./secrets (tạo bằng `python tools/init_secrets.py`), mount qua Docker secrets,
 #     KHÔNG nằm trong .env / biến môi trường. Mật khẩu superuser `elastic` nằm trong keystore của Elasticsearch.
-# Giới hạn còn lại: Kafka/Zookeeper chạy plaintext trong mạng docker nội bộ `soc-lab` (không publish ra ngoài).
+# Giới hạn còn lại: Kafka chạy plaintext trong mạng docker nội bộ `soc-lab` (không publish ra ngoài).
 
 x-app-env: &app-env
   KAFKA_BOOTSTRAP: kafka:9092
@@ -60,29 +60,29 @@ services:
     networks: [soc]
 
   # ---------------------------------------------------------------- hạ tầng
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.7.1
-    restart: unless-stopped
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    networks: [soc]
-
+  # Kafka chế độ KRaft (không ZooKeeper): 1 node vừa là broker vừa là controller (metadata quorum).
+  # Controller dùng listener riêng CONTROLLER:9093, chỉ trong mạng nội bộ, không quảng bá cho client.
+  # CLUSTER_ID sinh bằng `kafka-storage random-uuid`, cố định để volume kafkadata dùng lại được khi tạo lại container.
   kafka:
     image: confluentinc/cp-kafka:7.7.1
     restart: unless-stopped
-    depends_on: [zookeeper]
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092
+      CLUSTER_ID: 4QE4OUyBRDWV_gJxSy_LeQ
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
       KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_LOG_RETENTION_HOURS: 72
+    volumes:
+      - kafkadata:/var/lib/kafka/data
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
       interval: 10s
@@ -277,6 +277,7 @@ networks:
 
 volumes:
   certs:
+  kafkadata:
   esdata:
   grafanadata:
   mldata:
