@@ -32,6 +32,9 @@ func (s *Sender) Run(ctx context.Context) {
 
 		batch, lastOffset := s.collectBatch()
 		if len(batch) == 0 {
+			if lastOffset.Seg != 0 { // chỉ toàn dòng hỏng: ack để không đọc lại
+				_ = s.q.Ack(lastOffset)
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -51,9 +54,9 @@ func (s *Sender) Run(ctx context.Context) {
 }
 
 // collectBatch đọc tối đa batchSize event đang có sẵn trong queue.
-func (s *Sender) collectBatch() ([]core.Event, int64) {
+func (s *Sender) collectBatch() ([]core.Event, queue.Position) {
 	var batch []core.Event
-	var last int64
+	var last queue.Position
 	for len(batch) < s.batchSize {
 		evt, offset, err := s.q.Dequeue()
 		if err != nil {

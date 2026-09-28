@@ -40,22 +40,51 @@ và danh mục tài sản `BTL/asset.txt`. Toàn bộ backend đóng gói bằng
 
 ## 1. Agent (`agent/`)
 
-Phát triển tiếp từ `Wazuh/agent-core`, giữ nguyên thiết kế: collector → hàng đợi trên đĩa → sender (at-least-once, không mất event khi mất mạng hoặc agent crash).
+Phát triển tiếp từ `Wazuh/agent-core`, giữ nguyên thiết kế: collector → hàng đợi trên đĩa → sender (at-least-once).
+Chỉ dùng thư viện chuẩn của Go (không dependency ngoài).
+
+**Không mất event**: collector ghi từng lô vào queue và chờ fsync xong rồi mới lưu offset/bookmark,
+nên agent crash hay bị dừng giữa chừng thì lần sau đọc lại đúng chỗ (có thể gửi trùng, không bỏ sót).
+Queue chia thành segment 16 MB; segment đã gửi xong bị xóa. Tổng dung lượng giới hạn bởi `queue.max_mb`
+(mặc định 512): manager mất kết nối lâu, queue đầy thì collector tạm dừng chứ không vứt event
+(nguồn log vẫn giữ dữ liệu, đọc tiếp khi có chỗ). Queue của bản cũ (`queue.log`) được tự chuyển đổi.
 
 **Collector**
-- `filetail`: tail file log trên mọi OS (Apache access/error, `auth.log`, Suricata `eve.json`, syslog). Lưu offset và xử lý log rotation.
-- `winevent`: đọc Windows Event Log bằng `wevtutil` (Security, System, Sysmon, PowerShell, Defender). Lưu bookmark theo channel.
-- `process`: phát hiện tiến trình mới trên Linux qua `/proc`.
+- `filetail`: tail file log trên mọi OS (Apache access/error, `auth.log`, Suricata `eve.json`, syslog), có wildcard.
+  Giữ handle file nên khi log bị xoay vòng vẫn đọc nốt file cũ rồi mới chuyển sang file mới (Windows mở với
+  `FILE_SHARE_DELETE`, không cản ứng dụng xoay vòng log). Lưu fingerprint 1 KB đầu file cùng offset: agent tắt đúng lúc
+  log xoay vòng thì khi chạy lại vẫn đọc nốt phần còn lại ở `<file>.1` và đọc file mới từ đầu. Phát hiện cả copytruncate.
+- `winevent`: đọc Windows Event Log bằng `wevtutil` (Security, System, Sysmon, PowerShell, Defender). Mỗi vòng đọc hết
+  tồn đọng (tới 10.000 bản ghi/channel), đọc cả `UserData` (vd người xóa audit log trong event 1102), phát hiện log bị xóa
+  (đánh số lại) và báo `agent_health` khi bản ghi bị ghi đè trước khi kịp đọc.
+- `process`: tiến trình mới trên Linux. `process_mode: auto` dùng netlink proc connector (kernel báo ngay mỗi `execve`,
+  bắt được cả tiến trình sống vài mili giây); không dùng được (container có network/PID namespace riêng, thiếu root)
+  thì lùi về quét `/proc`. Windows dùng Sysmon / 4688 qua `winevent`.
+- `fim`: giám sát toàn vẹn file bằng cách băm SHA-256 định kỳ (`fim.paths`, mặc định 5 phút). Lần đầu chỉ lập baseline;
+  sau đó báo file thêm / sửa nội dung / đổi quyền / xóa kèm hash trước và sau (rule FIM-001..003).
 - `mock`: sinh dữ liệu giả để test.
 
-**Response (XDR)**: agent định kỳ hỏi manager xem có lệnh mới không rồi thực thi:
-`block_ip`/`unblock_ip` (iptables / netsh advfirewall), `kill_process`, `isolate_host`/`unisolate_host`
-(chỉ giữ kết nối tới manager). Mọi tham số đều được validate và lệnh chạy không qua shell.
-Agent từ chối chặn IP của manager và từ chối kill tiến trình hệ thống.
-Bật `response.dry_run: true` nếu chỉ muốn ghi log lệnh mà không thực thi.
+**Response (XDR)**: agent định kỳ hỏi manager xem có lệnh mới không rồi thực thi. Mọi tham số được validate,
+lệnh chạy không qua shell, chạy lại cùng lệnh không tạo luật trùng. Bật `response.dry_run: true` để chỉ ghi log.
 
-**Bảo mật kênh**: agent enroll bằng `enrollment_key`, nhận token HMAC riêng theo `agent_id`.
-Server ghi đè `agent_id` trong payload bằng danh tính đã xác thực, nên agent không giả mạo được agent khác.
+| Lệnh | Linux | Windows |
+|---|---|---|
+| `block_ip` / `unblock_ip` | iptables / ip6tables, chặn cả vào lẫn ra (cắt kết nối ngược ra C2) | netsh, luật `dir=in` + `dir=out` |
+| `isolate_host` | chain riêng: chỉ loopback, DHCP, manager; áp cho cả IPv4 và IPv6 | luật block mọi IP trừ manager (thắng mọi luật allow sẵn có), không đổi chính sách mặc định |
+| `kill_process` | theo pid (đối chiếu tên với alert, tránh giết nhầm khi PID bị tái sử dụng) hoặc theo tên | như Linux |
+
+- Chặn có hạn thì **agent tự gỡ** đúng hạn (lưu ở `response.state.json`), kể cả khi mất kết nối manager lúc đó.
+- Khi cô lập, DNS bị chặn nên agent ghim IP manager và gọi thẳng IP đó (TLS vẫn xác thực theo tên), kể cả sau khi khởi động lại.
+- Từ chối: chặn IP manager, kill tiến trình hệ thống (lsass, csrss, systemd…) kể cả theo pid, kill theo tên các tiến trình
+  dùng chung (bash, powershell.exe, explorer.exe…) — những tiến trình này chỉ được kill theo pid.
+
+**Bảo mật kênh và danh tính**: agent enroll bằng `enrollment_key` dùng chung, nhận **token ngẫu nhiên** riêng
+(manager chỉ lưu hash). Khóa enroll chỉ đủ để đăng ký agent MỚI: xin token cho `agent_id` đã tồn tại thì phải trình token
+hiện tại của agent đó, nếu không manager trả 409 và sinh alert AGENT-001 (nghi giả mạo agent). Máy cài lại / mất token:
+analyst bấm **Cho enroll lại** trên tab Agents (có hạn 60 phút, nên giới hạn theo IP máy thật). Nút **Thu hồi** vô hiệu hóa
+token ngay. Server ghi đè `agent_id` trong payload bằng danh tính đã xác thực. Thư mục trạng thái (token, queue, offset)
+được agent tự siết quyền: `chmod 700` trên Linux; trên Windows bỏ quyền thừa kế từ `C:\ProgramData`, chỉ còn SYSTEM,
+Administrators và tài khoản chạy agent.
 
 ```bash
 cd agent
@@ -63,9 +92,16 @@ go test ./...
 GOOS=linux   GOARCH=amd64 go build -o bin/siem-agent     ./cmd/agent
 GOOS=windows GOARCH=amd64 go build -o bin/siem-agent.exe ./cmd/agent
 ```
-- Linux (S001 Web-01, A003 Ubuntu-01): sửa `config.linux.yaml` (IP manager, key) rồi chạy `sudo ./siem-agent -config config.linux.yaml`
-- Windows (A001 PC-01): sửa `config.windows.yaml`, mở PowerShell **Administrator**, chạy `.\siem-agent.exe -config config.windows.yaml`.
-  Nên cài Sysmon để có telemetry process/network.
+- Linux (S001 Web-01, A003 Ubuntu-01): sửa `config.linux.yaml` (IP manager, key), `chmod 600` file này, rồi cài service
+  systemd (tự khởi động cùng máy, tự chạy lại khi chết): `sudo ./siem-agent -install -config /etc/siem-agent/config.yaml`.
+  Gỡ: `sudo ./siem-agent -uninstall`. Chạy thử ở foreground: `sudo ./siem-agent -config config.linux.yaml`.
+- Windows (A001 PC-01): chép `config.windows.yaml` vào `C:\ProgramData\siem-agent\config.yaml`, mở PowerShell **Administrator**:
+  `.\siem-agent.exe -install -config C:\ProgramData\siem-agent\config.yaml` (Windows Service chạy bằng LocalSystem, SCM tự
+  khởi động lại nếu agent chết). Gỡ: `.\siem-agent.exe -uninstall`. Nên cài Sysmon để có telemetry process/network.
+
+**Nâng cấp từ bản cũ**: agent cũ dùng token HMAC; manager mới không nhận token đó để gọi API nữa, agent mới tự trình
+token cũ để đổi sang token ngẫu nhiên (không cần thao tác). Agent **bản cũ** chạy với manager mới sẽ bị 409 khi enroll lại:
+build lại agent, hoặc bấm "Cho enroll lại" cho agent đó.
 
 ## 2. Backend
 
@@ -157,7 +193,7 @@ Ghi chú cấu hình: `topic` trong `vector.yaml` phải ghi thẳng `siem.raw`.
 
 ## 3. Phát hiện
 
-**Luật** (`server/rules/*.yml`, 40 luật, có gắn MITRE ATT&CK):
+**Luật** (`server/rules/*.yml`, 45 luật, có gắn MITRE ATT&CK):
 
 | Nhóm | Luật |
 |---|---|
@@ -166,6 +202,8 @@ Ghi chú cấu hình: `topic` trong `vector.yaml` phải ghi thẳng `siem.raw`.
 | Windows | 4625 brute-force, xóa audit log, tạo user, thêm vào Administrators, PowerShell `-enc`, download cradle/AMSI bypass, Mimikatz/LSASS dump, Office sinh shell, service lạ, xóa shadow copy, Defender, LOLBins, schtasks |
 | Linux | reverse shell, web server sinh shell, `curl \| sh`, crypto miner, trinh sát, persistence |
 | Mạng | port scan (distinct port), firewall deny hàng loạt, dịch vụ nhạy cảm lộ ra Internet, Suricata severity cao, SMB lateral, Threat Intel IOC |
+| FIM | file hệ thống / cơ chế duy trì bị sửa (passwd, sudoers, SSH key, cron, systemd, Startup, hosts), webshell mới trong web root, thay đổi khác trong vùng giám sát |
+| Hệ thống giám sát | enroll trùng `agent_id` đang có (nghi giả mạo agent), dò khóa enroll |
 
 Cú pháp luật:
 ```yaml
@@ -194,7 +232,8 @@ tài sản (`server/config/assets.yml`, lấy từ `asset.txt`) dùng để tín
 
 **Phản ứng tự động** (`server/config/playbooks.yml`): ví dụ AUTH-001 → chặn IP trên **mọi** agent trong 1 giờ, gửi thông báo, tạo case.
 AUTH-002 → chặn 24 giờ, còn cô lập máy thì chờ analyst duyệt (`approval: true`).
-SOAR tự tạo lệnh gỡ chặn khi hết hạn, bỏ qua IP trong `SOAR_WHITELIST` và không chặn trùng.
+SOAR tự tạo lệnh gỡ chặn khi hết hạn (agent cũng tự gỡ đúng hạn nếu mất kết nối), bỏ qua IP trong `SOAR_WHITELIST` và không chặn trùng.
+FIM-001/002 và AGENT-* chỉ thông báo và mở case; cô lập máy khi có webshell phải được duyệt.
 Đặt `SOAR_AUTO_RESPONSE=false` nếu chỉ muốn thông báo và tạo case.
 
 **Case playbook** (`server/config/case_playbooks.yml`): khi tạo case, SOAR gắn quy trình xử lý sự cố phù hợp theo `rule.id`.
@@ -209,6 +248,8 @@ Mỗi playbook là checklist task theo 5 giai đoạn của NIST SP 800-61 (Phá
 | PB-05 Trinh sát / quét mạng | NET-001..003, NET-005 |
 | PB-06 Kết nối tới IOC | TI-001 |
 | PB-07 Xóa dấu vết / nghi ngờ ransomware | WIN-002, WIN-010 |
+| PB-08 Tấn công vào hệ thống giám sát (giả mạo / chiếm agent) | AGENT-* |
+| PB-09 Thay đổi file trái phép (FIM) | FIM-* |
 | PB-00 Điều tra chung | mọi rule còn lại |
 
 - **Ưu tiên và hạn triage (SLA)** theo severity: critical = P1 / 15 phút, high = P2 / 1 giờ, medium = P3 / 8 giờ, low = P4 / 24 giờ.
@@ -323,9 +364,12 @@ Các biến cấu hình `AI_*` nằm trong `.env.example`.
 
 ```bash
 cd server && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt pytest httpx
-.venv/Scripts/python -m pytest -q      # 46 test: parser, rule, ML, SOAR, case playbook, API, AI (phân loại tấn công, kiểm định, worker với LLM giả, duyệt/gỡ)
-cd ../agent && go test ./...
+.venv/Scripts/python -m pytest -q      # 66 test: parser, rule (gồm FIM, AGENT), ML, SOAR, case playbook, API (enroll/thu hồi), AI
+cd ../agent && go test ./...            # queue, filetail (xoay vòng log), winevent, FIM, response, service, test đầu-cuối với manager giả
 ```
+Test với môi trường thật (Linux, cần container): `go test -c` rồi chạy file test trong container
+- iptables/ip6tables thật: `docker run --rm --cap-add NET_ADMIN -e SIEM_IPTABLES_IT=1 ... response.test`
+- netlink proc connector: chạy bằng root trên máy Linux (không phải container có namespace riêng).
 Sinh lại dashboard Grafana: `python tools/gen_dashboard.py`.
 
 ## 7. Bảo mật nội bộ
@@ -354,7 +398,14 @@ Sinh lại dashboard Grafana: `python tools/gen_dashboard.py`.
 2. Copy `ca.crt` sang máy agent và khai báo `server.ca_file` trong config agent.
 3. Có thể đặt enrollment key qua `SIEM_ENROLLMENT_KEY_FILE` thay vì ghi trong config.
 
+**Danh tính agent**: token ngẫu nhiên riêng cho từng agent, manager chỉ lưu SHA-256, thu hồi được từng agent.
+Khóa enroll dùng chung bị lộ (đọc được từ bất kỳ endpoint nào) cũng không đủ để giả mạo agent đang có: manager trả 409
+và alert AGENT-001 chỉ ra máy đã thử. Mọi thao tác enroll / thu hồi / cho enroll lại đều ghi thành event `agent_audit`.
+
 **Giới hạn còn lại**:
+- Khóa enroll vẫn dùng chung: ai có khóa vẫn đăng ký được agent MỚI (gửi event rác dưới một agent_id mới) —
+  theo dõi tab Agents / event `agent_enrolled`.
+- Agent chưa có alert khi ngừng gửi dữ liệu (chỉ hiện `offline` trên console).
 - Kafka chạy plaintext trong mạng docker nội bộ.
 - Console dùng một API key chung, còn tên analyst là do người dùng tự khai (chưa có đăng nhập theo từng người).
 - Đổi `elastic_password` sau lần chạy đầu phải đổi qua API của ES, hoặc xóa volume `esdata`.

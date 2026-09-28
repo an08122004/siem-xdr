@@ -533,6 +533,49 @@ def parse_process(data: Doc, doc: Doc) -> None:
     put(doc, "user.id", data.get("uid"))
 
 
+_FIM_TYPE = {"added": ("creation", "file_created"), "modified": ("change", "file_modified"),
+             "deleted": ("deletion", "file_deleted")}
+
+
+def parse_fim(data: Doc, doc: Doc) -> None:
+    """Giám sát toàn vẹn file của agent: file được thêm / sửa / xóa kèm hash trước và sau."""
+    path = str(data.get("path") or "")
+    etype, action = _FIM_TYPE.get(str(data.get("action")), ("change", "file_modified"))
+    put(doc, "event.module", "fim")
+    put(doc, "event.category", "file")
+    put(doc, "event.type", etype)
+    put(doc, "event.action", action)
+    put(doc, "file.path", path)
+    name = _basename(path)
+    put(doc, "file.name", name)
+    if name and "." in name:
+        put(doc, "file.extension", name.rsplit(".", 1)[1].lower())
+    put(doc, "file.directory", path[: len(path) - len(name or "")].rstrip("/\\") or None)
+    put(doc, "file.size", _int(data.get("size")))
+    put(doc, "file.mode", data.get("mode"))
+    put(doc, "file.mtime", data.get("mtime"))
+    put(doc, "file.hash.sha256", data.get("sha256"))
+    put(doc, "file.target_path", data.get("link_target"))
+    put(doc, "fim.changes", data.get("changes"))
+    put(doc, "fim.old.sha256", data.get("old_sha256"))
+    put(doc, "fim.old.size", _int(data.get("old_size")))
+    put(doc, "fim.old.mode", data.get("old_mode"))
+    put(doc, "message", data.get("message"))
+
+
+def parse_agent_audit(data: Doc, doc: Doc) -> None:
+    """Sự kiện quản trị agent do chính manager phát ra (enroll, thu hồi, enroll trùng...)."""
+    put(doc, "event.module", "siem-manager")
+    put(doc, "event.category", "iam")
+    put(doc, "event.type", "change")
+    put(doc, "event.action", data.get("action"))
+    put(doc, "event.outcome", data.get("outcome"))
+    put(doc, "source.ip", _clean_ip(data.get("ip")))
+    put(doc, "user.name", data.get("analyst"))
+    put(doc, "siem.target_agent", data.get("target_agent"))
+    put(doc, "message", f"{data.get('action')} {data.get('target_agent')}: {data.get('detail') or ''}".strip())
+
+
 def parse_mock(data: Doc, doc: Doc) -> None:
     put(doc, "event.module", "mock")
     _auth(doc, "logon", "success" if data.get("success") else "failure",
@@ -578,6 +621,10 @@ def normalize(raw: Doc) -> Doc:
             parse_windows(data, doc)
         elif etype == "process_creation":
             parse_process(data, doc)
+        elif etype == "agent_audit" and source == "manager":
+            parse_agent_audit(data, doc)
+        elif etype == "fim":
+            parse_fim(data, doc)
         elif source == "mock":
             parse_mock(data, doc)
         else:

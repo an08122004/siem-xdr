@@ -149,7 +149,7 @@ def bulk_index(es: Elasticsearch, actions: Iterable[dict[str, Any]]) -> int:
 # Agents
 # --------------------------------------------------------------------------
 
-def upsert_agent(es: Elasticsearch, info: dict[str, Any], ip: str | None) -> None:
+def upsert_agent(es: Elasticsearch, info: dict[str, Any], ip: str | None, extra: dict[str, Any] | None = None) -> None:
     doc = {
         "agent_id": info.get("agent_id"),
         "hostname": info.get("hostname"),
@@ -157,8 +157,34 @@ def upsert_agent(es: Elasticsearch, info: dict[str, Any], ip: str | None) -> Non
         "version": info.get("version"),
         "ip": ip,
         "last_seen": now_iso(),
-    }
-    es.update(index=settings.IDX_AGENTS, id=doc["agent_id"], doc=doc, doc_as_upsert=True)
+    } | (extra or {})
+    es.update(index=settings.IDX_AGENTS, id=doc["agent_id"], doc=doc, doc_as_upsert=True,
+              refresh="wait_for" if extra else None)
+
+
+def get_agent(es: Elasticsearch, agent_id: str) -> dict[str, Any] | None:
+    try:
+        return es.get(index=settings.IDX_AGENTS, id=agent_id)["_source"]
+    except Exception:  # noqa: BLE001 - chưa có agent / index chưa tồn tại
+        return None
+
+
+def update_agent(es: Elasticsearch, agent_id: str, fields: dict[str, Any]) -> None:
+    es.update(index=settings.IDX_AGENTS, id=agent_id, doc=fields, refresh="wait_for", retry_on_conflict=3)
+
+
+# Trường bí mật của agent: không bao giờ trả ra API/console.
+_AGENT_SECRETS = ("token_hash", "prev_token_hash")
+
+
+def enrollment_state(a: dict[str, Any]) -> str:
+    if a.get("revoked"):
+        return "revoked"
+    if a.get("reenroll_allowed"):
+        return "reenroll_allowed"
+    if not a.get("token_hash"):
+        return "legacy_token"     # agent cũ còn token HMAC, sẽ tự đổi sang token ngẫu nhiên khi kết nối
+    return "ok"
 
 
 def list_agents(es: Elasticsearch) -> list[dict[str, Any]]:
@@ -172,6 +198,9 @@ def list_agents(es: Elasticsearch) -> list[dict[str, Any]]:
         a = h["_source"]
         seen = datetime.fromisoformat(a["last_seen"]).timestamp() if a.get("last_seen") else 0
         a["status"] = "online" if now - seen < settings.AGENT_OFFLINE_SECONDS else "offline"
+        a["enrollment"] = enrollment_state(a)
+        for k in _AGENT_SECRETS:
+            a.pop(k, None)
         agents.append(a)
     return agents
 
@@ -226,7 +255,8 @@ def claim_pending_actions(es: Elasticsearch, agent_id: str) -> list[dict[str, An
         except Exception:  # noqa: BLE001 - đã bị request khác nhận
             continue
         src = h["_source"]
-        claimed.append({k: src.get(k) for k in ("id", "agent_id", "type", "params", "alert_id", "created_at")})
+        # expires_at: agent tự gỡ chặn đúng hạn kể cả khi mất kết nối tới manager lúc hết hạn
+        claimed.append({k: src.get(k) for k in ("id", "agent_id", "type", "params", "alert_id", "created_at", "expires_at")})
     return claimed
 
 

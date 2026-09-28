@@ -1,0 +1,28 @@
+# Luật về chính hệ thống giám sát: enroll / thu hồi agent (event do manager phát ra)
+- id: AGENT-001
+  title: Enroll trùng agent_id đang có (nghi giả mạo agent)
+  description: >-
+    Có máy dùng khóa enroll chung để xin token cho một agent_id đã tồn tại mà không chứng minh được
+    danh tính. Nếu thành công, kẻ tấn công có thể gửi event giả và lấy trước lệnh phản ứng của máy đó.
+    Kiểm tra máy ở source.ip: khóa enroll trên máy đó coi như đã lộ.
+  severity: high
+  mitre: {tactic: Defense Evasion, technique: [T1562]}
+  tags: [agent, impersonation]
+  type: match
+  condition:
+    all:
+      - {field: event.module, op: eq, value: siem-manager}
+      - {field: event.action, op: eq, value: agent_enroll_conflict}
+
+- id: AGENT-002
+  title: Dò khóa enroll agent
+  description: ">= 5 lần enroll sai khóa từ cùng 1 IP trong 10 phút"
+  severity: medium
+  mitre: {tactic: Credential Access, technique: [T1110]}
+  tags: [agent, bruteforce]
+  type: threshold
+  condition:
+    all:
+      - {field: event.module, op: eq, value: siem-manager}
+      - {field: event.action, op: eq, value: agent_enroll_bad_key}
+  threshold: {count: 5, window: 600, group_by: [source.ip]}

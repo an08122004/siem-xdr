@@ -36,6 +36,32 @@ func TestLoadQuotedValuesWithComments(t *testing.T) {
 	}
 }
 
+// Các file cấu hình mẫu đi kèm repo phải nạp được và có giá trị đúng.
+func TestShippedSampleConfigs(t *testing.T) {
+	t.Setenv("SIEM_ENROLLMENT_KEY", "k") // demo-web lấy khóa từ biến môi trường
+	lin, err := Load(filepath.Join("..", "config.linux.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lin.Queue.MaxMB != 512 || lin.Collectors.ProcessMode != "auto" || len(lin.FIM.Paths) < 5 || lin.FIM.Exclude[0] != "*.swp" {
+		t.Errorf("config.linux.yaml: %+v %+v", lin.Queue, lin.FIM)
+	}
+	win, err := Load(filepath.Join("..", "config.windows.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if win.FIM.Paths[0] != `C:\Windows\System32\drivers\etc` || win.Queue.Dir != `C:\ProgramData\siem-agent` {
+		t.Errorf("config.windows.yaml: %v %q", win.FIM.Paths, win.Queue.Dir)
+	}
+	demo, err := Load(filepath.Join("..", "..", "demo", "web", "agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if demo.Collectors.ProcessMode != "poll" || demo.FIM.IntervalSeconds != 30 {
+		t.Errorf("demo agent.yaml: %+v %+v", demo.Collectors, demo.FIM)
+	}
+}
+
 func TestEnrollmentKeyFromFile(t *testing.T) {
 	dir := t.TempDir()
 	keyFile := filepath.Join(dir, "key")

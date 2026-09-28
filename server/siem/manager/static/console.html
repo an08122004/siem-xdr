@@ -114,6 +114,21 @@ async function act(agent_id, type, params, alert_id) {
   try { await api('/api/v1/actions', { method: 'POST', body: JSON.stringify({ agent_id, type, params, alert_id }) }); toast(`Đã gửi lệnh ${type} tới ${agent_id}`); refresh(); }
   catch (e) { toast('Lỗi: ' + e.message); }
 }
+const ENROLL = { ok: 'token riêng', legacy_token: 'token cũ (sẽ tự đổi)', revoked: 'ĐÃ THU HỒI', reenroll_allowed: 'chờ enroll lại' };
+async function agentCred(agent_id, what) {
+  if (!WHO) { toast('Nhập tên analyst ở thanh trên rồi bấm Lưu trước'); return; }
+  const body = { analyst: WHO, reason: '' };
+  if (what === 'revoke') {
+    body.reason = prompt(`Thu hồi token của ${agent_id}? Agent sẽ bị từ chối ngay và không tự enroll lại được.\nLý do:`) || '';
+    if (!body.reason.trim()) return;
+  } else {
+    const ip = prompt(`Cho ${agent_id} enroll lại trong 60 phút.\nNên nhập IP của máy thật để kẻ khác không chen vào trước (để trống = mọi IP):`);
+    if (ip === null) return;
+    body.ip = ip.trim() || null;
+  }
+  try { await api(`/api/v1/agents/${encodeURIComponent(agent_id)}/${what}`, { method: 'POST', body: JSON.stringify(body) }); toast('Đã cập nhật ' + agent_id); refresh(); }
+  catch (e) { toast('Lỗi: ' + e.message); }
+}
 async function setStatus(id, status) {
   try { await api('/api/v1/alerts/' + id, { method: 'PATCH', body: JSON.stringify({ status }) }); refresh(); }
   catch (e) { toast('Lỗi: ' + e.message); }
@@ -202,16 +217,21 @@ const views = {
             btn('Ack', () => setStatus(a._id, 'acknowledged')), btn('Đóng', () => setStatus(a._id, 'closed')),
             btn('False +', () => setStatus(a._id, 'false_positive')),
             agent && ip ? btn('Chặn IP', () => act(agent, 'block_ip', { ip }, a._id), true) : null,
-            agent && (pid || pname) ? btn('Kill', () => act(agent, 'kill_process', pid ? { pid } : { name: pname }, a._id), true) : null,
+            agent && (pid || pname) ? btn('Kill', () => act(agent, 'kill_process', pid ? { pid, name: pname } : { name: pname }, a._id), true) : null,
             agent && !agent.startsWith('syslog-') ? btn('Cô lập', () => act(agent, 'isolate_host', {}, a._id), true) : null));
       }))];
   },
   async agents() {
     const rows = await api('/api/v1/agents');
-    return [head(['Agent ID', 'Hostname', 'OS', 'IP', 'Phiên bản', 'Last seen', 'Trạng thái', 'Phản ứng']),
+    return [head(['Agent ID', 'Hostname', 'OS', 'IP', 'Phiên bản', 'Last seen', 'Trạng thái', 'Danh tính', 'Phản ứng']),
       el('tbody', {}, rows.map(a => el('tr', {},
         el('td', { cls: 'mono' }, a.agent_id), el('td', {}, a.hostname), el('td', {}, a.os), el('td', { cls: 'mono' }, a.ip),
         el('td', {}, a.version), el('td', { cls: 'small' }, fmt(a.last_seen)), el('td', { cls: 'st ' + a.status }, a.status),
+        el('td', { cls: 'small' + (a.enrollment === 'revoked' ? ' bad' : '') }, ENROLL[a.enrollment] || a.enrollment || '',
+          a.enroll_ip ? el('div', { cls: 'mono' }, 'enroll từ ' + a.enroll_ip) : null,
+          a.enrollment === 'reenroll_allowed' ? el('div', {}, `tới ${fmt(a.reenroll_until)}${a.reenroll_ip ? ', chỉ IP ' + a.reenroll_ip : ''}`) : null,
+          el('div', {}, a.enrollment === 'revoked' ? null : btn('Thu hồi', () => agentCred(a.agent_id, 'revoke'), true),
+            btn('Cho enroll lại', () => agentCred(a.agent_id, 'allow-reenroll')))),
         el('td', {},
           btn('Chặn IP…', () => { const ip = prompt('IP cần chặn'); if (ip) act(a.agent_id, 'block_ip', { ip }); }),
           btn('Kill…', () => { const v = prompt('PID hoặc tên tiến trình'); if (v) act(a.agent_id, 'kill_process', /^\d+$/.test(v) ? { pid: +v } : { name: v }); }),

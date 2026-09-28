@@ -301,3 +301,75 @@ def test_soar_case_gets_playbook():
     case = next(iter(es.docs["siem-cases"].values()))
     assert case["playbook"]["id"] == "PB-01" and case["priority"] == "P1" and case["sla_due"]
     assert len(case["tasks"]) >= 8 and case["status"] == "open"
+
+
+def test_agent_audit_rules(engine, enricher):
+    def audit(action, ip, n=0, target="S001-Web-01"):
+        return raw("agent_audit", {"action": action, "outcome": "failure", "target_agent": target, "ip": ip,
+                                   "detail": "x"}, source="manager", agent="siem-manager", ts=T0 + timedelta(seconds=n))
+    doc = normalize(audit("agent_enroll_conflict", "10.0.0.66"))
+    assert get(doc, "event.module") == "siem-manager" and get(doc, "source.ip") == "10.0.0.66"
+    assert get(doc, "siem.target_agent") == "S001-Web-01" and get(doc, "event.category") == "iam"
+    assert run(engine, enricher, [audit("agent_enroll_conflict", "10.0.0.66")]) == ["AGENT-001"]
+    # sai khóa enroll: 5 lần mới báo; không lẫn sang rule brute-force đăng nhập (AUTH-*)
+    fired = run(engine, enricher, [audit("agent_enroll_bad_key", "10.0.0.77", n=i) for i in range(5)])
+    assert fired == ["AGENT-002"]
+    # event cùng tên nhưng không phải do manager phát ra thì không được parse như audit
+    fake = raw("agent_audit", {"action": "agent_enroll_conflict"}, source="file")
+    assert get(normalize(fake), "event.module") != "siem-manager"
+
+
+def test_agent_alert_opens_pb08_case_without_response():
+    from siem.soar.cases import CasePlaybooks
+    from siem.soar.engine import Notifier, Soar, load_playbooks
+    es = FakeES()
+    soar = Soar(es, load_playbooks(ROOT / "config" / "playbooks.yml"), whitelist=[], notifier=Notifier(),
+                case_playbooks=CasePlaybooks(ROOT / "config" / "case_playbooks.yml"))
+    alert = {"alert": {"id": "a4", "source": "rule"}, "rule": {"id": "AGENT-001", "name": "x"}, "severity": "high",
+             "severity_score": 3, "source": {"ip": "10.0.0.66"}, "agent": {"id": "siem-manager"}, "count": 1, "message": "x"}
+    results = soar.handle(alert)
+    assert [r["action"] for r in results] == ["notify", "create_case"]
+    case = next(iter(es.docs["siem-cases"].values()))
+    assert case["playbook"]["id"] == "PB-08"
+
+
+def fim(action, path, **extra):
+    return raw("fim", {"action": action, "path": path, "sha256": "b" * 64, "old_sha256": "a" * 64,
+                       "message": f"FIM: {action} {path}", **extra}, source="fim")
+
+
+def test_fim_normalize():
+    doc = normalize(fim("added", "/var/www/html/uploads/shell.php", size=31))
+    assert get(doc, "event.module") == "fim" and get(doc, "event.action") == "file_created"
+    assert get(doc, "file.name") == "shell.php" and get(doc, "file.extension") == "php"
+    assert get(doc, "file.directory") == "/var/www/html/uploads" and get(doc, "file.hash.sha256") == "b" * 64
+    assert get(doc, "fim.old.sha256") == "a" * 64 and get(doc, "file.size") == 31
+
+
+@pytest.mark.parametrize("event, rule", [
+    (fim("modified", "/etc/passwd"), "FIM-001"),
+    (fim("added", "/root/.ssh/authorized_keys"), "FIM-001"),
+    (fim("modified", "/etc/cron.d/backdoor"), "FIM-001"),
+    (fim("modified", r"C:\Windows\System32\drivers\etc\hosts"), "FIM-001"),
+    (fim("added", r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp\evil.lnk"), "FIM-001"),
+    (fim("added", "/usr/local/apache2/htdocs/cmd.php"), "FIM-002"),
+    (fim("modified", r"C:\inetpub\wwwroot\up.aspx"), "FIM-002"),
+    (fim("modified", "/var/www/html/index.html"), "FIM-003"),
+    (fim("deleted", "/var/www/html/old.php"), "FIM-003"),     # xóa script web: không phải webshell mới
+    (fim("modified", "/etc/passwd.bak"), "FIM-003"),
+])
+def test_fim_rules_one_alert_per_event(engine, enricher, event, rule):
+    assert run(engine, enricher, [event]) == [rule]
+
+
+def test_fim_webshell_case_needs_approval_to_isolate():
+    from siem.soar.cases import CasePlaybooks
+    from siem.soar.engine import Notifier, Soar, load_playbooks
+    es = FakeES()
+    soar = Soar(es, load_playbooks(ROOT / "config" / "playbooks.yml"), whitelist=[], notifier=Notifier(),
+                case_playbooks=CasePlaybooks(ROOT / "config" / "case_playbooks.yml"))
+    alert = {"alert": {"id": "a5", "source": "rule"}, "rule": {"id": "FIM-002", "name": "x"}, "severity": "high",
+             "severity_score": 3, "agent": {"id": "S001-Web-01"}, "count": 1, "message": "x"}
+    results = {r["action"]: r["status"] for r in soar.handle(alert)}
+    assert results["isolate_host"] == "awaiting_approval" and "kill_process" not in results
+    assert next(iter(es.docs["siem-cases"].values()))["playbook"]["id"] == "PB-09"

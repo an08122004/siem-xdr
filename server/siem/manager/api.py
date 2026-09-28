@@ -1,7 +1,8 @@
 """Manager API — điểm tiếp nhận của agent và giao diện cho analyst.
 
 Agent:
-  POST /api/v1/agents/enroll          (header X-Enrollment-Key) -> token riêng của agent
+  POST /api/v1/agents/enroll          (header X-Enrollment-Key [+ Bearer token hiện tại]) -> token ngẫu nhiên
+                                      riêng của agent; agent_id đã tồn tại -> 409 trừ khi chứng minh được danh tính
   POST /api/v1/agents/heartbeat       (Bearer token)
   POST /api/v1/events                 (Bearer token) batch event -> Kafka siem.raw
   GET  /api/v1/agents/actions         (Bearer token) lấy lệnh phản ứng đang chờ
@@ -11,6 +12,8 @@ Analyst (header X-API-Key):
   GET  /api/v1/agents | /alerts | /actions | /cases | /stats
   PATCH /api/v1/alerts/{id}           đổi trạng thái alert (ack/closed/false_positive)
   POST /api/v1/actions                ra lệnh phản ứng thủ công (block IP, kill, isolate)
+  POST /api/v1/agents/{id}/revoke     thu hồi token của agent
+  POST /api/v1/agents/{id}/allow-reenroll  cho phép agent enroll lại (có hạn, có thể giới hạn IP)
   GET  /                              SOC console (HTML)
 
 Chạy: uvicorn siem.manager.api:app --host 0.0.0.0 --port 8000
@@ -20,7 +23,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import secrets
+import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -60,14 +66,49 @@ def es():
 # Xác thực
 # ---------------------------------------------------------------------------
 
-def agent_token(agent_id: str) -> str:
+def legacy_token(agent_id: str) -> str:
+    """Token kiểu cũ (HMAC theo agent_id). Không còn dùng để gọi API, chỉ để agent
+    cũ chứng minh danh tính một lần khi đổi sang token ngẫu nhiên."""
     return hmac.new(settings.SERVER_SECRET.encode(), agent_id.encode(), hashlib.sha256).hexdigest()
 
 
+def _hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _matches(token: str, digest: str | None) -> bool:
+    return bool(token and digest) and hmac.compare_digest(_hash(token), digest)
+
+
+def _bearer(authorization: str) -> str:
+    return authorization.removeprefix("Bearer ").strip()
+
+
+# Cache ngắn hạn thông tin xác thực agent để không phải hỏi ES ở mọi request.
+# Thu hồi / enroll trong manager này xóa cache ngay.
+_CRED_TTL = 10.0
+_cred_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
+
+
+def _agent_doc(agent_id: str) -> dict[str, Any] | None:
+    now = time.monotonic()
+    hit = _cred_cache.get(agent_id)
+    if hit and now - hit[0] < _CRED_TTL:
+        return hit[1]
+    doc = store.get_agent(es(), agent_id)
+    _cred_cache[agent_id] = (now, doc)
+    return doc
+
+
 def require_agent(x_agent_id: str = Header(...), authorization: str = Header("")) -> str:
-    token = authorization.removeprefix("Bearer ").strip()
-    if not token or not hmac.compare_digest(token, agent_token(x_agent_id)):
+    token = _bearer(authorization)
+    doc = _agent_doc(x_agent_id) if token else None
+    if not doc or doc.get("revoked") or not _matches(token, doc.get("token_hash")):
         raise HTTPException(401, "token agent không hợp lệ")
+    if not doc.get("token_confirmed"):
+        # Agent đã nhận và dùng được token mới -> token trước đó hết hiệu lực hẳn.
+        store.update_agent(es(), x_agent_id, {"token_confirmed": True, "prev_token_hash": None})
+        doc.update(token_confirmed=True, prev_token_hash=None)
     return x_agent_id
 
 
@@ -92,14 +133,85 @@ class ActionResult(BaseModel):
     output: str = ""
 
 
+def audit(action: str, outcome: str, target_agent: str, ip: str | None, detail: str, analyst: str | None = None) -> None:
+    """Ghi sự kiện quản trị agent vào pipeline như mọi event khác -> có rule phát hiện (AGENT-*)."""
+    evt = {"timestamp": store.now_iso(), "agent_id": "siem-manager", "source": "manager", "event_type": "agent_audit",
+           "data": {"action": action, "outcome": outcome, "target_agent": target_agent, "ip": ip,
+                    "detail": detail, "analyst": analyst}}
+    try:
+        bus.send(_state["producer"], settings.TOPIC_RAW, evt, key="siem-manager")
+        _state["producer"].poll(0)
+    except Exception:  # noqa: BLE001 - không để lỗi Kafka chặn thao tác quản trị
+        log.exception("không gửi được audit event %s", action)
+
+
+def _parse_iso(s: str | None) -> datetime | None:
+    try:
+        return datetime.fromisoformat(s) if s else None
+    except ValueError:
+        return None
+
+
+def enroll_reason(doc: dict[str, Any] | None, presented: str, ip: str | None, agent_id: str) -> str | None:
+    """Có cấp token mới cho agent_id này không. Trả về lý do nếu được, None nếu phải từ chối.
+
+    Khóa enroll dùng chung nằm trên mọi endpoint, nên nó KHÔNG đủ để nhận danh tính của một
+    agent đã tồn tại. Với agent đã có, người gọi phải chứng minh mình là agent đó."""
+    if doc is None:
+        return "new"
+    if doc.get("reenroll_allowed"):
+        until = _parse_iso(doc.get("reenroll_until"))
+        if until and datetime.now(timezone.utc) > until:
+            return None
+        if doc.get("reenroll_ip") and doc["reenroll_ip"] != ip:
+            return None
+        return "reset"
+    if doc.get("revoked"):
+        return None
+    if doc.get("token_hash"):
+        if _matches(presented, doc["token_hash"]):
+            return "rotate"
+        if not doc.get("token_confirmed"):
+            # Token vừa cấp chưa từng được dùng: có thể phản hồi enroll trước đó bị mất trên đường.
+            if _matches(presented, doc.get("prev_token_hash")):
+                return "retry"
+            if not presented and not doc.get("prev_token_hash") and ip and ip == doc.get("enroll_ip"):
+                return "retry"
+        return None
+    # Agent cũ chưa có token ngẫu nhiên: chứng minh danh tính bằng token HMAC cũ.
+    if presented and hmac.compare_digest(presented, legacy_token(agent_id)):
+        return "legacy"
+    return None
+
+
 @app.post("/api/v1/agents/enroll")
-def enroll(info: AgentInfo, request: Request, x_enrollment_key: str = Header("")) -> dict[str, str]:
+def enroll(info: AgentInfo, request: Request, x_enrollment_key: str = Header(""),
+           authorization: str = Header("")) -> dict[str, str]:
+    ip = request.client.host
     if not hmac.compare_digest(x_enrollment_key, settings.ENROLLMENT_KEY):
-        log.warning("enroll bị từ chối từ %s (agent_id=%s)", request.client.host, info.agent_id)
+        log.warning("enroll bị từ chối từ %s (agent_id=%s): sai enrollment key", ip, info.agent_id)
+        audit("agent_enroll_bad_key", "failure", info.agent_id, ip, "enrollment key sai")
         raise HTTPException(403, "enrollment key sai")
-    store.upsert_agent(es(), info.model_dump(), request.client.host)
-    log.info("agent %s (%s/%s) đã enroll từ %s", info.agent_id, info.hostname, info.os, request.client.host)
-    return {"token": agent_token(info.agent_id)}
+    presented = _bearer(authorization)
+    doc = store.get_agent(es(), info.agent_id)
+    reason = enroll_reason(doc, presented, ip, info.agent_id)
+    if reason is None:
+        log.warning("từ chối enroll agent_id=%s từ %s: agent_id đã được enroll", info.agent_id, ip)
+        audit("agent_enroll_conflict", "failure", info.agent_id, ip,
+              f"enroll trùng agent_id đang có (máy đăng ký trước: {(doc or {}).get('enroll_ip') or (doc or {}).get('ip')})")
+        raise HTTPException(409, "agent_id đã được enroll. Nếu đây đúng là máy đó (cài lại, mất token), "
+                                 "analyst cần bấm 'Cho enroll lại' trên console")
+    token = secrets.token_urlsafe(32)
+    keep_prev = reason in ("rotate", "legacy", "retry") and bool(presented)
+    store.upsert_agent(es(), info.model_dump(), ip, extra={
+        "token_hash": _hash(token), "token_confirmed": False,
+        "prev_token_hash": _hash(presented) if keep_prev else None,
+        "revoked": False, "reenroll_allowed": False, "reenroll_until": None, "reenroll_ip": None,
+        "enrolled_at": store.now_iso(), "enroll_ip": ip, "enroll_reason": reason})
+    _cred_cache.pop(info.agent_id, None)
+    log.info("agent %s (%s/%s) đã enroll từ %s (%s)", info.agent_id, info.hostname, info.os, ip, reason)
+    audit("agent_enrolled", "success", info.agent_id, ip, reason)
+    return {"token": token}
 
 
 @app.post("/api/v1/agents/heartbeat")
@@ -164,6 +276,48 @@ class AlertUpdate(BaseModel):
 @app.get("/api/v1/agents", dependencies=[Depends(require_analyst)])
 def agents() -> list[dict[str, Any]]:
     return store.list_agents(es())
+
+
+class AgentDecision(BaseModel):
+    analyst: str = Field(min_length=1, max_length=64)
+    reason: str = Field("", max_length=500)
+    ip: str | None = Field(None, max_length=64)   # chỉ cho enroll lại từ IP này (tùy chọn)
+    minutes: int = Field(60, ge=5, le=1440)       # cửa sổ cho phép enroll lại
+
+
+def _existing_agent(agent_id: str) -> dict[str, Any]:
+    doc = store.get_agent(es(), agent_id)
+    if doc is None:
+        raise HTTPException(404, "không có agent này")
+    return doc
+
+
+@app.post("/api/v1/agents/{agent_id}/revoke", dependencies=[Depends(require_analyst)])
+def revoke_agent(agent_id: str, body: AgentDecision) -> dict[str, Any]:
+    """Thu hồi token: agent bị từ chối ngay (tối đa sau thời gian cache), không tự enroll lại được."""
+    _existing_agent(agent_id)
+    store.update_agent(es(), agent_id, {
+        "revoked": True, "reenroll_allowed": False, "token_hash": None, "prev_token_hash": None,
+        "revoked_at": store.now_iso(), "revoked_by": body.analyst, "revoke_reason": body.reason})
+    _cred_cache.pop(agent_id, None)
+    audit("agent_revoked", "success", agent_id, None, body.reason, analyst=body.analyst)
+    log.info("agent %s bị thu hồi bởi %s", agent_id, body.analyst)
+    return {"ok": True, "enrollment": "revoked"}
+
+
+@app.post("/api/v1/agents/{agent_id}/allow-reenroll", dependencies=[Depends(require_analyst)])
+def allow_reenroll(agent_id: str, body: AgentDecision) -> dict[str, Any]:
+    """Cho phép enroll lại (máy cài lại / mất token). Token cũ hết hiệu lực ngay.
+    Nên giới hạn theo IP của máy thật để kẻ khác không chen vào trước."""
+    _existing_agent(agent_id)
+    until = (datetime.now(timezone.utc) + timedelta(minutes=body.minutes)).isoformat()
+    store.update_agent(es(), agent_id, {
+        "revoked": False, "reenroll_allowed": True, "reenroll_until": until, "reenroll_ip": body.ip or None,
+        "token_hash": None, "prev_token_hash": None,
+        "reenroll_allowed_by": body.analyst, "reenroll_allowed_at": store.now_iso()})
+    _cred_cache.pop(agent_id, None)
+    audit("agent_reenroll_allowed", "success", agent_id, body.ip, f"tới {until}. {body.reason}".strip(), analyst=body.analyst)
+    return {"ok": True, "enrollment": "reenroll_allowed", "until": until, "ip": body.ip}
 
 
 @app.get("/api/v1/alerts", dependencies=[Depends(require_analyst)])
