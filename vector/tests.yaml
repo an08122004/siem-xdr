@@ -1,0 +1,30 @@
+# Unit test cho phần chuyển đổi syslog -> event thô (chạy: vector test vector.yaml tests.yaml)
+tests:
+  - name: dòng syslog thành event thô đúng định dạng analyzer đọc
+    inputs:
+      - insert_at: to_siem_raw
+        type: log
+        log_fields:
+          message: "<38>Sep 28 10:00:00 web01 sshd[1]: Accepted publickey for root from 10.60.0.9 port 1 ssh2\r"
+          host: "192.168.1.1"
+    outputs:
+      - extract_from: to_siem_raw
+        conditions:
+          - type: vrl
+            source: |
+              assert_eq!(.agent_id, "syslog-192.168.1.1")
+              assert_eq!(.source, "syslog")
+              assert_eq!(.event_type, "syslog")
+              assert_eq!(.data.sender_ip, "192.168.1.1")
+              assert_eq!(.data.message, "<38>Sep 28 10:00:00 web01 sshd[1]: Accepted publickey for root from 10.60.0.9 port 1 ssh2")
+              assert!(match(string!(.timestamp), r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}\+00:00$'))
+              assert_eq!(keys(.), ["agent_id", "data", "event_type", "source", "timestamp"])
+
+  - name: dòng rỗng / chỉ có khoảng trắng bị bỏ
+    no_outputs_from: [to_siem_raw]
+    inputs:
+      - insert_at: to_siem_raw
+        type: log
+        log_fields:
+          message: "   \r"
+          host: "192.168.1.1"

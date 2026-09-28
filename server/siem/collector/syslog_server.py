@@ -1,4 +1,6 @@
-"""Syslog collector — thu log từ thiết bị KHÔNG cài được agent (firewall F001,
+"""[ĐÃ THAY THẾ bằng Vector — vector/vector.yaml. Giữ lại để đối chiếu khi đo tải, xem README.]
+
+Syslog collector — thu log từ thiết bị KHÔNG cài được agent (firewall F001,
 router, switch, Suricata sensor...) qua UDP/TCP 514, đẩy vào Kafka [siem.raw].
 
 Chạy: python -m siem.collector.syslog_server

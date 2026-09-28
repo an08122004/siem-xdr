@@ -174,15 +174,25 @@ services:
       - ./server/rules/exceptions:/app/rules/exceptions
       - ./datasets/processed:/datasets:ro
 
+  # Syslog collector: Vector (Rust) thay cho bản Python cũ (siem/collector/syslog_server.py, giữ lại để đối chiếu).
+  # Nhận UDP/TCP 514 -> hàng đợi trên đĩa (volume vectordata) -> Kafka siem.raw. Xem vector/vector.yaml.
+  # Trên máy Linux thật nên đặt ở HOST: sysctl -w net.core.rmem_max=33554432 (để buffer UDP 32 MB có hiệu lực).
   syslog:
-    <<: *app
-    command: ["python", "-m", "siem.collector.syslog_server"]
-    user: root   # bind cổng 514
-    environment:
-      KAFKA_BOOTSTRAP: kafka:9092
+    image: timberio/vector:0.58.0-alpine
+    restart: unless-stopped
+    command: ["--config", "/etc/vector/vector.yaml"]
     ports: ["514:514/udp", "514:514/tcp"]
+    volumes:
+      - ./vector/vector.yaml:/etc/vector/vector.yaml:ro
+      - vectordata:/var/lib/vector
     depends_on:
       kafka: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8686/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [soc]
 
   analyzer:
     <<: *app
@@ -278,6 +288,7 @@ networks:
 volumes:
   certs:
   kafkadata:
+  vectordata:
   esdata:
   grafanadata:
   mldata:

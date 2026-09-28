@@ -27,7 +27,7 @@ và danh mục tài sản `BTL/asset.txt`. Toàn bộ backend đóng gói bằng
 |---|---|---|
 | Agent đa nền tảng (Windows/Linux) | Go, không dependency ngoài | `agent/` |
 | Manager API + SOC console | FastAPI | `server/siem/manager/` |
-| Syslog collector (UDP/TCP 514) | asyncio | `server/siem/collector/` |
+| Syslog collector (UDP/TCP 514) | **Vector** 0.58 (Rust), hàng đợi trên đĩa | `vector/` (bản Python cũ `server/siem/collector/` chỉ giữ để đối chiếu) |
 | Message bus | Kafka 7.7 (Confluent) chế độ **KRaft**, không dùng ZooKeeper | `docker-compose.yml` |
 | Chuẩn hóa log (ECS rút gọn) + làm giàu | Python | `server/siem/pipeline/` |
 | Phân tích dựa trên luật | Rule engine YAML (match / threshold / sequence) | `server/siem/detection/rules.py`, `server/rules/` |
@@ -106,8 +106,54 @@ http://localhost:8081. Truy cập trang này sẽ sinh log thật đi qua toàn 
 Trang `/cgi-bin/ping.cgi` **cố ý có lỗ hổng command injection** để kiểm tra rule LNX-002 và lệnh kill/chặn IP.
 Chỉ chạy máy này trong lab cô lập.
 
-**Firewall F001**: cấu hình remote syslog trỏ về `<IP máy docker>:514`.
+**Firewall F001**: cấu hình remote syslog trỏ về `<IP máy docker>:514`, **ưu tiên TCP** nếu thiết bị hỗ trợ (xem bảng đánh giá bên dưới).
 Hệ thống parse được iptables/UFW, pfSense/OPNsense filterlog và Suricata eve (JSON qua syslog).
+
+### Đánh giá syslog collector (vì sao chuyển sang Vector)
+
+Syslog collector do **Vector** đảm nhận (`vector/vector.yaml`): nhận UDP/TCP 514, chuyển mỗi dòng thành đúng event thô
+mà analyzer đọc (`{"timestamp","agent_id":"syslog-<ip>","source":"syslog","event_type":"syslog","data":{"message","sender_ip"}}`),
+đưa qua **hàng đợi trên đĩa** (volume `vectordata`, 1 GiB, đầy thì chặn chứ không vứt log) rồi ghi vào Kafka `siem.raw`.
+Unit test phần chuyển đổi: `docker run --rm -v ./vector:/etc/vector:ro timberio/vector:0.58.0-alpine test /etc/vector/vector.yaml /etc/vector/tests.yaml`.
+Metrics (log nhận / gửi / bị loại) ở `http://syslog:9598/metrics`, chỉ truy cập được trong mạng docker.
+
+Cách đo (28/9/2026): `tools/bench_syslog.py` bắn log bình thường (không kích hoạt rule), mỗi collector ghi vào topic Kafka riêng,
+đếm số message thật sự vào Kafka qua offset. Số gói kernel bỏ lấy từ `RcvbufErrors` trong `/proc/net/snmp` của collector.
+
+**A. Năng lực thuần của collector** (gửi trong cùng network namespace, không qua lớp mạng nào):
+
+| Tải | Python (asyncio, cũ) | Vector |
+|---|---|---|
+| UDP 20.000 msg/s | 50,5% vào Kafka (kernel bỏ 99.092 gói) | **100%** |
+| UDP 50.000 msg/s | 54,1% | **100%** |
+| UDP đột biến (~96–325 nghìn msg/s) | 17,2% | **100%**, đưa vào Kafka ~60 nghìn msg/s |
+| TCP đột biến | 100% | 100% |
+
+Bản Python chỉ xử lý được ~10–20 nghìn msg/s qua UDP. Phần vượt quá bị kernel bỏ khi buffer nhận đầy, **không có log hay chỉ số nào báo**.
+Số gói kernel bỏ cộng số log vào Kafka đúng bằng số đã gửi, nên toàn bộ chỗ hụt nằm ở khâu đọc UDP của collector.
+
+**B. Gửi từ máy host qua cổng publish (Docker Desktop trên Windows)**:
+
+| Tải | Python | Vector |
+|---|---|---|
+| UDP 5.000 msg/s | 99,9% | 100% |
+| UDP 20.000 msg/s | 100% | 85,2% |
+| UDP đột biến | 26,5% | 31,9% |
+| TCP đột biến | 100% | 100% |
+
+Ở đường này **cả hai mất gần như nhau và kernel phía collector không bỏ gói nào**: UDP bị mất ở lớp chuyển tiếp cổng của Docker Desktop
+(từ Windows vào máy ảo), trước khi tới collector. Khi triển khai thật nên chạy trên máy Linux và đặt ở host
+`sysctl -w net.core.rmem_max=33554432` (tham số này toàn cục, không đặt riêng cho container được; không đặt thì buffer 32 MB của Vector bị giới hạn),
+và cho thiết bị gửi syslog qua **TCP** (không mất log nhờ đẩy ngược áp lực).
+
+**C. Độ bền**: tắt Kafka, bắn 50.000 log vào mỗi collector, khởi động lại collector trong lúc Kafka vẫn chết, rồi bật Kafka:
+
+| | Python | Vector |
+|---|---|---|
+| Log còn lại sau khi Kafka hồi phục | **0/50.000** (log chỉ nằm trong RAM) | **50.000/50.000** (hàng đợi trên đĩa) |
+
+Ghi chú cấu hình: `topic` trong `vector.yaml` phải ghi thẳng `siem.raw`. Thử `${TOPIC_RAW}` thì broker trả lỗi `InvalidTopic`
+(Vector 0.58 không thay biến môi trường vào trường này).
 
 ## 3. Phát hiện
 
