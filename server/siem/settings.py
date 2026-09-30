@@ -41,6 +41,9 @@ CONSOLE_ADMIN_PASSWORD = _secret("CONSOLE_ADMIN_PASSWORD")   # chỉ dùng tạo
 CONSOLE_IDLE_MINUTES = int(os.getenv("CONSOLE_IDLE_MINUTES", "30"))      # không thao tác quá N phút -> đăng nhập lại
 CONSOLE_SESSION_HOURS = int(os.getenv("CONSOLE_SESSION_HOURS", "8"))     # phiên dài tối đa N giờ
 CONSOLE_MAX_FAILURES = int(os.getenv("CONSOLE_MAX_FAILURES", "5"))       # sai N lần / 15 phút -> khóa 15 phút
+# Grafana đứng sau manager (https://<manager>/grafana/), dùng chung tài khoản + phiên console (manager/grafana_proxy.py).
+# Tên "grafana-internal" chỉ phân giải trong mạng riêng manager <-> grafana (Grafana chỉ tin header từ mạng đó).
+GRAFANA_URL = os.getenv("GRAFANA_URL", "http://grafana-internal:3000")
 
 # Wazuh: agent kết nối tới wazuh-manager; SOAR ra lệnh phản ứng qua Wazuh API (user quyền tối thiểu)
 WAZUH_API_URL = os.getenv("WAZUH_API_URL", "https://wazuh-manager:55000")

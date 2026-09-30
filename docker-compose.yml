@@ -132,24 +132,52 @@ services:
       retries: 30
     networks: [soc]
 
+  # Grafana KHÔNG mở cổng ra ngoài: chỉ vào qua manager https://localhost:8000/grafana/, dùng chung tài khoản + phiên
+  # với SOC console (server/siem/manager/grafana_proxy.py). Chế độ auth proxy: form đăng nhập, basic auth và phiên
+  # riêng của Grafana đều tắt; danh tính lấy từ header X-WEBAUTH-USER/ROLE, chỉ tin khi đến từ IP của manager trên
+  # mạng riêng grafana-auth. Grafana chỉ lắng nghe trên mạng đó (mạng soc chỉ dùng để truy vấn Elasticsearch),
+  # nên container khác trong lab (vd. máy web demo bị chiếm) không gọi thẳng được Grafana.
   grafana:
     image: grafana/grafana:11.3.0
     restart: unless-stopped
     depends_on:
       es-setup: {condition: service_completed_successfully}
-    ports: ["3000:3000"]
     environment:
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/siem-overview.json
+      GF_SERVER_HTTP_ADDR: 10.250.30.11
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-https://localhost:8000/grafana/}
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_AUTH_PROXY_ENABLED: "true"
+      GF_AUTH_PROXY_HEADER_NAME: X-WEBAUTH-USER
+      GF_AUTH_PROXY_HEADER_PROPERTY: username
+      GF_AUTH_PROXY_HEADERS: "Name:X-WEBAUTH-NAME Role:X-WEBAUTH-ROLE"
+      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
+      GF_AUTH_PROXY_SYNC_TTL: "1"                     # đổi vai trò trong console -> Grafana cập nhật sau <= 1 phút
+      GF_AUTH_PROXY_WHITELIST: 10.250.30.10           # chỉ manager
+      GF_AUTH_PROXY_ENABLE_LOGIN_TOKEN: "false"       # không tạo phiên Grafana riêng: mỗi request đều qua phiên console
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_AUTH_SIGNOUT_REDIRECT_URL: /logout           # Sign out trong Grafana -> đăng xuất phiên console
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_COOKIE_SAMESITE: strict
+      GF_LIVE_MAX_CONNECTIONS: "0"                    # proxy không chuyển WebSocket; dashboard tự làm mới theo chu kỳ
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
     secrets: [grafana_admin_password, grafana_es_password]
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafanadata:/var/lib/grafana
       - *ca-mount
-    networks: [soc]
+    networks:
+      soc: {}
+      grafana-auth:
+        ipv4_address: 10.250.30.11
+        aliases: [grafana-internal]
 
   # ---------------------------------------------------------------- SIEM/XDR
   # SOC console + API cho analyst (alert, case, lệnh phản ứng thủ công, duyệt đề xuất AI). Không còn nhận agent:
@@ -159,6 +187,10 @@ services:
     command: ["uvicorn", "siem.manager.api:app", "--host", "0.0.0.0", "--port", "8000",
               "--ssl-keyfile", "/certs/manager/manager.key", "--ssl-certfile", "/certs/manager/manager.crt"]
     ports: ["8000:8000"]
+    networks:
+      soc: {}
+      grafana-auth:
+        ipv4_address: 10.250.30.10                    # = GF_AUTH_PROXY_WHITELIST của grafana
     environment:
       <<: *app-env
       ES_USER: siem_manager
@@ -349,6 +381,12 @@ secrets:
 networks:
   soc:
     name: soc-lab
+  # chỉ manager <-> grafana; không ra Internet
+  grafana-auth:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.250.30.0/28
 
 volumes:
   certs:

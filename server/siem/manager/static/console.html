@@ -52,12 +52,6 @@
   .aibar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:10px 12px; border-bottom:1px solid var(--line); }
   .aibar select { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px; }
   .chk { font-size:12px; padding:1px 0; }
-  #overlay { position:fixed; inset:0; background:rgba(8,11,15,.92); display:none; align-items:center; justify-content:center; z-index:10; }
-  #overlay form { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:22px 24px; width:340px; display:flex; flex-direction:column; gap:10px; }
-  #overlay h2 { margin:0 0 4px; font-size:17px; }
-  #overlay input { background:var(--bg); border:1px solid var(--line); color:var(--fg); padding:8px 10px; border-radius:6px; font:inherit; }
-  #overlay button[type=submit] { background:#2f6f53; border:1px solid #3fb27f; color:#fff; padding:8px; border-radius:6px; cursor:pointer; font:inherit; }
-  #overlay .msg { min-height:18px; font-size:12px; color:var(--critical); }
   #me { font-size:13px; }
   #me b { color:var(--fg); } #me .role { color:var(--mute); }
 </style>
@@ -70,7 +64,7 @@
   <span id="me"></span>
   <button class="btn" id="pwbtn">Đổi mật khẩu</button>
   <button class="btn" id="logout">Đăng xuất</button>
-  <a class="small" href="http://localhost:3000" target="_blank" style="color:var(--mute)">Grafana ↗</a>
+  <a class="small" href="/grafana/" target="_blank" style="color:var(--mute)">Grafana ↗</a>
 </header>
 <main>
   <div class="tiles" id="tiles"></div>
@@ -84,26 +78,6 @@
   </nav>
   <div class="wrap"><table id="tbl"></table></div>
 </main>
-<div id="overlay">
-  <form id="loginForm">
-    <h2>Đăng nhập SOC console</h2>
-    <input id="lu" autocomplete="username" placeholder="Tên đăng nhập" required>
-    <input id="lp" type="password" autocomplete="current-password" placeholder="Mật khẩu" required>
-    <button type="submit">Đăng nhập</button>
-    <div class="msg" id="loginMsg"></div>
-  </form>
-  <form id="pwForm" style="display:none">
-    <h2>Đổi mật khẩu</h2>
-    <div class="small" id="pwNote"></div>
-    <input id="pu" autocomplete="username" hidden>
-    <input id="pc" type="password" autocomplete="current-password" placeholder="Mật khẩu hiện tại" required>
-    <input id="pn" type="password" autocomplete="new-password" placeholder="Mật khẩu mới (tối thiểu 12 ký tự)" required>
-    <input id="pn2" type="password" autocomplete="new-password" placeholder="Nhập lại mật khẩu mới" required>
-    <button type="submit">Đổi mật khẩu</button>
-    <button type="button" class="btn" id="pwCancel">Hủy</button>
-    <div class="msg" id="pwMsg"></div>
-  </form>
-</div>
 <div id="toast"></div>
 <script>
 const $ = s => document.querySelector(s);
@@ -121,52 +95,31 @@ async function api(path, opt = {}, auto = false) {
   const headers = { 'Content-Type': 'application/json', 'X-Requested-With': 'siem-console' };
   if ((auto || AUTO) && !opt.method) headers['X-Auto-Refresh'] = '1';
   const r = await fetch(path, { ...opt, headers, credentials: 'same-origin' });
-  if (r.status === 401 && !path.startsWith('/api/v1/auth/login')) { showLogin('Phiên đã hết hạn, hãy đăng nhập lại.'); throw new Error('chưa đăng nhập'); }
+  if (r.status === 401) { toLogin('expired'); throw new Error('chưa đăng nhập'); }
   const text = await r.text();
   let data = null; try { data = text ? JSON.parse(text) : null; } catch (e) {}
   if (!r.ok) {
     const msg = (data && data.detail) ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)) : text;
-    if (r.status === 403 && /đổi mật khẩu/.test(msg)) showPassword(true);
+    if (r.status === 403 && /đổi mật khẩu/.test(msg)) toLogin('', true);
     throw new Error(msg || String(r.status));
   }
   return data;
 }
 
-function showLogin(msg = '') {
-  ME = null; $('#me').textContent = '';
-  $('#overlay').style.display = 'flex'; $('#pwForm').style.display = 'none'; $('#loginForm').style.display = 'flex';
-  $('#loginMsg').textContent = msg; $('#lp').value = ''; $('#lu').focus();
-}
-function showPassword(forced) {
-  $('#overlay').style.display = 'flex'; $('#loginForm').style.display = 'none'; $('#pwForm').style.display = 'flex';
-  $('#pwNote').textContent = forced ? 'Tài khoản đang dùng mật khẩu tạm — phải đổi trước khi dùng console.' : '';
-  $('#pwCancel').style.display = forced ? 'none' : ''; $('#pwMsg').textContent = '';
-  ['#pc', '#pn', '#pn2'].forEach(s => $(s).value = ''); $('#pu').value = ME ? ME.username : ''; $('#pc').focus();
-}
-function hideOverlay() { $('#overlay').style.display = 'none'; }
+// Đăng nhập / đổi mật khẩu nằm ở trang /login dùng chung với Grafana; console chỉ chuyển hướng sang đó.
+const toLogin = (reason, change) => location.replace('/login?' + (change ? 'change=1&' : '') +
+  (reason ? 'reason=' + reason + '&' : '') + 'next=' + encodeURIComponent(location.pathname + location.search));
 function showMe() {
   $('#me').replaceChildren(el('b', {}, ME.username), el('span', { cls: 'role' }, ` · ${ME.role} · hết phiên sau ${ME.idle_minutes} phút không thao tác`));
   $('#usersTab').style.display = can('admin') ? '' : 'none';
 }
 async function start(me) {
-  ME = me; showMe();
-  if (ME.must_change) { showPassword(true); return; }
-  hideOverlay(); refresh();
+  ME = me;
+  if (ME.must_change) { toLogin('', true); return; }
+  showMe(); refresh();
 }
-$('#loginForm').onsubmit = async e => {
-  e.preventDefault();
-  try { await start(await api('/api/v1/auth/login', { method: 'POST', body: JSON.stringify({ username: $('#lu').value.trim(), password: $('#lp').value }) })); }
-  catch (err) { $('#loginMsg').textContent = err.message; $('#lp').value = ''; }
-};
-$('#pwForm').onsubmit = async e => {
-  e.preventDefault();
-  if ($('#pn').value !== $('#pn2').value) { $('#pwMsg').textContent = 'Hai lần nhập mật khẩu mới không khớp'; return; }
-  try { await start(await api('/api/v1/auth/password', { method: 'POST', body: JSON.stringify({ current: $('#pc').value, new: $('#pn').value }) })); toast('Đã đổi mật khẩu'); }
-  catch (err) { $('#pwMsg').textContent = err.message; }
-};
-$('#pwCancel').onclick = hideOverlay;
-$('#pwbtn').onclick = () => showPassword(false);
-$('#logout').onclick = async () => { try { await api('/api/v1/auth/logout', { method: 'POST' }); } catch (e) {} showLogin('Đã đăng xuất.'); };
+$('#pwbtn').onclick = () => location.assign('/login?change=1&next=' + encodeURIComponent(location.pathname + location.search));
+$('#logout').onclick = async () => { try { await api('/api/v1/auth/logout', { method: 'POST' }); } catch (e) {} location.replace('/login?reason=logged_out'); };
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 4000); }
 // Dựng DOM an toàn bằng textContent — log chứa payload tấn công (XSS) nên KHÔNG dùng innerHTML với dữ liệu.
 function el(tag, props = {}, ...kids) {
@@ -397,7 +350,7 @@ async function refresh(auto = false) {
   finally { AUTO = false; }
 }
 (async () => {
-  try { await start(await api('/api/v1/auth/me')); } catch (e) { if (!ME) showLogin(''); }
+  try { await start(await api('/api/v1/auth/me')); } catch (e) { if (!ME) toLogin(''); }
 })();
 setInterval(() => { if (ME && !document.querySelector('details[open]')) refresh(true); }, 5000);
 </script>

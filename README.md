@@ -142,15 +142,17 @@ docker compose ps              # es-setup phải Exited (0); kafka, elasticsearc
 Hệ thống đã chạy từ trước thì chạy lại `python tools/init_secrets.py` (sinh thêm `wazuh_api_password`, `console_admin_password`),
 rồi `docker compose up -d --force-recreate es-certs es-setup` để sinh chứng chỉ Wazuh API và cập nhật quyền RBAC.
 
-**Đăng nhập console lần đầu**: tài khoản `admin`, mật khẩu tạm trong `secrets/console_admin_password`. Console bắt đổi
-mật khẩu ngay, sau đó vào tab *Tài khoản* để tạo tài khoản riêng cho từng người (xem mục 7).
+**Đăng nhập lần đầu**: mở https://localhost:8000, tài khoản `admin`, mật khẩu tạm trong `secrets/console_admin_password`.
+Trang đăng nhập bắt đặt mật khẩu mới ngay, sau đó vào tab *Tài khoản* để tạo tài khoản riêng cho từng người (xem mục 7).
+**Một tài khoản dùng cho cả console và Grafana**: Grafana nằm sau manager ở https://localhost:8000/grafana/ và dùng chung
+phiên đăng nhập (mở Grafana khi đã đăng nhập console thì vào thẳng, không hỏi lại mật khẩu).
 Phần AI (`--profile ai`, xem mục 5) và máy web demo (`--profile demo`, xem bên dưới) nằm trong profile riêng, không chạy mặc định.
 
 | URL | Dùng để | Đăng nhập |
 |---|---|---|
 | https://localhost:8000 | SOC console: alert, agent, lệnh phản ứng, case, đề xuất AI, tài khoản | tài khoản riêng từng người (lần đầu: `admin` / `secrets/console_admin_password`) |
+| https://localhost:8000/grafana/ | Grafana, dashboard *SIEM/XDR — Tổng quan SOC*: tổng quan, phát hiện, telemetry, **phiên đăng nhập**, phản ứng | **cùng tài khoản và phiên với console** |
 | https://localhost:8000/docs | Swagger của Manager API | |
-| http://localhost:3000 | Grafana, dashboard *SIEM/XDR — Tổng quan SOC*: tổng quan, phát hiện, telemetry, **phiên đăng nhập**, phản ứng | `admin` / `secrets/grafana_admin_password` |
 | http://127.0.0.1:8088 | Kafka UI (chỉ từ máy chạy docker) | |
 | https://127.0.0.1:9200 | Elasticsearch (chỉ từ máy chạy docker) | `analyst` / `secrets/analyst_es_password` (chỉ đọc) |
 | UDP/TCP 514 | Syslog từ firewall F001 / Suricata | |
@@ -428,13 +430,14 @@ Các biến cấu hình `AI_*` nằm trong `.env.example`.
 
 ```bash
 cd server && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt pytest httpx
-.venv/Scripts/python -m pytest -q      # 77 test: parser, rule, ML, SOAR, case playbook, API + đăng nhập console, AI, Wazuh
+.venv/Scripts/python -m pytest -q      # 82 test: parser, rule, ML, SOAR, case playbook, API + đăng nhập, Grafana proxy, AI, Wazuh
 cd .. && docker run --rm -v ./vector:/etc/vector:ro timberio/vector:0.58.0-alpine test /etc/vector/wazuh.yaml /etc/vector/wazuh-tests.yaml
 ```
-**Kiểm thử end-to-end trên stack đang chạy** (cần `--profile demo`): `python tools/e2e_test.py`. Nếu admin đã đặt mật khẩu
-riêng thì thêm `E2E_ADMIN_PASSWORD=...`. Script tấn công thật vào máy demo và kiểm tra cả chuỗi: SQLi → WEB-001 → chặn IP qua
-Wazuh → gỡ chặn; command injection → LNX-002 → kill cả cây tiến trình; webshell → FIM → case PB-08; phân quyền / phiên console;
-Grafana. Mọi thứ nó tạo ra đều được dọn sau khi chạy. Lần chạy 30/9/2026: 23/23 đạt, mất khoảng 66 giây.
+**Kiểm thử end-to-end trên stack đang chạy** (cần `--profile demo`): `python tools/e2e_test.py`. Script không dùng tài
+khoản `admin` thật mà tự tạo quản trị viên tạm `e2e-admin`. Nó tấn công thật vào máy demo và kiểm tra cả chuỗi: SQLi → WEB-001 →
+chặn IP qua Wazuh → gỡ chặn; command injection → LNX-002 → kill cả cây tiến trình; webshell → FIM → case PB-08; phân quyền /
+phiên console; Grafana sau manager (cổng 3000 đóng, giả header vô tác dụng, Viewer không sửa được dashboard, Sign out trong
+Grafana thoát luôn phiên console). Mọi thứ nó tạo ra đều được dọn sau khi chạy. Lần chạy 30/9/2026: 34/34 đạt, mất khoảng 70 giây.
 Lần chạy đầu tìm ra 2 lỗi, đã sửa: SOAR tin bản ghi chặn cũ, và SOAR thiếu quyền refresh index khi đánh dấu lệnh chặn đã gỡ.
 
 Sinh lại dashboard Grafana: `python tools/gen_dashboard.py` (Grafana tự nạp lại file sau vài giây).
@@ -448,13 +451,14 @@ IP nguồn, máy, hình thức) và đăng nhập form web (POST tới đường
 | **TLS** | `es-certs` sinh CA nội bộ và chứng chỉ cho `elasticsearch`, `manager` và `wazuh-manager` (Wazuh API). Elasticsearch bật TLS cho HTTP và transport. Manager API và Wazuh API chạy HTTPS. Grafana và các service Python (kể cả SOAR khi gọi Wazuh API) đều **xác thực chứng chỉ bằng CA** (không dùng `insecure`). |
 | **Kênh agent** | Wazuh agent mã hóa event bằng AES với khóa riêng từng agent. Enroll (1515) qua TLS và **bắt buộc mật khẩu** (`secrets/enrollment_key`, manager chép vào `etc/authd.pass` mỗi lần khởi động). |
 | **Wazuh API** | Không publish cổng 55000. SOAR dùng user `siem-soar` chỉ có 2 quyền: `active-response:command` và `agent:read` (đọc rule hay sửa cấu hình → 403). Hai user mặc định `wazuh` / `wazuh-wui` (mật khẩu mặc định công khai) bị đổi sang mật khẩu ngẫu nhiên mỗi lần khởi động. |
-| **Đăng nhập console** | Tài khoản riêng từng người thay cho API key dùng chung (`server/siem/manager/auth.py`). Mật khẩu băm scrypt, tối thiểu 12 ký tự, không chứa tên đăng nhập. Phiên nằm trong cookie `HttpOnly` + `Secure` + `SameSite=Strict`, JavaScript không đọc được, không lưu gì vào localStorage. Hết hạn sau 30 phút không thao tác (lần tự làm mới 5 giây/lần của console không được tính) và tối đa 8 giờ. Sai mật khẩu 5 lần / 15 phút (theo tài khoản hoặc IP) thì khóa 15 phút. Request thay đổi dữ liệu phải có header `X-Requested-With` (chống CSRF). Cấu hình: `CONSOLE_IDLE_MINUTES`, `CONSOLE_SESSION_HOURS`, `CONSOLE_MAX_FAILURES`. |
+| **Đăng nhập console** | Trang đăng nhập chung `/login` cho console và Grafana (`server/siem/manager/static/login.html`). Tài khoản riêng từng người thay cho API key dùng chung (`server/siem/manager/auth.py`). Mật khẩu băm scrypt, tối thiểu 12 ký tự, không chứa tên đăng nhập. Phiên nằm trong cookie `HttpOnly` + `Secure` + `SameSite=Strict`, JavaScript không đọc được, không lưu gì vào localStorage. Hết hạn sau 30 phút không thao tác (lần tự làm mới 5 giây/lần của console không được tính) và tối đa 8 giờ. Sai mật khẩu 5 lần / 15 phút (theo tài khoản hoặc IP) thì khóa 15 phút. Request thay đổi dữ liệu phải có header `X-Requested-With` (chống CSRF). Cấu hình: `CONSOLE_IDLE_MINUTES`, `CONSOLE_SESSION_HOURS`, `CONSOLE_MAX_FAILURES`. |
+| **Grafana dùng chung phiên** | Grafana không mở cổng ra ngoài. Mọi request đi qua manager (`server/siem/manager/grafana_proxy.py`), nên Grafana có cùng chính sách phiên, khóa tài khoản và nhật ký đăng nhập với console. Manager kiểm tra phiên (chưa đăng nhập → `/login`), xóa header `X-WEBAUTH-*` do trình duyệt gửi, rồi gửi tên và vai trò sang Grafana ở chế độ *auth proxy*. Form đăng nhập, basic auth và phiên riêng của Grafana đều tắt. Grafana chỉ tin header từ IP của manager (`10.250.30.10`) trên mạng riêng `grafana-auth`, và chỉ lắng nghe trên mạng đó, nên container khác trong lab (vd. máy web demo bị chiếm) không gọi thẳng được. Vai trò: `admin` → Admin, `lead` → Editor (sửa dashboard), `analyst` → Viewer (chỉ xem). Dashboard tự làm mới 10 giây/lần không gia hạn phiên. Bấm *Sign out* trong Grafana là đăng xuất cả console. Lúc khởi động, manager gán quyền mặc định (Viewer xem, Editor sửa) cho thư mục SIEM-XDR, vì Grafana 11 tạo thư mục provisioning mà không kèm quyền nào. |
 | **Vai trò console** | `analyst` (L1): xử lý alert/case, chặn IP, kill, duyệt đề xuất AI. `lead` (Trưởng nhóm IR): thêm cô lập / bỏ cô lập máy. `admin`: thêm tạo, khóa, đổi vai trò, đặt lại mật khẩu tài khoản (tab *Tài khoản*). Tài khoản mới và mật khẩu vừa đặt lại luôn phải đổi ở lần đăng nhập đầu. Không tự khóa được chính mình, và luôn phải còn ít nhất 1 admin. |
 | **Nhật ký đăng nhập** | Đăng nhập (đúng/sai/bị khóa), đăng xuất, đổi mật khẩu, quản lý tài khoản của console được gửi vào Kafka thành event của chính SIEM (`event.module: console`). Chúng hiện ở mục *Phiên đăng nhập* trên Grafana, và rule brute-force AUTH-001 áp dụng được cho console. Hash mật khẩu nằm ở index `console-users` (ngoài `siem-*`), nên Grafana và tài khoản ES chỉ đọc không thấy. |
 | **RBAC** | Mỗi service có một user Elasticsearch với quyền tối thiểu (bảng dưới). Superuser `elastic` chỉ dùng trong `es-setup` và khi khẩn cấp. |
 | **Bí mật** | `tools/init_secrets.py` sinh ngẫu nhiên vào `secrets/` (đã gitignore). Mỗi service chỉ được mount **đúng** secret nó cần qua Docker secrets (`/run/secrets/...`), không có bí mật trong `.env`, biến môi trường hay compose. Mật khẩu `elastic` được Elasticsearch ghi vào **keystore** (`bootstrap.password`). |
 | **Khóa riêng** | Khóa CA chỉ root đọc được. Khóa của ES và manager chỉ uid của service tương ứng đọc được. Các container khác chỉ mount thư mục `ca/` (chứng chỉ công khai). |
-| **Mạng** | Elasticsearch, Kafka UI chỉ bind `127.0.0.1`. Kafka không publish ra ngoài. |
+| **Mạng** | Elasticsearch, Kafka UI chỉ bind `127.0.0.1`. Kafka và Grafana không publish ra ngoài (Grafana chỉ vào qua manager). |
 
 | User Elasticsearch | Role | Quyền |
 |---|---|---|

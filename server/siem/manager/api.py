@@ -15,17 +15,18 @@ Chạy: uvicorn siem.manager.api:app --host 0.0.0.0 --port 8000
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from .. import settings, store
-from . import auth
+from . import auth, grafana_proxy
 from .auth import ROLES, Session, current_user, require_role
 
 log = logging.getLogger("manager")
@@ -40,12 +41,17 @@ _state: dict[str, Any] = {}
 async def lifespan(_app: FastAPI):
     _state["es"] = store.connect()
     auth.setup(_state["es"])
+    grafana_setup = asyncio.create_task(grafana_proxy.ensure_folder_permissions()) if settings.GRAFANA_URL else None
     log.info("manager sẵn sàng")
     yield
+    if grafana_setup:
+        grafana_setup.cancel()
+    await grafana_proxy.close()
 
 
 app = FastAPI(title="SIEM/XDR Manager", version="1.0.0", lifespan=lifespan)
 app.include_router(auth.router)
+app.include_router(grafana_proxy.router)
 
 
 @app.middleware("http")
@@ -211,9 +217,21 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/")
-def console() -> FileResponse:
+@app.get("/", response_model=None)
+def console(request: Request) -> FileResponse | RedirectResponse:
+    """Chưa đăng nhập / hết phiên / phải đổi mật khẩu -> trang đăng nhập dùng chung (console + Grafana)."""
+    token = request.cookies.get(auth.COOKIE)
+    s = auth.sessions.get(token) if token else None
+    if not s:
+        return RedirectResponse("/login?" + ("reason=expired&" if token else "") + "next=%2F", status_code=303)
+    if s.must_change:
+        return RedirectResponse("/login?change=1&next=%2F", status_code=303)
     return FileResponse(STATIC / "console.html")
+
+
+@app.get("/login", include_in_schema=False)
+def login_page() -> FileResponse:
+    return FileResponse(STATIC / "login.html")
 
 
 # ---------------------------------------------------------------------------

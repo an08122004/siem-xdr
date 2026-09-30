@@ -1,6 +1,8 @@
 """Test Manager API + đăng nhập console bằng tài khoản riêng (ES, Kafka giả lập)."""
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -35,6 +37,7 @@ def env(monkeypatch):
     monkeypatch.setattr(auth, "audit", lambda action, outcome, user, ip, **kw: audit.append((action, outcome, user, kw)))
     monkeypatch.setattr(auth, "time", clock)
     monkeypatch.setattr(settings, "CONSOLE_ADMIN_PASSWORD", ADMIN_TMP)
+    monkeypatch.setattr(settings, "GRAFANA_URL", "")                      # không gán quyền Grafana lúc khởi động
     monkeypatch.setattr(store, "create_action", lambda es, aid, t, p, **kw: actions.setdefault(
         f"a{len(actions)}", {"agent_id": aid, "type": t, "params": p, "status": "pending", **kw}))
     with TestClient(api.app, base_url="https://testserver") as c:     # cookie Secure chỉ gửi qua https
@@ -66,12 +69,30 @@ def admin_login(c):
 
 
 # ------------------------------------------------------------------ đăng nhập
-def test_console_served_and_api_needs_login(env):
-    r = env.get("/")
-    assert r.status_code == 200 and "SIEM/XDR Console" in r.text and r.headers["x-frame-options"] == "DENY"
-    assert "X-API-Key" not in r.text and "localStorage.setItem" not in r.text     # không còn API key trong trình duyệt
+def test_console_redirects_to_login_page_and_api_needs_login(env):
+    r = env.get("/", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login?next=%2F"          # chưa đăng nhập
+    r = env.get("/login")
+    assert r.status_code == 200 and "Đăng nhập" in r.text and r.headers["x-frame-options"] == "DENY"
+    assert "localStorage" not in r.text                                                # không lưu gì phía trình duyệt
+    assert env.get("/api/v1/auth/policy").json() == {"idle_minutes": 30, "session_hours": 8, "max_failures": 5,
+                                                     "lock_minutes": 15, "min_password": 12, "min_distinct": 6}
     assert env.get("/api/v1/alerts").status_code == 401
     assert env.get("/api/v1/alerts", headers={"X-API-Key": "whatever"}).status_code == 401
+    login(env, "admin", ADMIN_TMP)
+    r = env.get("/", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login?change=1&next=%2F"   # mật khẩu tạm: đổi trước
+    admin_login(env)
+    r = env.get("/", follow_redirects=False)
+    assert r.status_code == 200 and "SIEM/XDR Console" in r.text and "X-API-Key" not in r.text
+
+
+def test_logout_link_used_by_grafana(env):
+    admin_login(env)
+    r = env.get("/logout", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login?reason=logged_out"
+    assert env.get("/api/v1/stats").status_code == 401
+    assert env.audit[-1][:3] == ("logout", "success", "admin")
 
 
 def test_bootstrap_admin_must_change_password(env):
@@ -241,3 +262,92 @@ def test_console_auth_events_normalized():
                         target_role="analyst"))
     assert get(doc, "event.category") == "iam" and get(doc, "user.target.name") == "an"
     assert get(doc, "user.roles") == "analyst"
+
+
+# ------------------------------------------------------------------ Grafana sau manager (auth proxy, dùng chung phiên)
+@pytest.fixture()
+def grafana(env):
+    import httpx
+    from siem.manager import grafana_proxy
+    seen = []
+
+    def upstream(req):
+        seen.append(req)
+        return httpx.Response(200, headers=[("content-type", "text/html"), ("set-cookie", "a=1"), ("set-cookie", "b=2")],
+                              stream=httpx.ByteStream(b"<html>grafana</html>"))   # như upstream thật: chưa đọc body
+    grafana_proxy.set_client(httpx.AsyncClient(transport=httpx.MockTransport(upstream), base_url="http://grafana-internal:3000"))
+    yield seen
+    grafana_proxy.set_client(None)
+
+
+NAV = {"Sec-Fetch-Mode": "navigate"}
+
+
+def test_grafana_requires_console_session(env, grafana):
+    r = env.get("/grafana/d/siem-overview?orgId=1", headers=NAV, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login?next=%2Fgrafana%2Fd%2Fsiem-overview%3ForgId%3D1"
+    assert env.post("/grafana/api/ds/query", json={}).status_code == 401            # request API: 401, không chuyển trang
+    login(env, "admin", ADMIN_TMP)                                                   # mật khẩu tạm -> phải đổi trước
+    r = env.get("/grafana/", headers=NAV, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/login?change=1&next=%2Fgrafana%2F")
+    assert grafana == []                                                             # chưa request nào tới Grafana
+
+
+def test_grafana_identity_headers_and_role_mapping(env, grafana):
+    activate(env, "lan", "lead")
+    pw = activate(env, "an", "analyst")
+    login(env, "an", pw)
+    env.cookies.set("grafana_x", "1", domain=HOST)
+    r = env.get("/grafana/d/x?orgId=1", headers={**NAV, "X-WEBAUTH-USER": "admin", "X-WEBAUTH-ROLE": "Admin"})
+    assert r.status_code == 200 and r.text == "<html>grafana</html>"
+    assert r.headers.get_list("set-cookie") == ["a=1", "b=2"]                       # nhiều Set-Cookie giữ nguyên
+    req = grafana[-1]
+    assert str(req.url) == "http://grafana-internal:3000/grafana/d/x?orgId=1"
+    assert req.headers.get_list("x-webauth-user") == ["an"]                          # header giả mạo bị thay
+    assert req.headers["x-webauth-role"] == "Viewer"
+    assert "grafana_x=1" in req.headers["cookie"] and "siem_session" not in req.headers["cookie"]
+    login(env, "lan", "Rieng-Tu-Zx9-3-2026")
+    env.get("/grafana/", headers=NAV)
+    assert grafana[-1].headers["x-webauth-role"] == "Editor"
+    admin_login(env)
+    env.get("/grafana/", headers=NAV)
+    assert grafana[-1].headers["x-webauth-role"] == "Admin"
+
+
+def test_grafana_auto_refresh_does_not_extend_session(env, grafana):
+    admin_login(env)
+    env.clock.now += 20 * 60
+    assert env.post("/grafana/api/ds/query", json={}).status_code == 200            # dashboard tự làm mới
+    env.clock.now += 11 * 60                                                         # 31 phút không thao tác thật
+    assert env.post("/grafana/api/ds/query", json={}).status_code == 401
+    admin_login(env)
+    for _ in range(3):                                                               # mở trang / xem dashboard: gia hạn
+        env.clock.now += 25 * 60
+        assert env.get("/grafana/api/dashboards/uid/siem-overview").status_code == 200
+
+
+def test_grafana_folder_permissions_set_once():
+    import asyncio
+    import httpx
+    from siem.manager import grafana_proxy
+    perms, posts = [{"userId": 7, "permission": 4, "role": ""}], []
+
+    def upstream(req):
+        assert req.headers["x-webauth-user"] == "admin"
+        if req.url.path == "/grafana/api/folders":
+            return httpx.Response(200, json=[{"uid": "abc", "title": "SIEM-XDR"}])
+        if req.method == "POST":
+            posts.append(json.loads(req.content))
+            perms[:] = [{**p, "role": p.get("role", "")} for p in posts[-1]["items"]]
+            return httpx.Response(200, json={"message": "ok"})
+        return httpx.Response(200, json=perms)
+    grafana_proxy.set_client(httpx.AsyncClient(transport=httpx.MockTransport(upstream), base_url="http://g"))
+    try:
+        assert asyncio.run(grafana_proxy.ensure_folder_permissions(attempts=1, delay=0))
+        assert posts == [{"items": [{"userId": 7, "permission": 4},                  # quyền theo user giữ nguyên
+                                    {"role": "Viewer", "permission": 1}, {"role": "Editor", "permission": 2}]}]
+        grafana_proxy.set_client(httpx.AsyncClient(transport=httpx.MockTransport(upstream), base_url="http://g"))
+        assert asyncio.run(grafana_proxy.ensure_folder_permissions(attempts=1, delay=0))
+        assert len(posts) == 1                                                       # đã có quyền -> không ghi đè
+    finally:
+        grafana_proxy.set_client(None)

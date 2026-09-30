@@ -1,15 +1,15 @@
 """Kiểm thử end-to-end trên stack đang chạy: tấn công thật vào máy web demo rồi kiểm tra cả chuỗi
 event -> alert -> SOAR -> Wazuh agent -> kết quả, cùng đăng nhập / phân quyền console và Grafana.
 
-    python tools/e2e_test.py                                  # admin còn mật khẩu tạm (secrets/console_admin_password)
-    E2E_ADMIN_PASSWORD=<mật khẩu admin> python tools/e2e_test.py   # admin đã đặt mật khẩu riêng
+    python tools/e2e_test.py
+
+Không dùng tài khoản `admin` thật: tự tạo tài khoản quản trị tạm `e2e-admin` (mật khẩu tạm, bị buộc đổi) thẳng
+trong Elasticsearch qua container manager, và analyst `e2e-an` qua API.
 
 Cần stack chạy đủ, kể cả --profile demo. Chạy từ thư mục siem-xdr. Tác dụng phụ trên hệ thống (đều được dọn):
 chặn rồi gỡ chặn IP máy host trên demo-web, tạo rồi xóa file webshell thử (sinh alert + case thật, ghi rõ nguồn e2e),
-tạo rồi xóa tài khoản `e2e-an`. Không chạy kiểm tra khóa tài khoản (5 lần sai sẽ khóa IP của bạn 15 phút).
+tạo rồi xóa tài khoản `e2e-admin`, `e2e-an` (cả bên console lẫn Grafana). Không chạy kiểm tra khóa tài khoản (5 lần sai sẽ khóa IP của bạn 15 phút).
 """
-import base64
-import os
 import http.cookiejar
 import json
 import ssl
@@ -24,7 +24,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8")
 CTX = ssl.create_default_context()
 CTX.check_hostname, CTX.verify_mode = False, ssl.CERT_NONE
-BOOT = Path("secrets/console_admin_password").read_text().strip()
+ADMIN_TMP, ADMIN_PW = "Mat-Khau-Tam-Qp7-2026", "Quan-Tri-Tam-Zx9-2026"     # không chứa tên đăng nhập (chính sách)
 H = {"X-Requested-With": "siem-console", "Content-Type": "application/json"}
 WEB = "http://127.0.0.1:8081"
 START = datetime.now(timezone.utc).isoformat()
@@ -36,10 +36,30 @@ def check(scenario, name, ok, detail=""):
     print(f"   {'✓' if ok else '✗'} {name}" + (f"  — {detail}" if detail else ""), flush=True)
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None                                      # trả nguyên 30x để kiểm tra Location
+
+
 class Console:
     def __init__(self):
         self.op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=CTX),
-                                              urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+                                              urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
+                                              NoRedirect())
+
+    def raw(self, method, path, body=None, headers=None):
+        """(status, headers, body bytes) — dùng cho Grafana sau manager."""
+        req = urllib.request.Request("https://localhost:8000" + path, method=method, headers={**H, **(headers or {})},
+                                     data=json.dumps(body).encode() if body is not None else None)
+        try:
+            with self.op.open(req, timeout=30) as r:
+                return r.status, r.headers, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers, e.read()
+
+    def grafana(self, path, body=None):
+        st, _, b = self.raw("POST" if body is not None else "GET", "/grafana" + path, body)
+        return st, (json.loads(b) if b and st < 500 else None)
 
     def call(self, method, path, body=None, headers=H):
         req = urllib.request.Request("https://localhost:8000" + path, method=method, headers=headers,
@@ -91,31 +111,54 @@ def action(c, typ, target=None, status="success"):
 
 
 
-def drop_test_user():
-    code = ("import sys; sys.path.insert(0, '/app'); from siem import store, settings\n"
-            "es = store.connect(templates=False)\n"
-            "try: es.delete(index=settings.IDX_USERS, id='e2e-an', refresh='wait_for')\n"
-            "except Exception: pass")
-    subprocess.run(["docker", "compose", "exec", "-T", "manager", "python", "-c", code], capture_output=True)
+def manager_py(code):
+    return subprocess.run(["docker", "compose", "exec", "-T", "manager", "python", "-"], input=code,
+                          capture_output=True, text=True, encoding="utf-8")
 
 
-drop_test_user()
+def drop_test_users():
+    """Xóa tài khoản console e2e-* và user Grafana tự tạo tương ứng (manager là IP duy nhất Grafana tin header)."""
+    manager_py("""
+import httpx
+from siem import store, settings
+es = store.connect(templates=False)
+g = httpx.Client(base_url=settings.GRAFANA_URL + '/grafana', headers={'X-WEBAUTH-USER': 'admin'})
+for name in ('e2e-admin', 'e2e-an'):
+    try:
+        es.delete(index=settings.IDX_USERS, id=name, refresh='wait_for')
+    except Exception:
+        pass
+    try:
+        r = g.get('/api/users/lookup', params={'loginOrEmail': name})
+        if r.status_code == 200:
+            g.delete('/api/admin/users/%d' % r.json()['id'])
+    except Exception:
+        pass
+""")
+
+
+def create_test_admin():
+    r = manager_py(f"""
+from siem import store
+from siem.manager import auth
+auth.setup(store.connect(templates=False))
+print(auth.users.create(auth.new_user('e2e-admin', 'admin', {ADMIN_TMP!r}, must_change=True)))
+""")
+    return r.stdout.strip().endswith("True")
+
+
+drop_test_users()
 t_all = time.time()
 print(f"Bắt đầu {datetime.now().strftime('%H:%M:%S')}\n")
 
 # ----------------------------------------------------------------- 0. đăng nhập console
 print("0. Chuẩn bị: đăng nhập console")
 admin = Console()
-OWN_ADMIN_PW = os.environ.get("E2E_ADMIN_PASSWORD")      # admin đã có mật khẩu riêng -> không đụng vào tài khoản admin
-if OWN_ADMIN_PW:
-    st, me = admin.call("POST", "/api/v1/auth/login", {"username": "admin", "password": OWN_ADMIN_PW})
-    check("console", "admin đăng nhập", st == 200 and not me["must_change"])
-else:
-    st, me = admin.call("POST", "/api/v1/auth/login", {"username": "admin", "password": BOOT})
-    check("console", "admin đăng nhập bằng mật khẩu tạm → bị buộc đổi", st == 200 and me["must_change"],
-          "" if st == 200 else "admin đã có mật khẩu riêng? chạy lại với E2E_ADMIN_PASSWORD=...")
-    TMP = "E2e-Tam-Thoi-Pw-2026"
-    check("console", "admin đổi mật khẩu", admin.call("POST", "/api/v1/auth/password", {"current": BOOT, "new": TMP})[0] == 200)
+check("console", "tạo tài khoản quản trị tạm e2e-admin", create_test_admin())
+st, me = admin.call("POST", "/api/v1/auth/login", {"username": "e2e-admin", "password": ADMIN_TMP})
+check("console", "đăng nhập bằng mật khẩu tạm → bị buộc đổi", st == 200 and me["must_change"], str(st))
+check("console", "chưa đổi mật khẩu → API từ chối (403)", admin.call("GET", "/api/v1/stats")[0] == 403)
+check("console", "đổi mật khẩu", admin.call("POST", "/api/v1/auth/password", {"current": ADMIN_TMP, "new": ADMIN_PW})[0] == 200)
 admin.call("POST", "/api/v1/users", {"username": "e2e-an", "role": "analyst", "password": "Tam-Thoi-Qwe-2026"})
 an = Console()
 an.call("POST", "/api/v1/auth/login", {"username": "e2e-an", "password": "Tam-Thoi-Qwe-2026"})
@@ -179,35 +222,64 @@ check("console", "thiếu header chống CSRF → 403",
 an.call("POST", "/api/v1/auth/logout")
 check("console", "sau đăng xuất → 401", an.call("GET", "/api/v1/stats")[0] == 401)
 
-# ----------------------------------------------------------------- 5. Grafana
-print("\n5. Grafana")
-pw = Path("secrets/grafana_admin_password").read_text().strip()
-auth = {"Authorization": "Basic " + base64.b64encode(f"admin:{pw}".encode()).decode(), "Content-Type": "application/json"}
+# ----------------------------------------------------------------- 5. Grafana (sau manager, dùng chung phiên console)
+print("\n5. Grafana qua https://localhost:8000/grafana/ (dùng chung phiên console)")
+NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
+try:
+    urllib.request.urlopen("http://localhost:3000/", timeout=3)
+    check("grafana", "cổng 3000 không còn mở ra ngoài", False, "vẫn truy cập thẳng được Grafana")
+except urllib.error.HTTPError as e:
+    check("grafana", "cổng 3000 không còn mở ra ngoài", False, f"vẫn trả HTTP {e.code}")
+except OSError:
+    check("grafana", "cổng 3000 không còn mở ra ngoài", True)
+r = subprocess.run(["docker", "compose", "exec", "-T", "demo-web", "sh", "-c",
+                    "curl -s -m 3 -o /dev/null -w '%{http_code}' -H 'X-WEBAUTH-USER: admin' "
+                    "http://grafana:3000/grafana/api/user"], capture_output=True, text=True)
+check("grafana", "máy web demo gọi thẳng Grafana kèm header giả → không kết nối được",
+      r.stdout.strip() in ("", "000"), f"curl exit {r.returncode}")
+anon = Console()
+st, hd, _ = anon.raw("GET", "/grafana/d/siem-overview", headers=NAV)
+check("grafana", "chưa đăng nhập → chuyển tới trang đăng nhập chung",
+      st == 303 and hd["Location"].startswith("/login?next=%2Fgrafana"), f"{st} {hd.get('Location')}")
+check("grafana", "chưa đăng nhập, gọi API → 401", anon.grafana("/api/ds/query", {})[0] == 401)
 
+an = Console()
+an.call("POST", "/api/v1/auth/login", {"username": "e2e-an", "password": "Rieng-Tu-Zx9-2026"})
+st, _, b = an.raw("GET", "/grafana/api/user", headers={"X-WEBAUTH-USER": "admin", "X-WEBAUTH-ROLE": "Admin"})
+u = json.loads(b) if st == 200 else {}
+orgs = an.grafana("/api/user/orgs")[1] or [{"role": "?"}]
+check("grafana", "analyst vào Grafana bằng phiên console, giả header admin vô tác dụng",
+      u.get("login") == "e2e-an" and orgs[0]["role"] == "Viewer", f"{u.get('login')} / {orgs[0]['role']}")
+st, d = an.grafana("/api/dashboards/uid/siem-overview")
+check("grafana", "analyst (Viewer) xem được dashboard, không sửa được", st == 200 and not d["meta"]["canSave"],
+      f"{len(d['dashboard']['panels'])} panel" if st == 200 else str(st))
+if st == 200:
+    st, _ = an.grafana("/api/dashboards/db", {"dashboard": {**d["dashboard"], "title": "e2e sửa thử"}, "overwrite": True})
+    check("grafana", "analyst lưu dashboard → 403", st == 403, str(st))
+st, hd, _ = an.raw("GET", "/grafana/logout", headers=NAV)
+out = st == 302 and hd["Location"] == "/logout" and an.raw("GET", "/logout", headers=NAV)[0] == 303
+check("grafana", "Sign out trong Grafana → đăng xuất luôn phiên console",
+      out and an.call("GET", "/api/v1/stats")[0] == 401, f"{st} {hd.get('Location')}")
 
-def grafana(path, body=None):
-    req = urllib.request.Request("http://localhost:3000" + path, headers=auth,
-                                 data=json.dumps(body).encode() if body else None)
-    return json.loads(urllib.request.urlopen(req, timeout=20).read())
-
-
-dash = grafana("/api/dashboards/uid/siem-overview")["dashboard"]
-check("grafana", "dashboard SIEM/XDR tải được", len(dash["panels"]) == 35, f"{len(dash['panels'])} panel")
+st, orgs = admin.grafana("/api/user/orgs")
+check("grafana", "quản trị console (e2e-admin) → Admin trong Grafana", st == 200 and orgs[0]["role"] == "Admin")
+st, d = admin.grafana("/api/dashboards/uid/siem-overview")
+check("grafana", "dashboard SIEM/XDR tải được", st == 200 and len(d["dashboard"]["panels"]) == 35,
+      f"{len(d['dashboard']['panels'])} panel" if st == 200 else str(st))
 q = {"refId": "A", "datasource": {"type": "elasticsearch", "uid": "siem-events"},
      "query": "event.module:console AND event.category:authentication", "metrics": [{"id": "1", "type": "count"}],
      "bucketAggs": [{"id": "2", "type": "date_histogram", "field": "@timestamp", "settings": {"interval": "auto"}}],
      "timeField": "@timestamp", "intervalMs": 60000, "maxDataPoints": 500}
-frames = grafana("/api/ds/query", {"queries": [q], "from": "now-1h", "to": "now"})["results"]["A"].get("frames", [])
+st, res = admin.grafana("/api/ds/query", {"queries": [q], "from": "now-1h", "to": "now"})
+frames = res["results"]["A"].get("frames", []) if st == 200 else []
 n = int(sum(sum(v for v in f["data"]["values"][1] if v) for f in frames if len(f["data"]["values"]) > 1))
 check("grafana", "mục Phiên đăng nhập thấy lượt đăng nhập console vừa rồi", n > 0, f"{n} event trong 1 giờ")
 
 # ----------------------------------------------------------------- dọn dẹp
 print("\nDọn dẹp")
-drop_test_user()
-print("   đã xóa tài khoản test e2e-an")
-if not OWN_ADMIN_PW:
-    st, body = admin.call("PATCH", "/api/v1/users/admin", {"password": BOOT})
-    print(f"   admin về lại mật khẩu tạm (bắt đổi khi đăng nhập): {'xong' if st == 200 and body['must_change'] else 'LỖI'}")
+admin.call("POST", "/api/v1/auth/logout")
+drop_test_users()
+print("   đã xóa tài khoản test e2e-admin, e2e-an (console + Grafana)")
 
 # ----------------------------------------------------------------- tổng kết
 print(f"\nTỔNG KẾT ({time.time() - t_all:.0f} giây)")

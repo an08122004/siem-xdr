@@ -31,6 +31,7 @@ from typing import Any, Callable
 
 from elasticsearch import ConflictError, NotFoundError
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from .. import bus, settings, store
@@ -43,6 +44,7 @@ USERNAME_PATTERN = r"^[a-z0-9][a-z0-9._-]{1,31}$"
 COOKIE = "siem_session"
 CSRF_HEADER, CSRF_VALUE = "x-requested-with", "siem-console"
 MIN_PASSWORD = 12
+MIN_DISTINCT = 6          # số ký tự khác nhau tối thiểu trong mật khẩu
 
 
 # --------------------------------------------------------------------------- mật khẩu
@@ -76,8 +78,8 @@ def password_problem(password: str, username: str) -> str | None:
         return f"mật khẩu tối thiểu {MIN_PASSWORD} ký tự"
     if username and username.lower() in password.lower():
         return "mật khẩu không được chứa tên đăng nhập"
-    if len(set(password)) < 6:
-        return "mật khẩu quá đơn giản (quá ít ký tự khác nhau)"
+    if len(set(password)) < MIN_DISTINCT:
+        return f"mật khẩu quá đơn giản (cần ít nhất {MIN_DISTINCT} ký tự khác nhau)"
     return None
 
 
@@ -388,6 +390,28 @@ def logout(request: Request, response: Response) -> dict[str, bool]:
     if s:
         audit("logout", "success", s.username, client_ip(request), role=s.role)
     return {"ok": True}
+
+
+@router.get("/api/v1/auth/policy")
+def policy() -> dict[str, int]:
+    """Chính sách đăng nhập (công khai) để trang đăng nhập hiển thị đúng con số đang cấu hình."""
+    return {"idle_minutes": settings.CONSOLE_IDLE_MINUTES, "session_hours": settings.CONSOLE_SESSION_HOURS,
+            "max_failures": settings.CONSOLE_MAX_FAILURES, "lock_minutes": Throttle.LOCK // 60,
+            "min_password": MIN_PASSWORD, "min_distinct": MIN_DISTINCT}
+
+
+@router.get("/logout", include_in_schema=False)
+def logout_page(request: Request) -> RedirectResponse:
+    """Đăng xuất bằng đường link (nút Sign out của Grafana chuyển tới đây) -> về trang đăng nhập."""
+    token = request.cookies.get(COOKIE)
+    s = sessions.get(token, touch=False) if token else None
+    if token:
+        sessions.drop(token)
+    resp = RedirectResponse("/login?reason=logged_out", status_code=303)
+    resp.delete_cookie(COOKIE, path="/", secure=True, httponly=True, samesite="strict")
+    if s:
+        audit("logout", "success", s.username, client_ip(request), role=s.role)
+    return resp
 
 
 @router.get("/api/v1/auth/me")
