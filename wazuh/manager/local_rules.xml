@@ -1,0 +1,26 @@
+<!--
+  Rule Wazuh riêng của siem-xdr (đè etc/rules/local_rules.xml mặc định). ID 100000-120000 dành cho rule tự viết.
+  Ruleset gốc chấm "file mới" (554) level 5, "file bị sửa" (550) level 7 cho MỌI thư mục. Trong thư mục web, file mới
+  hay file bị sửa thường là webshell vừa tải lên -> nâng lên level 10 (siem-xdr chuyển thành alert high, rule WZH-1001xx).
+-->
+<group name="local,syscheck,siem-xdr,">
+  <rule id="100100" level="10">
+    <if_sid>554</if_sid>
+    <field name="file" type="pcre2">(?i)/(htdocs|www|html|cgi-bin|wwwroot)/</field>
+    <description>File mới trong thư mục web: $(file) (có thể là webshell)</description>
+    <mitre>
+      <id>T1505.003</id>
+    </mitre>
+    <group>web,webshell,</group>
+  </rule>
+
+  <rule id="100101" level="10">
+    <if_sid>550</if_sid>
+    <field name="file" type="pcre2">(?i)/(htdocs|www|html|cgi-bin|wwwroot)/</field>
+    <description>Nội dung web bị sửa: $(file)</description>
+    <mitre>
+      <id>T1505.003</id>
+    </mitre>
+    <group>web,webshell,</group>
+  </rule>
+</group>

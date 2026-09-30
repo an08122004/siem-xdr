@@ -1,0 +1,41 @@
+# Unit test cho phần chuyển đổi Wazuh -> event thô (chạy: vector test wazuh.yaml wazuh-tests.yaml)
+tests:
+  - name: dòng archives.json thành event thô event_type wazuh
+    inputs:
+      - insert_at: wazuh_event
+        type: log
+        log_fields:
+          message: '{"timestamp":"2026-09-28T03:12:45.123+0000","agent":{"id":"001","name":"demo-web","ip":"172.18.0.9"},"manager":{"name":"wazuh-manager"},"id":"1727493165.1","full_log":"x","decoder":{"name":"web-accesslog"},"location":"/usr/local/apache2/logs/access_log"}'
+    outputs:
+      - extract_from: wazuh_event
+        conditions:
+          - type: vrl
+            source: |
+              assert_eq!(.agent_id, "wazuh-001")
+              assert_eq!(.source, "wazuh")
+              assert_eq!(.event_type, "wazuh")
+              assert_eq!(.timestamp, "2026-09-28T03:12:45.123+0000")
+              assert_eq!(.data.agent.name, "demo-web")
+              assert_eq!(.data.location, "/usr/local/apache2/logs/access_log")
+
+  - name: dòng alerts.json thành event thô event_type wazuh_alert
+    inputs:
+      - insert_at: wazuh_alert
+        type: log
+        log_fields:
+          message: '{"timestamp":"2026-09-28T03:12:45.123+0000","rule":{"level":7,"id":"550","groups":["ossec","syscheck"]},"agent":{"id":"001","name":"demo-web"},"syscheck":{"path":"/x","event":"modified"},"location":"syscheck"}'
+    outputs:
+      - extract_from: wazuh_alert
+        conditions:
+          - type: vrl
+            source: |
+              assert_eq!(.event_type, "wazuh_alert")
+              assert_eq!(.data.rule.id, "550")
+
+  - name: dòng không phải JSON object bị bỏ
+    no_outputs_from: [wazuh_event]
+    inputs:
+      - insert_at: wazuh_event
+        type: log
+        log_fields:
+          message: 'không phải json'

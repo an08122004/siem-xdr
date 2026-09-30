@@ -4,8 +4,9 @@ Nhận alert từ Kafka [siem.alerts], đối chiếu với playbook (config/pla
 và thực hiện các bước tự động:
 
   block_ip      tạo lệnh chặn IP cho agent (XDR response), tự gỡ sau `duration` giây
-  kill_process  diệt tiến trình độc hại trên máy đã báo alert
-  isolate_host  cô lập máy khỏi mạng (chỉ giữ kết nối tới manager)
+  kill_process  diệt tiến trình độc hại (cả cây tiến trình) trên máy đã báo alert
+  isolate_host  cô lập máy khỏi mạng (chỉ giữ kết nối tới wazuh-manager)
+  (lệnh được soar/wazuh.py gửi xuống Wazuh agent qua Wazuh API, xem Responder)
   notify        gửi thông báo webhook (Slack/Discord/Teams tương thích) / Telegram
   create_case   gom alert thành case để analyst điều tra
 
@@ -36,6 +37,15 @@ log = logging.getLogger("soar")
 
 # Case chưa đóng -> alert mới cùng rule + thực thể được gom vào case này
 OPEN_CASE_STATUSES = ("open", "in_progress", "contained")
+# Lệnh chặn thành công không có hạn chỉ được coi là còn hiệu lực trong N phút (xem Soar._already_blocked)
+BLOCK_TRUST_MINUTES = 10
+
+
+def endpoint_agent(alert: dict[str, Any]) -> str | None:
+    """Agent ra lệnh được (Wazuh agent). Log syslog (firewall, Suricata) mang agent.id giả `syslog-<ip>`,
+    không có agent nào để chạy lệnh trên đó."""
+    agent_id = get(alert, "agent.id")
+    return None if not agent_id or str(agent_id).startswith("syslog-") else str(agent_id)
 
 
 class Playbook:
@@ -112,9 +122,9 @@ class Soar:
 
         if action == "block_ip":
             return self.block_ip(step, alert)
-        agent_id = get(alert, "agent.id")
+        agent_id = endpoint_agent(alert)
         if not agent_id:
-            return {"status": "skipped", "detail": "alert không gắn với agent nào"}
+            return {"status": "skipped", "detail": "alert không gắn với Wazuh agent nào (vd log syslog của firewall)"}
         if action == "kill_process":
             pid, name = get(alert, "process.pid"), get(alert, "process.name")
             if not pid and not name:
@@ -138,7 +148,7 @@ class Soar:
         if step.get("scope") == "all":
             agents = [a["agent_id"] for a in store.list_agents(self.es) if a["status"] == "online"]
         else:
-            agents = [get(alert, "agent.id")] if get(alert, "agent.id") else []
+            agents = [endpoint_agent(alert)] if endpoint_agent(alert) else []
         if not agents:
             return {"status": "skipped", "detail": "không có agent để thực thi"}
 
@@ -157,10 +167,22 @@ class Soar:
                 "detail": f"đã chặn sẵn trên {dup}" if dup else ""}
 
     def _already_blocked(self, agent_id: str, ip: str) -> bool:
-        hits = store.search(self.es, settings.IDX_ACTIONS, size=1, query={"bool": {"filter": [
-            {"term": {"agent_id": agent_id}}, {"term": {"type": "block_ip"}}, {"term": {"target": ip}},
-            {"terms": {"status": ["pending", "sent", "success"]}}, {"term": {"reverted": False}},
-        ]}}, sort=[{"created_at": "desc"}])
+        """Có lệnh chặn IP này trên agent còn hiệu lực không (để không chặn trùng khi alert dồn dập).
+        Chỉ tin: lệnh đang gửi/chờ kết quả, lệnh thành công còn hạn, hoặc thành công trong BLOCK_TRUST_MINUTES gần đây.
+        Không tin lệnh thành công cũ không có hạn: luật iptables trên agent mất khi máy / container khởi động lại, mà
+        bản ghi vẫn ghi 'đang chặn' -> kẻ tấn công không bị chặn lại (đã gặp khi chạy E2E 30/9). Script chặn trên agent
+        kiểm tra luật trước khi thêm nên gửi lại lệnh chặn không gây hại."""
+        now = datetime.now(timezone.utc)
+        recent = (now - timedelta(minutes=BLOCK_TRUST_MINUTES)).isoformat()
+        success = [{"term": {"status": "success"}}]
+        hits = store.search(self.es, settings.IDX_ACTIONS, size=1, query={"bool": {
+            "filter": [{"term": {"agent_id": agent_id}}, {"term": {"type": "block_ip"}}, {"term": {"target": ip}},
+                       {"term": {"reverted": False}}],
+            "should": [{"terms": {"status": ["pending", "sent"]}},
+                       {"bool": {"filter": success + [{"range": {"expires_at": {"gt": now.isoformat()}}}]}},
+                       {"bool": {"filter": success + [{"range": {"created_at": {"gte": recent}}}]}}],
+            "minimum_should_match": 1,
+        }}, sort=[{"created_at": "desc"}])
         return bool(hits)
 
     def create_case(self, alert: dict[str, Any]) -> dict[str, Any]:

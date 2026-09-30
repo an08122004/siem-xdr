@@ -1,11 +1,7 @@
-"""Manager API — điểm tiếp nhận của agent và giao diện cho analyst.
+"""Manager API — giao diện cho analyst.
 
-Agent:
-  POST /api/v1/agents/enroll          (header X-Enrollment-Key) -> token riêng của agent
-  POST /api/v1/agents/heartbeat       (Bearer token)
-  POST /api/v1/events                 (Bearer token) batch event -> Kafka siem.raw
-  GET  /api/v1/agents/actions         (Bearer token) lấy lệnh phản ứng đang chờ
-  POST /api/v1/actions/{id}/result    (Bearer token) báo kết quả thực thi
+Agent là Wazuh agent: event đi wazuh-manager -> Vector -> Kafka, lệnh phản ứng do SOAR gửi qua Wazuh API
+(soar/wazuh.py), nên manager không còn endpoint cho agent. Danh sách agent do SOAR đồng bộ từ Wazuh.
 
 Analyst (header X-API-Key):
   GET  /api/v1/agents | /alerts | /actions | /cases | /stats
@@ -17,24 +13,22 @@ Chạy: uvicorn siem.manager.api:app --host 0.0.0.0 --port 8000
 """
 from __future__ import annotations
 
-import hashlib
 import hmac
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import bus, settings, store
+from .. import settings, store
 
 log = logging.getLogger("manager")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 STATIC = Path(__file__).parent / "static"
-MAX_BATCH = 5000
 
 _state: dict[str, Any] = {}
 
@@ -42,11 +36,8 @@ _state: dict[str, Any] = {}
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _state["es"] = store.connect()
-    bus.wait_for_kafka()
-    _state["producer"] = bus.producer()
     log.info("manager sẵn sàng")
     yield
-    _state["producer"].flush(10)
 
 
 app = FastAPI(title="SIEM/XDR Manager", version="1.0.0", lifespan=lifespan)
@@ -60,89 +51,9 @@ def es():
 # Xác thực
 # ---------------------------------------------------------------------------
 
-def agent_token(agent_id: str) -> str:
-    return hmac.new(settings.SERVER_SECRET.encode(), agent_id.encode(), hashlib.sha256).hexdigest()
-
-
-def require_agent(x_agent_id: str = Header(...), authorization: str = Header("")) -> str:
-    token = authorization.removeprefix("Bearer ").strip()
-    if not token or not hmac.compare_digest(token, agent_token(x_agent_id)):
-        raise HTTPException(401, "token agent không hợp lệ")
-    return x_agent_id
-
-
 def require_analyst(x_api_key: str = Header("")) -> None:
     if not hmac.compare_digest(x_api_key, settings.API_KEY):
         raise HTTPException(401, "API key không hợp lệ")
-
-
-# ---------------------------------------------------------------------------
-# Agent endpoints
-# ---------------------------------------------------------------------------
-
-class AgentInfo(BaseModel):
-    agent_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._-]+$")
-    hostname: str = ""
-    os: str = ""
-    version: str = ""
-
-
-class ActionResult(BaseModel):
-    status: str
-    output: str = ""
-
-
-@app.post("/api/v1/agents/enroll")
-def enroll(info: AgentInfo, request: Request, x_enrollment_key: str = Header("")) -> dict[str, str]:
-    if not hmac.compare_digest(x_enrollment_key, settings.ENROLLMENT_KEY):
-        log.warning("enroll bị từ chối từ %s (agent_id=%s)", request.client.host, info.agent_id)
-        raise HTTPException(403, "enrollment key sai")
-    store.upsert_agent(es(), info.model_dump(), request.client.host)
-    log.info("agent %s (%s/%s) đã enroll từ %s", info.agent_id, info.hostname, info.os, request.client.host)
-    return {"token": agent_token(info.agent_id)}
-
-
-@app.post("/api/v1/agents/heartbeat")
-def heartbeat(info: AgentInfo, request: Request, agent_id: str = Depends(require_agent)) -> dict[str, bool]:
-    data = info.model_dump() | {"agent_id": agent_id}
-    store.upsert_agent(es(), data, request.client.host)
-    return {"ok": True}
-
-
-@app.post("/api/v1/events")
-async def ingest(request: Request, agent_id: str = Depends(require_agent)) -> dict[str, int]:
-    try:
-        body = await request.json()
-    except ValueError:
-        raise HTTPException(400, "body không phải JSON")
-    events = body if isinstance(body, list) else [body]
-    if len(events) > MAX_BATCH:
-        raise HTTPException(413, f"tối đa {MAX_BATCH} event/lần")
-    p = _state["producer"]
-    ip = request.client.host
-    accepted = 0
-    for e in events:
-        if not isinstance(e, dict):
-            continue
-        e["agent_id"] = agent_id      # không tin agent_id trong payload -> chống giả mạo
-        e["agent_ip"] = ip
-        bus.send(p, settings.TOPIC_RAW, e, key=agent_id)
-        accepted += 1
-    p.poll(0)
-    return {"accepted": accepted}
-
-
-@app.get("/api/v1/agents/actions")
-def poll_actions(agent_id: str = Depends(require_agent)) -> list[dict[str, Any]]:
-    return store.claim_pending_actions(es(), agent_id)
-
-
-@app.post("/api/v1/actions/{action_id}/result")
-def action_result(action_id: str, res: ActionResult, agent_id: str = Depends(require_agent)) -> dict[str, bool]:
-    if not store.finish_action(es(), action_id, agent_id, res.status, res.output):
-        raise HTTPException(404, "không tìm thấy action")
-    log.info("action %s trên %s: %s", action_id, agent_id, res.status)
-    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

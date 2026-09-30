@@ -91,6 +91,41 @@ def from_anomaly(a: Any, severity: str, description: str, features: dict[str, An
     return alert
 
 
+def from_wazuh(event: Doc, severity: str) -> Doc:
+    """Alert từ cảnh báo của ruleset Wazuh (xem detection/wazuh.py). rule.id = WZH-<id rule Wazuh>."""
+    r = get(event, "wazuh.rule") or {}
+    mitre = r.get("mitre") if isinstance(r.get("mitre"), dict) else {}
+    groups = [str(g) for g in r.get("groups") or []]
+    alert: Doc = {
+        "@timestamp": now_iso(),
+        "alert": {"id": new_id(), "status": "open", "source": "wazuh"},
+        "rule": {
+            "id": f"WZH-{r.get('id')}", "name": r.get("description") or f"Wazuh rule {r.get('id')}",
+            "description": f"Cảnh báo từ ruleset Wazuh (rule {r.get('id')}, level {r.get('level')}, "
+                           f"nhóm {', '.join(groups) or '—'})",
+            "type": "wazuh", "severity": severity, "tags": ["wazuh", *groups],
+            "mitre": {"tactic": (mitre.get("tactic") or [None])[0], "technique": list(mitre.get("id") or [])},
+        },
+        "severity": severity,
+        "severity_score": SEVERITY_SCORE[severity],
+        "risk_score": _risk(severity, event),
+        "wazuh": {"rule_id": r.get("id"), "level": r.get("level"), "groups": groups},
+        "count": 1,
+        "related_events": [get(event, "event.id")],
+        "event_time": event.get("@timestamp"),
+        "trigger_event": _trigger(event),
+    }
+    _copy_entities(event, alert)
+    for path in ("file.path", "registry.path", "sca.check.title"):
+        if (v := get(event, path)) is not None:
+            cur = alert
+            for p in path.split(".")[:-1]:
+                cur = cur.setdefault(p, {})
+            cur[path.split(".")[-1]] = v
+    alert["message"] = _message(alert)
+    return alert
+
+
 def _message(alert: Doc) -> str:
     who = get(alert, "source.ip") or get(alert, "user.name") or get(alert, "process.name") or "?"
     where = get(alert, "host.name") or get(alert, "agent.id") or "?"

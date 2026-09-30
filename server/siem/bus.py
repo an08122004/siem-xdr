@@ -1,6 +1,6 @@
 """Tiện ích Kafka (message bus trung tâm của pipeline).
 
-    agent/syslog --> [siem.raw] --> analyzer --> [siem.alerts] --> soar
+    Wazuh (archives/alerts) / syslog --Vector--> [siem.raw] --> analyzer --> [siem.alerts] --> soar
 """
 from __future__ import annotations
 

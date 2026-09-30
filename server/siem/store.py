@@ -150,13 +150,18 @@ def bulk_index(es: Elasticsearch, actions: Iterable[dict[str, Any]]) -> int:
 # --------------------------------------------------------------------------
 
 def upsert_agent(es: Elasticsearch, info: dict[str, Any], ip: str | None) -> None:
+    """Ghi thông tin agent (SOAR đồng bộ từ Wazuh API, xem soar/wazuh.py)."""
     doc = {
         "agent_id": info.get("agent_id"),
         "hostname": info.get("hostname"),
         "os": info.get("os"),
         "version": info.get("version"),
         "ip": ip,
-        "last_seen": now_iso(),
+        "last_seen": info.get("last_seen") or now_iso(),
+        "wazuh_status": info.get("wazuh_status"),   # active | disconnected | pending | never_connected
+        "platform": info.get("platform"),           # windows | ubuntu | debian ... (chọn script phản ứng)
+        "groups": info.get("groups"),
+        "synced_at": now_iso(),
     }
     es.update(index=settings.IDX_AGENTS, id=doc["agent_id"], doc=doc, doc_as_upsert=True)
 
@@ -170,8 +175,10 @@ def list_agents(es: Elasticsearch) -> list[dict[str, Any]]:
     agents = []
     for h in res["hits"]["hits"]:
         a = h["_source"]
-        seen = datetime.fromisoformat(a["last_seen"]).timestamp() if a.get("last_seen") else 0
-        a["status"] = "online" if now - seen < settings.AGENT_OFFLINE_SECONDS else "offline"
+        # trạng thái do Wazuh manager xác định (keepalive); chỉ tin nếu lần đồng bộ gần đây, SOAR chết thì coi là offline
+        synced = datetime.fromisoformat(a["synced_at"]).timestamp() if a.get("synced_at") else 0
+        fresh = now - synced < settings.AGENT_OFFLINE_SECONDS
+        a["status"] = "online" if a.get("wazuh_status") == "active" and fresh else "offline"
         agents.append(a)
     return agents
 
@@ -207,14 +214,16 @@ def create_action(es: Elasticsearch, agent_id: str, action_type: str, params: di
     return doc
 
 
-def claim_pending_actions(es: Elasticsearch, agent_id: str) -> list[dict[str, Any]]:
-    """Lấy các action pending của agent và chuyển sang 'sent' (optimistic locking
-    bằng seq_no để 2 lần poll đồng thời không nhận trùng lệnh)."""
+def claim_pending_actions(es: Elasticsearch, agent_id: str | None = None) -> list[dict[str, Any]]:
+    """Lấy các action pending (của 1 agent, hoặc tất cả nếu agent_id=None) và chuyển sang 'sent'
+    (optimistic locking bằng seq_no để 2 tiến trình chạy đồng thời không nhận trùng lệnh)."""
+    filters: list[dict[str, Any]] = [{"term": {"status": "pending"}}]
+    if agent_id is not None:
+        filters.append({"term": {"agent_id": agent_id}})
     try:
         res = es.search(
             index=settings.IDX_ACTIONS, size=50, seq_no_primary_term=True,
-            query={"bool": {"filter": [{"term": {"agent_id": agent_id}}, {"term": {"status": "pending"}}]}},
-            sort=[{"created_at": "asc"}],
+            query={"bool": {"filter": filters}}, sort=[{"created_at": "asc"}],
         )
     except Exception:  # noqa: BLE001
         return []
@@ -243,7 +252,8 @@ def finish_action(es: Elasticsearch, action_id: str, agent_id: str, status: str,
     if cur.get("type") == "unblock_ip" and status == "success":
         # Gỡ chặn (thủ công hoặc do hết hạn) -> đánh dấu các lệnh chặn cũ cùng IP là đã gỡ,
         # nếu không SOAR sẽ tưởng IP vẫn đang bị chặn và bỏ qua lần tấn công sau.
-        es.update_by_query(index=settings.IDX_ACTIONS, conflicts="proceed", refresh=True, query={"bool": {"filter": [
+        # không refresh=True: cần quyền maintenance mà SOAR không có (lỗi 403 làm mất bước đánh dấu này)
+        es.update_by_query(index=settings.IDX_ACTIONS, conflicts="proceed", query={"bool": {"filter": [
             {"term": {"agent_id": agent_id}}, {"term": {"type": "block_ip"}}, {"term": {"target": cur.get("target")}},
             {"term": {"reverted": False}}]}}, script={"source": "ctx._source.reverted = true", "lang": "painless"})
     return True

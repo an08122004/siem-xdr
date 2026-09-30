@@ -5,8 +5,25 @@ import time
 from .. import bus, settings, store
 from .cases import CasePlaybooks
 from .engine import Notifier, Soar, load_playbooks
+from .wazuh import Responder, WazuhAPI
 
 log = logging.getLogger("soar")
+
+
+class Every:
+    """Chạy fn mỗi `seconds` giây; lỗi chỉ ghi log, không làm dừng SOAR."""
+
+    def __init__(self, seconds: float, name: str, fn):
+        self.seconds, self.name, self.fn, self.last = seconds, name, fn, 0.0
+
+    def __call__(self) -> None:
+        if time.time() - self.last < self.seconds:
+            return
+        self.last = time.time()
+        try:
+            self.fn()
+        except Exception as e:  # noqa: BLE001
+            log.warning("%s lỗi: %s", self.name, e)
 
 
 def main() -> None:
@@ -19,20 +36,24 @@ def main() -> None:
         notifier=Notifier(settings.NOTIFY_WEBHOOK_URL, settings.TELEGRAM_BOT_TOKEN, settings.TELEGRAM_CHAT_ID),
         case_playbooks=CasePlaybooks(settings.CONFIG_DIR / "case_playbooks.yml"),
     )
-    log.info("SOAR sẵn sàng (auto_response=%s)", settings.SOAR_AUTO_RESPONSE)
-    last_hk = 0.0
+    tasks = [Every(30, "housekeeping", soar.housekeeping)]
+    if settings.WAZUH_API_PASSWORD:
+        responder = Responder(es, WazuhAPI(settings.WAZUH_API_URL, settings.WAZUH_API_USER,
+                                           settings.WAZUH_API_PASSWORD, settings.WAZUH_API_CA))
+        tasks += [Every(30, "đồng bộ agent từ Wazuh", responder.sync_agents),
+                  Every(2, "gửi lệnh qua Wazuh", responder.dispatch),
+                  Every(5, "nhận kết quả lệnh", responder.collect_results)]
+    else:
+        log.warning("chưa cấu hình WAZUH_API_PASSWORD: lệnh phản ứng chỉ được tạo, KHÔNG gửi xuống agent")
+    log.info("SOAR sẵn sàng (auto_response=%s, Wazuh API=%s)", settings.SOAR_AUTO_RESPONSE, settings.WAZUH_API_URL)
     for alert in bus.consume("siem-soar", [settings.TOPIC_ALERTS]):
         if alert is not None:
             try:
                 soar.handle(alert)
             except Exception:  # noqa: BLE001
                 log.exception("xử lý alert lỗi")
-        if time.time() - last_hk > 30:
-            try:
-                soar.housekeeping()
-            except Exception:  # noqa: BLE001
-                log.exception("housekeeping lỗi")
-            last_hk = time.time()
+        for t in tasks:
+            t()
 
 
 if __name__ == "__main__":

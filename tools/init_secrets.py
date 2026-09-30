@@ -15,9 +15,23 @@ NAMES = [
     "elastic_password",       # superuser Elasticsearch — chỉ dùng cho es-setup / khẩn cấp
     "manager_es_password", "analyzer_es_password", "soar_es_password",
     "grafana_es_password", "analyst_es_password", "ai_es_password", "grafana_admin_password",
-    "enrollment_key", "server_secret", "api_key",
+    "enrollment_key",         # mật khẩu enroll Wazuh agent (wazuh-manager: etc/authd.pass)
+    "api_key",                # API key dùng chung của SOC console (header X-API-Key)
+    "wazuh_api_password",     # user Wazuh API `siem-soar` (SOAR ra lệnh active response)
 ]
 ALPHABET = string.ascii_letters + string.digits  # không ký tự đặc biệt -> an toàn khi nhúng JSON/shell
+# Wazuh API bắt buộc mật khẩu có chữ thường, chữ hoa, số và ký tự đặc biệt -> thêm đủ 4 loại (ký tự an toàn với shell)
+NEEDS_SYMBOL = {"wazuh_api_password"}
+
+
+def generate(name: str) -> str:
+    value = [secrets.choice(ALPHABET) for _ in range(32)]
+    if name in NEEDS_SYMBOL:
+        extra = [secrets.choice(string.ascii_lowercase), secrets.choice(string.ascii_uppercase),
+                 secrets.choice(string.digits), secrets.choice("-._")]
+        for ch in extra:
+            value.insert(secrets.randbelow(len(value) + 1), ch)
+    return "".join(value)
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # console Windows mặc định cp1252
 out = Path(__file__).resolve().parent.parent / "secrets"
@@ -28,7 +42,7 @@ for name in NAMES:
     if p.exists() and not force:
         print(f"giữ nguyên  {p.name}")
         continue
-    p.write_text("".join(secrets.choice(ALPHABET) for _ in range(32)), encoding="utf-8")
+    p.write_text(generate(name), encoding="utf-8")
     try:
         p.chmod(0o600)
     except OSError:

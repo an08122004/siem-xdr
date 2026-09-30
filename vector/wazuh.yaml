@@ -1,0 +1,88 @@
+# Đưa dữ liệu của Wazuh manager vào pipeline siem-xdr (service wazuh-forwarder).
+#
+#   Wazuh agent --1514--> wazuh-manager --archives.json (MỌI event, đã giải mã)--> Vector --> Kafka siem.raw
+#                                       --alerts.json   (cảnh báo ruleset Wazuh)--> Vector --> Kafka siem.raw
+#
+# archives -> event_type "wazuh": analyzer chuẩn hóa, lưu vào siem-events-*, chạy rule của siem-xdr.
+# alerts   -> event_type "wazuh_alert": analyzer KHÔNG lưu lại (event đó đã có trong archives), chỉ chuyển
+#             cảnh báo của các nhóm rule Wazuh mà siem-xdr không tự viết (FIM, rootcheck, SCA...) thành alert.
+# Đọc file từ volume wazuh_logs (chỉ đọc), vị trí đã đọc lưu trong data_dir và chỉ tiến lên khi Kafka đã nhận.
+# Kiểm thử: vector test /etc/vector/wazuh.yaml /etc/vector/wazuh-tests.yaml
+
+data_dir: /var/lib/vector
+
+api:
+  enabled: true
+  address: 0.0.0.0:8686
+
+sources:
+  wazuh_archives:
+    type: file
+    include: [/wazuh-logs/archives/archives.json]
+    read_from: beginning        # file mới (sau khi Wazuh xoay vòng lúc nửa đêm) đọc từ đầu; file đã đọc thì theo checkpoint
+    max_line_bytes: 1048576     # event FIM có kèm diff nội dung file có thể dài
+
+  wazuh_alerts:
+    type: file
+    include: [/wazuh-logs/alerts/alerts.json]
+    read_from: beginning
+    max_line_bytes: 1048576
+
+transforms:
+  wazuh_event:
+    type: remap
+    inputs: [wazuh_archives]
+    drop_on_abort: true
+    source: |
+      parsed, err = parse_json(.message)
+      if err != null { abort }
+      ev = object(parsed) ?? {}
+      if ev == {} { abort }
+      . = {
+        "timestamp": ev.timestamp,
+        "agent_id": "wazuh-" + (string(ev.agent.id) ?? "000"),
+        "source": "wazuh",
+        "event_type": "wazuh",
+        "data": ev
+      }
+
+  wazuh_alert:
+    type: remap
+    inputs: [wazuh_alerts]
+    drop_on_abort: true
+    source: |
+      parsed, err = parse_json(.message)
+      if err != null { abort }
+      ev = object(parsed) ?? {}
+      if ev == {} { abort }
+      . = {
+        "timestamp": ev.timestamp,
+        "agent_id": "wazuh-" + (string(ev.agent.id) ?? "000"),
+        "source": "wazuh",
+        "event_type": "wazuh_alert",
+        "data": ev
+      }
+
+sinks:
+  kafka_raw:
+    type: kafka
+    inputs: [wazuh_event, wazuh_alert]
+    bootstrap_servers: kafka:9092
+    topic: siem.raw
+    key_field: agent_id               # cùng agent -> cùng partition (giữ thứ tự event của một máy)
+    encoding:
+      codec: json
+    compression: lz4
+    librdkafka_options:
+      linger.ms: "20"
+      acks: all
+      enable.idempotence: "true"
+    # Nguồn là FILE (vốn đã bền) nên không cần hàng đợi đĩa: acknowledgements bật -> Vector chỉ lưu vị trí đã đọc
+    # sau khi Kafka xác nhận, Kafka chết thì đọc lại từ vị trí cũ, không mất event. (Hàng đợi đĩa còn giữ event
+    # lúc lưu lượng thấp tới khi có event kế tiếp: đo được trễ 6-10 giây, làm lệnh kill tới sau khi tiến trình đã xong.)
+    acknowledgements:
+      enabled: true
+    buffer:
+      type: memory
+      max_events: 10000
+      when_full: block

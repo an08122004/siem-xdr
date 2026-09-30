@@ -4,77 +4,143 @@ Hệ thống SIEM + XDR cho môn GSANM, dựng theo kiến trúc trong `BTL/SIEM
 và danh mục tài sản `BTL/asset.txt`. Toàn bộ backend đóng gói bằng Docker.
 
 ```
- Endpoint / Server                       Backend (docker-compose)
- ┌───────────────────┐   HTTPS/JSON   ┌──────────┐   ┌─────────────────┐   ┌────────────┐   ┌──────────────┐   ┌─────────┐
- │ siem-agent (Go)   │ ─────────────▶ │ Manager  │──▶│ Kafka           │──▶│ Analyzer   │──▶│ Elasticsearch│──▶│ Grafana │
- │ file/eventlog/proc│ ◀── lệnh XDR ──│ API      │   │ (KRaft)         │   │ normalize  │   │ events/alerts│   └─────────┘
- └───────────────────┘                └──────────┘   │ siem.raw        │   │ enrich (TI)│   └──────────────┘
- ┌───────────────────┐   syslog 514   ┌──────────┐   │ siem.alerts     │   │ rules + ML │
- │ Firewall/Suricata │ ─────────────▶ │ Syslog   │──▶│                 │◀──┘            │
- └───────────────────┘                └──────────┘   └───────┬─────────┘                │
-                                                             ▼
-                                                     ┌──────────────┐  tạo lệnh block_ip / kill_process / isolate_host
-                                                     │ SOAR         │──────────────────────▶ Manager ──▶ Agent
-                                                     │ playbooks    │  notify (webhook/Telegram), create_case
-                                                     └──────────────┘
-                                                     ┌──────────────┐  chỉ đọc siem-*, ghi đề xuất vào ai-*
-                                                     │ AI worker    │◀──▶ Ollama (LLM nội bộ)
-                                                     │ (chỉ đề xuất)│  analyst duyệt trên console ─▶ Manager ghi rules/ai, rules/exceptions
-                                                     └──────────────┘
+ Endpoint / Server                        Backend (docker-compose)
+ ┌───────────────────┐  1514 AES      ┌───────────────┐ archives.json ┌─────────────────┐   ┌─────────────────┐   ┌────────────┐   ┌──────────────┐   ┌─────────┐
+ │ Wazuh agent 4.14.7│ ─────────────▶ │ wazuh-manager │ alerts.json ─▶│ wazuh-forwarder │──▶│ Kafka (KRaft)   │──▶│ Analyzer   │──▶│ Elasticsearch│──▶│ Grafana │
+ │ log, FIM, SCA,    │ 1515 enroll    │ (trạm thu,    │               │ (Vector)        │   │ siem.raw        │   │ normalize  │   │ events/alerts│   └─────────┘
+ │ rootcheck, kiểm kê│ ◀── active ────│ ruleset Wazuh)│               └─────────────────┘   │ siem.alerts     │   │ enrich (TI)│   └──────────────┘
+ └───────────────────┘    response    └───────▲───────┘                                     │                 │   │ rules + ML │
+ ┌───────────────────┐   syslog 514   ┌───────┼───────┐                                     │                 │   │ + cảnh báo │
+ │ Firewall/Suricata │ ─────────────▶ │ Syslog│(Vector)│───────────────────────────────────▶│                 │◀──│   Wazuh    │
+ └───────────────────┘                └───────┼───────┘                                     └───────┬─────────┘   └────────────┘
+                                              │ Wazuh API (55000, nội bộ)                           ▼
+                                              │  block_ip / kill_process / isolate_host   ┌──────────────┐
+                                              └──────────────────────────────────────────│ SOAR         │ notify (webhook/Telegram), create_case
+                                                                                          │ playbooks    │ đồng bộ danh sách agent từ Wazuh
+                                                                                          └──────────────┘
+                                                                                          ┌──────────────┐  chỉ đọc siem-*, ghi đề xuất vào ai-*
+                                                                                          │ AI worker    │◀──▶ Ollama (LLM nội bộ)
+                                                                                          │ (chỉ đề xuất)│  analyst duyệt trên console ─▶ Manager ghi rules/ai, rules/exceptions
+                                                                                          └──────────────┘
 ```
 
 | Thành phần | Công nghệ | Thư mục |
 |---|---|---|
-| Agent đa nền tảng (Windows/Linux) | Go, không dependency ngoài | `agent/` |
+| Agent đa nền tảng (Windows/Linux) | **Wazuh agent 4.14.7** (bộ cài chính thức) + script phản ứng `siem-xdr` | `wazuh/agent/`, `demo/web/` |
+| Trạm thu của agent | **Wazuh manager 4.14.7** (chỉ manager, không indexer/dashboard) | `wazuh/manager/` |
+| Chuyển dữ liệu Wazuh vào Kafka | **Vector** 0.58, end-to-end acknowledgement | `vector/wazuh.yaml` |
 | Manager API + SOC console | FastAPI | `server/siem/manager/` |
-| Syslog collector (UDP/TCP 514) | **Vector** 0.58 (Rust), hàng đợi trên đĩa | `vector/` (bản Python cũ `server/siem/collector/` chỉ giữ để đối chiếu) |
+| Syslog collector (UDP/TCP 514) | **Vector** 0.58 (Rust), hàng đợi trên đĩa | `vector/vector.yaml` (bản Python cũ `server/siem/collector/` chỉ giữ để đối chiếu) |
 | Message bus | Kafka 7.7 (Confluent) chế độ **KRaft**, không dùng ZooKeeper | `docker-compose.yml` |
 | Chuẩn hóa log (ECS rút gọn) + làm giàu | Python | `server/siem/pipeline/` |
-| Phân tích dựa trên luật | Rule engine YAML (match / threshold / sequence) | `server/siem/detection/rules.py`, `server/rules/` |
+| Phân tích dựa trên luật | Rule engine YAML (match / threshold / sequence) + cảnh báo chọn lọc từ ruleset Wazuh | `server/siem/detection/`, `server/rules/` |
 | Phân tích dựa trên ML (**tạm dừng**) | Isolation Forest (scikit-learn) | `server/siem/detection/ml.py` |
-| SOAR + quản lý case | Playbook tự động + case playbook NIST | `server/siem/soar/`, `server/config/playbooks.yml`, `server/config/case_playbooks.yml` |
+| SOAR + quản lý case | Playbook tự động + case playbook NIST, phản ứng qua Wazuh active response | `server/siem/soar/`, `server/config/playbooks.yml`, `server/config/case_playbooks.yml` |
 | AI hỗ trợ viết rule (chỉ đề xuất) | Ollama (`qwen2.5-coder:7b`) + kiểm định tự động + duyệt trên console | `server/siem/ai/`, `tools/fetch_datasets.py`, `tools/convert_datasets.py` |
-| Bảo mật nội bộ | TLS (CA nội bộ), RBAC Elasticsearch, Docker secrets + keystore | `security/setup.sh`, `tools/init_secrets.py` |
+| Bảo mật nội bộ | TLS (CA nội bộ), RBAC Elasticsearch + Wazuh API, Docker secrets + keystore | `security/setup.sh`, `tools/init_secrets.py`, `wazuh/manager/entrypoint/` |
 | Lưu trữ | Elasticsearch 8 (xpack security bật) | |
 | Trực quan hóa | Grafana 11 (dashboard được provision sẵn) | `grafana/` |
 
-## 1. Agent (`agent/`)
+## 1. Agent: Wazuh agent 4.14.7 (`wazuh/`)
 
-Phát triển tiếp từ `Wazuh/agent-core`, giữ nguyên thiết kế: collector → hàng đợi trên đĩa → sender (at-least-once, không mất event khi mất mạng hoặc agent crash).
+Endpoint dùng **Wazuh agent** chính thức, thay cho agent Go tự viết trước đây (thiếu FIM, SCA, rootcheck, kiểm kê,
+cấu hình tập trung, bộ cài chính thức). Agent kết nối tới **wazuh-manager** trong stack. Manager chỉ làm trạm thu:
+nhận event, chạy ruleset Wazuh, chuyển lệnh phản ứng xuống agent. Phân tích bằng rule riêng, lưu trữ, AI, SOAR và console
+vẫn là phần tự xây của siem-xdr. Không dùng Wazuh indexer, dashboard hay filebeat.
 
-**Collector**
-- `filetail`: tail file log trên mọi OS (Apache access/error, `auth.log`, Suricata `eve.json`, syslog). Lưu offset và xử lý log rotation.
-- `winevent`: đọc Windows Event Log bằng `wevtutil` (Security, System, Sysmon, PowerShell, Defender). Lưu bookmark theo channel.
-- `process`: phát hiện tiến trình mới trên Linux qua `/proc`.
-- `mock`: sinh dữ liệu giả để test.
+| Chức năng | Agent Go cũ | Wazuh agent |
+|---|---|---|
+| Đọc file log, Windows Event Log | có | có, kèm decoder của Wazuh |
+| Toàn vẹn file (FIM), registry Windows | không | có, theo thời gian thực, kèm diff nội dung |
+| Rootcheck (rootkit, trojan) | không | có |
+| SCA: chấm cấu hình theo CIS | không | có |
+| Kiểm kê: gói, cổng, tiến trình, phần cứng | không | có (syscollector) |
+| Cấu hình tập trung từ manager | không | có (`wazuh/manager/agent.conf`, nhóm `default`) |
+| Phản ứng: chặn IP, kill, cô lập | có | có, qua active response + script `siem-xdr` |
+| Kênh truyền | HTTPS + token HMAC | AES; enroll qua TLS + mật khẩu |
+| Bộ cài | tự build | MSI / DEB / RPM chính thức |
 
-**Response (XDR)**: agent định kỳ hỏi manager xem có lệnh mới không rồi thực thi:
-`block_ip`/`unblock_ip` (iptables / netsh advfirewall), `kill_process`, `isolate_host`/`unisolate_host`
-(chỉ giữ kết nối tới manager). Mọi tham số đều được validate và lệnh chạy không qua shell.
-Agent từ chối chặn IP của manager và từ chối kill tiến trình hệ thống.
-Bật `response.dry_run: true` nếu chỉ muốn ghi log lệnh mà không thực thi.
+| File | Vai trò |
+|---|---|
+| `wazuh/manager/ossec.conf` | Cấu hình manager: ghi mọi event ra `archives.json` (`logall_json`), enroll bắt buộc mật khẩu, tắt module giám sát chính container manager, tắt vulnerability detection (từ 4.8 cần Wazuh indexer) |
+| `wazuh/manager/agent.conf` | Cấu hình chung đẩy xuống mọi agent: Windows đọc Sysmon / PowerShell / Defender, FIM thư mục Startup và khóa Run; Linux đọc log Apache, FIM `/var/www`, `/etc/ssh`, cron |
+| `wazuh/manager/local_rules.xml` | Rule Wazuh riêng: file mới / bị sửa trong thư mục web lên level 10 (có thể là webshell, T1505.003) |
+| `wazuh/manager/entrypoint/` | Chạy mỗi lần manager khởi động: mật khẩu enroll lấy từ Docker secret, chứng chỉ Wazuh API do CA nội bộ ký, user API `siem-soar` quyền tối thiểu, khóa 2 user mặc định `wazuh` / `wazuh-wui`, tắt filebeat |
+| `vector/wazuh.yaml` | Đưa `archives.json` (mọi event) và `alerts.json` (cảnh báo ruleset Wazuh) vào Kafka `siem.raw` |
+| `wazuh/agent/linux/siem-xdr`, `wazuh/agent/windows/siem-xdr.cmd` + `.ps1` | Script phản ứng trên agent |
+| `wazuh/agent/linux/siem-procs` | Telemetry tiến trình mới mỗi giây cho máy không có auditd (rule LNX-*) |
 
-**Bảo mật kênh**: agent enroll bằng `enrollment_key`, nhận token HMAC riêng theo `agent_id`.
-Server ghi đè `agent_id` trong payload bằng danh tính đã xác thực, nên agent không giả mạo được agent khác.
+**Cài agent.** Phiên bản agent phải ≤ manager (4.14.7). Mật khẩu enroll là nội dung `secrets/enrollment_key`.
+Máy agent cần tới được cổng 1514 và 1515 của máy chạy docker. Tên agent phải khớp `hostname` trong
+`server/config/assets.yml` để event được gắn đúng tài sản.
 
-```bash
-cd agent
-go test ./...
-GOOS=linux   GOARCH=amd64 go build -o bin/siem-agent     ./cmd/agent
-GOOS=windows GOARCH=amd64 go build -o bin/siem-agent.exe ./cmd/agent
-```
-- Linux (S001 Web-01, A003 Ubuntu-01): sửa `config.linux.yaml` (IP manager, key) rồi chạy `sudo ./siem-agent -config config.linux.yaml`
-- Windows (A001 PC-01): sửa `config.windows.yaml`, mở PowerShell **Administrator**, chạy `.\siem-agent.exe -config config.windows.yaml`.
-  Nên cài Sysmon để có telemetry process/network.
+- Windows (A001 PC-01). Bộ cài có sẵn ở `BTL/Wazuh/wazuh-agent-4.14.7-1.msi`. Mở PowerShell **Administrator**:
+  ```powershell
+  msiexec.exe /i wazuh-agent-4.14.7-1.msi /q WAZUH_MANAGER="<IP máy docker>" WAZUH_AGENT_NAME="PC-01" WAZUH_REGISTRATION_PASSWORD="<secrets\enrollment_key>"
+  Copy-Item wazuh\agent\windows\siem-xdr.* "C:\Program Files (x86)\ossec-agent\active-response\bin\"
+  NET START WazuhSvc
+  ```
+  Nên cài Sysmon (manager đã đẩy sẵn cấu hình đọc kênh Sysmon). Nếu không có Sysmon thì bật audit *Process Creation* (event 4688).
+- Ubuntu (A003 Ubuntu-01, S001 Web-01):
+  ```bash
+  curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH | sudo gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import
+  sudo chmod 644 /usr/share/keyrings/wazuh.gpg
+  echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" | sudo tee /etc/apt/sources.list.d/wazuh.list
+  sudo apt-get update
+  sudo WAZUH_MANAGER="<IP máy docker>" WAZUH_AGENT_NAME="Ubuntu-01" WAZUH_REGISTRATION_PASSWORD="<secrets/enrollment_key>" apt-get install wazuh-agent=4.14.7-1
+  sudo install -m 750 -o root -g wazuh wazuh/agent/linux/siem-xdr /var/ossec/active-response/bin/
+  sudo systemctl enable --now wazuh-agent
+  ```
+  Telemetry tiến trình: dùng auditd (rule `execve`, Wazuh đọc `/var/log/audit/audit.log` với `log_format audit`),
+  hoặc thêm `siem-procs` như máy demo. auditd không ghi tên tiến trình cha, nên rule LNX-002 (web server sinh shell) cần `siem-procs`.
+- Máy web demo: image `demo/web/` cài sẵn agent, script và cấu hình (`demo/web/wazuh-agent.conf`), enroll tự động với tên `demo-web`.
+
+Kiểm tra agent: `docker compose exec wazuh-manager /var/ossec/bin/agent_control -l`, hoặc tab *Agent* trên console
+(SOAR đồng bộ từ Wazuh API mỗi 30 giây). `agent.id` trong event và alert là **ID Wazuh** (`001`...), `host.name` là tên agent.
+
+**Phản ứng (XDR).** SOAR hoặc analyst tạo lệnh. SOAR gọi Wazuh API
+`PUT /active-response {"command": "!siem-xdr", "arguments": [loại, đích, id lệnh]}` (Windows dùng `siem-xdr.cmd`).
+Agent chạy script `siem-xdr` bằng quyền root/SYSTEM:
+
+| Lệnh | Linux | Windows |
+|---|---|---|
+| `block_ip` / `unblock_ip` | iptables / ip6tables, chain INPUT | Windows Firewall, rule chặn chiều vào |
+| `kill_process` (PID hoặc tên) | kill cả cây tiến trình | kill cả cây tiến trình |
+| `isolate_host` / `unisolate_host` | chain riêng: chỉ cho phép loopback và IP wazuh-manager | rule chặn dải bù của IP manager (trong Windows Firewall rule chặn luôn thắng rule cho phép) |
+
+Script kiểm tra chặt tham số: không chặn loopback hay IP manager, không kill PID 1 hay tiến trình của Wazuh / hệ thống.
+Kết quả được ghi vào `active-responses.log`, agent gửi dòng đó về như log thường, và SOAR khớp theo ID lệnh để đánh dấu
+`success` / `failed`. Agent chỉ báo được kết quả cho lệnh của chính nó. Active response của Wazuh là "gửi rồi quên" (API chỉ xác nhận
+đã chuyển lệnh), nên đây là cách duy nhất biết lệnh có chạy thật hay không. Lệnh `sent` quá 10 phút chuyển sang `timeout`.
+
+**Kết quả chạy thử end-to-end** (28/9/2026, máy `demo-web`):
+
+| Kịch bản | Kết quả |
+|---|---|
+| SQL injection `?id=1 union select ...` | WEB-001 → SOAR `block_ip` → agent chặn `172.18.0.1` bằng iptables, báo `success`. Máy host không truy cập được web. Gỡ chặn thủ công từ console cũng đi qua Wazuh. |
+| Command injection `ping.cgi?host=127.0.0.1;sleep 15` | `siem-procs` thấy `sh` có cha `httpd` → LNX-002 → kill cả cây tiến trình. Request kết thúc sau 5,7 giây thay vì 15. Agent báo `đã kill PID 947 (sh) và 1 tiến trình con`. |
+| Tải webshell `htdocs/shell.php`, sửa `index.html` | FIM thời gian thực → rule 100100 / 100101 (level 10) → alert `WZH-100100` / `WZH-100101` (high, T1505.003) → thông báo + case PB-08. |
+| Cô lập máy (thủ công) | Web không truy cập được. Agent vẫn `Active` với manager, nhận và chạy được lệnh bỏ cô lập. |
+| Độ trễ agent → Kafka | Khoảng 2 giây. Bản đầu dùng hàng đợi đĩa của Vector: event bị giữ tới khi có event kế tiếp (6–10 giây), lệnh kill tới khi tiến trình đã chạy xong. Đã thay bằng end-to-end acknowledgement. |
+| SCA máy demo | 207 kết quả CIS Debian, 83 mục không đạt. Không chuyển thành alert (xem mục 3). |
+
+**Giới hạn**:
+- Script Windows (`siem-xdr.ps1`) chưa chạy thử trên máy thật: máy lab hiện không có quyền Administrator.
+- Vulnerability detection của Wazuh (từ 4.8) cần Wazuh indexer nên đang tắt.
+- Tiến trình sống ngắn hơn khoảng 1 giây có thể lọt khỏi `siem-procs`.
+- Rootcheck / SCA trên container demo chấm chính container, nên có nhiều mục không đạt.
+- Agent Go cũ đã được gỡ khỏi repo. Mã vẫn còn trong lịch sử git (commit `32897dc`) và nhánh `worktree-agent-hardening`.
 
 ## 2. Backend
 
 ```bash
 python tools/init_secrets.py   # sinh mật khẩu/key ngẫu nhiên vào secrets/ (chỉ lần đầu)
-cp .env.example .env           # cấu hình không bí mật; đặt MANAGER_TLS_IPS nếu agent ở máy khác
+cp .env.example .env           # cấu hình không bí mật
 docker compose up -d --build
-docker compose ps              # es-setup phải Exited (0); kafka, elasticsearch healthy
+docker compose ps              # es-setup phải Exited (0); kafka, elasticsearch, wazuh-manager healthy
 ```
+Hệ thống đã chạy từ trước thì chạy lại `python tools/init_secrets.py` (sinh thêm `wazuh_api_password`),
+rồi `docker compose up -d --force-recreate es-certs es-setup` để sinh chứng chỉ Wazuh API và cập nhật quyền RBAC.
 Phần AI (`--profile ai`, xem mục 5) và máy web demo (`--profile demo`, xem bên dưới) nằm trong profile riêng, không chạy mặc định.
 
 | URL | Dùng để | Đăng nhập |
@@ -85,6 +151,7 @@ Phần AI (`--profile ai`, xem mục 5) và máy web demo (`--profile demo`, xem
 | http://127.0.0.1:8088 | Kafka UI (chỉ từ máy chạy docker) | |
 | https://127.0.0.1:9200 | Elasticsearch (chỉ từ máy chạy docker) | `analyst` / `secrets/analyst_es_password` (chỉ đọc) |
 | UDP/TCP 514 | Syslog từ firewall F001 / Suricata | |
+| TCP 1514, 1515 | Wazuh agent gửi event (AES) / enroll (TLS) | mật khẩu enroll: `secrets/enrollment_key` |
 
 **Kafka chạy KRaft** (Kafka tự quản lý metadata, không cần ZooKeeper): 1 node vừa là broker vừa là controller,
 controller dùng listener riêng `CONTROLLER:9093` chỉ trong mạng nội bộ. Dữ liệu nằm ở volume `kafkadata`, `CLUSTER_ID` cố định
@@ -101,10 +168,10 @@ docker compose cp elasticsearch:/usr/share/elasticsearch/config/certs/ca/ca.crt 
 ```
 Trên Windows, lệnh `curl` (Schannel) cần thêm `--ssl-no-revoke --cacert ca.crt`, vì CA nội bộ không có danh sách thu hồi (CRL).
 
-**Máy web demo**: `docker compose --profile demo up -d --build demo-web` dựng thêm Apache kèm agent tại
+**Máy web demo**: `docker compose --profile demo up -d --build demo-web` dựng thêm Apache kèm Wazuh agent tại
 http://localhost:8081. Truy cập trang này sẽ sinh log thật đi qua toàn bộ pipeline.
 Trang `/cgi-bin/ping.cgi` **cố ý có lỗ hổng command injection** để kiểm tra rule LNX-002 và lệnh kill/chặn IP.
-Chỉ chạy máy này trong lab cô lập.
+Tạo file trong `/usr/local/apache2/htdocs` để thử FIM. Chỉ chạy máy này trong lab cô lập.
 
 **Firewall F001**: cấu hình remote syslog trỏ về `<IP máy docker>:514`, **ưu tiên TCP** nếu thiết bị hỗ trợ (xem bảng đánh giá bên dưới).
 Hệ thống parse được iptables/UFW, pfSense/OPNsense filterlog và Suricata eve (JSON qua syslog).
@@ -187,6 +254,15 @@ model bắt được tấn công nhưng **báo nhầm khoảng 32%** lưu lượ
 Nguyên nhân chính: baseline tổng hợp và một model chung cho mọi nguồn. Code được giữ lại trong `server/siem/detection/ml.py`.
 Trước khi bật lại cần: giai đoạn học trên dữ liệu thật, tách model theo nguồn, hiệu chỉnh ngưỡng, chống lặp alert.
 
+**Cảnh báo từ ruleset Wazuh** (`server/siem/detection/wazuh.py`): rule của siem-xdr chạy trên MỌI event lấy từ
+`archives.json`. Ruleset Wazuh (hơn 3.000 rule) phần lớn trùng việc với rule tự viết (web, SSH, đăng nhập Windows...), nên
+không chuyển hết sang để tránh mỗi sự cố thành 2 alert. Chỉ lấy cảnh báo trong `alerts.json` thuộc các nhóm siem-xdr không
+có rule tương đương (`WAZUH_ALERT_GROUPS`, mặc định `syscheck`, `rootcheck`, `vulnerability-detector`, `virustotal`, `yara`) từ level 7,
+cộng mọi cảnh báo level ≥ 12. Alert có `rule.id = WZH-<id rule Wazuh>`, `alert.source = wazuh`. Level ánh xạ sang severity:
+7–9 medium, 10–11 high, ≥ 12 critical. Kết quả SCA (CIS) KHÔNG chuyển thành alert: máy demo có 83 mục không đạt ngay khi khởi động,
+và đó là đánh giá cấu hình, không phải sự cố. Xem SCA trong event `event.module: sca`.
+Rule Wazuh riêng đặt ở `wazuh/manager/local_rules.xml` (ID từ 100000).
+
 **Làm giàu**: Threat Intel (`server/config/intel/*.txt`: IP/CIDR, domain, hash, tự nạp lại khi file đổi),
 tài sản (`server/config/assets.yml`, lấy từ `asset.txt`) dùng để tính `risk_score` theo mức quan trọng của tài sản.
 
@@ -194,8 +270,13 @@ tài sản (`server/config/assets.yml`, lấy từ `asset.txt`) dùng để tín
 
 **Phản ứng tự động** (`server/config/playbooks.yml`): ví dụ AUTH-001 → chặn IP trên **mọi** agent trong 1 giờ, gửi thông báo, tạo case.
 AUTH-002 → chặn 24 giờ, còn cô lập máy thì chờ analyst duyệt (`approval: true`).
-SOAR tự tạo lệnh gỡ chặn khi hết hạn, bỏ qua IP trong `SOAR_WHITELIST` và không chặn trùng.
+SOAR tự tạo lệnh gỡ chặn khi hết hạn, bỏ qua IP trong `SOAR_WHITELIST` và không chặn trùng. "Đang chặn" chỉ tính lệnh đang chờ
+agent, lệnh còn hạn, hoặc lệnh thành công trong 10 phút gần đây. Luật iptables trên agent mất khi máy/container khởi động lại, nên
+bản ghi chặn cũ không có hạn không được tin (lỗi E2E 30/9: SOAR bỏ qua kẻ tấn công vì tưởng IP đã bị chặn). Chặn lại cũng an toàn,
+vì script kiểm tra luật trước khi thêm.
 Đặt `SOAR_AUTO_RESPONSE=false` nếu chỉ muốn thông báo và tạo case.
+Lệnh (của playbook hoặc analyst tạo trên console) được SOAR gửi xuống agent qua Wazuh API mỗi 2 giây,
+kết quả thật lấy từ log agent gửi về (xem mục 1). Cảnh báo `WZH-*` từ ruleset Wazuh (FIM, rootcheck...) được thông báo và mở case PB-08.
 
 **Case playbook** (`server/config/case_playbooks.yml`): khi tạo case, SOAR gắn quy trình xử lý sự cố phù hợp theo `rule.id`.
 Mỗi playbook là checklist task theo 5 giai đoạn của NIST SP 800-61 (Phát hiện & phân tích → Ngăn chặn → Loại bỏ → Khôi phục → Rút kinh nghiệm).
@@ -209,6 +290,7 @@ Mỗi playbook là checklist task theo 5 giai đoạn của NIST SP 800-61 (Phá
 | PB-05 Trinh sát / quét mạng | NET-001..003, NET-005 |
 | PB-06 Kết nối tới IOC | TI-001 |
 | PB-07 Xóa dấu vết / nghi ngờ ransomware | WIN-002, WIN-010 |
+| PB-08 Thay đổi file trái phép / rootkit / cấu hình yếu | WZH-* (cảnh báo ruleset Wazuh) |
 | PB-00 Điều tra chung | mọi rule còn lại |
 
 - **Ưu tiên và hạn triage (SLA)** theo severity: critical = P1 / 15 phút, high = P2 / 1 giờ, medium = P3 / 8 giờ, low = P4 / 24 giờ.
@@ -342,8 +424,8 @@ Các biến cấu hình `AI_*` nằm trong `.env.example`.
 
 ```bash
 cd server && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt pytest httpx
-.venv/Scripts/python -m pytest -q      # 50 test: parser, rule, ML, SOAR, case playbook, API, AI (phân loại tấn công, biến thể, kiểm định, worker với LLM giả, duyệt/gỡ)
-cd ../agent && go test ./...
+.venv/Scripts/python -m pytest -q      # 69 test: parser, rule, ML, SOAR, case playbook, API, AI, Wazuh
+cd .. && docker run --rm -v ./vector:/etc/vector:ro timberio/vector:0.58.0-alpine test /etc/vector/wazuh.yaml /etc/vector/wazuh-tests.yaml
 ```
 Sinh lại dashboard Grafana: `python tools/gen_dashboard.py`.
 
@@ -351,7 +433,9 @@ Sinh lại dashboard Grafana: `python tools/gen_dashboard.py`.
 
 | Lớp | Cách làm |
 |---|---|
-| **TLS** | `es-setup` sinh CA nội bộ và chứng chỉ cho `elasticsearch` và `manager`. Elasticsearch bật TLS cho HTTP và transport. Manager API chạy HTTPS. Agent, Grafana và các service Python đều **xác thực chứng chỉ bằng CA** (không dùng `insecure`). |
+| **TLS** | `es-certs` sinh CA nội bộ và chứng chỉ cho `elasticsearch`, `manager` và `wazuh-manager` (Wazuh API). Elasticsearch bật TLS cho HTTP và transport. Manager API và Wazuh API chạy HTTPS. Grafana và các service Python (kể cả SOAR khi gọi Wazuh API) đều **xác thực chứng chỉ bằng CA** (không dùng `insecure`). |
+| **Kênh agent** | Wazuh agent mã hóa event bằng AES với khóa riêng từng agent. Enroll (1515) qua TLS và **bắt buộc mật khẩu** (`secrets/enrollment_key`, manager chép vào `etc/authd.pass` mỗi lần khởi động). |
+| **Wazuh API** | Không publish cổng 55000. SOAR dùng user `siem-soar` chỉ có 2 quyền: `active-response:command` và `agent:read` (đọc rule hay sửa cấu hình → 403). Hai user mặc định `wazuh` / `wazuh-wui` (mật khẩu mặc định công khai) bị đổi sang mật khẩu ngẫu nhiên mỗi lần khởi động. |
 | **RBAC** | Mỗi service có một user Elasticsearch với quyền tối thiểu (bảng dưới). Superuser `elastic` chỉ dùng trong `es-setup` và khi khẩn cấp. |
 | **Bí mật** | `tools/init_secrets.py` sinh ngẫu nhiên vào `secrets/` (đã gitignore). Mỗi service chỉ được mount **đúng** secret nó cần qua Docker secrets (`/run/secrets/...`), không có bí mật trong `.env`, biến môi trường hay compose. Mật khẩu `elastic` được Elasticsearch ghi vào **keystore** (`bootstrap.password`). |
 | **Khóa riêng** | Khóa CA chỉ root đọc được. Khóa của ES và manager chỉ uid của service tương ứng đọc được. Các container khác chỉ mount thư mục `ca/` (chứng chỉ công khai). |
@@ -359,22 +443,22 @@ Sinh lại dashboard Grafana: `python tools/gen_dashboard.py`.
 
 | User Elasticsearch | Role | Quyền |
 |---|---|---|
-| `siem_manager` | siem_manager | đọc/ghi `siem-agents`, `siem-actions`, `siem-alerts`, `siem-cases`, `ai-*`; chỉ đọc `siem-events-*` |
+| `siem_manager` | siem_manager | đọc/ghi `siem-actions`, `siem-alerts`, `siem-cases`, `ai-*`; chỉ đọc `siem-events-*`, `siem-agents` |
 | `siem_analyzer` | siem_analyzer | chỉ ghi `siem-events-*`, `siem-alerts` (không đọc được action/case) |
-| `siem_soar` | siem_soar | đọc/ghi `siem-alerts`, `siem-actions`, `siem-cases`; chỉ đọc `siem-agents` |
+| `siem_soar` | siem_soar | đọc/ghi `siem-alerts`, `siem-actions`, `siem-cases`, `siem-agents` (đồng bộ từ Wazuh); chỉ đọc `siem-events-*` (kết quả lệnh) |
 | `siem_ai` | siem_ai | chỉ đọc `siem-events-*`, `siem-alerts`, `siem-cases`; đọc/ghi `ai-*` |
 | `grafana`, `analyst` | siem_reader | chỉ đọc `siem-*` |
 
 Đã kiểm chứng khi chạy: truy cập không có tài khoản → 401; `analyst` ghi/xóa → 403; `siem_analyzer` đọc `siem-actions` → 403;
 `siem_manager` gọi API quản trị user → 403; HTTP thường tới ES/manager bị từ chối.
 
-**Agent ở máy khác**:
-1. Đặt `MANAGER_TLS_IPS=<IP máy docker>` trong `.env`, rồi xóa volume `certs` để sinh lại chứng chỉ.
-2. Copy `ca.crt` sang máy agent và khai báo `server.ca_file` trong config agent.
-3. Có thể đặt enrollment key qua `SIEM_ENROLLMENT_KEY_FILE` thay vì ghi trong config.
+**Agent ở máy khác**: mở cổng 1514, 1515 của máy chạy docker cho dải IP của endpoint, rồi cài agent theo mục 1.
+Truy cập console từ máy khác thì đặt `MANAGER_TLS_IPS=<IP máy docker>` trong `.env` và xóa volume `certs` để sinh lại chứng chỉ.
 
 **Giới hạn còn lại**:
 - Kafka chạy plaintext trong mạng docker nội bộ.
 - Console dùng một API key chung, còn tên analyst là do người dùng tự khai (chưa có đăng nhập theo từng người).
 - Đổi `elastic_password` sau lần chạy đầu phải đổi qua API của ES, hoặc xóa volume `esdata`.
 - Ollama gọi qua HTTP thường trong mạng docker nội bộ (không publish cổng ra ngoài).
+- Agent chưa kiểm tra chứng chỉ của wazuh-manager khi enroll (tùy chọn `server_ca_path` của Wazuh). Mật khẩu enroll lộ thì
+  máy lạ enroll được agent giả, nhưng agent giả chỉ gửi được dữ liệu dưới tên của chính nó, không nhận hay báo kết quả lệnh của máy khác.

@@ -184,6 +184,30 @@ playbooks:
         tasks:
           - Cập nhật feed threat intel
 
+  - id: PB-08
+    name: Thay đổi file trái phép / rootkit / cấu hình yếu (Wazuh FIM, rootcheck, SCA)
+    match: ["WZH-*"]
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - Xem file / khóa registry bị đổi, thời điểm, người và tiến trình sửa (file.path, user.name, process.name)
+          - Đối chiếu lịch bảo trì / cập nhật phần mềm - thay đổi có được phép không?
+          - Với file web (/var/www, htdocs, cgi-bin) - kiểm tra có phải webshell (nội dung diff trong event gốc)
+      - name: Ngăn chặn
+        tasks:
+          - {title: Nếu là webshell / backdoor - cô lập máy (isolate_host trên console), approval: Trưởng nhóm IR}
+          - Chặn IP đã tải file lên (tra access log quanh thời điểm thay đổi)
+      - name: Loại bỏ
+        tasks:
+          - Khôi phục file từ bản sao lưu sạch, xóa file lạ
+          - Rootcheck / SCA - sửa cấu hình theo khuyến nghị trong event (sca.check.title)
+      - name: Khôi phục
+        tasks:
+          - Theo dõi FIM trên máy này 7 ngày
+      - name: Rút kinh nghiệm
+        tasks:
+          - Thêm thư mục quan trọng còn thiếu vào FIM (wazuh/manager/agent.conf)
+
   - id: PB-00
     name: Điều tra chung
     match: ["*"]

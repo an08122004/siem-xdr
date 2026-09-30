@@ -1,13 +1,16 @@
-"""Chuẩn hóa (normalize) event thô từ agent/syslog về lược đồ chung kiểu ECS
-(Elastic Common Schema rút gọn) để rule, ML và dashboard dùng chung tên trường:
+"""Chuẩn hóa (normalize) event thô về lược đồ chung kiểu ECS (Elastic Common Schema rút gọn)
+để rule, ML và dashboard dùng chung tên trường:
 
     @timestamp, event.{category,type,action,outcome,code,dataset,module},
     agent.*, host.name, source.{ip,port}, destination.{ip,port}, user.name,
     process.{pid,name,executable,command_line,parent.name}, url.*, http.*,
     user_agent.original, network.*, dns.question.name, file.path, message ...
 
-Event thô (do agent gửi):
-    {"timestamp", "agent_id", "hostname", "os", "source", "event_type", "data": {...}}
+Event thô: {"timestamp", "agent_id", "hostname", "os", "source", "event_type", "data": {...}}
+  - event_type wazuh / wazuh_alert: event của Wazuh manager (data = 1 dòng archives.json / alerts.json)
+  - event_type syslog: dòng syslog do Vector nhận (firewall, Suricata...)
+  - apache_access, windows_event, process_creation...: định dạng nội bộ, dataset công khai
+    (tools/convert_datasets.py) và unit test dùng; parser Wazuh cũng chuyển dòng log gốc qua các parser này
 """
 from __future__ import annotations
 
@@ -540,6 +543,175 @@ def parse_mock(data: Doc, doc: Doc) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Wazuh (archives.json / alerts.json của wazuh-manager, Vector đưa vào Kafka)
+# ---------------------------------------------------------------------------
+# Event Wazuh: {"timestamp", "agent": {id, name, ip}, "full_log" (dòng log gốc), "location" (file / kênh nguồn),
+#   "decoder": {name}, "data": {...trường đã giải mã...}, "rule": {...} (nếu khớp rule Wazuh), "syscheck": {...} (FIM)}.
+# Dòng log gốc (Apache, auth.log, Suricata...) được đưa qua ĐÚNG parser đã có ở trên, nên rule của siem-xdr
+# chạy y như trước. Windows: data.win (eventdata dạng camelCase) được đổi về dạng parse_windows đang đọc.
+
+_WAZUH_TS = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?)\d*([+-]\d\d):?(\d\d)$")
+_ACCESS_LOC = re.compile(r"access[._]log", re.I)
+_ERROR_LOC = re.compile(r"error[._]log", re.I)
+_AUTH_LOC = re.compile(r"/(auth\.log|secure)$")
+# dòng do script của siem-xdr cài trên agent in ra (wazuh/agent/linux/)
+_SIEM_PROC = re.compile(r"siem-proc: pid=(?P<pid>\d+) ppid=(?P<ppid>\d+) uid=(?P<uid>\d*) name=(?P<name>\S*) "
+                        r"parent=(?P<parent>\S*) exe=(?P<exe>\S*) cmd=(?P<cmd>.*)$")
+_SIEM_XDR = re.compile(r"siem-xdr: action=(?P<id>[0-9a-f]{8,64}) type=(?P<type>[a-z_]+) target=(?P<target>\S*) "
+                       r"status=(?P<status>success|failed)(?: detail=(?P<detail>.*))?$")
+_FIM_EVENTS = {"added": ("creation", "file_created"), "modified": ("change", "file_modified"),
+               "deleted": ("deletion", "file_deleted")}
+
+
+def _wazuh_ts(ts: Any) -> str | None:
+    m = _WAZUH_TS.match(str(ts or ""))
+    if not m:
+        return None
+    try:
+        return _iso(datetime.fromisoformat(f"{m[1]}{m[2]}:{m[3]}"))
+    except ValueError:
+        return None
+
+
+def parse_wazuh(ev: Doc, doc: Doc) -> None:
+    ag = ev.get("agent") if isinstance(ev.get("agent"), dict) else {}
+    if ev.get("id"):
+        # id của Wazuh (duy nhất trên manager) -> đọc lại không tạo bản ghi trùng; archives và alerts cùng 1 event
+        doc["event"]["id"] = f"wazuh-{ag.get('id', '000')}-{ev['id']}"
+    doc["agent"] = {k: v for k, v in {"id": ag.get("id"), "name": ag.get("name"), "hostname": ag.get("name"),
+                                      "ip": ag.get("ip"), "type": "wazuh"}.items() if v}
+    put(doc, "host.name", ag.get("name"))
+    put(doc, "@timestamp", _wazuh_ts(ev.get("timestamp")))
+    loc = str(ev.get("location") or "")
+    full = ev["full_log"] if isinstance(ev.get("full_log"), str) else ""
+    decoder = str((ev.get("decoder") or {}).get("name") or "")
+    data = ev["data"] if isinstance(ev.get("data"), dict) else {}
+    wz: Doc = {"id": ev.get("id"), "location": loc, "decoder": decoder, "manager": (ev.get("manager") or {}).get("name")}
+    rule = ev.get("rule")
+    if isinstance(rule, dict):
+        wz["rule"] = {k: rule[k] for k in ("id", "level", "description", "groups", "mitre", "firedtimes") if k in rule}
+    doc["wazuh"] = {k: v for k, v in wz.items() if v not in (None, "")}
+    if loc.startswith("/") or re.match(r"^[A-Za-z]:\\", loc):
+        put(doc, "log.file.path", loc)
+    put(doc, "event.module", "wazuh")
+
+    if isinstance(ev.get("syscheck"), dict):
+        _wazuh_fim(ev["syscheck"], doc)
+    elif isinstance(data.get("win"), dict):
+        _wazuh_windows(data["win"], doc, ag.get("name"))
+    elif full and (m := _SIEM_XDR.search(full)):
+        _wazuh_response(m, doc)
+    elif full and (m := _SIEM_PROC.search(full)):
+        parse_process({"pid": m["pid"], "ppid": m["ppid"], "uid": m["uid"], "name": m["name"], "executable": m["exe"],
+                       "command_line": m["cmd"], "parent_name": m["parent"]}, doc)
+    elif isinstance(data.get("audit"), dict) and _wazuh_audit(data["audit"], doc):
+        pass
+    elif isinstance(data.get("sca"), dict):
+        _wazuh_sca(data["sca"], doc, full)
+    elif loc == "rootcheck":
+        put(doc, "event.module", "rootcheck")
+        put(doc, "event.category", "intrusion_detection")
+        put(doc, "event.type", "info")
+        put(doc, "event.action", "rootcheck")
+        put(doc, "message", full)
+    elif full:
+        put(doc, "message", full)
+        if decoder == "web-accesslog" or _ACCESS_LOC.search(loc):
+            parse_apache_access(full, doc)
+        elif decoder.startswith("apache") or _ERROR_LOC.search(loc):
+            parse_apache_error(full, doc)
+        elif loc.endswith("eve.json"):
+            parse_suricata(full, doc)
+        elif _AUTH_LOC.search(loc):
+            parse_auth_file(full, doc)
+        else:
+            parse_syslog(full, doc)
+    else:
+        put(doc, "message", (rule or {}).get("description") or json.dumps(data, ensure_ascii=False)[:2000])
+
+
+def _wazuh_fim(sc: Doc, doc: Doc) -> None:
+    typ, action = _FIM_EVENTS.get(str(sc.get("event")), ("change", "file_changed"))
+    path = str(sc.get("path") or "")
+    registry = path.upper().startswith("HKEY_")
+    put(doc, "event.module", "fim")
+    put(doc, "event.category", "registry" if registry else "file")
+    put(doc, "event.type", typ)
+    put(doc, "event.action", action.replace("file_", "registry_") if registry else action)
+    if registry:
+        put(doc, "registry.path", path)
+        put(doc, "registry.value", sc.get("value_name"))
+    else:
+        put(doc, "file.path", path)
+        put(doc, "file.name", _basename(path))
+        put(doc, "file.size", _int(sc.get("size_after")))
+        put(doc, "file.mode", sc.get("perm_after") if isinstance(sc.get("perm_after"), str) else None)
+        put(doc, "file.owner", sc.get("uname_after"))
+        put(doc, "file.hash.md5", sc.get("md5_after"))
+        put(doc, "file.hash.sha256", sc.get("sha256_after"))
+    put(doc, "file.changed_attributes", sc.get("changed_attributes"))
+    who = sc.get("audit") if isinstance(sc.get("audit"), dict) else {}      # chế độ whodata: ai / tiến trình nào sửa
+    put(doc, "user.name", (who.get("user") or {}).get("name"))
+    proc = who.get("process") if isinstance(who.get("process"), dict) else {}
+    put(doc, "process.executable", proc.get("name"))
+    put(doc, "process.name", _basename(proc.get("name")))
+    put(doc, "process.pid", _int(proc.get("id")))
+    put(doc, "message", f"FIM {sc.get('event', 'changed')}: {path}")
+
+
+def _wazuh_windows(win: Doc, doc: Doc, agent_name: Any) -> None:
+    sysd = win.get("system") if isinstance(win.get("system"), dict) else {}
+    ed = win.get("eventdata") if isinstance(win.get("eventdata"), dict) else {}
+    fields = {k[:1].upper() + k[1:]: v for k, v in ed.items() if isinstance(k, str) and k}   # targetUserName -> TargetUserName
+    parse_windows({"event_id": sysd.get("eventID"), "channel": sysd.get("channel"), "provider": sysd.get("providerName"),
+                   "computer": sysd.get("computer"), "record_id": sysd.get("eventRecordID"), "fields": fields}, doc)
+    put(doc, "winlog.computer_name", sysd.get("computer"))
+    put(doc, "host.name", agent_name)   # tên agent (khớp assets.yml), không phải FQDN của computer
+    if isinstance(sysd.get("message"), str):
+        put(doc, "message", sysd["message"].strip('"'))
+
+
+def _wazuh_audit(audit: Doc, doc: Doc) -> bool:
+    """auditd (Linux thật, log_format audit): EXECVE / SYSCALL execve -> tiến trình mới.
+    auditd không ghi tên tiến trình cha, nên rule cần process.parent.name (LNX-002) không bắt được từ nguồn này."""
+    execve = audit.get("execve") if isinstance(audit.get("execve"), dict) else {}
+    if not execve and str(audit.get("syscall")) not in ("59", "322"):
+        return False
+    args = [str(execve[f"a{i}"]) for i in range(len(execve)) if f"a{i}" in execve]
+    exe = audit.get("exe")
+    parse_process({"pid": audit.get("pid"), "ppid": audit.get("ppid"), "uid": audit.get("auid") or audit.get("uid"),
+                   "name": audit.get("command") or _basename(exe), "executable": exe,
+                   "command_line": " ".join(args) or None}, doc)
+    put(doc, "event.module", "auditd")
+    return True
+
+
+def _wazuh_sca(sca: Doc, doc: Doc, full: str) -> None:
+    chk = sca.get("check") if isinstance(sca.get("check"), dict) else {}
+    put(doc, "event.module", "sca")
+    put(doc, "event.category", "configuration")
+    put(doc, "event.type", "info")
+    put(doc, "event.action", f"sca_{sca.get('type') or 'check'}")
+    put(doc, "sca.policy", sca.get("policy"))
+    put(doc, "sca.check.id", chk.get("id"))
+    put(doc, "sca.check.title", chk.get("title"))
+    put(doc, "sca.check.result", chk.get("result"))
+    put(doc, "message", chk.get("title") or full or sca.get("policy"))
+
+
+def _wazuh_response(m: re.Match, doc: Doc) -> None:
+    """Kết quả lệnh phản ứng do script siem-xdr trên agent ghi vào active-responses.log (SOAR đọc để cập nhật lệnh)."""
+    put(doc, "event.module", "siem-xdr")
+    put(doc, "event.category", "host")
+    put(doc, "event.type", "info")
+    put(doc, "event.action", "response_result")
+    put(doc, "event.outcome", "success" if m["status"] == "success" else "failure")
+    doc["siem"] = {"action": {k: v for k, v in {"id": m["id"], "type": m["type"], "target": m["target"],
+                                                 "status": m["status"], "output": m["detail"]}.items() if v}}
+    put(doc, "message", m.group(0))
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -574,6 +746,8 @@ def normalize(raw: Doc) -> Doc:
         if etype in _LINE_PARSERS and isinstance(line, str):
             put(doc, "message", line)
             _LINE_PARSERS[etype](line, doc)
+        elif etype in ("wazuh", "wazuh_alert"):
+            parse_wazuh(data, doc)
         elif etype == "windows_event":
             parse_windows(data, doc)
         elif etype == "process_creation":

@@ -36,9 +36,21 @@ IDX_ACTIONS = "siem-actions"
 IDX_CASES = "siem-cases"
 
 # Bảo mật
-ENROLLMENT_KEY = _secret("ENROLLMENT_KEY", "change-me-enrollment-key")
-SERVER_SECRET = _secret("SERVER_SECRET", "change-me-server-secret")
 API_KEY = _secret("API_KEY", "change-me-api-key")  # cho analyst/console
+
+# Wazuh: agent kết nối tới wazuh-manager; SOAR ra lệnh phản ứng qua Wazuh API (user quyền tối thiểu)
+WAZUH_API_URL = os.getenv("WAZUH_API_URL", "https://wazuh-manager:55000")
+WAZUH_API_USER = os.getenv("WAZUH_API_USER", "siem-soar")
+WAZUH_API_PASSWORD = _secret("WAZUH_API_PASSWORD")
+WAZUH_API_CA = os.getenv("WAZUH_API_CA", os.getenv("ES_CA_CERT", ""))   # cùng CA nội bộ với Elasticsearch
+WAZUH_AR_SCRIPT = os.getenv("WAZUH_AR_SCRIPT", "siem-xdr")              # script phản ứng cài sẵn trên agent
+# Cảnh báo của ruleset Wazuh chuyển thành alert (xem detection/wazuh.py)
+WAZUH_ALERT_MIN_LEVEL = int(os.getenv("WAZUH_ALERT_MIN_LEVEL", "7"))
+WAZUH_ALERT_ANY_LEVEL = int(os.getenv("WAZUH_ALERT_ANY_LEVEL", "12"))
+# sca KHÔNG có mặc định: mỗi mục CIS không đạt là 1 cảnh báo level 7 (máy demo: 83 cái lúc khởi động) — đó là
+# tư thế cấu hình, xem trong event (event.module: sca), không phải sự cố cần mở case
+WAZUH_ALERT_GROUPS = {g.strip() for g in os.getenv(
+    "WAZUH_ALERT_GROUPS", "syscheck,rootcheck,vulnerability-detector,virustotal,yara").split(",") if g.strip()}
 
 # Thư mục cấu hình (rules, playbooks, intel, assets)
 CONFIG_DIR = Path(os.getenv("CONFIG_DIR", BASE_DIR / "config"))

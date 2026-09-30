@@ -2,8 +2,8 @@
 
     Kafka [siem.raw] -> normalize -> enrich -> (1) Elasticsearch siem-events-*
                                              -> (2) Rule engine  ┐
-                                             -> (3) ML anomaly   ┴-> alert -> ES siem-alerts
-                                                                         -> Kafka [siem.alerts] -> SOAR
+                                             -> (3) ML anomaly   ┼-> alert -> ES siem-alerts
+    (cảnh báo ruleset Wazuh, event_type wazuh_alert) -> (4) cầu nối ┘       -> Kafka [siem.alerts] -> SOAR
 Chạy: python -m siem.analyzer
 """
 from __future__ import annotations
@@ -14,6 +14,7 @@ import time
 from . import bus, settings, store
 from .detection import alerts as alert_builder
 from .detection import ml
+from .detection import wazuh as wazuh_bridge
 from .detection.rules import RuleEngine, event_time, load_rules, rules_fingerprint
 from .pipeline.enrich import default_enricher
 from .pipeline.normalize import normalize
@@ -44,6 +45,12 @@ class Analyzer:
 
     def handle(self, raw: dict) -> None:
         doc = self.enricher.enrich(normalize(raw))
+        if raw.get("event_type") == "wazuh_alert":
+            # cảnh báo từ alerts.json của Wazuh: event gốc đã đến qua archives.json (được lưu + chạy rule ở đó),
+            # ở đây chỉ chuyển cảnh báo thuộc nhóm rule mà siem-xdr không tự viết thành alert
+            if (alert := wazuh_bridge.to_alert(doc)):
+                self.emit(alert)
+            return
         self.buffer.append({"_index": store.events_index(doc.get("@timestamp")), "_id": doc["event"]["id"], "_source": doc})
         self.stats["events"] += 1
         for det in self.engine.process(doc):

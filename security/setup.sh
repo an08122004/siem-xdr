@@ -37,13 +37,29 @@ YML
   unzip -q -o "$CERTS/certs.zip" -d "$CERTS" && rm "$CERTS/certs.zip"
 fi
 
-# Quyền file: CA công khai cho mọi service; khóa CA chỉ root; khóa ES cho uid 1000; khóa manager cho uid 10001
+# Wazuh API (55000) — tách khối riêng để hệ thống đã có chứng chỉ cũ vẫn được sinh thêm chứng chỉ này
+if [ ! -f "$CERTS/wazuh-manager/wazuh-manager.crt" ]; then
+  echo "[setup] tạo chứng chỉ cho wazuh-manager (Wazuh API)"
+  cat > "$CERTS/instances-wazuh.yml" <<YML
+instances:
+  - name: wazuh-manager
+    dns: [wazuh-manager, localhost]
+    ip: [127.0.0.1]
+YML
+  bin/elasticsearch-certutil cert --silent --pem -out "$CERTS/wazuh.zip" --in "$CERTS/instances-wazuh.yml" \
+    --ca-cert "$CERTS/ca/ca.crt" --ca-key "$CERTS/ca/ca.key"
+  unzip -q -o "$CERTS/wazuh.zip" -d "$CERTS" && rm "$CERTS/wazuh.zip"
+fi
+
+# Quyền file: CA công khai cho mọi service; khóa CA chỉ root; khóa ES cho uid 1000; khóa manager cho uid 10001;
+# khóa Wazuh API cho user wazuh (uid 999 trong image wazuh-manager)
 chown -R root:root "$CERTS"
 chmod 755 "$CERTS" "$CERTS"/*/
 chmod 644 "$CERTS"/*/*.crt
 chmod 600 "$CERTS/ca/ca.key"
 chown 1000:0 "$CERTS/elasticsearch/elasticsearch.key"; chmod 600 "$CERTS/elasticsearch/elasticsearch.key"
 chown 10001:0 "$CERTS/manager/manager.key";           chmod 600 "$CERTS/manager/manager.key"
+chown 999:0 "$CERTS/wazuh-manager/wazuh-manager.key";  chmod 600 "$CERTS/wazuh-manager/wazuh-manager.key"
 
 # Mật khẩu superuser cho Elasticsearch: ES yêu cầu file quyền 400/600, nhưng bind mount từ Windows luôn là 777
 # -> chép vào thư mục riêng trong volume certs (chỉ container elasticsearch mount thư mục này)
@@ -61,25 +77,39 @@ until curl -s --cacert "$CERTS/ca/ca.crt" https://elasticsearch:9200 | grep -q "
 done
 
 EP=$(cat "$S/elastic_password")
+# HTTPS đã trả lời nhưng ngay sau khi khởi động, index .security có thể chưa sẵn sàng (API security trả 503)
+# -> đợi cluster tối thiểu yellow, và mỗi lệnh gọi được thử lại vài lần trước khi coi là lỗi.
+echo "[setup] chờ cluster sẵn sàng..."
+for i in $(seq 1 30); do
+  curl -sf --cacert "$CERTS/ca/ca.crt" -u "elastic:$EP" \
+       "https://elasticsearch:9200/_cluster/health?wait_for_status=yellow&timeout=10s" > /dev/null && break
+  sleep 3
+done
 api() {  # api METHOD PATH JSON
-  curl -sf --cacert "$CERTS/ca/ca.crt" -u "elastic:$EP" -H "Content-Type: application/json" \
-       -X "$1" "https://elasticsearch:9200$2" -d "$3" > /dev/null \
-    || { echo "[setup] LỖI khi gọi $1 $2"; exit 1; }
+  local out
+  for i in $(seq 1 10); do
+    out=$(curl -s --cacert "$CERTS/ca/ca.crt" -u "elastic:$EP" -H "Content-Type: application/json" \
+               -X "$1" "https://elasticsearch:9200$2" -d "$3" -w '\n%{http_code}')
+    case "${out##*$'\n'}" in 2??) return 0 ;; esac
+    sleep 3
+  done
+  echo "[setup] LỖI khi gọi $1 $2: ${out}"
+  exit 1
 }
 role() { api PUT "/_security/role/$1" "$2"; echo "[setup] role $1"; }
 user() { api POST "/_security/user/$1" "{\"password\":\"$(cat "$S/$2")\",\"roles\":[\"$3\"],\"full_name\":\"$4\"}"; echo "[setup] user $1 -> $3"; }
 
 META='"cluster": ["monitor", "manage_index_templates"]'
 role siem_manager  "{$META, \"indices\": [
-  {\"names\": [\"siem-agents\", \"siem-actions\", \"siem-alerts\", \"siem-cases\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]},
-  {\"names\": [\"siem-events-*\"], \"privileges\": [\"read\", \"view_index_metadata\"]},
+  {\"names\": [\"siem-actions\", \"siem-alerts\", \"siem-cases\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]},
+  {\"names\": [\"siem-events-*\", \"siem-agents\"], \"privileges\": [\"read\", \"view_index_metadata\"]},
   {\"names\": [\"ai-*\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]}]}"
 role siem_analyzer "{$META, \"indices\": [
   {\"names\": [\"siem-events-*\", \"siem-alerts\"], \"privileges\": [\"create_index\", \"create_doc\", \"write\", \"auto_configure\", \"view_index_metadata\"]}]}"
 role siem_soar     "{$META, \"indices\": [
   {\"names\": [\"siem-alerts\"], \"privileges\": [\"read\", \"write\", \"view_index_metadata\"]},
-  {\"names\": [\"siem-actions\", \"siem-cases\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]},
-  {\"names\": [\"siem-agents\"], \"privileges\": [\"read\", \"view_index_metadata\"]}]}"
+  {\"names\": [\"siem-actions\", \"siem-cases\", \"siem-agents\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]},
+  {\"names\": [\"siem-events-*\"], \"privileges\": [\"read\", \"view_index_metadata\"]}]}"
 role siem_ai      "{\"cluster\": [\"monitor\"], \"indices\": [
   {\"names\": [\"siem-events-*\", \"siem-alerts\", \"siem-cases\"], \"privileges\": [\"read\", \"view_index_metadata\"]},
   {\"names\": [\"ai-*\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]}]}"

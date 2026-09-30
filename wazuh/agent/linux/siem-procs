@@ -1,0 +1,37 @@
+#!/bin/sh
+# In ra các tiến trình MỚI xuất hiện kể từ lần chạy trước — telemetry tiến trình cho rule LNX-* (vd LNX-002:
+# shell có cha là web server = command injection). Wazuh agent chạy script này mỗi giây (localfile, log_format
+# command), mỗi dòng in ra là 1 event gửi về manager:
+#   siem-proc: pid=<pid> ppid=<ppid> uid=<uid> name=<tên> parent=<tên cha> exe=<đường dẫn> cmd=<dòng lệnh>
+# Dùng khi máy không có auditd (vd container demo). Máy Linux thật nên dùng auditd + log_format audit của Wazuh;
+# auditd không có tên tiến trình cha nên LNX-002 cần script này.
+# Giới hạn: tiến trình sống ngắn hơn chu kỳ quét (~1 giây) có thể bị bỏ sót.
+STATE=/var/ossec/var/run/siem-procs.state
+export LC_ALL=C
+self=$$
+
+cur=$(for d in /proc/[0-9]*; do printf '%s\n' "${d#/proc/}"; done | sort)
+if [ ! -f "$STATE" ]; then          # lần đầu: chỉ ghi nhận hiện trạng, không in (tránh dội event lúc khởi động)
+    printf '%s\n' "$cur" > "$STATE"
+    exit 0
+fi
+new=$(printf '%s\n' "$cur" | comm -13 "$STATE" -)
+printf '%s\n' "$cur" > "$STATE"
+
+for pid in $new; do
+    [ "$pid" = "$self" ] && continue
+    stat=$(cat "/proc/$pid/stat" 2>/dev/null) || continue
+    rest=${stat##*) }                                  # bỏ "pid (comm) " — comm có thể chứa khoảng trắng
+    ppid=$(printf '%s' "$rest" | cut -d' ' -f2)
+    [ "$ppid" = "$self" ] && continue                  # tiến trình con của chính script này
+    pname=$(cat "/proc/$ppid/comm" 2>/dev/null)
+    case "$pname" in wazuh-*) continue ;; esac         # do Wazuh agent sinh ra (logcollector, execd...)
+    name=$(cat "/proc/$pid/comm" 2>/dev/null) || continue
+    case "$name" in wazuh-*) continue ;; esac          # chính daemon của Wazuh agent (khởi động lại)
+    uid=$(awk '/^Uid:/{print $2; exit}' "/proc/$pid/status" 2>/dev/null)
+    exe=$(readlink "/proc/$pid/exe" 2>/dev/null)
+    cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-2000)
+    printf 'siem-proc: pid=%s ppid=%s uid=%s name=%s parent=%s exe=%s cmd=%s\n' \
+        "$pid" "$ppid" "$uid" "$(printf '%s' "$name" | tr ' ' '_')" "$(printf '%s' "$pname" | tr ' ' '_')" \
+        "$(printf '%s' "${exe:--}" | tr ' ' '_')" "$cmd"
+done

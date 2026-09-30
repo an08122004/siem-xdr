@@ -1,6 +1,6 @@
 # Playbook SOAR: khi alert khớp điều kiện `when` -> thực hiện lần lượt `steps`.
-#   rule_ids: hỗ trợ wildcard (WEB-*), min_severity: low|medium|high|critical
-#   sources: [rule, ml]
+#   rule_ids: hỗ trợ wildcard (WEB-*; WZH-* là cảnh báo của ruleset Wazuh), min_severity: low|medium|high|critical
+#   sources: [rule, ml, wazuh]
 # Các action: block_ip, kill_process, isolate_host, notify, create_case
 #   block_ip: target (trường chứa IP, mặc định source.ip), scope: origin|all, duration (giây, 0 = vĩnh viễn)
 #   approval: true -> không tự chạy, chỉ đề xuất cho analyst duyệt trên console
@@ -46,6 +46,14 @@ playbooks:
       rule_ids: [TI-001]
     steps:
       - {action: block_ip, target: threat.indicator.value, scope: all, duration: 86400}
+      - {action: notify}
+      - {action: create_case}
+
+  - name: Cảnh báo từ Wazuh (FIM, rootcheck, SCA...)
+    when:
+      rule_ids: ["WZH-*"]
+      min_severity: medium
+    steps:
       - {action: notify}
       - {action: create_case}
 

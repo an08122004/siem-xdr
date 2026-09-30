@@ -2,8 +2,6 @@
 __pycache__/
 *.pyc
 .env
-agent/bin/
-queue-data/
 secrets/
 datasets/raw/
 datasets/processed/
@@ -12,3 +10,5 @@ datasets/processed/
 *.tmp
 *.part
 /ca.crt
+# worktree và cấu hình cục bộ của Claude Code
+.claude/

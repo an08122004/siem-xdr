@@ -1,6 +1,7 @@
 # SIEM/XDR lab — pipeline theo BTL/SIEM.txt:
-#   Agent / Syslog -> Manager (HTTPS) -> Kafka (KRaft) -> Analyzer (Rule) -> Elasticsearch (TLS + RBAC) -> Grafana
-#                                                           -> SOAR -> lệnh phản ứng -> Agent (XDR)
+#   Wazuh agent -> wazuh-manager -> (archives/alerts.json) -> Vector -> Kafka (KRaft) -> Analyzer (Rule) -> Elasticsearch -> Grafana
+#   Syslog (firewall, Suricata) -> Vector ------------------------------------------^
+#   SOAR -> Wazuh API (active response) -> script siem-xdr trên agent (XDR)
 #
 # Bảo mật nội bộ:
 #   - TLS: CA nội bộ do es-certs sinh (volume certs). Elasticsearch HTTPS + transport TLS; manager HTTPS.
@@ -151,6 +152,8 @@ services:
     networks: [soc]
 
   # ---------------------------------------------------------------- SIEM/XDR
+  # SOC console + API cho analyst (alert, case, lệnh phản ứng thủ công, duyệt đề xuất AI). Không còn nhận agent:
+  # agent là Wazuh agent, kết nối tới wazuh-manager.
   manager:
     <<: *app
     command: ["uvicorn", "siem.manager.api:app", "--host", "0.0.0.0", "--port", "8000",
@@ -160,11 +163,9 @@ services:
       <<: *app-env
       ES_USER: siem_manager
       ES_PASSWORD_FILE: /run/secrets/manager_es_password
-      ENROLLMENT_KEY_FILE: /run/secrets/enrollment_key
-      SERVER_SECRET_FILE: /run/secrets/server_secret
       API_KEY_FILE: /run/secrets/api_key
       DATASETS_DIR: /datasets   # bộ mẫu vàng để kiểm tra lại đề xuất AI ngay trước khi triển khai
-    secrets: [manager_es_password, enrollment_key, server_secret, api_key]
+    secrets: [manager_es_password, api_key]
     volumes:
       - *ca-mount
       - {type: volume, source: certs, target: /certs/manager, read_only: true, volume: {subpath: manager}}
@@ -194,6 +195,66 @@ services:
       retries: 10
     networks: [soc]
 
+  # Wazuh manager 4.14.7: trạm thu của Wazuh agent (Windows/Linux). Chỉ dùng manager (không indexer/dashboard/filebeat):
+  # event + cảnh báo đi tiếp qua wazuh-forwarder vào Kafka. Cấu hình: wazuh/manager/ (xem README mục 1).
+  #   1514/tcp  agent gửi event (mã hóa AES)       1515/tcp  enroll agent (TLS + mật khẩu secrets/enrollment_key)
+  #   55000     Wazuh API: KHÔNG publish, chỉ SOAR gọi trong mạng docker (user siem-soar, quyền tối thiểu)
+  # Agent không được mới hơn manager: dùng bộ cài agent 4.14.7 trở xuống.
+  wazuh-manager:
+    image: wazuh/wazuh-manager:4.14.7
+    hostname: wazuh-manager
+    restart: unless-stopped
+    depends_on:
+      es-certs: {condition: service_completed_successfully}
+    ulimits:
+      memlock: {soft: -1, hard: -1}
+      nofile: {soft: 655360, hard: 655360}
+    ports: ["1514:1514", "1515:1515"]
+    secrets: [enrollment_key, wazuh_api_password]
+    volumes:
+      - wazuh_api_configuration:/var/ossec/api/configuration
+      - wazuh_etc:/var/ossec/etc
+      - wazuh_logs:/var/ossec/logs
+      - wazuh_queue:/var/ossec/queue
+      - wazuh_var_multigroups:/var/ossec/var/multigroups
+      - wazuh_integrations:/var/ossec/integrations
+      - wazuh_active_response:/var/ossec/active-response/bin
+      - wazuh_agentless:/var/ossec/agentless
+      - wazuh_wodles:/var/ossec/wodles
+      # /wazuh-config-mount: image chép đè vào /var/ossec mỗi lần khởi động
+      - ./wazuh/manager/ossec.conf:/wazuh-config-mount/etc/ossec.conf:ro
+      - ./wazuh/manager/agent.conf:/wazuh-config-mount/etc/shared/default/agent.conf:ro
+      - ./wazuh/manager/local_rules.xml:/wazuh-config-mount/etc/rules/local_rules.xml:ro
+      - ./wazuh/manager/api.yaml:/wazuh-config-mount/api/configuration/api.yaml:ro
+      - ./wazuh/manager/entrypoint:/entrypoint-scripts:ro     # mật khẩu enroll, user API, tắt filebeat
+      - {type: volume, source: certs, target: /certs/wazuh, read_only: true, volume: {subpath: wazuh-manager}}
+    healthcheck:
+      test: ["CMD-SHELL", "/var/ossec/bin/wazuh-control status | grep -q 'wazuh-remoted is running' && /var/ossec/bin/wazuh-control status | grep -q 'wazuh-apid is running'"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    networks: [soc]
+
+  # Đọc archives.json / alerts.json của wazuh-manager (volume wazuh_logs, chỉ đọc) -> Kafka siem.raw. Xem vector/wazuh.yaml.
+  wazuh-forwarder:
+    image: timberio/vector:0.58.0-alpine
+    restart: unless-stopped
+    command: ["--config", "/etc/vector/wazuh.yaml"]
+    volumes:
+      - ./vector/wazuh.yaml:/etc/vector/wazuh.yaml:ro
+      - ./vector/wazuh-tests.yaml:/etc/vector/wazuh-tests.yaml:ro
+      - {type: volume, source: wazuh_logs, target: /wazuh-logs, read_only: true}
+      - vectorwazuh:/var/lib/vector
+    depends_on:
+      kafka: {condition: service_healthy}
+      wazuh-manager: {condition: service_started}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8686/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [soc]
+
   analyzer:
     <<: *app
     command: ["python", "-m", "siem.analyzer"]
@@ -208,6 +269,7 @@ services:
       - mldata:/data
       - *ca-mount
 
+  # SOAR: playbook -> lệnh phản ứng -> Wazuh API (active response) -> agent; đồng bộ danh sách agent từ Wazuh
   soar:
     <<: *app
     command: ["python", "-m", "siem.soar"]
@@ -215,7 +277,10 @@ services:
       <<: *app-env
       ES_USER: siem_soar
       ES_PASSWORD_FILE: /run/secrets/soar_es_password
-    secrets: [soar_es_password]
+      WAZUH_API_URL: https://wazuh-manager:55000
+      WAZUH_API_USER: siem-soar
+      WAZUH_API_PASSWORD_FILE: /run/secrets/wazuh_api_password
+    secrets: [soar_es_password, wazuh_api_password]
     volumes:
       - ./server/config:/app/config:ro
       - *ca-mount
@@ -252,20 +317,19 @@ services:
       es-setup: {condition: service_completed_successfully}
       ollama: {condition: service_started}
 
-  # Máy chủ web demo (S001) có cài agent — dùng để kiểm tra luồng XDR end-to-end
+  # Máy chủ web demo (vai trò S001) có cài Wazuh agent 4.14.7 — dùng để kiểm tra luồng XDR end-to-end
   demo-web:
     build: {context: ., dockerfile: demo/web/Dockerfile}
     restart: unless-stopped
     profiles: [demo]
-    hostname: web-01
-    cap_add: [NET_ADMIN]
-    environment:
-      SIEM_ENROLLMENT_KEY_FILE: /run/secrets/enrollment_key
+    hostname: demo-web
+    cap_add: [NET_ADMIN]     # iptables cho block_ip / isolate_host
     secrets: [enrollment_key]
     volumes:
-      - *ca-mount
+      - demo_wazuh_etc:/var/ossec/etc   # giữ khóa agent (client.keys) khi tạo lại container
     ports: ["127.0.0.1:8081:80"]
-    depends_on: [manager]
+    depends_on:
+      wazuh-manager: {condition: service_healthy}
     networks: [soc]
 
 secrets:
@@ -277,9 +341,9 @@ secrets:
   analyst_es_password:    {file: ./secrets/analyst_es_password}
   grafana_admin_password: {file: ./secrets/grafana_admin_password}
   enrollment_key:         {file: ./secrets/enrollment_key}
-  server_secret:          {file: ./secrets/server_secret}
   api_key:                {file: ./secrets/api_key}
   ai_es_password:         {file: ./secrets/ai_es_password}
+  wazuh_api_password:     {file: ./secrets/wazuh_api_password}
 
 networks:
   soc:
@@ -289,6 +353,17 @@ volumes:
   certs:
   kafkadata:
   vectordata:
+  vectorwazuh:
+  wazuh_api_configuration:
+  wazuh_etc:
+  wazuh_logs:
+  wazuh_queue:
+  wazuh_var_multigroups:
+  wazuh_integrations:
+  wazuh_active_response:
+  wazuh_agentless:
+  wazuh_wodles:
+  demo_wazuh_etc:
   esdata:
   grafanadata:
   mldata:
