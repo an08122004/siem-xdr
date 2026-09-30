@@ -35,8 +35,12 @@ IDX_AGENTS = "siem-agents"
 IDX_ACTIONS = "siem-actions"
 IDX_CASES = "siem-cases"
 
-# Bảo mật
-API_KEY = _secret("API_KEY", "change-me-api-key")  # cho analyst/console
+# Đăng nhập SOC console: tài khoản riêng từng người (manager/auth.py), không còn API key dùng chung
+IDX_USERS = "console-users"         # NGOÀI siem-* -> Grafana / tài khoản chỉ đọc không thấy hash mật khẩu
+CONSOLE_ADMIN_PASSWORD = _secret("CONSOLE_ADMIN_PASSWORD")   # chỉ dùng tạo tài khoản admin đầu tiên
+CONSOLE_IDLE_MINUTES = int(os.getenv("CONSOLE_IDLE_MINUTES", "30"))      # không thao tác quá N phút -> đăng nhập lại
+CONSOLE_SESSION_HOURS = int(os.getenv("CONSOLE_SESSION_HOURS", "8"))     # phiên dài tối đa N giờ
+CONSOLE_MAX_FAILURES = int(os.getenv("CONSOLE_MAX_FAILURES", "5"))       # sai N lần / 15 phút -> khóa 15 phút
 
 # Wazuh: agent kết nối tới wazuh-manager; SOAR ra lệnh phản ứng qua Wazuh API (user quyền tối thiểu)
 WAZUH_API_URL = os.getenv("WAZUH_API_URL", "https://wazuh-manager:55000")

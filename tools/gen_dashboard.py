@@ -64,16 +64,21 @@ def bars(title, ds, query, field, x, y, w=6, h=8, size=10):
             "fieldConfig": {"defaults": {"color": {"mode": "continuous-YlRd"}}, "overrides": []}}
 
 
-def table(title, ds, query, fields, x, y, w=24, h=10, time_field="@timestamp"):
+def color_cells(field, colors):
+    """Tô màu ô của cột `field` theo giá trị (vd severity, event.outcome)."""
+    return {"matcher": {"id": "byName", "options": field},
+            "properties": [{"id": "custom.cellOptions", "value": {"type": "color-background"}},
+                           {"id": "mappings", "value": [{"type": "value", "options": {
+                               k: {"color": c, "index": i} for i, (k, c) in enumerate(colors.items())}}]}]}
+
+
+def table(title, ds, query, fields, x, y, w=24, h=10, time_field="@timestamp", overrides=None):
     return {"id": pid(), "type": "table", "title": title, "datasource": ds, "gridPos": {"x": x, "y": y, "w": w, "h": h},
             "targets": [target(ds, query, [], {"id": "1", "type": "raw_data", "settings": {"size": "200"}}, time_field=time_field)],
             "transformations": [{"id": "filterFieldsByName", "options": {"include": {"names": fields}}},
                                 {"id": "organize", "options": {"indexByName": {f: i for i, f in enumerate(fields)}}}],
-            "fieldConfig": {"defaults": {"custom": {"filterable": True}}, "overrides": [
-                {"matcher": {"id": "byName", "options": "severity"},
-                 "properties": [{"id": "custom.cellOptions", "value": {"type": "color-background"}},
-                                {"id": "mappings", "value": [{"type": "value", "options": {
-                                    k: {"color": c, "index": i} for i, (k, c) in enumerate(SEV_COLORS.items())}}]}]}]},
+            "fieldConfig": {"defaults": {"custom": {"filterable": True}},
+                            "overrides": [color_cells("severity", SEV_COLORS), *(overrides or [])]},
             "options": {"showHeader": True, "sortBy": [{"displayName": fields[0], "desc": True}]}}
 
 
@@ -83,6 +88,16 @@ def row(title, y):
 
 sev_overrides = [{"matcher": {"id": "byName", "options": k},
                   "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": c}}]} for k, c in SEV_COLORS.items()]
+OUTCOME_COLORS = {"success": "green", "failure": "red"}
+outcome_overrides = [{"matcher": {"id": "byName", "options": k},
+                      "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": c}}]}
+                     for k, c in OUTCOME_COLORS.items()]
+
+# Phiên đăng nhập: đăng nhập hệ thống (SSH, PAM, Windows logon 4624/4625 — event.category authentication)
+# và đăng nhập form web (POST tới đường dẫn login — access log không có tên tài khoản, chỉ có IP và mã HTTP)
+AUTH = "event.category:authentication"
+WEB_LOGIN = "event.category:web AND http.request.method:POST AND url.path:*login*"
+PRIVILEGED = "user.name:(root OR Administrator OR admin)"
 
 panels = [
     row("Tổng quan", 0),
@@ -107,9 +122,26 @@ panels = [
     pie("Nguồn dữ liệu (event.module)", EV, "", "event.module", 16, 33, w=8),
     bars("Top URL bị truy cập", EV, "event.category:web", "url.path", 0, 41, w=12, size=15),
     bars("Kết nối bị firewall chặn (IP nguồn)", EV, "event.action:deny", "source.ip", 12, 41, w=12),
-    row("Phản ứng (XDR / SOAR)", 49),
+    row("Phiên đăng nhập", 49),
+    stat("Đăng nhập thành công", EV, f"{AUTH} AND event.outcome:success", 0, 50, "green", w=6),
+    stat("Đăng nhập thất bại", EV, f"{AUTH} AND event.outcome:failure", 6, 50, "red", w=6),
+    stat("Tài khoản đặc quyền đăng nhập được", EV, f"{AUTH} AND event.outcome:success AND {PRIVILEGED}", 12, 50,
+         "purple", w=6),
+    stat("Đăng nhập form web bị từ chối", EV, f"{WEB_LOGIN} AND http.response.status_code:(401 OR 403)", 18, 50,
+         "orange", w=6),
+    timeseries("Đăng nhập hệ thống theo kết quả", EV, AUTH, "event.outcome", 0, 54, overrides=outcome_overrides),
+    timeseries("Đăng nhập form web theo IP nguồn", EV, WEB_LOGIN, "source.ip", 12, 54),
+    bars("Tài khoản đăng nhập thất bại nhiều nhất", EV, f"{AUTH} AND event.outcome:failure", "user.name", 0, 62),
+    bars("IP nguồn đăng nhập thành công", EV, f"{AUTH} AND event.outcome:success", "source.ip", 6, 62),
+    pie("Đăng nhập theo máy", EV, AUTH, "host.name", 12, 62),
+    pie("Hình thức đăng nhập", EV, AUTH, "event.action", 18, 62),
+    table("Phiên đăng nhập gần đây", EV, f"{AUTH} OR ({WEB_LOGIN})",
+          ["@timestamp", "event.outcome", "user.name", "source.ip", "host.name", "event.action", "auth.method",
+           "winlog.logon.type", "url.path", "http.response.status_code", "message"], 0, 70,
+          overrides=[color_cells("event.outcome", OUTCOME_COLORS)]),
+    row("Phản ứng (XDR / SOAR)", 80),
     table("Lệnh phản ứng gần đây", AC, "", ["created_at", "agent_id", "type", "target", "source", "status", "expires_at", "output"],
-          0, 50, h=9, time_field="created_at"),
+          0, 81, h=9, time_field="created_at"),
 ]
 
 dash = {
@@ -118,5 +150,5 @@ dash = {
     "time": {"from": "now-1h", "to": "now"}, "editable": True, "panels": panels,
     "templating": {"list": []}, "annotations": {"list": []},
 }
-OUT.write_text(json.dumps(dash, ensure_ascii=False, indent=2), encoding="utf-8")
+OUT.write_text(json.dumps(dash, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
 print(f"OK: {OUT} ({len(panels)} panels)")

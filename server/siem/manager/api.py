@@ -1,29 +1,32 @@
-"""Manager API — giao diện cho analyst.
+"""Manager API — SOC console và API cho analyst.
 
-Agent là Wazuh agent: event đi wazuh-manager -> Vector -> Kafka, lệnh phản ứng do SOAR gửi qua Wazuh API
-(soar/wazuh.py), nên manager không còn endpoint cho agent. Danh sách agent do SOAR đồng bộ từ Wazuh.
+Agent là Wazuh agent: enroll, gửi event và nhận lệnh phản ứng qua wazuh-manager (không qua API này).
+Danh sách agent do SOAR đồng bộ từ Wazuh API; lệnh tạo ở đây được SOAR gửi xuống agent (soar/wazuh.py).
 
-Analyst (header X-API-Key):
-  GET  /api/v1/agents | /alerts | /actions | /cases | /stats
-  PATCH /api/v1/alerts/{id}           đổi trạng thái alert (ack/closed/false_positive)
-  POST /api/v1/actions                ra lệnh phản ứng thủ công (block IP, kill, isolate)
-  GET  /                              SOC console (HTML)
+Đăng nhập bằng tài khoản riêng (manager/auth.py): POST /api/v1/auth/login -> cookie phiên. Người thực hiện mọi
+thao tác (case, lệnh, duyệt AI) lấy từ phiên, không tự khai.
+  GET  /api/v1/agents | /alerts | /actions | /cases | /stats | /ai/...     mọi tài khoản
+  PATCH /api/v1/alerts/{id}, /cases/{id}; POST /api/v1/actions; duyệt AI   analyst trở lên
+  POST /api/v1/actions (isolate_host / unisolate_host)                     lead trở lên
+  /api/v1/users                                                            admin
+  GET  /                                                                   SOC console (HTML)
 
 Chạy: uvicorn siem.manager.api:app --host 0.0.0.0 --port 8000
 """
 from __future__ import annotations
 
-import hmac
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .. import settings, store
+from . import auth
+from .auth import ROLES, Session, current_user, require_role
 
 log = logging.getLogger("manager")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -36,29 +39,33 @@ _state: dict[str, Any] = {}
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _state["es"] = store.connect()
+    auth.setup(_state["es"])
     log.info("manager sẵn sàng")
     yield
 
 
 app = FastAPI(title="SIEM/XDR Manager", version="1.0.0", lifespan=lifespan)
+app.include_router(auth.router)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")                  # chống clickjacking console
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    if request.url.path.startswith("/api/"):
+        resp.headers.setdefault("Cache-Control", "no-store")           # dữ liệu nhạy cảm không nằm trong cache
+    return resp
 
 
 def es():
     return _state["es"]
 
 
-# ---------------------------------------------------------------------------
-# Xác thực
-# ---------------------------------------------------------------------------
+analyst = require_role("analyst")
+lead = require_role("lead")
 
-def require_analyst(x_api_key: str = Header("")) -> None:
-    if not hmac.compare_digest(x_api_key, settings.API_KEY):
-        raise HTTPException(401, "API key không hợp lệ")
-
-
-# ---------------------------------------------------------------------------
-# Analyst endpoints
-# ---------------------------------------------------------------------------
 
 class NewAction(BaseModel):
     agent_id: str
@@ -72,12 +79,12 @@ class AlertUpdate(BaseModel):
     note: str = ""
 
 
-@app.get("/api/v1/agents", dependencies=[Depends(require_analyst)])
+@app.get("/api/v1/agents", dependencies=[Depends(current_user)])
 def agents() -> list[dict[str, Any]]:
     return store.list_agents(es())
 
 
-@app.get("/api/v1/alerts", dependencies=[Depends(require_analyst)])
+@app.get("/api/v1/alerts", dependencies=[Depends(current_user)])
 def alerts(status: str | None = None, severity: str | None = None, size: int = 100) -> list[dict[str, Any]]:
     filters: list[dict] = []
     if status:
@@ -87,27 +94,31 @@ def alerts(status: str | None = None, severity: str | None = None, size: int = 1
     return store.search(es(), settings.IDX_ALERTS, {"bool": {"filter": filters}}, size=min(size, 1000))
 
 
-@app.patch("/api/v1/alerts/{alert_id}", dependencies=[Depends(require_analyst)])
-def update_alert(alert_id: str, body: AlertUpdate) -> dict[str, bool]:
+@app.patch("/api/v1/alerts/{alert_id}")
+def update_alert(alert_id: str, body: AlertUpdate, s: Session = Depends(analyst)) -> dict[str, bool]:
     es().update(index=settings.IDX_ALERTS, id=alert_id, refresh="wait_for",
-                doc={"alert": {"status": body.status, "note": body.note, "updated_at": store.now_iso()}})
+                doc={"alert": {"status": body.status, "note": body.note, "updated_at": store.now_iso(),
+                               "updated_by": s.username}})
     return {"ok": True}
 
 
-@app.get("/api/v1/actions", dependencies=[Depends(require_analyst)])
+@app.get("/api/v1/actions", dependencies=[Depends(current_user)])
 def actions(size: int = 100) -> list[dict[str, Any]]:
     return store.search(es(), settings.IDX_ACTIONS, size=min(size, 1000), sort=[{"created_at": "desc"}])
 
 
-@app.post("/api/v1/actions", dependencies=[Depends(require_analyst)])
-def create_action(body: NewAction) -> dict[str, Any]:
+@app.post("/api/v1/actions")
+def create_action(body: NewAction, s: Session = Depends(analyst)) -> dict[str, Any]:
+    if body.type in ("isolate_host", "unisolate_host") and ROLES[s.role] < ROLES["lead"]:
+        raise HTTPException(403, "cô lập / bỏ cô lập máy cần quyền lead (Trưởng nhóm IR)")
     try:
-        return store.create_action(es(), body.agent_id, body.type, body.params, alert_id=body.alert_id, source="manual")
+        return store.create_action(es(), body.agent_id, body.type, body.params, alert_id=body.alert_id,
+                                   source="manual", requested_by=s.username)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
 
-@app.get("/api/v1/cases", dependencies=[Depends(require_analyst)])
+@app.get("/api/v1/cases", dependencies=[Depends(current_user)])
 def cases(size: int = 100) -> list[dict[str, Any]]:
     return store.search(es(), settings.IDX_CASES, size=min(size, 1000), sort=[{"created_at": "desc"}])
 
@@ -116,7 +127,6 @@ CASE_STATUSES = r"^(open|in_progress|contained|closed|false_positive)$"
 
 
 class CaseUpdate(BaseModel):
-    analyst: str = Field(min_length=1, max_length=64)   # ai thực hiện (ghi vào lịch sử case)
     status: str | None = Field(None, pattern=CASE_STATUSES)
     assignee: str | None = Field(None, max_length=64)
     note: str = Field("", max_length=4000)
@@ -124,7 +134,7 @@ class CaseUpdate(BaseModel):
     task_done: bool | None = None
 
 
-@app.get("/api/v1/cases/{case_id}", dependencies=[Depends(require_analyst)])
+@app.get("/api/v1/cases/{case_id}", dependencies=[Depends(current_user)])
 def get_case(case_id: str) -> dict[str, Any]:
     try:
         return es().get(index=settings.IDX_CASES, id=case_id)["_source"]
@@ -132,15 +142,15 @@ def get_case(case_id: str) -> dict[str, Any]:
         raise HTTPException(404, "không tìm thấy case")
 
 
-@app.patch("/api/v1/cases/{case_id}", dependencies=[Depends(require_analyst)])
-def update_case(case_id: str, body: CaseUpdate) -> dict[str, Any]:
+@app.patch("/api/v1/cases/{case_id}")
+def update_case(case_id: str, body: CaseUpdate, s: Session = Depends(analyst)) -> dict[str, Any]:
     """Cập nhật case: trạng thái, người xử lý, đánh dấu task playbook, ghi chú.
-    Mọi thay đổi được ghi vào `notes` (lịch sử) kèm tên analyst và thời điểm."""
+    Mọi thay đổi được ghi vào `notes` (lịch sử) kèm tài khoản thực hiện và thời điểm."""
     try:
         cur = es().get(index=settings.IDX_CASES, id=case_id)
     except Exception:  # noqa: BLE001
         raise HTTPException(404, "không tìm thấy case")
-    case, now = cur["_source"], store.now_iso()
+    case, now, who = cur["_source"], store.now_iso(), s.username
     changes: dict[str, Any] = {"updated_at": now}
     history: list[str] = []
     if body.status and body.status != case.get("status"):
@@ -158,7 +168,7 @@ def update_case(case_id: str, body: CaseUpdate) -> dict[str, Any]:
         if body.task_index >= len(tasks):
             raise HTTPException(400, "task_index vượt quá số task")
         t = tasks[body.task_index]
-        t.update(done=body.task_done, done_by=body.analyst if body.task_done else None,
+        t.update(done=body.task_done, done_by=who if body.task_done else None,
                  done_at=now if body.task_done else None)
         changes["tasks"] = tasks
         history.append(f"{'hoàn thành' if body.task_done else 'bỏ đánh dấu'} task [{t['phase']}] {t['title']}")
@@ -166,17 +176,17 @@ def update_case(case_id: str, body: CaseUpdate) -> dict[str, Any]:
         history.append(f"ghi chú: {body.note.strip()}")
     if not history:
         return case
-    changes["notes"] = (case.get("notes") or []) + [{"at": now, "by": body.analyst, "text": h} for h in history]
+    changes["notes"] = (case.get("notes") or []) + [{"at": now, "by": who, "text": h} for h in history]
     try:
         es().update(index=settings.IDX_CASES, id=case_id, doc=changes, refresh="wait_for",
                     if_seq_no=cur["_seq_no"], if_primary_term=cur["_primary_term"])
     except Exception:  # noqa: BLE001 - người khác vừa sửa case
         raise HTTPException(409, "case vừa được người khác cập nhật, hãy tải lại")
-    log.info("case %s cập nhật bởi %s: %s", case_id, body.analyst, "; ".join(history))
+    log.info("case %s cập nhật bởi %s: %s", case_id, who, "; ".join(history))
     return case | changes
 
 
-@app.get("/api/v1/stats", dependencies=[Depends(require_analyst)])
+@app.get("/api/v1/stats", dependencies=[Depends(current_user)])
 def stats() -> dict[str, Any]:
     def count(index: str, query: dict | None = None) -> int:
         try:
@@ -214,7 +224,6 @@ from ..ai import deploy as ai_deploy  # noqa: E402
 
 
 class AIDecision(BaseModel):
-    analyst: str = Field(min_length=1, max_length=64)
     reason: str = Field("", max_length=2000)
 
 
@@ -225,39 +234,40 @@ def _ai(fn, *args, **kw):
         raise HTTPException(e.code, str(e))
 
 
-@app.get("/api/v1/ai/proposals", dependencies=[Depends(require_analyst)])
+@app.get("/api/v1/ai/proposals", dependencies=[Depends(current_user)])
 def ai_proposals(status: str | None = None, size: int = 100) -> list[dict[str, Any]]:
     q = {"bool": {"filter": [{"term": {"status": status}}]}} if status else None
     return store.search(es(), settings.IDX_AI_PROPOSALS, q, size=min(size, 500), sort=[{"created_at": "desc"}])
 
 
-@app.post("/api/v1/ai/proposals/{pid}/approve", dependencies=[Depends(require_analyst)])
-def ai_approve(pid: str, body: AIDecision) -> dict[str, Any]:
-    return _ai(ai_deploy.approve, es(), pid, body.analyst, settings.RULES_DIR, now=store.now_iso())
+@app.post("/api/v1/ai/proposals/{pid}/approve")
+def ai_approve(pid: str, s: Session = Depends(analyst)) -> dict[str, Any]:
+    # ngoại lệ cần 2 người KHÁC NHAU duyệt: danh tính lấy từ phiên nên không giả được bằng cách đổi tên
+    return _ai(ai_deploy.approve, es(), pid, s.username, settings.RULES_DIR, now=store.now_iso())
 
 
-@app.post("/api/v1/ai/proposals/{pid}/reject", dependencies=[Depends(require_analyst)])
-def ai_reject(pid: str, body: AIDecision) -> dict[str, Any]:
+@app.post("/api/v1/ai/proposals/{pid}/reject")
+def ai_reject(pid: str, body: AIDecision, s: Session = Depends(analyst)) -> dict[str, Any]:
     if len(body.reason.strip()) < 3:
         raise HTTPException(400, "từ chối phải ghi lý do (AI dùng lý do này để không lặp lại lỗi)")
-    return _ai(ai_deploy.reject, es(), pid, body.analyst, body.reason.strip(), now=store.now_iso())
+    return _ai(ai_deploy.reject, es(), pid, s.username, body.reason.strip(), now=store.now_iso())
 
 
-@app.post("/api/v1/ai/proposals/{pid}/rollback", dependencies=[Depends(require_analyst)])
-def ai_rollback(pid: str, body: AIDecision) -> dict[str, Any]:
+@app.post("/api/v1/ai/proposals/{pid}/rollback")
+def ai_rollback(pid: str, body: AIDecision, s: Session = Depends(analyst)) -> dict[str, Any]:
     if len(body.reason.strip()) < 3:
         raise HTTPException(400, "gỡ phải ghi lý do")
-    return _ai(ai_deploy.rollback, es(), pid, body.analyst, body.reason.strip(), settings.RULES_DIR, now=store.now_iso())
+    return _ai(ai_deploy.rollback, es(), pid, s.username, body.reason.strip(), settings.RULES_DIR, now=store.now_iso())
 
 
-@app.post("/api/v1/ai/run", dependencies=[Depends(require_analyst)])
-def ai_run(body: AIDecision) -> dict[str, Any]:
-    job = {"kind": "job", "status": "pending", "requested_by": body.analyst, "created_at": store.now_iso()}
+@app.post("/api/v1/ai/run")
+def ai_run(s: Session = Depends(analyst)) -> dict[str, Any]:
+    job = {"kind": "job", "status": "pending", "requested_by": s.username, "created_at": store.now_iso()}
     r = es().index(index=settings.IDX_AI_JOBS, document=job, refresh="wait_for")
     return job | {"id": r["_id"]}
 
 
-@app.get("/api/v1/ai/status", dependencies=[Depends(require_analyst)])
+@app.get("/api/v1/ai/status", dependencies=[Depends(current_user)])
 def ai_status() -> dict[str, Any]:
     try:
         worker = es().get(index=settings.IDX_AI_JOBS, id="worker")["_source"]

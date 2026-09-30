@@ -9,6 +9,7 @@
 Event thô: {"timestamp", "agent_id", "hostname", "os", "source", "event_type", "data": {...}}
   - event_type wazuh / wazuh_alert: event của Wazuh manager (data = 1 dòng archives.json / alerts.json)
   - event_type syslog: dòng syslog do Vector nhận (firewall, Suricata...)
+  - event_type console_auth: đăng nhập / quản lý tài khoản của SOC console (manager/auth.py)
   - apache_access, windows_event, process_creation...: định dạng nội bộ, dataset công khai
     (tools/convert_datasets.py) và unit test dùng; parser Wazuh cũng chuyển dòng log gốc qua các parser này
 """
@@ -536,6 +537,31 @@ def parse_process(data: Doc, doc: Doc) -> None:
     put(doc, "user.id", data.get("uid"))
 
 
+def parse_console(data: Doc, doc: Doc) -> None:
+    """Đăng nhập / quản lý tài khoản của chính SOC console (manager/auth.py). Đăng nhập là event xác thực như SSH,
+    nên hiện ở mục Phiên đăng nhập trên Grafana và rule brute-force (AUTH-001) áp dụng được cho console."""
+    action, outcome = str(data.get("action") or ""), data.get("outcome") or "success"
+    put(doc, "host.name", "soc-console")
+    if action in ("login", "logout"):
+        _auth(doc, f"console_{action}", outcome, data.get("user"), data.get("ip"), None)
+        if action == "logout":
+            put(doc, "event.type", "end")
+    else:     # password_changed, user_created, user_updated
+        put(doc, "event.category", "iam")
+        put(doc, "event.type", "creation" if action == "user_created" else "change")
+        put(doc, "event.action", f"console_{action}")
+        put(doc, "event.outcome", outcome)
+        put(doc, "user.name", data.get("user"))
+        put(doc, "user.target.name", data.get("target"))
+        put(doc, "source.ip", _clean_ip(data.get("ip")))
+    put(doc, "event.module", "console")
+    put(doc, "user.roles", data.get("role") or data.get("target_role"))
+    put(doc, "event.reason", data.get("reason") or data.get("change"))
+    put(doc, "message", f"console {action} {outcome}: {data.get('user')}"
+                        + (f" -> {data['target']}" if data.get("target") else "")
+                        + (f" ({data.get('reason') or data.get('change')})" if data.get("reason") or data.get("change") else ""))
+
+
 def parse_mock(data: Doc, doc: Doc) -> None:
     put(doc, "event.module", "mock")
     _auth(doc, "logon", "success" if data.get("success") else "failure",
@@ -748,6 +774,8 @@ def normalize(raw: Doc) -> Doc:
             _LINE_PARSERS[etype](line, doc)
         elif etype in ("wazuh", "wazuh_alert"):
             parse_wazuh(data, doc)
+        elif etype == "console_auth":
+            parse_console(data, doc)
         elif etype == "windows_event":
             parse_windows(data, doc)
         elif etype == "process_creation":

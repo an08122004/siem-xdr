@@ -16,7 +16,7 @@ NAMES = [
     "manager_es_password", "analyzer_es_password", "soar_es_password",
     "grafana_es_password", "analyst_es_password", "ai_es_password", "grafana_admin_password",
     "enrollment_key",         # mật khẩu enroll Wazuh agent (wazuh-manager: etc/authd.pass)
-    "api_key",                # API key dùng chung của SOC console (header X-API-Key)
+    "console_admin_password", # mật khẩu tạm của tài khoản console `admin` đầu tiên (phải đổi khi đăng nhập lần đầu)
     "wazuh_api_password",     # user Wazuh API `siem-soar` (SOAR ra lệnh active response)
 ]
 ALPHABET = string.ascii_letters + string.digits  # không ký tự đặc biệt -> an toàn khi nhúng JSON/shell
@@ -49,4 +49,5 @@ for name in NAMES:
         pass
     print(f"đã tạo      {p.name}")
 print(f"\nThư mục: {out}")
-print(r"Xem API key cho console:  type secrets\api_key  (Windows)  |  cat secrets/api_key  (Linux)")
+print(r"Đăng nhập console lần đầu: tài khoản admin, mật khẩu tạm trong secrets\console_admin_password "
+      r"(type secrets\console_admin_password | cat secrets/console_admin_password) — console buộc đổi ngay.")

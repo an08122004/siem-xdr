@@ -192,7 +192,7 @@ ACTION_TYPES = {"block_ip", "unblock_ip", "kill_process", "isolate_host", "uniso
 
 def create_action(es: Elasticsearch, agent_id: str, action_type: str, params: dict[str, Any],
                   *, alert_id: str | None = None, source: str = "manual",
-                  expires_at: str | None = None) -> dict[str, Any]:
+                  expires_at: str | None = None, requested_by: str | None = None) -> dict[str, Any]:
     if action_type not in ACTION_TYPES:
         raise ValueError(f"loại action không hỗ trợ: {action_type}")
     doc = {
@@ -203,6 +203,7 @@ def create_action(es: Elasticsearch, agent_id: str, action_type: str, params: di
         "target": str(params.get("ip") or params.get("pid") or params.get("name") or agent_id),
         "alert_id": alert_id,
         "source": source,          # manual | soar
+        "requested_by": requested_by,   # tài khoản console tạo lệnh thủ công
         "status": "pending",       # pending -> sent -> success | failed
         "created_at": now_iso(),
         "updated_at": now_iso(),

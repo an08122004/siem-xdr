@@ -163,9 +163,10 @@ services:
       <<: *app-env
       ES_USER: siem_manager
       ES_PASSWORD_FILE: /run/secrets/manager_es_password
-      API_KEY_FILE: /run/secrets/api_key
+      # đăng nhập console bằng tài khoản riêng (manager/auth.py); secret này chỉ dùng tạo tài khoản admin đầu tiên
+      CONSOLE_ADMIN_PASSWORD_FILE: /run/secrets/console_admin_password
       DATASETS_DIR: /datasets   # bộ mẫu vàng để kiểm tra lại đề xuất AI ngay trước khi triển khai
-    secrets: [manager_es_password, api_key]
+    secrets: [manager_es_password, console_admin_password]
     volumes:
       - *ca-mount
       - {type: volume, source: certs, target: /certs/manager, read_only: true, volume: {subpath: manager}}
@@ -341,7 +342,7 @@ secrets:
   analyst_es_password:    {file: ./secrets/analyst_es_password}
   grafana_admin_password: {file: ./secrets/grafana_admin_password}
   enrollment_key:         {file: ./secrets/enrollment_key}
-  api_key:                {file: ./secrets/api_key}
+  console_admin_password: {file: ./secrets/console_admin_password}
   ai_es_password:         {file: ./secrets/ai_es_password}
   wazuh_api_password:     {file: ./secrets/wazuh_api_password}
 

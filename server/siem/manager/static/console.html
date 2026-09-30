@@ -52,16 +52,24 @@
   .aibar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:10px 12px; border-bottom:1px solid var(--line); }
   .aibar select { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px; }
   .chk { font-size:12px; padding:1px 0; }
+  #overlay { position:fixed; inset:0; background:rgba(8,11,15,.92); display:none; align-items:center; justify-content:center; z-index:10; }
+  #overlay form { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:22px 24px; width:340px; display:flex; flex-direction:column; gap:10px; }
+  #overlay h2 { margin:0 0 4px; font-size:17px; }
+  #overlay input { background:var(--bg); border:1px solid var(--line); color:var(--fg); padding:8px 10px; border-radius:6px; font:inherit; }
+  #overlay button[type=submit] { background:#2f6f53; border:1px solid #3fb27f; color:#fff; padding:8px; border-radius:6px; cursor:pointer; font:inherit; }
+  #overlay .msg { min-height:18px; font-size:12px; color:var(--critical); }
+  #me { font-size:13px; }
+  #me b { color:var(--fg); } #me .role { color:var(--mute); }
 </style>
 </head>
 <body>
 <header>
   <h1>🛡️ SIEM/XDR Console</h1>
-  <input id="key" type="password" placeholder="API key (X-API-Key)">
-  <input id="who" placeholder="Tên analyst (ghi vào lịch sử case)" style="width:200px">
-  <button class="btn" id="save">Lưu</button>
   <span class="small" id="updated"></span>
   <span style="flex:1"></span>
+  <span id="me"></span>
+  <button class="btn" id="pwbtn">Đổi mật khẩu</button>
+  <button class="btn" id="logout">Đăng xuất</button>
   <a class="small" href="http://localhost:3000" target="_blank" style="color:var(--mute)">Grafana ↗</a>
 </header>
 <main>
@@ -72,32 +80,93 @@
     <button data-t="actions">Response actions</button>
     <button data-t="cases">Cases</button>
     <button data-t="ai">Đề xuất AI</button>
+    <button data-t="users" id="usersTab" style="display:none">Tài khoản</button>
   </nav>
   <div class="wrap"><table id="tbl"></table></div>
 </main>
+<div id="overlay">
+  <form id="loginForm">
+    <h2>Đăng nhập SOC console</h2>
+    <input id="lu" autocomplete="username" placeholder="Tên đăng nhập" required>
+    <input id="lp" type="password" autocomplete="current-password" placeholder="Mật khẩu" required>
+    <button type="submit">Đăng nhập</button>
+    <div class="msg" id="loginMsg"></div>
+  </form>
+  <form id="pwForm" style="display:none">
+    <h2>Đổi mật khẩu</h2>
+    <div class="small" id="pwNote"></div>
+    <input id="pu" autocomplete="username" hidden>
+    <input id="pc" type="password" autocomplete="current-password" placeholder="Mật khẩu hiện tại" required>
+    <input id="pn" type="password" autocomplete="new-password" placeholder="Mật khẩu mới (tối thiểu 12 ký tự)" required>
+    <input id="pn2" type="password" autocomplete="new-password" placeholder="Nhập lại mật khẩu mới" required>
+    <button type="submit">Đổi mật khẩu</button>
+    <button type="button" class="btn" id="pwCancel">Hủy</button>
+    <div class="msg" id="pwMsg"></div>
+  </form>
+</div>
 <div id="toast"></div>
 <script>
 const $ = s => document.querySelector(s);
-let KEY = '', TAB = 'alerts';
-try { KEY = localStorage.getItem('siem_key') || ''; } catch (e) {}
-let WHO = '';
-try { WHO = localStorage.getItem('siem_who') || ''; } catch (e) {}
-$('#key').value = KEY; $('#who').value = WHO;
-$('#save').onclick = () => {
-  KEY = $('#key').value.trim(); WHO = $('#who').value.trim();
-  try { localStorage.setItem('siem_key', KEY); localStorage.setItem('siem_who', WHO); } catch (e) {}
-  refresh();
-};
+// Đăng nhập bằng tài khoản riêng: phiên nằm trong cookie HttpOnly (JavaScript không đọc được), không lưu gì vào
+// localStorage. Hết hạn sau N phút không thao tác: request tự làm mới gửi X-Auto-Refresh nên không kéo dài phiên.
+let ME = null, TAB = 'alerts';
+const RANK = { analyst: 1, lead: 2, admin: 3 };
+const can = role => ME && RANK[ME.role] >= RANK[role];
 document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
   document.querySelectorAll('#tabs button').forEach(x => x.classList.remove('on'));
   b.classList.add('on'); TAB = b.dataset.t; refresh();
 });
 
-async function api(path, opt = {}) {
-  const r = await fetch(path, { ...opt, headers: { 'X-API-Key': KEY, 'Content-Type': 'application/json' } });
-  if (!r.ok) throw new Error(r.status + ' ' + (await r.text()));
-  return r.json();
+async function api(path, opt = {}, auto = false) {
+  const headers = { 'Content-Type': 'application/json', 'X-Requested-With': 'siem-console' };
+  if ((auto || AUTO) && !opt.method) headers['X-Auto-Refresh'] = '1';
+  const r = await fetch(path, { ...opt, headers, credentials: 'same-origin' });
+  if (r.status === 401 && !path.startsWith('/api/v1/auth/login')) { showLogin('Phiên đã hết hạn, hãy đăng nhập lại.'); throw new Error('chưa đăng nhập'); }
+  const text = await r.text();
+  let data = null; try { data = text ? JSON.parse(text) : null; } catch (e) {}
+  if (!r.ok) {
+    const msg = (data && data.detail) ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)) : text;
+    if (r.status === 403 && /đổi mật khẩu/.test(msg)) showPassword(true);
+    throw new Error(msg || String(r.status));
+  }
+  return data;
 }
+
+function showLogin(msg = '') {
+  ME = null; $('#me').textContent = '';
+  $('#overlay').style.display = 'flex'; $('#pwForm').style.display = 'none'; $('#loginForm').style.display = 'flex';
+  $('#loginMsg').textContent = msg; $('#lp').value = ''; $('#lu').focus();
+}
+function showPassword(forced) {
+  $('#overlay').style.display = 'flex'; $('#loginForm').style.display = 'none'; $('#pwForm').style.display = 'flex';
+  $('#pwNote').textContent = forced ? 'Tài khoản đang dùng mật khẩu tạm — phải đổi trước khi dùng console.' : '';
+  $('#pwCancel').style.display = forced ? 'none' : ''; $('#pwMsg').textContent = '';
+  ['#pc', '#pn', '#pn2'].forEach(s => $(s).value = ''); $('#pu').value = ME ? ME.username : ''; $('#pc').focus();
+}
+function hideOverlay() { $('#overlay').style.display = 'none'; }
+function showMe() {
+  $('#me').replaceChildren(el('b', {}, ME.username), el('span', { cls: 'role' }, ` · ${ME.role} · hết phiên sau ${ME.idle_minutes} phút không thao tác`));
+  $('#usersTab').style.display = can('admin') ? '' : 'none';
+}
+async function start(me) {
+  ME = me; showMe();
+  if (ME.must_change) { showPassword(true); return; }
+  hideOverlay(); refresh();
+}
+$('#loginForm').onsubmit = async e => {
+  e.preventDefault();
+  try { await start(await api('/api/v1/auth/login', { method: 'POST', body: JSON.stringify({ username: $('#lu').value.trim(), password: $('#lp').value }) })); }
+  catch (err) { $('#loginMsg').textContent = err.message; $('#lp').value = ''; }
+};
+$('#pwForm').onsubmit = async e => {
+  e.preventDefault();
+  if ($('#pn').value !== $('#pn2').value) { $('#pwMsg').textContent = 'Hai lần nhập mật khẩu mới không khớp'; return; }
+  try { await start(await api('/api/v1/auth/password', { method: 'POST', body: JSON.stringify({ current: $('#pc').value, new: $('#pn').value }) })); toast('Đã đổi mật khẩu'); }
+  catch (err) { $('#pwMsg').textContent = err.message; }
+};
+$('#pwCancel').onclick = hideOverlay;
+$('#pwbtn').onclick = () => showPassword(false);
+$('#logout').onclick = async () => { try { await api('/api/v1/auth/logout', { method: 'POST' }); } catch (e) {} showLogin('Đã đăng xuất.'); };
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 4000); }
 // Dựng DOM an toàn bằng textContent — log chứa payload tấn công (XSS) nên KHÔNG dùng innerHTML với dữ liệu.
 function el(tag, props = {}, ...kids) {
@@ -120,9 +189,8 @@ async function setStatus(id, status) {
 }
 let OPEN_CASE = null;
 async function updateCase(id, body) {
-  if (!WHO) { toast('Nhập tên analyst ở thanh trên rồi bấm Lưu trước khi xử lý case'); return; }
   try {
-    await api('/api/v1/cases/' + id, { method: 'PATCH', body: JSON.stringify({ analyst: WHO, ...body }) });
+    await api('/api/v1/cases/' + id, { method: 'PATCH', body: JSON.stringify(body) });
     toast('Đã cập nhật case'); OPEN_CASE = id; refresh();
   } catch (e) { toast('Lỗi: ' + e.message); }
 }
@@ -155,18 +223,16 @@ function caseDetail(c) {
 let AI_FILTER = 'pending';
 const KIND = { exception: 'Ngoại lệ (giảm cảnh báo)', new_rule: 'Rule mới' };
 async function aiDo(id, action, needReason) {
-  if (!WHO) { toast('Nhập tên analyst ở thanh trên rồi bấm Lưu trước'); return; }
   let reason = '';
   if (needReason) { reason = prompt('Lý do (bắt buộc — AI dùng lý do này để không lặp lại):') || ''; if (!reason.trim()) return; }
   try {
-    const r = await api(`/api/v1/ai/proposals/${id}/${action}`, { method: 'POST', body: JSON.stringify({ analyst: WHO, reason }) });
+    const r = await api(`/api/v1/ai/proposals/${id}/${action}`, { method: 'POST', body: JSON.stringify({ reason }) });
     toast(r.status === 'approved' ? `Đã triển khai ${r.file}` : `Đã ghi nhận (${r.status}, ${r.approvals ? r.approvals.length : 0}/${r.required_approvals} duyệt)`);
     refresh();
   } catch (e) { toast('Lỗi: ' + e.message); }
 }
 async function aiRun() {
-  if (!WHO) { toast('Nhập tên analyst trước'); return; }
-  try { await api('/api/v1/ai/run', { method: 'POST', body: JSON.stringify({ analyst: WHO }) }); toast('Đã gửi yêu cầu, AI worker sẽ chạy trong ~10 giây'); refresh(); }
+  try { await api('/api/v1/ai/run', { method: 'POST', body: '{}' }); toast('Đã gửi yêu cầu, AI worker sẽ chạy trong ~10 giây'); refresh(); }
   catch (e) { toast('Lỗi: ' + e.message); }
 }
 function aiDetail(p) {
@@ -203,7 +269,7 @@ const views = {
             btn('False +', () => setStatus(a._id, 'false_positive')),
             agent && ip ? btn('Chặn IP', () => act(agent, 'block_ip', { ip }, a._id), true) : null,
             agent && (pid || pname) ? btn('Kill', () => act(agent, 'kill_process', pid ? { pid } : { name: pname }, a._id), true) : null,
-            agent && !agent.startsWith('syslog-') ? btn('Cô lập', () => act(agent, 'isolate_host', {}, a._id), true) : null));
+            agent && !agent.startsWith('syslog-') && can('lead') ? btn('Cô lập', () => act(agent, 'isolate_host', {}, a._id), true) : null));
       }))];
   },
   async agents() {
@@ -215,7 +281,36 @@ const views = {
         el('td', {},
           btn('Chặn IP…', () => { const ip = prompt('IP cần chặn'); if (ip) act(a.agent_id, 'block_ip', { ip }); }),
           btn('Kill…', () => { const v = prompt('PID hoặc tên tiến trình'); if (v) act(a.agent_id, 'kill_process', /^\d+$/.test(v) ? { pid: +v } : { name: v }); }),
-          btn('Cô lập', () => act(a.agent_id, 'isolate_host', {}), true), btn('Bỏ cô lập', () => act(a.agent_id, 'unisolate_host', {}))))))];
+          can('lead') ? btn('Cô lập', () => act(a.agent_id, 'isolate_host', {}), true) : null,
+          can('lead') ? btn('Bỏ cô lập', () => act(a.agent_id, 'unisolate_host', {})) : null))))];
+  },
+  async users() {
+    const rows = await api('/api/v1/users');
+    const add = async () => {
+      const username = (prompt('Tên đăng nhập mới (chữ thường, số, . _ -):') || '').trim().toLowerCase(); if (!username) return;
+      const role = (prompt('Vai trò: analyst | lead | admin', 'analyst') || '').trim(); if (!role) return;
+      const password = prompt('Mật khẩu tạm (tối thiểu 12 ký tự — người dùng phải đổi khi đăng nhập lần đầu):') || ''; if (!password) return;
+      try { await api('/api/v1/users', { method: 'POST', body: JSON.stringify({ username, role, password }) }); toast('Đã tạo tài khoản ' + username); refresh(); }
+      catch (e) { toast('Lỗi: ' + e.message); }
+    };
+    const upd = async (u, body, msg) => {
+      try { await api('/api/v1/users/' + encodeURIComponent(u), { method: 'PATCH', body: JSON.stringify(body) }); toast(msg); refresh(); }
+      catch (e) { toast('Lỗi: ' + e.message); }
+    };
+    return [head(['Tài khoản', 'Vai trò', 'Trạng thái', 'Đăng nhập gần nhất', 'Tạo lúc', '']),
+      el('tbody', {}, el('tr', {}, el('td', { colspan: '6' }, btn('+ Thêm tài khoản', add),
+        el('span', { cls: 'small' }, '  analyst: xử lý alert/case, chặn IP, kill · lead: thêm cô lập máy · admin: thêm quản lý tài khoản'))),
+        rows.map(u => el('tr', {},
+          el('td', {}, el('b', {}, u.username), u.username === ME.username ? el('span', { cls: 'small' }, ' (bạn)') : null),
+          el('td', {}, u.role),
+          el('td', { cls: u.disabled ? 'bad' : (u.must_change ? 'warn' : 'ok') }, u.disabled ? 'đã khóa' : (u.must_change ? 'chờ đổi mật khẩu' : 'hoạt động')),
+          el('td', { cls: 'small' }, fmt(u.last_login) || '—'), el('td', { cls: 'small' }, fmt(u.created_at)),
+          el('td', {},
+            btn('Đổi vai trò', () => { const r = (prompt('Vai trò mới: analyst | lead | admin', u.role) || '').trim(); if (r) upd(u.username, { role: r }, 'Đã đổi vai trò'); }),
+            btn('Đặt lại mật khẩu', () => { const p = prompt('Mật khẩu tạm mới (tối thiểu 12 ký tự):') || ''; if (p) upd(u.username, { password: p }, 'Đã đặt lại mật khẩu, người dùng phải đổi khi đăng nhập'); }),
+            u.username === ME.username ? null : (u.disabled
+              ? btn('Mở khóa', () => upd(u.username, { disabled: false }, 'Đã mở khóa'))
+              : btn('Khóa', () => upd(u.username, { disabled: true }, 'Đã khóa tài khoản'), true))))))];
   },
   async actions() {
     const rows = await api('/api/v1/actions?size=200');
@@ -287,18 +382,24 @@ const views = {
   },
 };
 
-async function refresh() {
-  if (!KEY) { $('#tbl').replaceChildren(el('tbody', {}, el('tr', {}, el('td', {}, 'Nhập API key (biến API_KEY trong .env) rồi bấm Lưu.')))); return; }
+let AUTO = false;   // đang làm mới tự động -> mọi GET gắn X-Auto-Refresh (không tính là thao tác của người dùng)
+async function refresh(auto = false) {
+  if (!ME || ME.must_change) return;
+  AUTO = auto;
   try {
-    const s = await api('/api/v1/stats');
+    const s = await api('/api/v1/stats', {}, auto);
     const labels = { events_24h: 'Event 24h', alerts_24h: 'Alert 24h', alerts_open: 'Alert đang mở', agents_online: 'Agent online', agents_total: 'Tổng agent', actions_pending: 'Lệnh đang chờ', cases_open: 'Case đang mở' };
     $('#tiles').replaceChildren(...Object.entries(labels).map(([k, l]) => el('div', { cls: 'tile' }, el('b', {}, (s[k] ?? 0).toLocaleString('vi-VN')), el('span', {}, l))));
+    if (TAB === 'users' && !can('admin')) TAB = 'alerts';
     $('#tbl').replaceChildren(...await views[TAB]());
     $('#updated').textContent = 'cập nhật ' + new Date().toLocaleTimeString('vi-VN');
   } catch (e) { $('#updated').textContent = 'Lỗi: ' + e.message; }
+  finally { AUTO = false; }
 }
-refresh();
-setInterval(() => { if (!document.querySelector('details[open]')) refresh(); }, 5000);
+(async () => {
+  try { await start(await api('/api/v1/auth/me')); } catch (e) { if (!ME) showLogin(''); }
+})();
+setInterval(() => { if (ME && !document.querySelector('details[open]')) refresh(true); }, 5000);
 </script>
 </body>
 </html>
