@@ -13,25 +13,29 @@ import hashlib
 import logging
 import re
 import uuid
-from collections import defaultdict
+from collections import Counter, defaultdict
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar
 
 from .. import settings
-from ..detection.rules import Rule, load_rules
+from ..detection.rules import Rule, load_rules, regex_risk
 from ..pipeline.normalize import Doc, get
 from .attack_types import TYPES
 from .dataset import ESDataSource, EventGroup
 from .golden import PublicDatasets
-from .llm import LLMError, OllamaClient
-from .prompts import (EXCEPTION_SCHEMA, EXCEPTION_SYSTEM, NEW_RULE_SCHEMA, NEW_RULE_SYSTEM, exception_prompt,
-                      new_rule_prompt, rule_to_yaml, sigma_brief)
-from .validate import build_condition, scope_match, validate_exception, validate_new_rule
+from .llm import LLMError, LLMResult, OllamaClient
+from .prompts import (EXCEPTION_SCHEMA, EXCEPTION_SYSTEM, NEW_RULE_SCHEMA, NEW_RULE_SYSTEM, REFINE_SYSTEM,
+                      WEB_SAMPLE_FIELDS, exception_prompt, new_rule_prompt, refine_prompt, rule_to_yaml, sigma_brief)
+from .validate import (SCOPE_FIELDS, _app_specific, build_condition, leaves_of, ordinary_hits, scope_match,
+                       validate_exception, validate_new_rule)
 
 log = logging.getLogger("ai.worker")
 OPEN = ["pending", "approved"]
 MITRE_ID = re.compile(r"^T\d{4}(\.\d{3})?$")
+T = TypeVar("T")
+_REGEX_SYNTAX = re.compile(r"\\[sdwbSDW.\-/?*+()\[\]{}|^$]|\.[*+?]|\[[^\]]+\]|\(\?|\||^\^|\$$")
 
 
 def now_iso() -> str:
@@ -40,22 +44,32 @@ def now_iso() -> str:
 
 def generator_id(model: str) -> str:
     """Dấu vân tay của model + system prompt đang dùng, ghi vào mỗi đề xuất."""
-    return hashlib.sha1("\n".join([model, EXCEPTION_SYSTEM, NEW_RULE_SYSTEM]).encode()).hexdigest()[:10]
+    return hashlib.sha1("\n".join([model, EXCEPTION_SYSTEM, NEW_RULE_SYSTEM, REFINE_SYSTEM]).encode()).hexdigest()[:10]
 
 
-def diverse(docs: list[Doc], k: int) -> list[Doc]:
-    """Chọn k mẫu trải đều theo url.path (lần lượt mỗi đường dẫn 1 mẫu) để LLM thấy nhiều biến thể,
-    thay vì k mẫu liền nhau cùng một đường dẫn. Tất định (không ngẫu nhiên)."""
-    by_path: dict[str, list[Doc]] = defaultdict(list)
-    for d in docs:
-        by_path[str(get(d, "url.path") or get(d, "event.action") or "")].append(d)
-    queues = [by_path[p] for p in sorted(by_path)]
-    out: list[Doc] = []
-    i = 0
-    while len(out) < k and any(i < len(q) for q in queues):
-        out.extend(q[i] for q in queues if i < len(q))
-        i += 1
-    return out[:k]
+def _path_key(d: Doc) -> str:
+    return str(get(d, "url.path") or get(d, "event.action") or "")
+
+
+def diverse(items: list[T], k: int, key: Callable[[T], str] = _path_key) -> list[T]:
+    """Chọn k mẫu trải đều theo `key` (mặc định url.path): mỗi nhóm 1 mẫu, nhóm ĐÔNG trước; còn chỗ thì chia
+    thêm theo tỉ lệ kích thước nhóm (D'Hondt) để nhóm lớn có nhiều mẫu hơn nhóm lẻ tẻ.
+    Nhờ vậy LLM thấy các biến thể phổ biến nhất, thay vì k mẫu liền nhau cùng một nhóm (hoặc k nhóm đầu
+    bảng chữ cái: bản cũ xếp theo tên nên 8 mẫu dò đường dẫn đều là /CFIDE/...). Tất định (không ngẫu nhiên)."""
+    groups: dict[str, list[T]] = defaultdict(list)
+    for x in items:
+        groups[key(x)].append(x)
+    queues = [q for _, q in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))]
+    out = [q[0] for q in queues[:k]]
+    taken = [1 if i < k else 0 for i in range(len(queues))]
+    while len(out) < k:
+        left = [i for i, q in enumerate(queues) if taken[i] < len(q)]
+        if not left:
+            break
+        i = max(left, key=lambda j: len(queues[j]) / (taken[j] + 1))
+        out.append(queues[i][taken[i]])
+        taken[i] += 1
+    return out
 
 
 def rule_yaml(rule: Rule) -> str:
@@ -228,22 +242,135 @@ class AIWorker:
                              rejected: list[str]) -> dict[str, Any]:
         items = sorted(missed, key=lambda x: str(get(x.doc, "url.original") or get(x.doc, "event.id")))
         train, test = items[0::2], items[1::2]          # tách tập: LLM chỉ thấy (một phần) tập train
-        shown = diverse([x.doc for x in train], 8)
+        picked = diverse(train, 8, key=self.golden.variant)   # trải đều theo biến thể, biến thể đông trước
+        shown = [x.doc for x in picked]
+        # thống kê biến thể trên CẢ tập train (không chỉ 8 mẫu) -> rule phủ biến thể phổ biến; tập kiểm tra vẫn giữ riêng
+        variants = dict(Counter(self.golden.variant(x) for x in train).most_common(15))
+        web = get(shown[0], "event.category") == "web"
         paths = {get(d, "url.path") for d in shown}
-        normals = diverse([x.doc for x in self.golden.normal if get(x.doc, "url.path") in paths], 6) or \
-            diverse([x.doc for x in self.golden.normal], 6)
+        with_query = web and any(get(d, "url.query") for d in shown)   # payload trong query -> đối chứng với request có query
+        pool = [x.doc for x in self.golden.normal if get(x.doc, "url.path") in paths
+                and (get(x.doc, "url.query") or not with_query)]
+        normals = diverse(pool, 6) or diverse([x.doc for x in self.golden.normal], 6)
         module = get(shown[0], "event.module")
-        sigma = [sigma_brief(r) for r in self.golden.similar_sigma(shown, module)]
         kind = key.rsplit(":", 1)[-1]
         what = TYPES[kind].prompt if kind in TYPES else kind
+        sigma = [sigma_brief(r) for r in self.golden.similar_sigma(shown, module, hint=what)]
         ctx = (f"Attack type: {what}. These samples come from public dataset '{key.split(':')[0]}' and no current "
-               f"rule detects them ({len(missed)} events). Write a GENERIC signature for this attack type that "
-               "would work on any web application: do not use paths, file names or parameter names specific to the "
-               "sample application. Normal samples are legitimate requests to the same application.")
-        res = self.llm.chat_json(NEW_RULE_SYSTEM, new_rule_prompt(ctx, shown, normals, sigma, rejected), NEW_RULE_SCHEMA)
-        return self._finish_new_rule(res, f"gap-dataset:{key}", rules, ds, [x.doc for x in train],
+               f"rule detects them ({len(missed)} events, {len(train)} of them in the training set summarized by "
+               "variants). Write a GENERIC signature for this attack type that would work on any web application: "
+               "do not use paths, file names or parameter names specific to the sample application. "
+               "Use match \"any\": every value is evaluated on its own, so each one must be a standalone signature. "
+               "Normal samples are legitimate requests to the same application.")
+        payloads = [self.golden.evidence(x) for x in picked]
+        fields = WEB_SAMPLE_FIELDS if web else None
+        normal_half = [x.doc for x in self.golden.normal][0::2]   # ghép mẫu chỉ nhìn nửa tập bình thường
+        prompt = new_rule_prompt(ctx, shown, normals, sigma, rejected, payloads=payloads, variants=variants,
+                                 fields=fields)
+        first = self.llm.chat_json(NEW_RULE_SYSTEM, prompt, NEW_RULE_SCHEMA)
+        # ghép mẫu dựa trên payload trong URL -> chỉ áp dụng cho nhóm web (EVTX giữ câu trả lời đầu)
+        final, attempts = self._refine(first, key, train, normals, normal_half) if web else (first, [])
+        return self._finish_new_rule(final, f"gap-dataset:{key}", rules, ds, [x.doc for x in train],
                                      [x.doc for x in test], key, ["dataset-gap", kind],
-                                     app_tokens=self.golden.profile.app_tokens())
+                                     app_tokens=self.golden.profile.app_tokens(), attempts=attempts)
+
+    def _refine(self, first: LLMResult, key: str, train: list, normals: list[Doc],
+                normal_half: list[Doc]) -> tuple[LLMResult, list[dict[str, Any]]]:
+        """Ghép rule từ nhiều lượt LLM. Mỗi lượt: đo TỪNG mẫu (giá trị của mệnh đề) LLM đưa ra trên tập train và
+        nửa tập bình thường; chỉ giữ mẫu bắt thêm được tấn công mà không khớp request bình thường nào. Lượt sau
+        dồn vào MỘT biến thể còn sót nhiều nhất (8 payload cùng dạng thì model nhỏ mới nhìn ra cấu trúc chung),
+        bằng prompt mới, không kèm câu trả lời cũ: model 7B chỉ chép lại nguyên văn dù được báo mệnh đề nào sai.
+        Rule cuối = OR các mẫu giữ lại. Tập kiểm tra (holdout) không dùng ở đây."""
+        if first.data.get("propose") is False:
+            return first, []
+        kept: list[tuple[dict[str, Any], set[int]]] = []
+        bad: list[dict[str, Any]] = []
+        covered: set[int] = set()
+        attempts: list[dict[str, Any]] = []
+        focused: Counter = Counter()
+        res, focus = first, None
+        for rnd in range(settings.AI_REFINE_ROUNDS + 1):
+            if rnd:
+                missed = [x for i, x in enumerate(train) if i not in covered]
+                lost = Counter(self.golden.variant(x) for x in missed)
+                # biến thể còn sót nhiều nhất, ưu tiên biến thể chưa được hỏi riêng lần nào
+                focus = min(lost, key=lambda v: (focused[v], -lost[v], v))
+                focused[focus] += 1
+                sample = [x for x in missed if self.golden.variant(x) == focus]
+                # hỏi lại cùng biến thể: tăng temperature (model 7B hay trả lời y hệt lần trước) và đổi kiểu
+                # payload luân phiên khúc URL / đúng tham số (thử nghiệm: mỗi kiểu hợp với biến thể khác nhau)
+                style = "window" if focused[focus] % 2 else "param"
+                res = self.llm.chat_json(REFINE_SYSTEM, refine_prompt(
+                    [{**a, "training_hits": len(h)} for a, h in kept], bad, focus, len(sample),
+                    [self.golden.evidence(x, style) for x in diverse(sample, 8)], normals),
+                    NEW_RULE_SCHEMA, temperature=min(0.2 + 0.3 * (focused[focus] - 1), 0.8))
+            measured = []
+            for atom in self._atoms(res.data):
+                if any(atom == a for a, _ in kept) or any(atom == b["pattern"] for b in bad):
+                    continue
+                hits, nh, err = self._measure(atom, train, normal_half, self.golden.profile.app_tokens())
+                if err or nh or not hits:
+                    bad.append({"pattern": atom, "why": err or (
+                        f"matches {len(nh)} normal requests, e.g. {get(nh[0], 'url.decoded') or get(nh[0], 'url.path')}"
+                        if nh else "matches no training event")})
+                else:
+                    measured.append((atom, hits))
+            added = []
+            while measured:          # tham lam: mẫu bắt THÊM nhiều nhất trước, bỏ mẫu không bắt thêm được gì
+                atom, hits = max(measured, key=lambda m: len(m[1] - covered))
+                measured.remove((atom, hits))
+                if hits - covered:
+                    kept.append((atom, hits))
+                    covered |= hits
+                    added.append(atom)
+            recall = len(covered) / len(train) if train else 0.0
+            attempts.append({"round": rnd, "focus": focus, "seconds": res.seconds, "kept": added,
+                             "train_recall": round(recall, 3)})
+            log.info("%s lượt %d: giữ %d mẫu, bắt %.0f%% tập train", key, rnd, len(added), 100 * recall)
+            if recall >= 0.8 or len(kept) >= 15:
+                break
+        if not kept:
+            return first, attempts
+        by_op: dict[tuple[str, str], list[Any]] = {}
+        for a, _ in kept:
+            vals = by_op.setdefault((a["field"], a["op"]), [])
+            vals.extend(a["value"] if isinstance(a["value"], list) else [a["value"]])
+        clauses = [{"field": f, "op": op, "value": vs[0] if len(vs) == 1 and op not in ("in", "cidr") else vs}
+                   for (f, op), vs in by_op.items()]
+        return replace(first, data={**first.data, "match": "any", "clauses": clauses}), attempts
+
+    @staticmethod
+    def _atoms(data: dict[str, Any]) -> list[dict[str, Any]]:
+        """Tách câu trả lời của LLM thành các mẫu đơn {field, op, value}; bỏ mệnh đề phạm vi (event.category...)."""
+        out: list[dict[str, Any]] = []
+        for c in leaves_of(build_condition("any", data.get("clauses") or [])):
+            if c["field"] in SCOPE_FIELDS:
+                continue
+            vals = c["value"] if isinstance(c["value"], list) and c["op"] not in ("in", "cidr") else [c["value"]]
+            for v in vals:
+                op = c["op"]
+                # model nhỏ hay viết regex (AND\s*1=1) nhưng để op=contains -> không bao giờ khớp; sửa op cho nó
+                if op == "contains" and isinstance(v, str) and _REGEX_SYNTAX.search(v):
+                    op = "regex"
+                atom = {"field": c["field"], "op": op, "value": v}
+                if atom not in out:
+                    out.append(atom)
+        return out
+
+    @staticmethod
+    def _measure(atom: dict[str, Any], train: list, normal: list[Doc],
+                 app_tokens: set[str]) -> tuple[set[int], list[Doc], str | None]:
+        if atom["op"] == "regex" and (why := regex_risk(str(atom["value"]))):
+            return set(), [], why
+        if (tied := _app_specific([atom], app_tokens)):
+            return set(), [], f"specific to the sample application or dataset ({', '.join(sorted(tied))})"
+        try:
+            cond = Rule.from_dict({"id": "_atom", "title": "atom", "condition": atom}).condition
+        except Exception as e:  # noqa: BLE001
+            return set(), [], f"invalid: {e}"
+        if atom["field"].startswith("url.") and (oh := ordinary_hits(cond)):
+            return set(), [], f"too generic: matches ordinary URLs such as {oh[0]}"
+        return {i for i, x in enumerate(train) if cond.match(x.doc)}, [d for d in normal if cond.match(d)], None
 
     def propose_own_rule(self, g: EventGroup, rules: list[Rule], ds: ESDataSource, rejected: list[str]) -> dict | None:
         module = g.key.get("event.module")
@@ -259,7 +386,7 @@ class AIWorker:
 
     def _finish_new_rule(self, res, target: str, rules: list[Rule], ds: ESDataSource, train: list[Doc],
                          test: list[Doc], key: str, tags: list[str],
-                         app_tokens: set[str] | None = None) -> dict[str, Any]:
+                         app_tokens: set[str] | None = None, attempts: list[dict] | None = None) -> dict[str, Any]:
         pid = uuid.uuid4().hex[:12]
         if res.data.get("propose") is False:
             p = self._base("new_rule", target, res, f"{key}: AI không đề xuất rule")
@@ -272,4 +399,9 @@ class AIWorker:
         p = self._base("new_rule", target, res, f"Rule mới {rd['id']} — {rd['title']}")
         p.update(id=pid, target_rule_id=rd["id"], proposal=rd, yaml=rule_to_yaml(rd), validation=val.to_dict(),
                  risk=val.risk, required_approvals=1, status="pending" if val.passed else "invalid")
+        if attempts:
+            p["llm"].update(attempts=attempts, seconds=round(sum(a["seconds"] for a in attempts), 1))
+            p["history"].append({"at": now_iso(), "by": "ai-worker",
+                                 "text": f"ghép {sum(len(a['kept']) for a in attempts)} mẫu từ {len(attempts)} lượt LLM, "
+                                         "chỉ giữ mẫu bắt được tấn công ở tập train và không khớp request bình thường"})
         return p

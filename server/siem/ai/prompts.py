@@ -23,6 +23,8 @@ SAMPLE_FIELDS = [
     "http.response.status_code", "user_agent.original", "dns.question.name", "file.path",
     "winlog.channel", "network.transport", "asset.id",
 ]
+# mẫu web từ dataset: chỉ các trường mang payload (IP, user-agent, host... của dataset chỉ là nhiễu cho LLM)
+WEB_SAMPLE_FIELDS = ["http.request.method", "url.path", "url.query", "url.decoded"]
 _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 EXC_OPS = ["eq", "in", "cidr", "startswith", "endswith", "contains", "regex"]
@@ -92,7 +94,25 @@ TASK: decide whether the events in DATA deserve a NEW detection rule. If they ar
 activity with no security value, answer propose=false. Otherwise propose ONE rule of type "match"
 (single-event condition) that fires on the suspicious samples and NOT on the normal samples.
 Keep severity low or medium (a human decides whether to raise it). Prefer precise conditions; a rule
-that fires on normal traffic will be rejected automatically."""
+that fires on normal traffic will be rejected automatically.
+A sample may carry "payload": the part of the request that makes it suspicious (long URLs are truncated,
+the payload is not). DATA.variants counts the sub-types of this attack over ALL training events, not only
+the samples shown, and the rule is tested on held-out events of the same variants. Cover the frequent
+variants, e.g. one regex alternation per group of similar variants. Generalize from the structure the
+variants share (alternation, character classes, optional quotes or spaces) instead of copying literal
+fragments of one sample: a rule that only matches the shown samples is rejected.
+Never use bare common words or short fragments (e.g. "in", "from", "select" alone) that also appear in
+normal text."""
+
+# Lượt bổ sung: bài toán quy nạp mẫu thuần túy, KHÔNG nêu tên loại tấn công. Khi prompt nói "SQL injection",
+# model 7B viết payload sách giáo khoa (' OR 1=1) dù cả 8 payload đưa vào đều là 'OR'a='a.
+REFINE_SYSTEM = _COMMON + """
+TASK: DATA.payloads are strings cut from url.decoded of malicious requests, all of the same variant.
+Find the short substring structure they share that ordinary requests never contain, and propose ONE rule
+of type "match" with match "any" whose values match as many payloads as possible. Copy the characters
+exactly as they appear in the payloads (quotes, spaces or their absence, case). op contains = literal
+text without regex syntax, op regex = Python regex. Do not repeat kept_patterns or rejected_patterns.
+Keep severity low or medium."""
 
 
 def sanitize(v: Any, limit: int = 160) -> Any:
@@ -104,9 +124,17 @@ def sanitize(v: Any, limit: int = 160) -> Any:
     return v
 
 
-def compact(doc: Doc) -> dict[str, Any]:
+def sanitize_deep(v: Any, limit: int = 160) -> Any:
+    if isinstance(v, dict):
+        return {sanitize(k, 60): sanitize_deep(x, limit) for k, x in list(v.items())[:20]}
+    if isinstance(v, list):
+        return [sanitize_deep(x, limit) for x in v[:10]]
+    return sanitize(v, limit)
+
+
+def compact(doc: Doc, fields: list[str] | None = None) -> dict[str, Any]:
     out = {}
-    for f in SAMPLE_FIELDS:
+    for f in fields or SAMPLE_FIELDS:
         v = get(doc, f)
         if v is not None and v != "":
             out[f] = sanitize(v)
@@ -128,15 +156,35 @@ def exception_prompt(rule_yaml: str, fp: list[Doc], tp: list[Doc], rejected: lis
 
 
 def new_rule_prompt(context: str, suspicious: list[Doc], normal: list[Doc], similar_rules: list[str],
-                    rejected: list[str]) -> str:
+                    rejected: list[str], payloads: list[str] | None = None,
+                    variants: dict[str, int] | None = None, fields: list[str] | None = None) -> str:
+    samples = [compact(d, fields) for d in suspicious[:8]]
+    for s, p in zip(samples, payloads or []):
+        if p:
+            s["payload"] = sanitize(p, 120)
     data = {
         "context": context,
-        "suspicious_samples": [compact(d) for d in suspicious[:8]],
-        "normal_samples": [compact(d) for d in normal[:6]],
+        **({"variants": {sanitize(k, 60): n for k, n in variants.items()}} if variants else {}),
+        "suspicious_samples": samples,
+        "normal_samples": [compact(d, fields) for d in normal[:6]],
         "reference_rules": [sanitize(r, 700) for r in similar_rules[:2]],
         "previously_rejected_reasons": [sanitize(r, 300) for r in rejected[:3]],
     }
     return "DATA:\n" + _dump(data) + "\n\nDecide and answer now."
+
+
+def refine_prompt(kept: list[dict[str, Any]], rejected: list[dict[str, Any]], variant: str, missed: int,
+                  payloads: list[str], normal: list[Doc]) -> str:
+    """Lượt bổ sung cho MỘT biến thể còn sót (dùng với REFINE_SYSTEM): payload của biến thể đó, mẫu đã giữ,
+    mẫu bị loại kèm lý do. Payload vẫn là dữ liệu không tin cậy."""
+    data = sanitize_deep({
+        "variant": f"{variant} ({missed} training events still missed)",
+        "payloads": payloads,
+        "kept_patterns": kept,
+        "rejected_patterns": rejected[-8:],
+        "normal_samples": [get(d, "url.decoded") or get(d, "url.path") for d in normal[:3]],
+    }, 200)
+    return "DATA:\n" + _dump(data) + "\n\nAnswer now."
 
 
 def rule_to_yaml(d: dict[str, Any]) -> str:

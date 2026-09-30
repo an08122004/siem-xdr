@@ -257,7 +257,7 @@ khi vẫn cùng model và prompt (xem *Kết quả chạy thử*). Ngoại lệ 
 |---|---|---|
 | Chung | Compile được, trường có thật trong dữ liệu, toán tử được phép, regex không có nguy cơ ReDoS, không chậm engine | như bên trái, thêm ID không trùng |
 | Độ chính xác | Neo vào thực thể cụ thể (IP, user, host, process, URL), không được loại cả `event.category`. Khớp ≥ 50% alert báo nhầm | Bắt ≥ 30% mẫu nghi vấn. Với mẫu từ dataset thì đo trên **tập kiểm tra** (một nửa số mẫu giữ riêng, LLM không thấy) |
-| An toàn | Không khớp event nào của case đã xác nhận thật. Không làm mất mẫu tấn công nào mà rule đang bắt trong bộ mẫu vàng | Báo nhầm ≤ 0,1% trên tập bình thường. Replay 7 ngày ≤ 20 alert/ngày. Severity chỉ `low`/`medium` |
+| An toàn | Không khớp event nào của case đã xác nhận thật. Không làm mất mẫu tấn công nào mà rule đang bắt trong bộ mẫu vàng | Báo nhầm ≤ 0,1% trên tập bình thường. Rule web không khớp URL nào trong 23 URL của một website bình thường (`ORDINARY_URLS`: `/`, `/images/`, `/search?q=...`). Replay 7 ngày ≤ 20 alert/ngày. Severity chỉ `low`/`medium` |
 | Dùng chung được | | Rule từ dataset không được chứa đường dẫn hay tên file của ứng dụng mẫu (vd `tienda1`, `anadir.jsp`) |
 
 **Duyệt và triển khai** (tab *Đề xuất AI* trên console):
@@ -284,19 +284,38 @@ Dataset chỉ được chạy offline qua bộ chuẩn hóa và rule engine, kh�
 Kết quả hiện tại: bắt 11% mẫu tấn công quan sát được, 0 báo nhầm. Có thêm 9.977 mẫu tấn công nằm trong body POST, access log không ghi nên không thể phát hiện.
 
 **Gom theo loại tấn công** (`attack_types.py`): mỗi mẫu tấn công web được gán một loại bằng heuristic thô, chỉ để gom nhóm.
-Nhờ vậy mỗi lần gọi, LLM chỉ thấy một kiểu tấn công, kèm mô tả loại đó và 8 mẫu trải đều nhiều đường dẫn.
+Nhờ vậy mỗi lần gọi, LLM chỉ thấy một kiểu tấn công, kèm mô tả loại đó.
 CSIC 2010 gán nhãn "bất thường" cho cả những request sai định dạng của riêng ứng dụng mẫu. Rule chữ ký cho các nhóm này
 chỉ khớp ứng dụng đó, nên chúng chỉ được báo cáo, không giao cho AI. Muốn bắt cần mô hình hành vi hoặc allowlist theo từng ứng dụng.
+Dấu nháy đơn lẻ giữa chữ (tên riêng như `D'estats`, hoặc dataset chèn nháy ngẫu nhiên) không tính là SQLi, vì không viết được
+chữ ký chung cho nó mà không báo nhầm tên người hay địa chỉ hợp lệ.
+
+Mỗi mẫu còn được gán **biến thể** (kiểu con trong cùng loại, vd SQLi `tautology-quoted` / `quote-breakout`, hay thư mục bị dò
+`/_vti_bin/`) và **payload** (đoạn làm request bị nghi vấn). LLM nhận 8 mẫu trải đều theo biến thể, biến thể đông trước,
+thống kê biến thể của cả tập train và payload của từng mẫu. URL dài bị cắt khi đưa vào prompt, còn payload thì không bị cắt.
+Chuỗi giữ chỗ `INJECTED_PARAM` của CSIC bị bỏ khỏi payload, và rule chứa nó bị kiểm định loại.
 
 | Loại | Mẫu rule hiện tại chưa bắt | Giao cho AI |
 |---|---|---|
 | Dò file sao lưu / mã nguồn (`.bak`, `.old`, `~`, `.inc`...) | 2.615 | có |
-| Dò tài nguyên nhạy cảm / mặc định (`/_vti_bin`, `/msadc`, `.htr`...) | 885 | có |
-| SQL Injection (dạng rule hiện tại bỏ sót, vd `AND 1=1` không có dấu nháy) | 679 | có |
+| Dò tài nguyên nhạy cảm / mặc định (`/_vti_bin`, `/cfide`, `.nsf`...) | 885 | có |
 | CRLF / chèn header (`%0A Set-cookie:`) | 540 | có |
-| Mã hóa né tránh (`%25xx`, `%00`) | 465 | có |
+| Mã hóa né tránh (`%25xx`, `%00`) | 466 | có |
+| SQL Injection (dạng rule hiện tại bỏ sót, vd `'OR'a='a`, `AND 1=1`) | 392 | có |
 | Server-Side Include (`<!--#exec`) | 265 | có |
-| Tham số lạ / giá trị sai định dạng / đường dẫn không tồn tại (riêng ứng dụng) | 7.980 | không |
+| Tham số lạ / giá trị sai định dạng / đường dẫn không tồn tại (riêng ứng dụng) | 8.266 | không |
+
+**Ghép rule theo biến thể** (`worker._refine`, chỉ cho nhóm web): câu trả lời đầu của LLM được tách thành từng mẫu (giá trị
+của mệnh đề). Mỗi mẫu được đo trên tập train và nửa tập bình thường, và chỉ được giữ nếu bắt thêm được tấn công mà không khớp
+request bình thường, không khớp URL thông thường, không gắn với ứng dụng mẫu. Sau đó, tối đa `AI_REFINE_ROUNDS` (mặc định 6)
+lượt bổ sung hỏi riêng **một biến thể** còn sót nhiều nhất. Mỗi lượt dùng prompt mới, kèm mẫu đã giữ và mẫu bị loại (có lý do),
+nhưng không kèm câu trả lời cũ và không nêu tên loại tấn công. Hỏi lại cùng biến thể thì tăng temperature và luân phiên kiểu payload
+(khúc URL / đúng cặp tham số=giá trị). Rule cuối là OR các mẫu đã giữ, rồi mới qua kiểm định trên tập kiểm tra. Tập kiểm tra
+không được dùng ở bước ghép. Lý do thiết kế như vậy, rút ra khi chạy thử với `qwen2.5-coder:7b`:
+- Gửi lại rule cũ kèm phản hồi chi tiết từng giá trị thì model chỉ chép lại nguyên văn, kể cả ở temperature 0,8.
+- Prompt có nhắc "SQL injection" thì model viết payload sách giáo khoa (`' OR 1=1`), dù cả 8 payload đưa vào đều là `'OR'a='a`.
+- Model hay viết cú pháp regex (`AND\s*1=1`) nhưng lại để op là `contains`. Worker tự đổi op sang `regex`.
+- Thêm ví dụ mẫu (few-shot) từ loại tấn công khác làm kết quả tệ hơn.
 
 Các biến cấu hình `AI_*` nằm trong `.env.example`.
 
@@ -323,7 +342,7 @@ Các biến cấu hình `AI_*` nằm trong `.env.example`.
 
 ```bash
 cd server && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt pytest httpx
-.venv/Scripts/python -m pytest -q      # 46 test: parser, rule, ML, SOAR, case playbook, API, AI (phân loại tấn công, kiểm định, worker với LLM giả, duyệt/gỡ)
+.venv/Scripts/python -m pytest -q      # 50 test: parser, rule, ML, SOAR, case playbook, API, AI (phân loại tấn công, biến thể, kiểm định, worker với LLM giả, duyệt/gỡ)
 cd ../agent && go test ./...
 ```
 Sinh lại dashboard Grafana: `python tools/gen_dashboard.py`.

@@ -75,6 +75,7 @@ AI_MIN_FALSE_POSITIVES = int(os.getenv("AI_MIN_FALSE_POSITIVES", "3"))  # rule c
 AI_MIN_GROUP_EVENTS = int(os.getenv("AI_MIN_GROUP_EVENTS", "20"))       # nhóm event chưa có rule cần >= N event
 AI_MAX_NEW_RULE_ALERTS_PER_DAY = float(os.getenv("AI_MAX_NEW_RULE_ALERTS_PER_DAY", "20"))
 AI_MAX_PROPOSALS_PER_RUN = int(os.getenv("AI_MAX_PROPOSALS_PER_RUN", "5"))
+AI_REFINE_ROUNDS = int(os.getenv("AI_REFINE_ROUNDS", "6"))            # rule từ dataset: số lượt LLM bổ sung mẫu cho biến thể còn sót
 
 # Log từng request HTTP tới Elasticsearch quá nhiều -> chỉ giữ cảnh báo
 import logging as _logging  # noqa: E402

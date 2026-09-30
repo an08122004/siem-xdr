@@ -24,13 +24,14 @@ from typing import Any
 
 from ..detection.rules import Rule, RuleEngine
 from ..pipeline.enrich import Enricher
-from .attack_types import TYPES, WebProfile, classify_web
+from .attack_types import DATASET_ARTIFACTS, TYPES, WebProfile, inspect_web
 from ..pipeline.normalize import Doc, get, normalize
 
 log = logging.getLogger("ai.golden")
 
 DEFAULT_DIR = Path(os.getenv("DATASETS_DIR", Path(__file__).resolve().parents[3] / "datasets" / "processed"))
 _TOKEN = re.compile(r"[a-z][a-z0-9_]{2,}")
+_ARTIFACT = re.compile("|".join(sorted(DATASET_ARTIFACTS)), re.I)
 # event.module của siem-xdr -> logsource tương ứng bên Sigma (để ưu tiên rule cùng loại nguồn)
 MODULE_TO_SIGMA = {
     "apache": {"category": "webserver"}, "windows": {"product": "windows"}, "sysmon": {"product": "windows"},
@@ -98,13 +99,37 @@ class PublicDatasets:
             self._profile = WebProfile.build(x.doc for x in self.normal if get(x.doc, "event.category") == "web")
         return self._profile
 
+    def _inspect(self, x: Labeled) -> dict[str, Any]:
+        if "attack_type" not in x.label:
+            if get(x.doc, "event.category") == "web":
+                m = inspect_web(x.doc, self.profile)
+                x.label.update(attack_type=m.kind, variant=m.variant, evidence=m.evidence, evidence_window=m.short,
+                               evidence_param=m.param)
+            else:
+                x.label.update(attack_type="khac", variant=str(get(x.doc, "event.action") or ""), evidence="")
+        return x.label
+
     def attack_type(self, x: Labeled) -> str:
         """Nhóm của mẫu tấn công: tactic ATT&CK (EVTX) hoặc loại tấn công web (xem attack_types.py)."""
         if x.label.get("tactic"):
             return x.label["tactic"]
-        if "attack_type" not in x.label:
-            x.label["attack_type"] = classify_web(x.doc, self.profile) if get(x.doc, "event.category") == "web" else "khac"
-        return x.label["attack_type"]
+        return self._inspect(x)["attack_type"]
+
+    def variant(self, x: Labeled) -> str:
+        """Kiểu con trong nhóm (vd SQLi tautology / thoát chuỗi; thư mục bị dò); EVTX: file mẫu."""
+        if x.label.get("tactic"):
+            return str(x.label.get("file") or get(x.doc, "event.code") or "")
+        return self._inspect(x)["variant"]
+
+    def evidence(self, x: Labeled, style: str = "full") -> str:
+        """Đoạn làm request bị nghi vấn (payload), không bị cắt như URL đầy đủ khi đưa vào prompt.
+        style: "full" (khúc URL rộng quanh đoạn khớp), "window" (cắt sát đoạn khớp),
+        "param" (đúng cặp tham số=giá trị chứa đoạn khớp). Kiểu nào không có thì lùi về "full"."""
+        if x.label.get("tactic"):
+            return ""
+        lab = self._inspect(x)
+        # bỏ chuỗi giữ chỗ của dataset (INJECTED_PARAM): không phải payload thật, model hay chép nguyên vào rule
+        return _ARTIFACT.sub("", lab.get(f"evidence_{style}") or lab["evidence"])
 
     @staticmethod
     def transferable(kind: str) -> bool:
@@ -163,18 +188,23 @@ class PublicDatasets:
         }
 
     # ------------------------------------------------------------ RAG Sigma
-    def similar_sigma(self, samples: list[Doc], module: str | None, k: int = 3) -> list[dict[str, Any]]:
+    def similar_sigma(self, samples: list[Doc], module: str | None, k: int = 3, hint: str = "") -> list[dict[str, Any]]:
+        """Rule Sigma gần nhất theo từ khóa. `hint` (vd mô tả loại tấn công) được tính trọng số gấp đôi:
+        chỉ dựa vào mẫu thì từ khóa của ứng dụng (tienda1, publico...) lấn át, kéo về rule CVE không liên quan."""
         if not self.sigma:
             return []
         q: set[str] = set()
         for d in samples[:10]:
             q |= _tokens(json.dumps(_flat(d), ensure_ascii=False))
+        h = _tokens(hint)
         want = MODULE_TO_SIGMA.get(module or "", {})
         scored = []
         for r, toks in zip(self.sigma, self._sigma_tokens):
             if not toks:
                 continue
             s = len(q & toks) / math.sqrt(len(q) * len(toks) or 1)
+            if h:
+                s += 2 * len(h & toks) / math.sqrt(len(h) * len(toks))
             ls = r.get("logsource") or {}
             if want and all(ls.get(k2) == v for k2, v in want.items()):
                 s *= 2  # cùng loại nguồn log

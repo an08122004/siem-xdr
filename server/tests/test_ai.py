@@ -335,3 +335,81 @@ def test_retry_policy_depends_on_generator(tmp_path, monkeypatch):
     assert run([{"target": target, "status": "invalid", "llm": {"generator": "prompt-cu"}}]) == [target]
     assert run([{"target": target, "status": "invalid", "llm": {"generator": generator_id("fake")}}]) == []
     assert run([{"target": target, "status": "rejected", "reject_reason": "không cần", "llm": {"generator": "khac"}}]) == []
+
+
+# ------------------------------------------------------------------ biến thể, ghép mẫu, URL thông thường
+def test_sqli_variants_stray_quote_and_path_variants():
+    from siem.ai.attack_types import WebProfile, inspect_web
+    prof = WebProfile.build([web(u) for u in NORMAL_URLS])
+    cases = {
+        "/shop/login.jsp?user=%27OR%27a%27%3D%27a&pwd=x": ("sqli", "tautology-quoted"),
+        "/shop/add.jsp?id=1%27&qty=2": ("sqli", "quote-breakout"),
+        "/shop/login.jsp?user=D%27estats&pwd=abc123": ("invalid-value", "/shop/login.jsp"),  # nháy trong tên riêng
+        "/_vti_bin/admin.dll": ("sensitive-path", "/_vti_bin/"),
+        "/admin4.nsf": ("sensitive-path", "extension .nsf"),
+    }
+    got = {u: (m.kind, m.variant) for u in cases for m in [inspect_web(web(u), prof)]}
+    assert got == cases
+    x = Labeled(web("/shop/add.jsp?id=%27INJECTED_PARAM&qty=2"), {"dataset": "t"})
+    g = PublicDatasets(directory=Path("."), attack=[x], normal=[Labeled(web(u), {"class": "normal"}) for u in NORMAL_URLS])
+    assert g.attack_type(x) == "sqli" and "id='&qty" in g.evidence(x, "window")   # bỏ chuỗi giữ chỗ của dataset
+    assert g.evidence(x, "param") == "id='"
+
+
+def test_diverse_largest_groups_first_then_proportional():
+    from siem.ai.worker import diverse
+    items = [("z", i) for i in range(6)] + [("a", 0)] + [("m", i) for i in range(3)]
+    assert [g for g, _ in diverse(items, 2, key=lambda x: x[0])] == ["z", "m"]           # không theo bảng chữ cái
+    assert [g for g, _ in diverse(items, 5, key=lambda x: x[0])] == ["z", "m", "a", "z", "z"]
+
+
+class SeqLLM:
+    """LLM giả lập trả lần lượt từng câu trả lời."""
+    model = "fake"
+
+    def __init__(self, answers):
+        self.answers, self.prompts = list(answers), []
+
+    def chat_json(self, system, user, schema, temperature=0.2):
+        self.prompts.append(user)
+        return LLMResult(data=self.answers.pop(0), raw="{}", model="fake", seconds=0.1, prompt_tokens=1, output_tokens=1)
+
+
+def test_dataset_rule_assembled_from_measured_patterns(tmp_path, monkeypatch):
+    """Giữ mẫu bắt được tấn công ở tập train mà không khớp request bình thường; lượt sau hỏi riêng biến thể còn sót."""
+    rd = write_rules(tmp_path)
+    monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
+    attack = [web(f"/shop/img/a{i:02d}.gif.bak", i) for i in range(12)] + \
+             [web(f"/shop/img/b{i:02d}.gif.old", i) for i in range(12)]
+    golden = PublicDatasets(directory=Path("."), attack=[Labeled(d, {"dataset": "t"}) for d in attack],
+                            normal=[Labeled(web(u, i), {"class": "normal"}) for i, u in enumerate(NORMAL_URLS * 5)])
+    base = {"propose": True, "rationale": "r", "title": "Dò file sao lưu", "description": "d", "severity": "low",
+            "mitre_tactic": "Discovery", "mitre_technique": ["T1083"], "match": "any"}
+    llm = SeqLLM([
+        # "/shop/" gắn với ứng dụng mẫu -> loại; "\.bak$" là regex nhưng model để op=contains -> tự sửa op;
+        # event.category là mệnh đề phạm vi -> bỏ; "/" khớp URL thư mục bình thường -> loại
+        {**base, "clauses": [{"field": "url.path", "op": "contains", "value": ["/shop/", r"\.bak$"]},
+                             {"field": "url.path", "op": "endswith", "value": "/"},
+                             {"field": "event.category", "op": "eq", "value": "web"}]},
+        {**base, "clauses": [{"field": "url.path", "op": "endswith", "value": ".old"}]},
+    ])
+    saved = []
+    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append).run_cycle("an")
+    p = saved[0]
+    assert p["status"] == "pending", p["validation"]["checks"]
+    assert p["proposal"]["condition"] == {"any": [{"field": "url.path", "op": "regex", "value": r"\.bak$"},
+                                                  {"field": "url.path", "op": "endswith", "value": ".old"}]}
+    assert [(a["focus"], a["train_recall"]) for a in p["llm"]["attempts"]] == [(None, 0.5), (".old", 1.0)]
+    assert '"variant": ".old (6 training events still missed)"' in llm.prompts[1]
+    assert "Probing for backup" not in llm.prompts[1]          # lượt bổ sung không nêu tên loại tấn công
+    assert "specific to the sample application" in llm.prompts[1] and "ordinary URLs" in llm.prompts[1]
+
+
+def test_new_rule_matching_ordinary_urls_blocked():
+    susp = [web(f"/shop/img/{i}/", i) for i in range(10)]
+    normal = [web(u, i) for i, u in enumerate(NORMAL_URLS[:3] * 5)]      # tập bình thường không có URL thư mục
+    val = validate_new_rule(_new([{"field": "url.path", "op": "endswith", "value": "/"}]), [],
+                            susp[:5], susp[5:], normal, [], 20)
+    checks = {c.name: c.ok for c in val.checks}
+    assert checks["báo nhầm trên dữ liệu bình thường"] and not checks["không khớp URL thông thường"]
+    assert not val.passed

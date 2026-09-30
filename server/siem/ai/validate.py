@@ -16,6 +16,7 @@ import time
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from typing import Any
+from urllib.parse import unquote_plus
 
 from ..detection.rules import Rule, RuleEngine, RuleException, _eval, regex_risk
 from ..pipeline.normalize import Doc, get
@@ -27,6 +28,32 @@ SPECIFIC_OPS = {"eq", "in", "cidr", "startswith"}
 GENERIC_PREFIXES = ("event.", "message", "log.", "tags")
 _SEGMENT = re.compile(r"[^a-z0-9_.\-~]+")
 SCOPE_FIELDS = {"event.category", "event.module", "event.action", "event.code", "event.dataset", "event.type"}
+
+# URL bình thường của một website bất kỳ. Tập bình thường CSIC chỉ có một ứng dụng (/tienda1/...), không có
+# URL thư mục, trang tĩnh, API... nên rule kiểu `url endswith "/"` vẫn đạt 0 báo nhầm trên CSIC. Rule web
+# khớp bất kỳ URL nào dưới đây là quá chung chung.
+ORDINARY_URLS = [
+    "/", "/index.html", "/images/", "/images/logo.png", "/css/site.css", "/js/app.min.js", "/favicon.ico",
+    "/robots.txt", "/about-us", "/news/", "/blog/2024/05/hello-world/", "/login", "/account/settings",
+    "/products?category=shoes&sort=price-asc&page=2", "/search?q=summer+sale", "/search?q=O%27Brien+%26+Sons",
+    "/api/v1/users/42", "/api/v1/orders?status=open&limit=20", "/docs/guide.html", "/download?file=report-2024.pdf",
+    "/cart/add?id=17&qty=1", "/?lang=en", "/contact?name=Anna&email=anna%40example.com&msg=Hi%2C+see+you+at+5",
+]
+
+
+def _ordinary_doc(u: str) -> Doc:
+    path, _, query = u.partition("?")
+    return {"event": {"category": "web", "module": "apache", "type": "access"},
+            "http": {"request": {"method": "GET"}, "response": {"status_code": 200}},
+            "url": {"original": u, "path": path, "query": query, "decoded": unquote_plus(u)}}
+
+
+ORDINARY_DOCS = [_ordinary_doc(u) for u in ORDINARY_URLS]
+
+
+def ordinary_hits(cond) -> list[str]:
+    """URL bình thường mà điều kiện khớp (chỉ xét nếu điều kiện dùng trường url.*)."""
+    return [get(d, "url.original") for d in ORDINARY_DOCS if cond.match(d)]
 
 
 @dataclass
@@ -240,6 +267,12 @@ def validate_new_rule(rule_dict: dict[str, Any], existing: list[Rule], suspiciou
                             f"{nh}/{len(normal)} event bình thường bị bắt ({fpr:.2%}, tối đa 0,1%)"))
     else:
         nh = 0
+    if any(c["field"].startswith("url.") for c in clauses):
+        oh = ordinary_hits(rule.condition)
+        metrics["ordinary_url_hits"] = len(oh)
+        checks.append(Check("không khớp URL thông thường", not oh,
+                            f"không khớp {len(ORDINARY_URLS)} URL mẫu của website bình thường" if not oh
+                            else f"khớp URL bình thường: {', '.join(oh[:3])} — quá chung chung"))
 
     n, t = replay(rule, replay_events)
     per_day = n / span_days(replay_events) if replay_events else 0
