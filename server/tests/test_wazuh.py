@@ -46,12 +46,23 @@ def test_apache_via_wazuh_keeps_existing_rules(engine, enricher):
     raw = wz(full_log=line, decoder={"name": "web-accesslog"}, location="/usr/local/apache2/logs/access_log")
     doc = enricher.enrich(normalize(raw))
     assert get(doc, "agent.id") == "001" and get(doc, "agent.type") == "wazuh" and get(doc, "host.name") == "demo-web"
-    assert get(doc, "event.id") == "wazuh-001-1790609494.501537"          # cố định -> đọc lại không trùng
+    assert get(doc, "event.id").startswith("wazuh-001-1790609494.501537-")
+    assert get(normalize(raw), "event.id") == get(doc, "event.id")       # cố định -> đọc lại không tạo bản ghi trùng
     assert get(doc, "@timestamp") == "2026-09-28T15:31:34+00:00"          # thời gian trong dòng log
     assert get(doc, "source.ip") == "203.0.113.9" and get(doc, "url.decoded") == "/p?id=1 union select 1,2"
     assert get(doc, "asset.id") == "S001-DEMO"                             # tra theo tên agent
     assert get(doc, "wazuh.location") == "/usr/local/apache2/logs/access_log"
     assert "WEB-001" in fired(engine, enricher, [raw])
+
+
+def test_events_sharing_wazuh_id_get_distinct_event_ids():
+    # Wazuh đặt id = <giây>.<vị trí alerts.log>: mọi event không sinh cảnh báo trong cùng giây chung 1 id (đã gặp
+    # thật: 8 event chung id, ES chỉ giữ 1). Hai tiến trình khác nhau phải là 2 bản ghi.
+    lines = [f"ossec: output: 'siem-procs': siem-proc: pid={p} ppid=1 uid=0 name=sh parent=init exe=- cmd=" for p in (5, 6)]
+    ids = {get(normalize(wz(full_log=line, location="siem-procs")), "event.id") for line in lines}
+    assert len(ids) == 2
+    ids.add(get(normalize(wz(full_log=lines[0], location="siem-procs", timestamp="2026-09-28T15:31:34.124+0000")), "event.id"))
+    assert len(ids) == 3                                                  # cùng dòng nhưng khác thời điểm (ms)
 
 
 def test_windows_eventchannel_mapped_to_existing_parser():
@@ -164,7 +175,8 @@ def test_bridge_alert_document(enricher):
     assert alert["rule"]["id"] == "WZH-100100" and alert["severity"] == "high" and alert["alert"]["source"] == "wazuh"
     assert alert["rule"]["mitre"] == {"tactic": "Persistence", "technique": ["T1505.003"]}
     assert alert["file"]["path"] == "/var/www/html/x.php" and alert["agent"]["id"] == "001"
-    assert alert["related_events"] == ["wazuh-001-1790609494.501537"]   # trỏ đúng event bản archives
+    archived = normalize(wz(location="syscheck", syscheck={"path": "/var/www/html/x.php", "event": "added"}))
+    assert alert["related_events"] == [get(archived, "event.id")]       # trỏ đúng event bản archives
     assert bridge.to_alert(enricher.enrich(normalize(wz("wazuh_alert", rule={"id": "5402", "level": 3})))) is None
 
 
@@ -179,6 +191,40 @@ def test_analyzer_does_not_store_wazuh_alert_twice(enricher, engine):
     assert an.buffer == [] and [a["rule"]["id"] for a in emitted] == ["WZH-550"]
     an.handle(wz(full_log="x", location="/var/log/syslog"))
     assert len(an.buffer) == 1
+
+
+def test_analyzer_acknowledges_kafka_only_after_events_are_stored(enricher, engine, monkeypatch):
+    """Offset Kafka chỉ được xác nhận khi event đã nằm trong ES: ES lỗi -> không xác nhận -> lần sau đọc lại."""
+    from siem import analyzer as mod
+
+    class Stream:
+        acked = 0
+
+        def done(self):
+            self.acked += 1
+
+    class Producer:
+        def flush(self, _t):
+            return 0
+    an = mod.Analyzer.__new__(mod.Analyzer)
+    an.enricher, an.engine, an.detector, an.buffer, an.stats = enricher, engine, None, [], {"events": 0, "alerts": 0}
+    an.stream, an.producer, an.es, an.last_rules_check = Stream(), Producer(), None, 10 ** 12
+    an.last_flush = 0
+    an.emit = lambda a: None
+    calls = []
+
+    def bulk(es, docs):
+        calls.append(len(docs))
+        if len(calls) == 1:
+            raise ConnectionError("ES tạm lỗi")
+        return len(docs)
+    monkeypatch.setattr(mod.store, "bulk_index", bulk)
+    monkeypatch.setattr(mod.time, "sleep", lambda s: None)
+    an.handle(wz(full_log="x", location="/var/log/syslog"))
+    an.tick()
+    assert calls == [1] and an.stream.acked == 0 and len(an.buffer) == 1      # ES lỗi: giữ bộ đệm, chưa xác nhận
+    an.tick()
+    assert calls == [1, 1] and an.stream.acked == 1 and an.buffer == []       # ghi xong mới xác nhận
 
 
 def test_case_playbooks_have_titled_tasks():
@@ -293,15 +339,30 @@ def test_soar_no_endpoint_action_for_syslog_source(monkeypatch):
     assert created == []
 
 
+def test_soar_auto_kill_only_by_pid(monkeypatch):
+    """Tự kill theo tên giết mọi tiến trình cùng tên (vd httpd -> sập web): chỉ tự kill khi alert có PID."""
+    from siem.soar.engine import Soar
+    created = []
+    monkeypatch.setattr(store, "create_action", lambda es, aid, t, p, **kw: created.append((aid, t, p)) or {"id": "x"})
+    soar = Soar(FakeES(), [], whitelist=[])
+    no_pid = {"alert": {"id": "a"}, "agent": {"id": "001"}, "process": {"name": "httpd"}}
+    assert soar.run_step({"action": "kill_process"}, no_pid)["status"] == "skipped"
+    with_pid = {"alert": {"id": "b"}, "agent": {"id": "001"}, "process": {"name": "sh", "pid": 4242}}
+    assert soar.run_step({"action": "kill_process"}, with_pid)["status"] == "queued"
+    assert created == [("001", "kill_process", {"pid": 4242})]
+
+
 def _es_match(doc, q):
-    """Đánh giá tối giản query Elasticsearch (term / terms / range / bool filter+should) trên 1 document."""
+    """Đánh giá tối giản query Elasticsearch (term / terms / range / exists / bool filter+should+must_not)."""
     if "bool" in q:
         b = q["bool"]
-        ok = all(_es_match(doc, c) for c in b.get("filter", []))
+        ok = all(_es_match(doc, c) for c in b.get("filter", [])) and not any(_es_match(doc, c) for c in b.get("must_not", []))
         if b.get("should"):
             ok = ok and sum(_es_match(doc, c) for c in b["should"]) >= b.get("minimum_should_match", 1)
         return ok
     (kind, spec), = q.items()
+    if kind == "exists":
+        return doc.get(spec["field"]) is not None
     (field, val), = spec.items()
     v = doc.get(field)
     if kind == "term":
@@ -309,8 +370,34 @@ def _es_match(doc, q):
     if kind == "terms":
         return v in val
     if kind == "range":
-        return v is not None and all({"gt": v > x, "gte": v >= x}[op] for op, x in val.items())
+        return v is not None and all({"gt": v > x, "gte": v >= x, "lt": v < x, "lte": v <= x}[op] for op, x in val.items())
     raise AssertionError(kind)
+
+
+def test_expired_block_is_retried_until_unblock_succeeds(monkeypatch):
+    """Hết hạn chặn -> tạo lệnh gỡ; chưa gỡ được thì 15 phút sau tạo lại (trước đây đánh dấu đã gỡ ngay, lệnh gỡ lỗi
+    là IP bị chặn mãi)."""
+    from datetime import datetime, timedelta, timezone
+    from siem.soar import engine as eng
+    now = datetime.now(timezone.utc)
+    block = {"_id": "blk", "agent_id": "001", "type": "block_ip", "target": "203.0.113.9", "status": "success",
+             "reverted": False, "created_at": (now - timedelta(hours=2)).isoformat(),
+             "expires_at": (now - timedelta(hours=1)).isoformat()}
+    unblocks = []
+
+    class ES:
+        def update(self, index, id, doc, **kw):
+            block.update(doc)
+    monkeypatch.setattr(store, "search", lambda es, index, query=None, **kw: [block] if _es_match(block, query) else [])
+    monkeypatch.setattr(store, "create_action", lambda es, aid, t, p, **kw: unblocks.append((aid, t, p)) or {"id": "u"})
+    soar = eng.Soar(ES(), [], whitelist=[])
+    soar.housekeeping()
+    assert unblocks == [("001", "unblock_ip", {"ip": "203.0.113.9"})] and block["reverted"] is False
+    soar.housekeeping()
+    assert len(unblocks) == 1                                   # vừa yêu cầu gỡ: chờ kết quả, không gửi trùng
+    block["revert_requested_at"] = (now - timedelta(minutes=eng.REVERT_RETRY_MINUTES + 1)).isoformat()
+    soar.housekeeping()
+    assert len(unblocks) == 2                                   # lệnh gỡ lần trước không thành công -> thử lại
 
 
 def test_already_blocked_ignores_stale_permanent_block(monkeypatch):

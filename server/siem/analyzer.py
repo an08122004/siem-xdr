@@ -42,6 +42,7 @@ class Analyzer:
         self.buffer: list[dict] = []
         self.last_flush = time.time()
         self.stats = {"events": 0, "alerts": 0}
+        self.stream: bus.Stream | None = None
 
     def handle(self, raw: dict) -> None:
         doc = self.enricher.enrich(normalize(raw))
@@ -100,12 +101,16 @@ class Analyzer:
                 return
             self.buffer.clear()
             self.last_flush = now
-            self.producer.flush(5)
+        if not self.buffer:
+            # mọi message đã đọc đều đã ghi ES; alert đã sinh phải tới được Kafka thì mới xác nhận offset
+            if self.producer.flush(5) == 0 and self.stream is not None:
+                self.stream.done()
 
     def run(self) -> None:
         log.info("analyzer bắt đầu tiêu thụ topic %s", settings.TOPIC_RAW)
         last_report = time.time()
-        for msg in bus.consume("siem-analyzer", [settings.TOPIC_RAW], poll_timeout=0.5):
+        self.stream = bus.consume("siem-analyzer", [settings.TOPIC_RAW], poll_timeout=0.5)
+        for msg in self.stream:
             if msg is not None:
                 try:
                     self.handle(msg)

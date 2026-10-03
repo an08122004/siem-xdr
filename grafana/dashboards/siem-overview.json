@@ -9,7 +9,7 @@
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
-  "refresh": "10s",
+  "refresh": "30s",
   "time": {
     "from": "now-1h",
     "to": "now"
@@ -714,7 +714,8 @@
         "defaults": {
           "color": {
             "mode": "continuous-YlRd"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       }
@@ -784,7 +785,7 @@
     },
     {
       "id": 13,
-      "type": "bargauge",
+      "type": "piechart",
       "title": "Top IP tấn công (từ alert)",
       "datasource": {
         "type": "elasticsearch",
@@ -835,17 +836,14 @@
           ],
           "fields": ""
         },
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "continuous-YlRd"
-          }
-        },
-        "overrides": []
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value"
+          ]
+        }
       }
     },
     {
@@ -914,7 +912,7 @@
     {
       "id": 15,
       "type": "table",
-      "title": "Alert mới nhất",
+      "title": "Alert mới nhất — bấm tên rule để mở trên console",
       "datasource": {
         "type": "elasticsearch",
         "uid": "siem-alerts"
@@ -963,7 +961,8 @@
                 "agent.id",
                 "risk_score",
                 "alert.status",
-                "message"
+                "message",
+                "alert.id"
               ]
             }
           }
@@ -982,7 +981,8 @@
               "agent.id": 7,
               "risk_score": 8,
               "alert.status": 9,
-              "message": 10
+              "message": 10,
+              "alert.id": 11
             }
           }
         }
@@ -1031,6 +1031,54 @@
                     }
                   }
                 ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "rule.id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Mở trên SOC console",
+                    "url": "/go/alert/${__data.fields[\"alert.id\"]}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "rule.name"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Mở trên SOC console",
+                    "url": "/go/alert/${__data.fields[\"alert.id\"]}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "alert.id"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
               }
             ]
           }
@@ -1337,7 +1385,8 @@
         "defaults": {
           "color": {
             "mode": "continuous-YlRd"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       }
@@ -1403,7 +1452,8 @@
         "defaults": {
           "color": {
             "mode": "continuous-YlRd"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       }
@@ -1931,7 +1981,8 @@
         "defaults": {
           "color": {
             "mode": "continuous-YlRd"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       }
@@ -1997,7 +2048,8 @@
         "defaults": {
           "color": {
             "mode": "continuous-YlRd"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       }
@@ -2422,6 +2474,211 @@
                     }
                   }
                 ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "created_at",
+            "desc": true
+          }
+        ]
+      }
+    },
+    {
+      "id": 36,
+      "type": "table",
+      "title": "Case đang mở — bấm tiêu đề để mở trên console",
+      "datasource": {
+        "type": "elasticsearch",
+        "uid": "siem-cases"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 90,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "elasticsearch",
+            "uid": "siem-cases"
+          },
+          "query": "status:(open OR in_progress OR contained)",
+          "alias": "",
+          "timeField": "created_at",
+          "metrics": [
+            {
+              "id": "1",
+              "type": "raw_data",
+              "settings": {
+                "size": "200"
+              }
+            }
+          ],
+          "bucketAggs": []
+        }
+      ],
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "created_at",
+                "priority",
+                "severity",
+                "title",
+                "entity",
+                "alert_count",
+                "assignee",
+                "status",
+                "id"
+              ]
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "created_at": 0,
+              "priority": 1,
+              "severity": 2,
+              "title": 3,
+              "entity": 4,
+              "alert_count": 5,
+              "assignee": 6,
+              "status": 7,
+              "id": 8
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "severity"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "low": {
+                        "color": "blue",
+                        "index": 0
+                      },
+                      "medium": {
+                        "color": "yellow",
+                        "index": 1
+                      },
+                      "high": {
+                        "color": "orange",
+                        "index": 2
+                      },
+                      "critical": {
+                        "color": "red",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "open": {
+                        "color": "red",
+                        "index": 0
+                      },
+                      "in_progress": {
+                        "color": "orange",
+                        "index": 1
+                      },
+                      "contained": {
+                        "color": "yellow",
+                        "index": 2
+                      },
+                      "closed": {
+                        "color": "green",
+                        "index": 3
+                      },
+                      "false_positive": {
+                        "color": "blue",
+                        "index": 4
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "title"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Mở trên SOC console",
+                    "url": "/go/case/${__data.fields[\"id\"]}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "id"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
               }
             ]
           }

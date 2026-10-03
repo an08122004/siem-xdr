@@ -39,6 +39,8 @@ log = logging.getLogger("soar")
 OPEN_CASE_STATUSES = ("open", "in_progress", "contained")
 # Lệnh chặn thành công không có hạn chỉ được coi là còn hiệu lực trong N phút (xem Soar._already_blocked)
 BLOCK_TRUST_MINUTES = 10
+# Lệnh gỡ chặn (khi hết hạn) chưa thành công sau N phút -> tạo lại (xem Soar.housekeeping)
+REVERT_RETRY_MINUTES = 15
 
 
 def endpoint_agent(alert: dict[str, Any]) -> str | None:
@@ -126,13 +128,14 @@ class Soar:
         if not agent_id:
             return {"status": "skipped", "detail": "alert không gắn với Wazuh agent nào (vd log syslog của firewall)"}
         if action == "kill_process":
-            pid, name = get(alert, "process.pid"), get(alert, "process.name")
-            if not pid and not name:
-                return {"status": "skipped", "detail": "không có thông tin tiến trình"}
-            params = {"pid": pid} if pid else {"name": name}
-            a = store.create_action(self.es, agent_id, "kill_process", params,
+            # chỉ kill tự động theo PID: kill theo tên giết MỌI tiến trình cùng tên (vd tên httpd -> sập web).
+            # Kill theo tên vẫn làm được thủ công trên console, có người chịu trách nhiệm.
+            pid = get(alert, "process.pid")
+            if not pid:
+                return {"status": "skipped", "detail": "alert không có PID, không tự kill theo tên tiến trình"}
+            a = store.create_action(self.es, agent_id, "kill_process", {"pid": pid},
                                     alert_id=get(alert, "alert.id"), source="soar")
-            return {"status": "queued", "action_id": a["id"], "agent_id": agent_id, "target": str(pid or name)}
+            return {"status": "queued", "action_id": a["id"], "agent_id": agent_id, "target": str(pid)}
         a = store.create_action(self.es, agent_id, "isolate_host", {}, alert_id=get(alert, "alert.id"), source="soar")
         return {"status": "queued", "action_id": a["id"], "agent_id": agent_id}
 
@@ -227,17 +230,25 @@ class Soar:
 
     # ------------------------------------------------------------------
     def housekeeping(self) -> None:
-        """Tự gỡ chặn IP hết hạn + đánh dấu lệnh quá hạn không phản hồi."""
+        """Tự gỡ chặn IP hết hạn + đánh dấu lệnh quá hạn không phản hồi.
+        Lệnh chặn chỉ thành `reverted` khi lệnh gỡ báo thành công (store.finish_action). Ở đây chỉ ghi
+        `revert_requested_at`: lệnh gỡ thất bại / không phản hồi thì REVERT_RETRY_MINUTES sau tạo lại, không để IP
+        bị chặn mãi (trước đây đánh dấu đã gỡ ngay khi tạo lệnh gỡ, lệnh gỡ lỗi là không bao giờ thử lại)."""
         now = store.now_iso()
-        expired = store.search(self.es, settings.IDX_ACTIONS, size=100, query={"bool": {"filter": [
-            {"term": {"type": "block_ip"}}, {"term": {"status": "success"}}, {"term": {"reverted": False}},
-            {"range": {"expires_at": {"lte": now}}},
-        ]}}, sort=[{"created_at": "asc"}])
+        retry = (datetime.now(timezone.utc) - timedelta(minutes=REVERT_RETRY_MINUTES)).isoformat()
+        expired = store.search(self.es, settings.IDX_ACTIONS, size=100, query={"bool": {
+            "filter": [{"term": {"type": "block_ip"}}, {"term": {"status": "success"}}, {"term": {"reverted": False}},
+                       {"range": {"expires_at": {"lte": now}}}],
+            "should": [{"bool": {"must_not": [{"exists": {"field": "revert_requested_at"}}]}},
+                       {"range": {"revert_requested_at": {"lte": retry}}}],
+            "minimum_should_match": 1,
+        }}, sort=[{"created_at": "asc"}])
         for a in expired:
             ip = a.get("target")
             store.create_action(self.es, a["agent_id"], "unblock_ip", {"ip": ip}, alert_id=a.get("alert_id"), source="soar")
-            self.es.update(index=settings.IDX_ACTIONS, id=a["_id"], doc={"reverted": True, "updated_at": now})
-            log.info("hết hạn chặn %s trên %s -> tạo lệnh gỡ chặn", ip, a["agent_id"])
+            self.es.update(index=settings.IDX_ACTIONS, id=a["_id"], doc={"revert_requested_at": now, "updated_at": now})
+            log.info("hết hạn chặn %s trên %s -> tạo lệnh gỡ chặn%s", ip, a["agent_id"],
+                     " (thử lại)" if a.get("revert_requested_at") else "")
 
         stale = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
         try:

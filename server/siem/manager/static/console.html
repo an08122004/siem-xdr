@@ -3,356 +3,960 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SIEM/XDR Console</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect x=%271%27 y=%271%27 width=%2714%27 height=%2714%27 rx=%273%27 fill=%27%23181b1f%27/%3E%3Crect x=%273%27 y=%2710%27 width=%272%27 height=%273%27 fill=%27%234f9dde%27/%3E%3Crect x=%276%27 y=%277%27 width=%272%27 height=%276%27 fill=%27%23e0b93b%27/%3E%3Crect x=%279%27 y=%275%27 width=%272%27 height=%278%27 fill=%27%23e7793a%27/%3E%3Crect x=%2712%27 y=%273%27 width=%272%27 height=%2710%27 fill=%27%23e2474b%27/%3E%3C/svg%3E">
+<title>SIEM/XDR</title>
 <style>
-  :root { --bg:#0f1419; --panel:#171e26; --line:#26313d; --fg:#d6dde5; --mute:#8595a6;
-          --low:#4f9dde; --medium:#e0b93b; --high:#e7793a; --critical:#e2474b; --ok:#3fb27f; }
+  /* Một hệ thống chung: SOC console là khung, dashboard Grafana (cùng tài khoản, cùng phiên) nhúng vào trang Tổng quan
+     và Điều tra. Màu nền theo Grafana dark để dashboard nhúng liền mạch; màu chỉ dùng cho mức độ cảnh báo. */
+  :root {
+    color-scheme: dark;
+    --bg: #111217; --surface: #181b1f; --raised: #1f2329; --line: #2b3038; --line2: #3a404a;
+    --fg: #d8dce3; --mute: #8e95a3; --faint: #6b7280;
+    --low: #4f9dde; --medium: #e0b93b; --high: #e7793a; --critical: #e2474b; --ok: #3fb27f;
+    --accent: #4f9dde;
+    --display: "Bahnschrift", "DIN Alternate", "Segoe UI Variable Display", "Segoe UI", sans-serif;
+    --text: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Noto Sans", sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    --rail: 216px;
+  }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui, Segoe UI, sans-serif; }
-  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:12px 20px; border-bottom:1px solid var(--line); }
-  header h1 { font-size:17px; margin:0 12px 0 0; }
-  header input { background:var(--panel); border:1px solid var(--line); color:var(--fg); padding:6px 8px; border-radius:6px; width:230px; }
-  main { padding:16px 20px; }
-  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:16px; }
-  .tile { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
-  .tile b { display:block; font-size:24px; font-variant-numeric:tabular-nums; }
-  .tile span { color:var(--mute); font-size:12px; }
-  nav { display:flex; gap:4px; margin-bottom:10px; flex-wrap:wrap; }
-  nav button { background:none; border:1px solid var(--line); color:var(--mute); padding:6px 14px; border-radius:6px; cursor:pointer; }
-  nav button.on { color:var(--fg); background:var(--panel); border-color:#3a4b5d; }
-  .wrap { overflow-x:auto; background:var(--panel); border:1px solid var(--line); border-radius:8px; }
-  table { border-collapse:collapse; width:100%; min-width:900px; }
-  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
-  th { color:var(--mute); font-weight:500; font-size:12px; position:sticky; top:0; background:var(--panel); }
-  tr:hover td { background:#1c2530; }
-  .sev { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:600; color:#10151a; }
-  .sev.low{background:var(--low)} .sev.medium{background:var(--medium)} .sev.high{background:var(--high)} .sev.critical{background:var(--critical)}
-  .st { font-size:12px; color:var(--mute); }
-  .st.online,.st.success{color:var(--ok)} .st.failed,.st.offline,.st.timeout{color:var(--critical)}
-  .btn { background:#233040; border:1px solid #33475c; color:var(--fg); padding:3px 8px; border-radius:5px; cursor:pointer; font-size:12px; margin:1px; }
-  .btn:hover { background:#2d3e52; }
-  .btn.danger { border-color:#7a3336; }
-  .mono { font-family:ui-monospace, Consolas, monospace; font-size:12px; word-break:break-all; }
-  .small { color:var(--mute); font-size:12px; }
-  #toast { position:fixed; right:16px; bottom:16px; background:var(--panel); border:1px solid var(--line); padding:10px 14px; border-radius:8px; display:none; max-width:420px; }
-  details summary { cursor:pointer; color:var(--mute); font-size:12px; }
-  pre { white-space:pre-wrap; margin:6px 0 0; max-height:260px; overflow:auto; }
-  .prio { font-weight:700; } .prio.P1{color:var(--critical)} .prio.P2{color:var(--high)} .prio.P3{color:var(--medium)} .prio.P4{color:var(--low)}
-  .late { color:var(--critical); font-weight:600; }
-  .bar { height:6px; background:var(--line); border-radius:3px; min-width:90px; margin-top:4px; }
-  .bar i { display:block; height:100%; background:var(--ok); border-radius:3px; }
-  .case { padding:10px 12px 14px; }
-  .case h4 { margin:12px 0 4px; font-size:13px; color:var(--mute); font-weight:600; }
-  .case label { display:flex; gap:8px; align-items:flex-start; padding:2px 0; cursor:pointer; }
-  .case label.done span:first-of-type { color:var(--mute); text-decoration:line-through; }
-  .appr { font-size:11px; color:var(--high); border:1px solid #6b4a2a; border-radius:8px; padding:0 6px; margin-left:4px; white-space:nowrap; }
-  .case textarea, .case input[type=text] { background:var(--bg); border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:6px; font:inherit; }
-  .case textarea { width:100%; min-height:54px; }
-  .ok { color:var(--ok); } .bad { color:var(--critical); } .warn { color:var(--medium); }
-  .aibar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:10px 12px; border-bottom:1px solid var(--line); }
-  .aibar select { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px; }
-  .chk { font-size:12px; padding:1px 0; }
-  #me { font-size:13px; }
-  #me b { color:var(--fg); } #me .role { color:var(--mute); }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 var(--text); overflow: hidden; }
+  a { color: var(--accent); }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  [hidden] { display: none !important; }
+  .num { font-family: var(--display); font-variant-numeric: tabular-nums; }
+
+  /* ---------- khung */
+  .app { display: grid; grid-template-columns: var(--rail) 1fr; height: 100vh; }
+  .rail { position: relative; display: flex; flex-direction: column; background: var(--surface);
+          border-right: 1px solid var(--line); padding: 18px 0 12px 6px; min-height: 0; }
+  .spectrum { position: absolute; inset: 0 auto 0 0; width: 4px; display: flex; flex-direction: column-reverse; }
+  .spectrum i { flex: 1; }
+  .spectrum .s1 { background: var(--low); } .spectrum .s2 { background: var(--medium); }
+  .spectrum .s3 { background: var(--high); } .spectrum .s4 { background: var(--critical); }
+  .brand { margin: 0 16px 18px; font: 600 26px/1 var(--display); font-stretch: 85%; letter-spacing: .01em; }
+  .brand small { display: block; margin-top: 6px; font: 12px var(--text); color: var(--mute); letter-spacing: 0; }
+  .nav { display: flex; flex-direction: column; gap: 1px; overflow-y: auto; }
+  .nav a { display: flex; align-items: center; gap: 10px; padding: 7px 14px 7px 12px; margin-right: 8px;
+           color: var(--mute); text-decoration: none; border-radius: 0 6px 6px 0; border-left: 2px solid transparent; }
+  .nav a:hover { color: var(--fg); background: var(--raised); }
+  .nav a[aria-current="page"] { color: var(--fg); background: var(--raised); border-left-color: var(--accent); }
+  .nav svg { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.6;
+             stroke-linecap: round; stroke-linejoin: round; }
+  .nav .count { margin-left: auto; font: 13px var(--display); font-variant-numeric: tabular-nums; color: var(--mute); }
+  .nav .count.hot { color: var(--critical); }
+  .nav .sep { height: 1px; background: var(--line); margin: 8px 14px 8px 12px; }
+  .me { margin-top: auto; padding: 12px 14px 0 12px; border-top: 1px solid var(--line); font-size: 13px; }
+  .me b { display: block; font-weight: 600; }
+  .me .role { color: var(--mute); }
+  .me .links { display: flex; gap: 12px; margin-top: 8px; }
+  .linkbtn { background: none; border: 0; padding: 0; color: var(--mute); cursor: pointer; font-size: 13px; }
+  .linkbtn:hover { color: var(--fg); text-decoration: underline; }
+  .me .idle { margin-top: 6px; color: var(--faint); font-size: 12px; }
+
+  .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 20px;
+         border-bottom: 1px solid var(--line); min-height: 58px; }
+  .bar h1 { margin: 0 6px 0 0; font: 600 21px/1.1 var(--display); letter-spacing: .01em; }
+  .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 1; }
+  .sync { margin-left: auto; color: var(--faint); font-size: 12px; white-space: nowrap; }
+  .sync.bad { color: var(--critical); }
+  .content { flex: 1; overflow: auto; min-height: 0; }
+  .frame { flex: 1; min-height: 0; display: flex; }
+  .frame iframe { flex: 1; border: 0; background: var(--bg); }
+
+  /* ---------- điều khiển */
+  .seg { display: inline-flex; border: 1px solid var(--line2); border-radius: 6px; overflow: hidden; }
+  .seg button { background: none; border: 0; border-right: 1px solid var(--line2); padding: 5px 11px; color: var(--mute);
+                cursor: pointer; font-size: 13px; white-space: nowrap; }
+  .seg button:last-child { border-right: 0; }
+  .seg button:hover { color: var(--fg); background: var(--raised); }
+  .seg button[aria-pressed="true"] { color: var(--fg); background: var(--raised); box-shadow: inset 0 -2px 0 var(--accent); }
+  .chip { background: none; border: 1px solid var(--line2); border-radius: 999px; padding: 3px 10px; color: var(--mute);
+          cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+  .chip[aria-pressed="true"] { color: var(--fg); border-color: currentColor; }
+  .chip i { width: 8px; height: 8px; border-radius: 50%; }
+  input.field, select.field, textarea.field { background: var(--bg); border: 1px solid var(--line2); border-radius: 6px;
+          padding: 6px 9px; min-width: 0; }
+  input.field:hover, select.field:hover, textarea.field:hover { border-color: #4a515c; }
+  input.search { width: 260px; }
+  textarea.field { width: 100%; min-height: 64px; resize: vertical; }
+  .btn { background: var(--raised); border: 1px solid var(--line2); color: var(--fg); padding: 5px 11px; border-radius: 6px;
+         cursor: pointer; font-size: 13px; white-space: nowrap; text-decoration: none; display: inline-block; line-height: 1.45; }
+  .btn:hover { border-color: #565e6b; background: #262b32; }
+  .btn:disabled { opacity: .55; cursor: progress; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #07121c; font-weight: 600; }
+  .btn.primary:hover { background: #69ace4; }
+  .btn.danger { border-color: #6f3335; color: #ffb1b3; }
+  .btn.danger:hover { background: #3a1f22; }
+  .btn.armed { background: var(--critical); border-color: var(--critical); color: #fff; }
+  .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  /* ---------- bảng */
+  table.list { border-collapse: separate; border-spacing: 0; width: 100%; }
+  .list th { position: sticky; top: 0; z-index: 1; background: var(--bg); text-align: left; font-weight: 500; font-size: 12px;
+             color: var(--mute); padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .list td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .list th:first-child, .list td:first-child { padding-left: 20px; }
+  .list tr.row { cursor: pointer; }
+  .list tr.row:hover td { background: var(--surface); }
+  .list tr.row[aria-selected="true"] td { background: var(--raised); }
+  .list tr.row td:first-child { box-shadow: inset 3px 0 0 var(--edge, transparent); }
+  .edge-low { --edge: var(--low); } .edge-medium { --edge: var(--medium); }
+  .edge-high { --edge: var(--high); } .edge-critical { --edge: var(--critical); }
+  .when { white-space: nowrap; color: var(--mute); font-size: 13px; }
+  .title { font-weight: 600; }
+  .sub { color: var(--mute); font-size: 12px; }
+  .mono { font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+  .sev { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+  .sev i { width: 9px; height: 9px; border-radius: 2px; background: var(--c); }
+  .sev.low { --c: var(--low); } .sev.medium { --c: var(--medium); } .sev.high { --c: var(--high); } .sev.critical { --c: var(--critical); }
+  .st { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line2);
+        color: var(--mute); white-space: nowrap; }
+  .st.new { color: #ffb1b3; border-color: #6f3335; }
+  .st.work { color: #ffd38a; border-color: #6b5326; }
+  .st.done { color: #9fdcbf; border-color: #2c5a45; }
+  .st.bad { color: #ffb1b3; border-color: #6f3335; }
+  .soar { font-size: 12px; color: var(--mute); }
+  .soar span { display: block; white-space: nowrap; }
+  .ok { color: var(--ok); } .bad { color: var(--critical); } .warn { color: var(--medium); }
+  .prio { font: 600 14px var(--display); }
+  .prio.P1 { color: var(--critical); } .prio.P2 { color: var(--high); } .prio.P3 { color: var(--medium); } .prio.P4 { color: var(--low); }
+  .progress { height: 4px; background: var(--line); border-radius: 2px; margin-top: 5px; min-width: 70px; }
+  .progress i { display: block; height: 100%; background: var(--ok); border-radius: 2px; }
+  .empty { padding: 48px 20px; color: var(--mute); max-width: 52ch; }
+  .empty b { display: block; color: var(--fg); font-size: 15px; margin-bottom: 4px; }
+  .notice { margin: 12px 20px 0; padding: 9px 12px; border-left: 3px solid var(--critical); background: var(--surface); }
+  .inline-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 0 2px; }
+
+  /* ---------- ngăn chi tiết */
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(580px, 100vw); background: var(--surface);
+            border-left: 1px solid var(--line2); box-shadow: -18px 0 40px rgba(0, 0, 0, .35); z-index: 20;
+            display: flex; flex-direction: column; animation: slide .16s ease-out; }
+  @keyframes slide { from { transform: translateX(28px); } to { transform: none; } }
+  .drawer > header { display: flex; align-items: center; gap: 10px; padding: 14px 18px 10px; border-bottom: 1px solid var(--line);
+                     box-shadow: inset 0 3px 0 var(--edge, var(--line2)); }
+  .drawer .x { margin-left: auto; background: none; border: 0; color: var(--mute); font-size: 22px; line-height: 1;
+               cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+  .drawer .x:hover { color: var(--fg); background: var(--raised); }
+  .drawer .body { overflow: auto; padding: 4px 18px 28px; }
+  .drawer h2 { margin: 12px 0 4px; font-size: 18px; line-height: 1.3; }
+  .drawer h3 { margin: 20px 0 8px; font-size: 13px; font-weight: 600; color: var(--mute); }
+  .desc { color: var(--mute); margin: 0 0 6px; }
+  .facts { display: grid; grid-template-columns: 9.5em 1fr; gap: 5px 12px; margin: 10px 0 0; font-size: 13px; }
+  .facts dt { color: var(--mute); }
+  .facts dd { margin: 0; word-break: break-word; }
+  .items { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+  .items li { padding: 7px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+  .items li.link { cursor: pointer; } .items li.link:hover { border-color: var(--line2); }
+  .hist { list-style: none; margin: 0; padding: 0; font-size: 13px; display: grid; gap: 5px; }
+  .hist li { padding-left: 12px; border-left: 2px solid var(--line2); }
+  .hist .sub { display: block; }
+  details.raw summary { cursor: pointer; color: var(--mute); font-size: 13px; }
+  pre { white-space: pre-wrap; margin: 8px 0 0; max-height: 340px; overflow: auto; background: var(--bg); padding: 10px;
+        border: 1px solid var(--line); border-radius: 6px; font: 12px/1.5 var(--mono); }
+  .phase { margin: 14px 0 4px; font-size: 13px; font-weight: 600; }
+  .task { display: flex; gap: 9px; align-items: flex-start; padding: 4px 0; cursor: pointer; font-size: 13.5px; }
+  .task input { margin-top: 3px; }
+  .task.done > span:first-of-type { color: var(--mute); text-decoration: line-through; }
+  .appr { font-size: 12px; color: var(--high); white-space: nowrap; }
+  .late { color: var(--critical); font-weight: 600; }
+
+  #toasts { position: fixed; right: 18px; bottom: 18px; display: grid; gap: 8px; z-index: 40; max-width: min(440px, 90vw); }
+  .toast { background: var(--raised); border: 1px solid var(--line2); border-left: 3px solid var(--ok); padding: 10px 14px;
+           border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
+  .toast.err { border-left-color: var(--critical); }
+
+  @media (max-width: 900px) {
+    body { overflow: auto; }
+    .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: auto; min-height: 100vh; }
+    .rail { flex-direction: row; align-items: center; padding: 8px 12px 8px 14px; gap: 8px; overflow-x: auto;
+            border-right: 0; border-bottom: 1px solid var(--line); }
+    .spectrum { inset: 0 0 auto 0; width: auto; height: 3px; flex-direction: row; }
+    .brand { margin: 0 6px 0 0; font-size: 20px; } .brand small { display: none; }
+    .nav { flex-direction: row; overflow: visible; }
+    .nav a { border-left: 0; border-radius: 6px; margin: 0; padding: 6px 9px; white-space: nowrap; }
+    .nav a span.label { display: none; } .nav a[aria-current="page"] span.label { display: inline; }
+    .nav .sep, .me .idle, .me .role { display: none; }
+    .me { margin: 0 0 0 auto; border: 0; padding: 0; white-space: nowrap; } .me b { display: none; }
+    .main { min-height: calc(100vh - 52px); }
+    .bar { padding: 10px 14px; flex-direction: column; align-items: stretch; }
+    .tools { width: 100%; } .sync { margin-left: 0; }
+    .list th:first-child, .list td:first-child { padding-left: 14px; }
+    table.list { table-layout: fixed; }                 /* bảng vừa màn hình: chữ xuống dòng thay vì tràn ngang */
+    .list td, .list th { padding: 8px 6px; overflow-wrap: anywhere; }
+    input.search, .tools input.search[style] { width: 100% !important; }
+    .frame { min-height: 75vh; }
+    .hide-sm { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .drawer { animation: none; } }
 </style>
 </head>
 <body>
-<header>
-  <h1>🛡️ SIEM/XDR Console</h1>
-  <span class="small" id="updated"></span>
-  <span style="flex:1"></span>
-  <span id="me"></span>
-  <button class="btn" id="pwbtn">Đổi mật khẩu</button>
-  <button class="btn" id="logout">Đăng xuất</button>
-  <a class="small" href="/grafana/" target="_blank" style="color:var(--mute)">Grafana ↗</a>
-</header>
-<main>
-  <div class="tiles" id="tiles"></div>
-  <nav id="tabs">
-    <button data-t="alerts" class="on">Alerts</button>
-    <button data-t="agents">Agents</button>
-    <button data-t="actions">Response actions</button>
-    <button data-t="cases">Cases</button>
-    <button data-t="ai">Đề xuất AI</button>
-    <button data-t="users" id="usersTab" style="display:none">Tài khoản</button>
-  </nav>
-  <div class="wrap"><table id="tbl"></table></div>
-</main>
-<div id="toast"></div>
+<div class="app">
+  <aside class="rail" aria-label="Điều hướng">
+    <div class="spectrum" aria-hidden="true"><i class="s1"></i><i class="s2"></i><i class="s3"></i><i class="s4"></i></div>
+    <div class="brand">SIEM/XDR<small>Trung tâm giám sát an ninh</small></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="me" id="me"></div>
+  </aside>
+  <main class="main">
+    <header class="bar">
+      <h1 id="title">Tổng quan</h1>
+      <div class="tools" id="tools"></div>
+      <span class="sync" id="sync" role="status"></span>
+    </header>
+    <div class="content" id="content"></div>
+    <div class="frame" id="frame-overview" hidden><iframe title="Dashboard tổng quan SOC (Grafana)"></iframe></div>
+    <div class="frame" id="frame-investigate" hidden><iframe title="Dashboard điều tra thực thể (Grafana)"></iframe></div>
+  </main>
+</div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="false" aria-labelledby="drawer-title" hidden></aside>
+<div id="toasts" aria-live="polite"></div>
+
 <script>
-const $ = s => document.querySelector(s);
-// Đăng nhập bằng tài khoản riêng: phiên nằm trong cookie HttpOnly (JavaScript không đọc được), không lưu gì vào
-// localStorage. Hết hạn sau N phút không thao tác: request tự làm mới gửi X-Auto-Refresh nên không kéo dài phiên.
-let ME = null, TAB = 'alerts';
-const RANK = { analyst: 1, lead: 2, admin: 3 };
-const can = role => ME && RANK[ME.role] >= RANK[role];
-document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
-  document.querySelectorAll('#tabs button').forEach(x => x.classList.remove('on'));
-  b.classList.add('on'); TAB = b.dataset.t; refresh();
-});
-
-async function api(path, opt = {}, auto = false) {
-  const headers = { 'Content-Type': 'application/json', 'X-Requested-With': 'siem-console' };
-  if ((auto || AUTO) && !opt.method) headers['X-Auto-Refresh'] = '1';
-  const r = await fetch(path, { ...opt, headers, credentials: 'same-origin' });
-  if (r.status === 401) { toLogin('expired'); throw new Error('chưa đăng nhập'); }
-  const text = await r.text();
-  let data = null; try { data = text ? JSON.parse(text) : null; } catch (e) {}
-  if (!r.ok) {
-    const msg = (data && data.detail) ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)) : text;
-    if (r.status === 403 && /đổi mật khẩu/.test(msg)) toLogin('', true);
-    throw new Error(msg || String(r.status));
-  }
-  return data;
-}
-
-// Đăng nhập / đổi mật khẩu nằm ở trang /login dùng chung với Grafana; console chỉ chuyển hướng sang đó.
-const toLogin = (reason, change) => location.replace('/login?' + (change ? 'change=1&' : '') +
-  (reason ? 'reason=' + reason + '&' : '') + 'next=' + encodeURIComponent(location.pathname + location.search));
-function showMe() {
-  $('#me').replaceChildren(el('b', {}, ME.username), el('span', { cls: 'role' }, ` · ${ME.role} · hết phiên sau ${ME.idle_minutes} phút không thao tác`));
-  $('#usersTab').style.display = can('admin') ? '' : 'none';
-}
-async function start(me) {
-  ME = me;
-  if (ME.must_change) { toLogin('', true); return; }
-  showMe(); refresh();
-}
-$('#pwbtn').onclick = () => location.assign('/login?change=1&next=' + encodeURIComponent(location.pathname + location.search));
-$('#logout').onclick = async () => { try { await api('/api/v1/auth/logout', { method: 'POST' }); } catch (e) {} location.replace('/login?reason=logged_out'); };
-function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 4000); }
-// Dựng DOM an toàn bằng textContent — log chứa payload tấn công (XSS) nên KHÔNG dùng innerHTML với dữ liệu.
+'use strict';
+// ============================================================================ tiện ích
+const $ = (s, r = document) => r.querySelector(s);
+// Dựng DOM bằng textContent — log chứa payload tấn công (XSS) nên KHÔNG dùng innerHTML với dữ liệu.
 function el(tag, props = {}, ...kids) {
   const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) { if (k === 'on') e.onclick = v; else if (k === 'cls') e.className = v; else e.setAttribute(k, v); }
-  for (const k of kids.flat()) if (k != null) e.append(k instanceof Node ? k : String(k));
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v == null || v === false) continue;
+    if (k === 'cls') e.className = v;
+    else if (k.startsWith('on') && typeof v === 'function') e.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (v === true) e.setAttribute(k, '');
+    else e.setAttribute(k, v);
+  }
+  for (const k of kids.flat(Infinity)) if (k != null && k !== false) e.append(k instanceof Node ? k : String(k));
   return e;
+}
+const svgNS = 'http://www.w3.org/2000/svg';
+function icon(d) {
+  const s = document.createElementNS(svgNS, 'svg'); s.setAttribute('viewBox', '0 0 16 16'); s.setAttribute('aria-hidden', 'true');
+  for (const p of d.split('|')) { const path = document.createElementNS(svgNS, 'path'); path.setAttribute('d', p); s.append(path); }
+  return s;
 }
 const g = (o, p) => p.split('.').reduce((a, k) => a == null ? a : a[k], o);
 const fmt = t => t ? new Date(t).toLocaleString('vi-VN') : '';
-const btn = (label, fn, danger) => el('button', { cls: 'btn' + (danger ? ' danger' : ''), on: fn }, label);
+function ago(t) {
+  if (!t) return '';
+  const s = (Date.now() - new Date(t).getTime()) / 1000;
+  if (s < 45) return 'vừa xong';
+  if (s < 3600) return `${Math.round(s / 60)} phút trước`;
+  if (s < 86400) return `${Math.round(s / 3600)} giờ trước`;
+  if (s < 86400 * 30) return `${Math.round(s / 86400)} ngày trước`;
+  return new Date(t).toLocaleDateString('vi-VN');
+}
+const when = t => el('span', { cls: 'when', title: fmt(t) }, ago(t));
+const isEndpoint = id => !!id && !String(id).startsWith('syslog-');
+const luceneValue = v => '"' + String(v).replace(/[\\"]/g, m => '\\' + m) + '"';
+const isIP = s => /^(\d{1,3}\.){3}\d{1,3}$/.test(s) || (/^[0-9a-f:]+$/i.test(s) && s.includes(':') && s.length > 2);
 
-async function act(agent_id, type, params, alert_id) {
-  try { await api('/api/v1/actions', { method: 'POST', body: JSON.stringify({ agent_id, type, params, alert_id }) }); toast(`Đã gửi lệnh ${type} tới ${agent_id}`); refresh(); }
-  catch (e) { toast('Lỗi: ' + e.message); }
+const SEV = { low: 'Thấp', medium: 'Trung bình', high: 'Cao', critical: 'Nghiêm trọng' };
+const ALERT_ST = { open: ['Mới', 'new'], acknowledged: ['Đã xác nhận', 'work'], in_progress: ['Đang xử lý', 'work'],
+                   closed: ['Đã đóng', 'done'], false_positive: ['Báo nhầm', 'done'] };
+const CASE_ST = { open: ['Mới', 'new'], in_progress: ['Đang xử lý', 'work'], contained: ['Đã ngăn chặn', 'work'],
+                  closed: ['Đã đóng', 'done'], false_positive: ['Báo nhầm', 'done'] };
+const ACT_ST = { pending: ['Chờ gửi', 'work'], sent: ['Đã gửi, chờ agent', 'work'], success: ['Thành công', 'done'],
+                 failed: ['Thất bại', 'bad'], timeout: ['Quá hạn', 'bad'] };
+const ACT_TYPE = { block_ip: 'Chặn IP', unblock_ip: 'Gỡ chặn IP', kill_process: 'Kill tiến trình', isolate_host: 'Cô lập máy',
+                   unisolate_host: 'Bỏ cô lập' };
+const SOAR_ST = { queued: 'đã gửi lệnh', skipped: 'bỏ qua', created: 'tạo case mới', updated: 'gom vào case', logged: 'đã ghi log',
+                  sent: 'đã gửi', awaiting_approval: 'chờ duyệt', error: 'lỗi' };
+const ACTION_LABEL = { notify: 'Thông báo', create_case: 'Case', block_ip: 'Chặn IP', kill_process: 'Kill', isolate_host: 'Cô lập' };
+const RESPONSE = ['block_ip', 'kill_process', 'isolate_host'];
+const sev = s => el('span', { cls: 'sev ' + (s || '') }, el('i'), SEV[s] || s || '');
+const stLabel = (map, s) => { const [label, kind] = map[s] || [s || '—', '']; return el('span', { cls: 'st ' + kind }, label); };
+
+// ============================================================================ API
+let ME = null, LEAVING = false;
+class ApiError extends Error { constructor(msg, code) { super(msg); this.code = code; } }
+async function api(path, { method = 'GET', body, auto = false } = {}) {
+  const headers = { 'X-Requested-With': 'siem-console' };
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (auto && method === 'GET') headers['X-Auto-Refresh'] = '1';   // làm mới tự động: không tính là thao tác
+  const r = await fetch(path, { method, headers, credentials: 'same-origin', body: body === undefined ? undefined : JSON.stringify(body) });
+  // đang đăng xuất: request còn dở nhận 401 là đương nhiên, không báo "phiên hết hạn"
+  if (r.status === 401) { if (!LEAVING) toLogin('expired'); throw new ApiError('Phiên đăng nhập đã hết hạn.', 401); }
+  const text = await r.text();
+  let data = null; try { data = text ? JSON.parse(text) : null; } catch (e) {}
+  if (!r.ok) {
+    let msg = data && data.detail;
+    if (Array.isArray(msg)) msg = 'Dữ liệu không hợp lệ: ' + msg.map(d => (d.loc || []).slice(-1)[0] + ' ' + d.msg).join('; ');
+    msg = msg || text || `Lỗi ${r.status}`;
+    if (r.status === 403 && /đổi mật khẩu/.test(msg)) toLogin('', true);
+    throw new ApiError(String(msg), r.status);
+  }
+  return data;
 }
-async function setStatus(id, status) {
-  try { await api('/api/v1/alerts/' + id, { method: 'PATCH', body: JSON.stringify({ status }) }); refresh(); }
-  catch (e) { toast('Lỗi: ' + e.message); }
+const sentence = s => { s = String(s || '').trim(); return s ? s[0].toUpperCase() + s.slice(1) + (/[.!?]$/.test(s) ? '' : '.') : ''; };
+function toLogin(reason, change) {
+  location.replace('/login?' + (change ? 'change=1&' : '') + (reason ? 'reason=' + reason + '&' : '') +
+                   'next=' + encodeURIComponent(location.pathname + location.search + location.hash));
 }
-let OPEN_CASE = null;
-async function updateCase(id, body) {
-  try {
-    await api('/api/v1/cases/' + id, { method: 'PATCH', body: JSON.stringify(body) });
-    toast('Đã cập nhật case'); OPEN_CASE = id; refresh();
-  } catch (e) { toast('Lỗi: ' + e.message); }
+function toast(msg, err) {
+  const t = el('div', { cls: 'toast' + (err ? ' err' : ''), role: err ? 'alert' : 'status' }, msg);
+  $('#toasts').append(t); setTimeout(() => t.remove(), err ? 7000 : 4000);
 }
-function caseDetail(c) {
-  const box = el('div', { cls: 'case' });
-  let phase = null;
-  (c.tasks || []).forEach((t, i) => {
-    if (t.phase !== phase) { phase = t.phase; box.append(el('h4', {}, phase)); }
-    const cb = el('input', { type: 'checkbox' }); cb.checked = !!t.done;
-    cb.onchange = () => updateCase(c.id, { task_index: i, task_done: cb.checked });
-    box.append(el('label', { cls: t.done ? 'done' : '' }, cb, el('span', {}, t.title),
-      t.approval ? el('span', { cls: 'appr' }, 'cần duyệt: ' + t.approval) : null,
-      t.done ? el('span', { cls: 'small' }, ` — ${t.done_by}, ${fmt(t.done_at)}`) : null));
+// nút làm việc: khóa trong lúc chờ, báo lỗi bằng toast
+async function run(btn, fn, okMsg) {
+  if (btn) btn.disabled = true;
+  try { const r = await fn(); if (okMsg) toast(typeof okMsg === 'function' ? okMsg(r) : okMsg); return r; }
+  catch (e) { if (e.code !== 401) toast(sentence(e.message), true); }
+  finally { if (btn) btn.disabled = false; }
+}
+const button = (label, fn, cls = '') => { const b = el('button', { type: 'button', cls: 'btn ' + cls }, label); b.addEventListener('click', () => fn(b)); return b; };
+// lệnh nặng (chặn, kill, cô lập, khóa tài khoản): bấm lần 1 để hiện câu hỏi, bấm lần 2 trong 4 giây mới thực hiện
+function confirmButton(label, question, fn) {
+  const b = el('button', { type: 'button', cls: 'btn danger' }, label);
+  let armed = null;
+  const reset = () => { clearTimeout(armed); armed = null; b.textContent = label; b.classList.remove('armed'); };
+  b.addEventListener('click', async () => {
+    if (!armed) { b.textContent = question; b.classList.add('armed'); armed = setTimeout(reset, 4000); return; }
+    reset(); await fn(b);
   });
-  const note = el('textarea', { placeholder: 'Ghi chú / kết luận (bắt buộc khi đóng case)' });
-  const who = el('input', { type: 'text', placeholder: 'giao cho…', value: c.assignee || '' });
-  const st = s => () => updateCase(c.id, { status: s, note: note.value });
-  box.append(el('h4', {}, 'Xử lý'), note,
-    el('div', { style: 'margin-top:6px;display:flex;gap:4px;flex-wrap:wrap;align-items:center' },
-      who, btn('Giao', () => updateCase(c.id, { assignee: who.value.trim(), note: note.value })),
-      btn('Ghi chú', () => updateCase(c.id, { note: note.value })),
-      btn('Đang xử lý', st('in_progress')), btn('Đã ngăn chặn', st('contained')),
-      btn('Đóng', st('closed'), true), btn('False positive', st('false_positive'))),
-    el('h4', {}, 'Lịch sử'),
-    el('div', { cls: 'small mono' }, (c.notes || []).slice().reverse().map(n => el('div', {}, `${fmt(n.at)} · ${n.by}: ${n.text}`))),
-    el('h4', {}, 'Alert liên quan'), el('div', { cls: 'small mono' }, (c.alert_ids || []).join(', ')));
-  if (OPEN_CASE === c.id) queueMicrotask(() => { const d = box.closest('details'); if (d) d.open = true; });
-  return box;
+  b.addEventListener('blur', () => armed && reset());
+  return b;
 }
-let AI_FILTER = 'pending';
-const KIND = { exception: 'Ngoại lệ (giảm cảnh báo)', new_rule: 'Rule mới' };
-async function aiDo(id, action, needReason) {
-  let reason = '';
-  if (needReason) { reason = prompt('Lý do (bắt buộc — AI dùng lý do này để không lặp lại):') || ''; if (!reason.trim()) return; }
-  try {
-    const r = await api(`/api/v1/ai/proposals/${id}/${action}`, { method: 'POST', body: JSON.stringify({ reason }) });
-    toast(r.status === 'approved' ? `Đã triển khai ${r.file}` : `Đã ghi nhận (${r.status}, ${r.approvals ? r.approvals.length : 0}/${r.required_approvals} duyệt)`);
-    refresh();
-  } catch (e) { toast('Lỗi: ' + e.message); }
+async function sendAction(btn, agent_id, type, params, alert_id) {
+  return run(btn, () => api('/api/v1/actions', { method: 'POST', body: { agent_id, type, params, alert_id } }),
+    `Đã tạo lệnh ${ACT_TYPE[type] || type} trên agent ${agent_id}. SOAR gửi xuống trong vài giây.`);
 }
-async function aiRun() {
-  try { await api('/api/v1/ai/run', { method: 'POST', body: '{}' }); toast('Đã gửi yêu cầu, AI worker sẽ chạy trong ~10 giây'); refresh(); }
-  catch (e) { toast('Lỗi: ' + e.message); }
-}
-function aiDetail(p) {
-  const v = p.validation || {};
-  return el('div', { cls: 'case' },
-    el('h4', {}, 'Lý do AI đưa ra'), el('div', {}, p.rationale || ''),
-    el('h4', {}, 'Kiểm định tự động (độc lập với AI)'),
-    ...(v.checks || []).map(c => el('div', { cls: 'chk' }, el('span', { cls: c.ok ? 'ok' : (c.blocking ? 'bad' : 'warn') }, c.ok ? '✓ ' : (c.blocking ? '✗ ' : '! ')),
-      el('b', {}, c.name + ': '), c.detail)),
-    el('h4', {}, 'Nội dung sẽ triển khai'), el('pre', { cls: 'mono' }, p.yaml || ''),
-    el('h4', {}, 'Lịch sử'), el('div', { cls: 'small mono' }, (p.history || []).map(h => el('div', {}, `${fmt(h.at)} · ${h.by}: ${h.text}`))),
-    el('div', { cls: 'small', style: 'margin-top:8px' }, `Model ${p.llm?.model || ''} · ${p.llm?.seconds ?? ''}s · ${p.llm?.prompt_tokens ?? ''}+${p.llm?.output_tokens ?? ''} token`));
-}
-function head(cols) { return el('thead', {}, el('tr', {}, cols.map(c => el('th', {}, c)))); }
 
-const views = {
-  async alerts() {
-    const rows = await api('/api/v1/alerts?size=200');
-    return [head(['Thời gian', 'Mức', 'Rule', 'Nguồn / Host', 'MITRE', 'Trạng thái', 'SOAR', 'Phản ứng']),
-      el('tbody', {}, rows.map(a => {
-        const ip = g(a, 'source.ip'), agent = g(a, 'agent.id'), pid = g(a, 'process.pid'), pname = g(a, 'process.name');
-        const soar = (g(a, 'soar.results') || []).map(r => `${r.action}: ${r.status}${r.target ? ' ' + r.target : ''}`).join('\n');
-        return el('tr', {},
-          el('td', { cls: 'small' }, fmt(a['@timestamp'])),
-          el('td', {}, el('span', { cls: 'sev ' + a.severity }, a.severity), el('div', { cls: 'small' }, 'risk ' + (a.risk_score ?? ''))),
-          el('td', {}, el('b', {}, g(a, 'rule.id') + ' '), g(a, 'rule.name'), el('div', { cls: 'small' }, `count=${a.count}`),
-             el('details', {}, el('summary', {}, 'chi tiết'), el('pre', { cls: 'mono' }, JSON.stringify({ rule: a.rule, ml: a.ml, trigger_event: a.trigger_event }, null, 2)))),
-          el('td', { cls: 'mono' }, ip || '', el('div', { cls: 'small' }, [g(a, 'user.name'), g(a, 'host.name') || agent].filter(Boolean).join(' @ '))),
-          el('td', { cls: 'small' }, [g(a, 'rule.mitre.tactic'), (g(a, 'rule.mitre.technique') || []).join(', ')].filter(Boolean).join(' · ')),
-          el('td', { cls: 'st' }, g(a, 'alert.status')),
-          el('td', { cls: 'small mono' }, soar),
-          el('td', {},
-            btn('Ack', () => setStatus(a._id, 'acknowledged')), btn('Đóng', () => setStatus(a._id, 'closed')),
-            btn('False +', () => setStatus(a._id, 'false_positive')),
-            agent && ip ? btn('Chặn IP', () => act(agent, 'block_ip', { ip }, a._id), true) : null,
-            agent && (pid || pname) ? btn('Kill', () => act(agent, 'kill_process', pid ? { pid } : { name: pname }, a._id), true) : null,
-            agent && !agent.startsWith('syslog-') && can('lead') ? btn('Cô lập', () => act(agent, 'isolate_host', {}, a._id), true) : null));
-      }))];
+// ============================================================================ điều hướng (#/view/id?tham-số)
+const NAV = [
+  ['overview', 'Tổng quan', 'M2 2h5v5H2z|M9 2h5v3H9z|M9 7h5v7H9z|M2 9h5v5H2z'],
+  ['alerts', 'Cảnh báo', 'M8 2 1.5 13.5h13z|M8 6.5v3.5|M8 12v.1'],
+  ['cases', 'Case', 'M2 4.5h4l1.5 1.5H14v7.5H2z'],
+  ['investigate', 'Điều tra', 'M7 2.5a4.5 4.5 0 1 0 0 9a4.5 4.5 0 1 0 0-9|M10.3 10.3 14 14'],
+  null,
+  ['actions', 'Lệnh phản ứng', 'M9 1.5 3 9h4.5L7 14.5 13 7H8.5z'],
+  ['agents', 'Agent', 'M2.5 3h11v4h-11z|M2.5 9h11v4h-11z|M5 5h.1|M5 11h.1'],
+  ['ai', 'Đề xuất AI', 'M8 1.5v3|M8 11.5v3|M1.5 8h3|M11.5 8h3|M8 5.5 9 7l1.5 1L9 9l-1 1.5L7 9 5.5 8 7 7z'],
+  ['users', 'Tài khoản', 'M8 2.5a3 3 0 1 0 0 6a3 3 0 1 0 0-6|M2.5 14c.8-2.6 3-4 5.5-4s4.7 1.4 5.5 4'],
+];
+function route() {
+  const h = location.hash.replace(/^#\/?/, '');
+  const [path, qs] = h.split('?');
+  const [view, id] = (path || '').split('/');
+  return { view: VIEWS[view] ? view : 'overview', id: id ? decodeURIComponent(id) : null, params: new URLSearchParams(qs || '') };
+}
+const go = hash => { if (location.hash !== hash) location.hash = hash; else render(true); };
+
+function buildNav() {
+  $('#nav').replaceChildren(...NAV.map(n => {
+    if (!n) return el('div', { cls: 'sep' });
+    const [key, label, path] = n;
+    if (key === 'users' && !can('admin')) return null;
+    return el('a', { href: '#/' + key, 'data-view': key }, icon(path), el('span', { cls: 'label' }, label),
+      el('span', { cls: 'count', id: 'count-' + key }));
+  }).filter(Boolean));
+}
+const RANK = { analyst: 1, lead: 2, admin: 3 };
+const can = role => ME && RANK[ME.role] >= RANK[role];
+
+async function loadStats(auto) {
+  const s = await api('/api/v1/stats', { auto });
+  const set = (k, v, hot) => { const c = $('#count-' + k); if (c) { c.textContent = v || ''; c.classList.toggle('hot', !!hot); } };
+  set('alerts', s.alerts_open, s.alerts_open > 0);
+  set('cases', s.cases_open);
+  set('actions', s.actions_pending);
+  set('agents', s.agents_total ? `${s.agents_online}/${s.agents_total}` : '', s.agents_total && s.agents_online < s.agents_total);
+  set('ai', s.ai_pending);
+  return s;
+}
+function syncOk() { const s = $('#sync'); s.classList.remove('bad'); s.textContent = 'Cập nhật ' + new Date().toLocaleTimeString('vi-VN'); }
+function syncFail(e) { if (e.code === 401) return; const s = $('#sync'); s.classList.add('bad'); s.textContent = 'Mất kết nối, đang thử lại'; }
+
+// ============================================================================ dashboard Grafana nhúng
+const RANGES = [['now-1h', '1 giờ'], ['now-24h', '24 giờ'], ['now-7d', '7 ngày'], ['now-30d', '30 ngày']];
+function grafanaUrl(uid, from, vars = {}) {
+  const p = new URLSearchParams({ orgId: '1', from, to: 'now', refresh: '30s', theme: 'dark' });
+  for (const [k, v] of Object.entries(vars)) p.set('var-' + k, v);
+  // kiosk: bỏ thanh điều hướng Grafana; ẩn bộ chọn thời gian / biến của Grafana vì console đã có điều khiển riêng
+  return `/grafana/d/${uid}?${p}&kiosk&_dash.hideTimePicker&_dash.hideVariables&_dash.hideLinks`;
+}
+// Grafana cùng origin với console: bắt cú bấm vào liên kết "Mở trên SOC console" trong khung để mở chi tiết ngay tại chỗ
+// (thay vì Grafana tự điều hướng bên trong khung).
+function hookFrame(iframe) {
+  iframe.addEventListener('load', () => {
+    let w; try { w = iframe.contentWindow; void w.document; } catch (e) { return; }
+    w.addEventListener('click', e => {
+      const a = e.target && e.target.closest && e.target.closest('a[href]');
+      const m = a && /\/go\/(alert|case)\/([A-Za-z0-9_-]+)/.exec(a.getAttribute('href') || '');
+      if (!m) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      go(`#/${m[1] === 'alert' ? 'alerts' : 'cases'}/${m[2]}`);
+    }, true);
+  });
+}
+function showFrame(name, url) {
+  for (const f of document.querySelectorAll('.frame')) f.hidden = f.id !== 'frame-' + name;
+  $('#content').hidden = true;
+  const iframe = $(`#frame-${name} iframe`);
+  if (iframe.dataset.src !== url) { iframe.dataset.src = url; iframe.src = url; }   // giữ khung đã tải khi chuyển trang
+}
+function rangeControl(cur, onPick) {
+  return el('div', { cls: 'seg', role: 'group', 'aria-label': 'Khoảng thời gian' }, RANGES.map(([v, label]) =>
+    el('button', { type: 'button', 'aria-pressed': String(v === cur), onClick: () => onPick(v) }, label)));
+}
+
+// ============================================================================ các trang
+const VIEWS = {};
+const listState = {};          // chữ ký dữ liệu đã vẽ của mỗi trang -> làm mới tự động không vẽ lại nếu không đổi
+function showList() {
+  for (const f of document.querySelectorAll('.frame')) f.hidden = true;
+  $('#content').hidden = false;
+}
+// vẽ trang danh sách; giữ vị trí cuộn và dòng đang chọn
+function paint(view, rows, build, auto) {
+  const sig = JSON.stringify(rows), c = $('#content');
+  // làm mới tự động: bỏ qua nếu dữ liệu không đổi, hoặc người dùng đang gõ trong form trên trang (không xóa chữ đang nhập)
+  if (auto && (listState[view] === sig || c.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) return;
+  listState[view] = sig;
+  const top = c.scrollTop, focused = document.activeElement && document.activeElement.closest && document.activeElement.closest('#content tr.row');
+  c.replaceChildren(...[].concat(build(rows)));
+  c.scrollTop = top;
+  markSelected();
+  if (focused && focused.dataset.id) c.querySelector(`tr.row[data-id="${CSS.escape(focused.dataset.id)}"]`)?.focus({ preventScroll: true });
+}
+function markSelected() {
+  const r = route();
+  for (const tr of document.querySelectorAll('#content tr.row')) tr.setAttribute('aria-selected', String(tr.dataset.id === r.id));
+}
+function rowLink(tr, hash) {
+  tr.tabIndex = 0;
+  tr.addEventListener('click', e => { if (!e.target.closest('button, a, input, select, textarea')) go(hash); });
+  tr.addEventListener('keydown', e => { if (e.key === 'Enter') go(hash); });
+  return tr;
+}
+const head = cols => el('thead', {}, el('tr', {}, cols.map(c => typeof c === 'string' ? el('th', {}, c) : c)));
+const empty = (title, text, action) => el('div', { cls: 'empty' }, el('b', {}, title), text, action ? el('div', { style: 'margin-top:12px' }, action) : null);
+
+// ---------------------------------------------------------------- Tổng quan
+VIEWS.overview = {
+  title: 'Tổng quan', range: 'now-1h',
+  tools() {
+    return [rangeControl(this.range, v => { this.range = v; render(true); }),
+      el('a', { cls: 'btn', href: '/grafana/d/siem-overview', target: '_blank', rel: 'noopener' }, 'Mở Grafana đầy đủ (tab mới)')];
   },
-  async agents() {
-    const rows = await api('/api/v1/agents');
-    return [head(['Agent ID', 'Hostname', 'OS', 'IP', 'Phiên bản', 'Last seen', 'Trạng thái', 'Phản ứng']),
-      el('tbody', {}, rows.map(a => el('tr', {},
-        el('td', { cls: 'mono' }, a.agent_id), el('td', {}, a.hostname), el('td', {}, a.os), el('td', { cls: 'mono' }, a.ip),
-        el('td', {}, a.version), el('td', { cls: 'small' }, fmt(a.last_seen)), el('td', { cls: 'st ' + a.status }, a.status),
-        el('td', {},
-          btn('Chặn IP…', () => { const ip = prompt('IP cần chặn'); if (ip) act(a.agent_id, 'block_ip', { ip }); }),
-          btn('Kill…', () => { const v = prompt('PID hoặc tên tiến trình'); if (v) act(a.agent_id, 'kill_process', /^\d+$/.test(v) ? { pid: +v } : { name: v }); }),
-          can('lead') ? btn('Cô lập', () => act(a.agent_id, 'isolate_host', {}), true) : null,
-          can('lead') ? btn('Bỏ cô lập', () => act(a.agent_id, 'unisolate_host', {})) : null))))];
+  async load() { showFrame('overview', grafanaUrl('siem-overview', this.range)); },
+};
+
+// ---------------------------------------------------------------- Cảnh báo
+const ALERT_SETS = { active: ['Đang mở', 'open,acknowledged,in_progress'], done: ['Đã xử lý', 'closed,false_positive'], all: ['Tất cả', ''] };
+VIEWS.alerts = {
+  title: 'Cảnh báo', list: true, f: { set: 'active', sev: [], since: '7d', q: '' },
+  tools() {
+    const f = this.f;
+    const q = el('input', { cls: 'field search', type: 'search', placeholder: 'Tìm IP, máy, rule (phím /)', value: f.q, 'aria-label': 'Tìm cảnh báo' });
+    let t; q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { f.q = q.value.trim(); this.load(); }, 300); });
+    return [
+      el('div', { cls: 'seg', role: 'group', 'aria-label': 'Trạng thái' }, Object.entries(ALERT_SETS).map(([k, [label]]) =>
+        el('button', { type: 'button', 'aria-pressed': String(f.set === k), onClick: () => { f.set = k; render(true); } }, label))),
+      el('div', { cls: 'btns', role: 'group', 'aria-label': 'Mức độ' }, ['critical', 'high', 'medium', 'low'].map(s =>
+        el('button', { type: 'button', cls: 'chip', style: `color:var(--${s})`, 'aria-pressed': String(f.sev.includes(s)),
+          onClick: () => { f.sev = f.sev.includes(s) ? f.sev.filter(x => x !== s) : [...f.sev, s]; render(true); } },
+          el('i', { style: `background:var(--${s})` }), SEV[s]))),
+      el('select', { cls: 'field', 'aria-label': 'Thời gian', onChange: e => { f.since = e.target.value; this.load(); } },
+        [['24h', '24 giờ qua'], ['7d', '7 ngày qua'], ['30d', '30 ngày qua'], ['', 'Mọi lúc']].map(([v, l]) =>
+          el('option', { value: v, selected: v === f.since }, l))),
+      q];
   },
-  async users() {
-    const rows = await api('/api/v1/users');
-    const add = async () => {
-      const username = (prompt('Tên đăng nhập mới (chữ thường, số, . _ -):') || '').trim().toLowerCase(); if (!username) return;
-      const role = (prompt('Vai trò: analyst | lead | admin', 'analyst') || '').trim(); if (!role) return;
-      const password = prompt('Mật khẩu tạm (tối thiểu 12 ký tự — người dùng phải đổi khi đăng nhập lần đầu):') || ''; if (!password) return;
-      try { await api('/api/v1/users', { method: 'POST', body: JSON.stringify({ username, role, password }) }); toast('Đã tạo tài khoản ' + username); refresh(); }
-      catch (e) { toast('Lỗi: ' + e.message); }
-    };
-    const upd = async (u, body, msg) => {
-      try { await api('/api/v1/users/' + encodeURIComponent(u), { method: 'PATCH', body: JSON.stringify(body) }); toast(msg); refresh(); }
-      catch (e) { toast('Lỗi: ' + e.message); }
-    };
-    return [head(['Tài khoản', 'Vai trò', 'Trạng thái', 'Đăng nhập gần nhất', 'Tạo lúc', '']),
-      el('tbody', {}, el('tr', {}, el('td', { colspan: '6' }, btn('+ Thêm tài khoản', add),
-        el('span', { cls: 'small' }, '  analyst: xử lý alert/case, chặn IP, kill · lead: thêm cô lập máy · admin: thêm quản lý tài khoản'))),
-        rows.map(u => el('tr', {},
-          el('td', {}, el('b', {}, u.username), u.username === ME.username ? el('span', { cls: 'small' }, ' (bạn)') : null),
-          el('td', {}, u.role),
-          el('td', { cls: u.disabled ? 'bad' : (u.must_change ? 'warn' : 'ok') }, u.disabled ? 'đã khóa' : (u.must_change ? 'chờ đổi mật khẩu' : 'hoạt động')),
-          el('td', { cls: 'small' }, fmt(u.last_login) || '—'), el('td', { cls: 'small' }, fmt(u.created_at)),
-          el('td', {},
-            btn('Đổi vai trò', () => { const r = (prompt('Vai trò mới: analyst | lead | admin', u.role) || '').trim(); if (r) upd(u.username, { role: r }, 'Đã đổi vai trò'); }),
-            btn('Đặt lại mật khẩu', () => { const p = prompt('Mật khẩu tạm mới (tối thiểu 12 ký tự):') || ''; if (p) upd(u.username, { password: p }, 'Đã đặt lại mật khẩu, người dùng phải đổi khi đăng nhập'); }),
-            u.username === ME.username ? null : (u.disabled
-              ? btn('Mở khóa', () => upd(u.username, { disabled: false }, 'Đã mở khóa'))
-              : btn('Khóa', () => upd(u.username, { disabled: true }, 'Đã khóa tài khoản'), true))))))];
-  },
-  async actions() {
-    const rows = await api('/api/v1/actions?size=200');
-    return [head(['Tạo lúc', 'Agent', 'Lệnh', 'Mục tiêu', 'Nguồn', 'Trạng thái', 'Hết hạn', 'Output', '']),
-      el('tbody', {}, rows.map(a => el('tr', {},
-        el('td', { cls: 'small' }, fmt(a.created_at)), el('td', { cls: 'mono' }, a.agent_id), el('td', {}, a.type),
-        el('td', { cls: 'mono' }, a.target), el('td', {}, a.source), el('td', { cls: 'st ' + a.status }, a.status + (a.reverted ? ' (đã gỡ)' : '')),
-        el('td', { cls: 'small' }, fmt(a.expires_at)), el('td', { cls: 'mono small' }, (a.output || '').slice(0, 300)),
-        el('td', {}, a.type === 'block_ip' && a.status === 'success' && !a.reverted ? btn('Gỡ chặn', () => act(a.agent_id, 'unblock_ip', { ip: a.target })) : null))))];
-  },
-  async ai() {
-    const [st, rows] = await Promise.all([api('/api/v1/ai/status'), api('/api/v1/ai/proposals?size=200' + (AI_FILTER ? '&status=' + AI_FILTER : ''))]);
-    const w = st.worker || {};
-    const sel = el('select', {}, ...['pending', 'approved', 'invalid', 'rejected', 'rolled_back', 'no_action', ''].map(x => {
-      const o = el('option', { value: x }, x || 'tất cả'); if (x === AI_FILTER) o.selected = true; return o; }));
-    sel.onchange = () => { AI_FILTER = sel.value; refresh(); };
-    const bar = el('tr', {}, el('td', { colspan: '9', style: 'padding:0' }, el('div', { cls: 'aibar' },
-      btn('Chạy phân tích AI ngay', aiRun), el('span', { cls: 'small' }, 'Lọc:'), sel,
-      el('span', { cls: 'small' }, w.model ? `Worker: ${w.model} · ${w.model_ready ? 'sẵn sàng' : 'đang tải model'} · ${w.running ? 'ĐANG CHẠY' : 'rảnh'} · lần chạy cuối ${fmt(w.last_run) || '—'}` : 'AI worker chưa chạy (docker compose --profile ai up -d)'),
-      w.datasets ? el('span', { cls: 'small' }, `Dataset: ${w.datasets.attack} mẫu tấn công, ${w.datasets.normal} bình thường, ${w.datasets.sigma} rule Sigma`) : null,
-      w.last_error ? el('span', { cls: 'bad small' }, 'Lỗi: ' + w.last_error) : null)));
-    return [head(['Tạo lúc', 'Loại', 'Đề xuất', 'Rủi ro', 'Kiểm định', 'Số liệu', 'Duyệt', 'Trạng thái', '']),
-      el('tbody', {}, bar, ...rows.flatMap(p => {
-        const v = p.validation || {}, m = v.metrics || {};
-        const nums = p.kind === 'exception'
-          ? `báo nhầm khớp ${m.fp_matched ?? '?'}/${m.fp_total ?? '?'} · case thật khớp ${m.tp_matched ?? 0}/${m.tp_total ?? 0} · mẫu vàng mất ${m.golden_matched ?? 0}/${m.golden_total ?? 0} · replay ${m.alerts_before ?? '?'}→${m.alerts_after ?? '?'} alert`
-          : `bắt ${m.test_detected ?? '?'}/${m.test_total ?? '?'} mẫu kiểm tra · báo nhầm ${m.normal_hits ?? '—'}/${m.normal_total ?? '—'} · ~${m.alerts_per_day ?? '?'} alert/ngày`;
-        const row = el('tr', {},
-          el('td', { cls: 'small' }, fmt(p.created_at)),
-          el('td', { cls: 'small' }, KIND[p.kind] || p.kind),
-          el('td', {}, p.title, el('div', { cls: 'small' }, (p.rationale || '').slice(0, 160))),
-          el('td', { cls: p.risk === 'cao' ? 'bad' : 'small' }, p.risk || ''),
-          el('td', { cls: v.passed ? 'ok' : 'bad' }, p.validation ? (v.passed ? 'đạt' : 'KHÔNG đạt') : '—'),
-          el('td', { cls: 'small' }, p.validation ? nums : ''),
-          el('td', { cls: 'small' }, p.required_approvals ? `${(p.approvals || []).length}/${p.required_approvals}` : '—',
-             el('div', {}, (p.approvals || []).map(a => a.by).join(', '))),
-          el('td', { cls: 'st' }, p.status),
-          el('td', {},
-            p.status === 'pending' ? btn('Duyệt', () => aiDo(p.id, 'approve')) : null,
-            ['pending', 'invalid'].includes(p.status) ? btn('Từ chối', () => aiDo(p.id, 'reject', true)) : null,
-            p.status === 'approved' ? btn('Gỡ', () => aiDo(p.id, 'rollback', true), true) : null));
-        return [row, el('tr', {}, el('td', { colspan: '9', style: 'padding:0' },
-          el('details', {}, el('summary', { style: 'padding:4px 12px' }, 'chi tiết kiểm định, nội dung, lịch sử'), aiDetail(p))))];
-      }))];
-  },
-  async cases() {
-    const rows = await api('/api/v1/cases');
-    const now = Date.now();
-    return [head(['Tạo lúc', 'Ưu tiên', 'Case', 'Playbook', 'Thực thể', 'Alert', 'Người xử lý', 'Hạn triage', 'Tiến độ', 'Trạng thái']),
-      el('tbody', {}, rows.flatMap(c => {
-        const tasks = c.tasks || [], done = tasks.filter(t => t.done).length;
-        const late = c.status === 'open' && c.sla_due && new Date(c.sla_due).getTime() < now;
-        const row = el('tr', {},
-          el('td', { cls: 'small' }, fmt(c.created_at)),
-          el('td', { cls: 'prio ' + (c.priority || '') }, c.priority || ''),
-          el('td', {}, c.title, el('div', {}, el('span', { cls: 'sev ' + c.severity }, c.severity))),
-          el('td', { cls: 'small' }, c.playbook ? `${c.playbook.id} — ${c.playbook.name}` : ''),
-          el('td', { cls: 'mono' }, c.entity),
-          el('td', {}, c.alert_count),
-          el('td', {}, c.assignee || el('span', { cls: 'small' }, 'chưa giao')),
-          el('td', { cls: late ? 'late' : 'small' }, fmt(c.sla_due) + (late ? ' (QUÁ HẠN)' : '')),
-          el('td', { cls: 'small' }, `${done}/${tasks.length}`,
-             el('div', { cls: 'bar' }, el('i', { style: `width:${tasks.length ? 100 * done / tasks.length : 0}%` }))),
-          el('td', { cls: 'st' }, c.status));
-        const detail = el('tr', {}, el('td', { colspan: '10', style: 'padding:0' },
-          el('details', {}, el('summary', { style: 'padding:4px 12px' }, 'mở case: checklist, xử lý, lịch sử'), caseDetail(c))));
-        return [row, detail];
-      }))];
+  async load(auto) {
+    const f = this.f, p = new URLSearchParams({ size: '300' });
+    if (ALERT_SETS[f.set][1]) p.set('status', ALERT_SETS[f.set][1]);
+    if (f.sev.length) p.set('severity', f.sev.join(','));
+    if (f.since) p.set('since', f.since);
+    if (f.q) p.set('q', f.q);
+    const rows = await api('/api/v1/alerts?' + p, { auto });
+    this.rows = rows;
+    paint('alerts', rows, rs => rs.length ? el('table', { cls: 'list' },
+      head(['Thời điểm', el('th', { cls: 'hide-sm' }, 'Mức độ'), 'Cảnh báo', 'Thực thể', el('th', { cls: 'hide-sm' }, 'SOAR'), 'Trạng thái']),
+      el('tbody', {}, rs.map(a => rowLink(el('tr', { cls: 'row edge-' + a.severity, 'data-id': a._id, title: 'Mức độ: ' + (SEV[a.severity] || a.severity) },
+        el('td', {}, when(a['@timestamp'])),
+        el('td', { cls: 'hide-sm' }, sev(a.severity), el('div', { cls: 'sub num' }, 'risk ' + (a.risk_score ?? '—'))),
+        el('td', {}, el('div', { cls: 'title' }, g(a, 'rule.name') || ''), el('div', { cls: 'sub' }, g(a, 'rule.id'),
+          a.count > 1 ? `, ${a.count} event` : '')),
+        el('td', {}, el('div', { cls: 'mono' }, g(a, 'source.ip') || g(a, 'user.name') || g(a, 'process.name')
+            || (g(a, 'file.path') || '').split('/').pop() || '—'),
+          el('div', { cls: 'sub' }, g(a, 'host.name') || g(a, 'agent.id') || '')),
+        // chỉ hiện lệnh phản ứng (chặn / kill / cô lập); thông báo và case xem trong chi tiết
+        el('td', { cls: 'soar hide-sm' }, (g(a, 'soar.results') || []).filter(r => RESPONSE.includes(r.action)).map(r =>
+          el('span', {}, `${ACTION_LABEL[r.action]}: ${SOAR_ST[r.status] || r.status}`))),
+        el('td', {}, stLabel(ALERT_ST, g(a, 'alert.status')))), '#/alerts/' + a._id))))
+      : empty('Không có cảnh báo nào khớp bộ lọc.', 'Đổi trạng thái sang “Tất cả” hoặc mở rộng khoảng thời gian để xem thêm.',
+          f.set !== 'all' || f.sev.length || f.q ? button('Bỏ lọc', () => { Object.assign(f, { set: 'all', sev: [], q: '', since: '' }); render(true); }) : null),
+      auto);
   },
 };
 
-let AUTO = false;   // đang làm mới tự động -> mọi GET gắn X-Auto-Refresh (không tính là thao tác của người dùng)
-async function refresh(auto = false) {
-  if (!ME || ME.must_change) return;
-  AUTO = auto;
-  try {
-    const s = await api('/api/v1/stats', {}, auto);
-    const labels = { events_24h: 'Event 24h', alerts_24h: 'Alert 24h', alerts_open: 'Alert đang mở', agents_online: 'Agent online', agents_total: 'Tổng agent', actions_pending: 'Lệnh đang chờ', cases_open: 'Case đang mở' };
-    $('#tiles').replaceChildren(...Object.entries(labels).map(([k, l]) => el('div', { cls: 'tile' }, el('b', {}, (s[k] ?? 0).toLocaleString('vi-VN')), el('span', {}, l))));
-    if (TAB === 'users' && !can('admin')) TAB = 'alerts';
-    $('#tbl').replaceChildren(...await views[TAB]());
-    $('#updated').textContent = 'cập nhật ' + new Date().toLocaleTimeString('vi-VN');
-  } catch (e) { $('#updated').textContent = 'Lỗi: ' + e.message; }
-  finally { AUTO = false; }
+// ---------------------------------------------------------------- Case
+const CASE_SETS = { active: ['Đang mở', 'open,in_progress,contained'], done: ['Đã đóng', 'closed,false_positive'], all: ['Tất cả', ''] };
+VIEWS.cases = {
+  title: 'Case', list: true, f: { set: 'active', q: '' },
+  tools() {
+    const f = this.f;
+    const q = el('input', { cls: 'field search', type: 'search', placeholder: 'Tìm tiêu đề, thực thể (phím /)', value: f.q, 'aria-label': 'Tìm case' });
+    let t; q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { f.q = q.value.trim(); this.load(); }, 300); });
+    return [el('div', { cls: 'seg', role: 'group', 'aria-label': 'Trạng thái' }, Object.entries(CASE_SETS).map(([k, [label]]) =>
+      el('button', { type: 'button', 'aria-pressed': String(f.set === k), onClick: () => { f.set = k; render(true); } }, label))), q];
+  },
+  async load(auto) {
+    const f = this.f, p = new URLSearchParams({ size: '300' });
+    if (CASE_SETS[f.set][1]) p.set('status', CASE_SETS[f.set][1]);
+    if (f.q) p.set('q', f.q);
+    const rows = await api('/api/v1/cases?' + p, { auto });
+    const now = Date.now();
+    paint('cases', rows, rs => rs.length ? el('table', { cls: 'list' },
+      head(['Tạo lúc', 'Ưu tiên', 'Case', 'Thực thể', 'Người xử lý', 'Tiến độ', 'Trạng thái']),
+      el('tbody', {}, rs.map(c => {
+        const tasks = c.tasks || [], done = tasks.filter(t => t.done).length;
+        const late = c.status === 'open' && c.sla_due && new Date(c.sla_due).getTime() < now;
+        return rowLink(el('tr', { cls: 'row edge-' + c.severity, 'data-id': c._id },
+          el('td', {}, when(c.created_at)),
+          el('td', {}, el('span', { cls: 'prio ' + (c.priority || '') }, c.priority || '—')),
+          el('td', {}, el('div', { cls: 'title' }, c.title), el('div', { cls: 'sub' },
+            c.playbook ? c.playbook.id + ' ' + c.playbook.name : '', late ? el('span', { cls: 'late' }, ' quá hạn triage') : null)),
+          el('td', {}, el('div', { cls: 'mono' }, c.entity), el('div', { cls: 'sub num' }, `${c.alert_count || 1} alert`)),
+          el('td', {}, c.assignee || el('span', { cls: 'sub' }, 'chưa giao')),
+          el('td', { cls: 'num' }, `${done}/${tasks.length}`, el('div', { cls: 'progress' }, el('i', { style: `width:${tasks.length ? 100 * done / tasks.length : 0}%` }))),
+          el('td', {}, stLabel(CASE_ST, c.status))), '#/cases/' + c._id);
+      })))
+      : empty('Không có case nào.', 'SOAR tự mở case khi alert khớp playbook; case đã đóng nằm ở mục “Đã đóng”.'), auto);
+  },
+};
+
+// ---------------------------------------------------------------- Điều tra (dashboard Grafana lọc theo thực thể)
+function entityQuery(t) {
+  t = (t || '').trim();
+  if (!t || t === '*') return '*';
+  if (isIP(t)) return `source.ip:${luceneValue(t)} OR destination.ip:${luceneValue(t)}`;
+  if (/[:*()]|\s(AND|OR|NOT)\s/.test(t)) return t;                 // đã là truy vấn Lucene
+  return `host.name:${luceneValue(t)} OR user.name:${luceneValue(t)} OR agent.name:${luceneValue(t)}`;
 }
+VIEWS.investigate = {
+  title: 'Điều tra', range: 'now-24h',
+  tools() {
+    const r = route(), q = r.params.get('q') || '';
+    const input = el('input', { cls: 'field search', type: 'search', value: q === '*' ? '' : q, style: 'width:340px',
+      placeholder: 'IP, tên máy, tài khoản hoặc truy vấn Lucene', 'aria-label': 'Thực thể cần điều tra' });
+    const submit = () => go('#/investigate?q=' + encodeURIComponent(entityQuery(input.value)));
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+    const sugg = el('div', { cls: 'btns' });
+    api('/api/v1/alerts?size=100&status=open,acknowledged,in_progress&since=7d').then(rows => {
+      const seen = new Map();
+      for (const a of rows) for (const v of [g(a, 'source.ip'), g(a, 'host.name')]) if (v && !seen.has(v)) seen.set(v, a.severity);
+      sugg.replaceChildren(...[...seen].slice(0, 6).map(([v, s]) =>
+        el('button', { type: 'button', cls: 'chip', onClick: () => go('#/investigate?q=' + encodeURIComponent(entityQuery(v))) },
+          el('i', { style: `background:var(--${s})` }), v)));
+    }).catch(() => {});
+    return [input, button('Điều tra', submit, 'primary'), rangeControl(this.range, v => { this.range = v; render(true); }), sugg];
+  },
+  async load() {
+    showFrame('investigate', grafanaUrl('siem-investigate', this.range, { q: route().params.get('q') || '*' }));
+  },
+};
+const investigateLinks = a => [
+  g(a, 'source.ip') && ['IP ' + g(a, 'source.ip'), entityQuery(g(a, 'source.ip'))],
+  g(a, 'host.name') && ['máy ' + g(a, 'host.name'), `host.name:${luceneValue(g(a, 'host.name'))}`],
+  g(a, 'user.name') && ['tài khoản ' + g(a, 'user.name'), `user.name:${luceneValue(g(a, 'user.name'))}`],
+].filter(Boolean).map(([label, q]) => el('a', { cls: 'btn', href: '#/investigate?q=' + encodeURIComponent(q) }, 'Điều tra ' + label));
+
+// ---------------------------------------------------------------- Lệnh phản ứng
+VIEWS.actions = {
+  title: 'Lệnh phản ứng', list: true, f: { status: '' },
+  tools() {
+    return [el('div', { cls: 'seg', role: 'group', 'aria-label': 'Trạng thái lệnh' },
+      [['', 'Tất cả'], ['pending,sent', 'Đang chờ'], ['success', 'Thành công'], ['failed,timeout', 'Lỗi']].map(([v, l]) =>
+        el('button', { type: 'button', 'aria-pressed': String(this.f.status === v), onClick: () => { this.f.status = v; render(true); } }, l)))];
+  },
+  async load(auto) {
+    const p = new URLSearchParams({ size: '300' }); if (this.f.status) p.set('status', this.f.status);
+    const rows = await api('/api/v1/actions?' + p, { auto });
+    paint('actions', rows, rs => rs.length ? el('table', { cls: 'list' },
+      head(['Tạo lúc', 'Lệnh', 'Agent', 'Người tạo', 'Trạng thái', el('th', { cls: 'hide-sm' }, 'Kết quả'), '']),
+      el('tbody', {}, rs.map(a => el('tr', {},
+        el('td', {}, when(a.created_at)),
+        el('td', {}, el('div', { cls: 'title' }, ACT_TYPE[a.type] || a.type), el('div', { cls: 'mono' }, a.target)),
+        el('td', { cls: 'mono' }, a.agent_id),
+        el('td', {}, a.requested_by || (a.source === 'soar' ? 'SOAR (tự động)' : a.source),
+          a.alert_id ? el('div', {}, el('a', { href: '#/alerts/' + a.alert_id, cls: 'sub' }, 'xem alert')) : null),
+        el('td', {}, stLabel(ACT_ST, a.status), a.reverted ? el('div', { cls: 'sub' }, 'đã gỡ chặn') : null,
+          a.expires_at && !a.reverted ? el('div', { cls: 'sub', title: fmt(a.expires_at) }, 'hết hạn ' + fmt(a.expires_at)) : null),
+        el('td', { cls: 'mono sub hide-sm' }, (a.output || '').slice(0, 220)),
+        el('td', {}, a.type === 'block_ip' && a.status === 'success' && !a.reverted
+          ? button('Gỡ chặn', b => sendAction(b, a.agent_id, 'unblock_ip', { ip: a.target }).then(() => this.load())) : null)))))
+      : empty('Chưa có lệnh phản ứng nào.', 'Lệnh do SOAR tự tạo theo playbook, hoặc do analyst tạo từ chi tiết cảnh báo / trang Agent.'), auto);
+  },
+};
+
+// ---------------------------------------------------------------- Agent
+VIEWS.agents = {
+  title: 'Agent', list: true, open: null,
+  async load(auto) {
+    const rows = await api('/api/v1/agents', { auto });
+    paint('agents', { rows, open: this.open }, ({ rows: rs }) => rs.length ? el('table', { cls: 'list' },
+      head(['Agent', 'Hệ điều hành', 'IP', 'Liên lạc gần nhất', 'Trạng thái', 'Phản ứng']),
+      el('tbody', {}, rs.map(a => [el('tr', {},
+        el('td', {}, el('div', { cls: 'title' }, a.hostname), el('div', { cls: 'sub mono' }, 'ID ' + a.agent_id + (a.version ? ', ' + a.version : ''))),
+        el('td', {}, a.os || '—'),
+        el('td', { cls: 'mono' }, a.ip || '—'),
+        el('td', {}, when(a.last_seen)),
+        el('td', {}, el('span', { cls: 'st ' + (a.status === 'online' ? 'done' : 'bad') }, a.status === 'online' ? 'Trực tuyến' : 'Mất kết nối')),
+        el('td', {}, el('div', { cls: 'btns' },
+          button('Chặn IP…', () => { this.open = this.open === a.agent_id + ':ip' ? null : a.agent_id + ':ip'; this.load(); }),
+          button('Kill tiến trình…', () => { this.open = this.open === a.agent_id + ':kill' ? null : a.agent_id + ':kill'; this.load(); }),
+          el('a', { cls: 'btn', href: '#/investigate?q=' + encodeURIComponent(`host.name:${luceneValue(a.hostname)}`) }, 'Điều tra'),
+          can('lead') ? confirmButton('Cô lập', 'Cô lập ' + a.hostname + '?', b => sendAction(b, a.agent_id, 'isolate_host', {})) : null,
+          can('lead') ? button('Bỏ cô lập', b => sendAction(b, a.agent_id, 'unisolate_host', {})) : null))),
+        this.open && this.open.startsWith(a.agent_id + ':') ? el('tr', {}, el('td', { colspan: '6' }, agentForm(a, this.open.split(':')[1]))) : null])))
+      : empty('Chưa có agent nào.', 'Cài Wazuh agent trên máy cần giám sát và enroll vào wazuh-manager (README mục 1).'), auto);
+  },
+};
+function agentForm(a, kind) {
+  const input = el('input', { cls: 'field', style: 'width:220px', autofocus: true,
+    placeholder: kind === 'ip' ? 'IP cần chặn, vd 203.0.113.9' : 'PID hoặc tên tiến trình', 'aria-label': kind === 'ip' ? 'IP cần chặn' : 'PID hoặc tên tiến trình' });
+  const submit = b => {
+    const v = input.value.trim(); if (!v) { input.focus(); return; }
+    if (kind === 'ip' && !isIP(v)) { toast('IP không hợp lệ.', true); input.focus(); return; }
+    const params = kind === 'ip' ? { ip: v } : (/^\d+$/.test(v) ? { pid: +v } : { name: v });
+    sendAction(b, a.agent_id, kind === 'ip' ? 'block_ip' : 'kill_process', params).then(r => { if (r) { VIEWS.agents.open = null; VIEWS.agents.load(); } });
+  };
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') { VIEWS.agents.open = null; VIEWS.agents.load(); } });
+  setTimeout(() => input.focus());
+  return el('div', { cls: 'inline-form' }, el('span', { cls: 'sub' }, kind === 'ip' ? `Chặn IP vào ${a.hostname}:` : `Kill tiến trình trên ${a.hostname} (tên: kill mọi tiến trình cùng tên):`),
+    input, button(kind === 'ip' ? 'Chặn' : 'Kill', submit, 'danger'), button('Hủy', () => { VIEWS.agents.open = null; VIEWS.agents.load(); }));
+}
+
+// ---------------------------------------------------------------- Đề xuất AI
+const KIND = { exception: 'Ngoại lệ (giảm báo nhầm)', new_rule: 'Rule mới' };
+const AI_ST = { pending: ['Chờ duyệt', 'work'], approved: ['Đã triển khai', 'done'], invalid: ['Không đạt kiểm định', 'bad'],
+                rejected: ['Đã từ chối', 'done'], rolled_back: ['Đã gỡ', 'done'], no_action: ['Không cần làm gì', 'done'] };
+VIEWS.ai = {
+  title: 'Đề xuất AI', list: true, f: { status: 'pending' }, expanded: new Set(),
+  tools() {
+    return [el('div', { cls: 'seg', role: 'group', 'aria-label': 'Trạng thái đề xuất' },
+      [['pending', 'Chờ duyệt'], ['approved', 'Đã triển khai'], ['invalid', 'Không đạt'], ['', 'Tất cả']].map(([v, l]) =>
+        el('button', { type: 'button', 'aria-pressed': String(this.f.status === v), onClick: () => { this.f.status = v; render(true); } }, l))),
+      button('Chạy phân tích AI ngay', b => run(b, () => api('/api/v1/ai/run', { method: 'POST', body: {} }), 'Đã gửi yêu cầu. AI worker bắt đầu trong khoảng 10 giây.'))];
+  },
+  async load(auto) {
+    const [st, rows] = await Promise.all([api('/api/v1/ai/status', { auto }),
+      api('/api/v1/ai/proposals?size=200' + (this.f.status ? '&status=' + this.f.status : ''), { auto })]);
+    const w = st.worker || {};
+    paint('ai', { rows, w, ex: [...this.expanded] }, () => [
+      el('p', { cls: 'sub', style: 'margin:12px 20px 0' }, w.model
+        ? `Worker dùng model ${w.model}, ${w.model_ready ? 'sẵn sàng' : 'đang tải model'}, ${w.running ? 'đang chạy' : 'đang rảnh'}. Lần chạy gần nhất: ${fmt(w.last_run) || 'chưa có'}.`
+        : 'AI worker chưa chạy. Bật bằng: docker compose --profile ai up -d',
+        w.last_error ? el('span', { cls: 'bad' }, ' Lỗi gần nhất: ' + w.last_error) : null),
+      rows.length ? el('table', { cls: 'list' }, head(['Tạo lúc', 'Đề xuất', 'Kiểm định', 'Duyệt', 'Trạng thái']),
+        el('tbody', {}, rows.flatMap(p => {
+          const v = p.validation || {}, open = this.expanded.has(p.id);
+          const tr = el('tr', { cls: 'row', 'aria-expanded': String(open) },
+            el('td', {}, when(p.created_at)),
+            el('td', {}, el('div', { cls: 'title' }, p.title), el('div', { cls: 'sub' }, KIND[p.kind] || p.kind, p.risk ? `, rủi ro ${p.risk}` : '')),
+            el('td', {}, p.validation ? el('span', { cls: v.passed ? 'ok' : 'bad' }, v.passed ? 'Đạt' : 'Không đạt') : '—'),
+            el('td', { cls: 'num' }, p.required_approvals ? `${(p.approvals || []).length}/${p.required_approvals}` : '—'),
+            el('td', {}, stLabel(AI_ST, p.status)));
+          tr.tabIndex = 0;
+          const toggle = () => { open ? this.expanded.delete(p.id) : this.expanded.add(p.id); this.load(); };
+          tr.addEventListener('click', toggle); tr.addEventListener('keydown', e => { if (e.key === 'Enter') toggle(); });
+          return [tr, open ? el('tr', {}, el('td', { colspan: '5' }, aiDetail(p))) : null];
+        })))
+        : empty('Không có đề xuất nào ở mục này.', 'AI chỉ đề xuất; mọi rule hay ngoại lệ đều phải qua kiểm định tự động và người duyệt.')]);
+  },
+};
+function aiDetail(p) {
+  const v = p.validation || {}, m = v.metrics || {};
+  const reason = el('textarea', { cls: 'field', placeholder: 'Lý do (bắt buộc khi từ chối hoặc gỡ; AI dùng lý do này để không lặp lại lỗi)' });
+  const need = () => { if (reason.value.trim().length < 3) { toast('Ghi lý do trước khi từ chối hoặc gỡ.', true); reason.focus(); return false; } return true; };
+  const act = (b, action) => run(b, () => api(`/api/v1/ai/proposals/${p.id}/${action}`, { method: 'POST', body: { reason: reason.value.trim() } }),
+    r => r.status === 'approved' ? `Đã triển khai ${r.file}.` : `Đã ghi nhận (${(r.approvals || []).length}/${r.required_approvals || 1} lượt duyệt).`)
+    .then(() => VIEWS.ai.load());
+  const nums = p.kind === 'exception'
+    ? `Báo nhầm khớp ${m.fp_matched ?? '?'}/${m.fp_total ?? '?'}; case thật khớp ${m.tp_matched ?? 0}/${m.tp_total ?? 0}; mẫu vàng mất ${m.golden_matched ?? 0}/${m.golden_total ?? 0}; replay ${m.alerts_before ?? '?'} thành ${m.alerts_after ?? '?'} alert.`
+    : `Bắt ${m.test_detected ?? '?'}/${m.test_total ?? '?'} mẫu kiểm tra; báo nhầm ${m.normal_hits ?? '—'}/${m.normal_total ?? '—'}; khoảng ${m.alerts_per_day ?? '?'} alert/ngày.`;
+  return el('div', { style: 'padding:4px 0 12px;max-width:900px' },
+    el('h3', { style: 'margin-top:4px' }, 'Lý do AI đưa ra'), el('div', {}, p.rationale || '—'),
+    el('h3', {}, 'Kiểm định tự động (độc lập với AI)'), el('div', { cls: 'sub' }, p.validation ? nums : ''),
+    el('ul', { cls: 'items', style: 'margin-top:6px' }, (v.checks || []).map(c => el('li', {},
+      el('span', { cls: c.ok ? 'ok' : (c.blocking ? 'bad' : 'warn') }, c.ok ? 'Đạt' : (c.blocking ? 'Chặn' : 'Lưu ý')), ': ', el('b', {}, c.name), ' — ', c.detail))),
+    el('h3', {}, 'Nội dung sẽ triển khai'), el('pre', {}, p.yaml || ''),
+    el('h3', {}, 'Lịch sử'), el('ul', { cls: 'hist' }, (p.history || []).map(h => el('li', {}, h.text, el('span', { cls: 'sub' }, `${h.by}, ${fmt(h.at)}`)))),
+    ['pending', 'invalid', 'approved'].includes(p.status) ? el('div', { style: 'margin-top:12px;display:grid;gap:8px' }, reason, el('div', { cls: 'btns' },
+      p.status === 'pending' ? button('Duyệt', b => act(b, 'approve'), 'primary') : null,
+      ['pending', 'invalid'].includes(p.status) ? button('Từ chối', b => need() && act(b, 'reject')) : null,
+      p.status === 'approved' ? confirmButton('Gỡ rule', 'Gỡ khỏi hệ thống?', b => need() && act(b, 'rollback')) : null)) : null,
+    el('p', { cls: 'sub' }, `Model ${p.llm?.model || ''}, ${p.llm?.seconds ?? '?'} giây, ${p.llm?.prompt_tokens ?? '?'} + ${p.llm?.output_tokens ?? '?'} token.`));
+}
+
+// ---------------------------------------------------------------- Tài khoản (admin)
+VIEWS.users = {
+  title: 'Tài khoản', list: true, open: null,
+  tools() { return [button('Thêm tài khoản', () => { this.open = this.open === '+new' ? null : '+new'; this.load(); }, 'primary')]; },
+  async load(auto) {
+    if (!can('admin')) { go('#/alerts'); return; }
+    const rows = await api('/api/v1/users', { auto });
+    const upd = (b, u, body, msg) => run(b, () => api('/api/v1/users/' + encodeURIComponent(u), { method: 'PATCH', body }), msg).then(() => this.load());
+    paint('users', { rows, open: this.open }, () => [
+      this.open === '+new' ? newUserForm() : null,
+      el('p', { cls: 'sub', style: 'margin:12px 20px 4px' }, 'Analyst xử lý cảnh báo, case, chặn IP, kill tiến trình. Lead làm được thêm cô lập máy. Admin quản lý thêm tài khoản. Cùng tài khoản dùng cho Grafana: analyst xem, lead sửa dashboard, admin quản trị.'),
+      el('table', { cls: 'list' }, head(['Tài khoản', 'Vai trò', 'Trạng thái', 'Đăng nhập gần nhất', '']),
+        el('tbody', {}, rows.map(u => [el('tr', {},
+          el('td', {}, el('span', { cls: 'title' }, u.username), u.username === ME.username ? el('span', { cls: 'sub' }, ' (bạn)') : null),
+          el('td', {}, u.username === ME.username ? u.role : (() => {
+            const s = el('select', { cls: 'field', 'aria-label': 'Vai trò của ' + u.username },
+              ['analyst', 'lead', 'admin'].map(r => el('option', { value: r, selected: r === u.role }, r)));
+            s.addEventListener('change', () => upd(s, u.username, { role: s.value }, `Đã đổi vai trò ${u.username} thành ${s.value}.`));
+            return s; })()),
+          el('td', {}, el('span', { cls: 'st ' + (u.disabled ? 'bad' : (u.must_change ? 'work' : 'done')) },
+            u.disabled ? 'Đã khóa' : (u.must_change ? 'Chờ đổi mật khẩu' : 'Hoạt động'))),
+          el('td', {}, u.last_login ? when(u.last_login) : el('span', { cls: 'sub' }, 'chưa đăng nhập')),
+          el('td', {}, el('div', { cls: 'btns' },
+            button('Đặt lại mật khẩu', () => { this.open = this.open === u.username ? null : u.username; this.load(); }),
+            u.username === ME.username ? null : (u.disabled
+              ? button('Mở khóa', b => upd(b, u.username, { disabled: false }, `Đã mở khóa ${u.username}.`))
+              : confirmButton('Khóa', `Khóa ${u.username}?`, b => upd(b, u.username, { disabled: true }, `Đã khóa ${u.username}, mọi phiên của tài khoản này bị đăng xuất.`)))))),
+          this.open === u.username ? el('tr', {}, el('td', { colspan: '5' }, resetForm(u.username, upd))) : null])))]);
+  },
+};
+function newUserForm() {
+  const name = el('input', { cls: 'field', placeholder: 'tên đăng nhập', 'aria-label': 'Tên đăng nhập', autocomplete: 'off' });
+  const role = el('select', { cls: 'field', 'aria-label': 'Vai trò' }, ['analyst', 'lead', 'admin'].map(r => el('option', { value: r }, r)));
+  const pw = el('input', { cls: 'field', type: 'password', placeholder: 'mật khẩu tạm, từ 12 ký tự', 'aria-label': 'Mật khẩu tạm', autocomplete: 'new-password' });
+  setTimeout(() => name.focus());
+  return el('div', { cls: 'inline-form', style: 'margin:12px 20px 0' }, name, role, pw,
+    button('Tạo tài khoản', b => run(b, () => api('/api/v1/users', { method: 'POST', body: { username: name.value.trim().toLowerCase(), role: role.value, password: pw.value } }),
+      `Đã tạo ${name.value.trim().toLowerCase()}. Người dùng phải đổi mật khẩu ở lần đăng nhập đầu.`).then(r => { if (r) { VIEWS.users.open = null; VIEWS.users.load(); } }), 'primary'),
+    button('Hủy', () => { VIEWS.users.open = null; VIEWS.users.load(); }));
+}
+function resetForm(username, upd) {
+  const pw = el('input', { cls: 'field', type: 'password', placeholder: 'mật khẩu tạm mới, từ 12 ký tự', 'aria-label': 'Mật khẩu tạm mới', autocomplete: 'new-password' });
+  setTimeout(() => pw.focus());
+  return el('div', { cls: 'inline-form' }, el('span', { cls: 'sub' }, `Mật khẩu tạm cho ${username} (phải đổi khi đăng nhập):`), pw,
+    button('Đặt lại', b => upd(b, username, { password: pw.value }, `Đã đặt lại mật khẩu ${username}.`).then(() => { VIEWS.users.open = null; }), 'primary'),
+    button('Hủy', () => { VIEWS.users.open = null; VIEWS.users.load(); }));
+}
+
+// ============================================================================ ngăn chi tiết (alert / case)
+const drawer = { kind: null, id: null, sig: null, returnFocus: null };
+function closeDrawer() {
+  const d = $('#drawer'); d.hidden = true; d.replaceChildren();
+  Object.assign(drawer, { kind: null, id: null, sig: null });
+  markSelected();
+  if (drawer.returnFocus) { drawer.returnFocus.focus?.(); drawer.returnFocus = null; }
+}
+// đang gõ / có ghi chú chưa gửi -> không làm mới ngăn chi tiết (tránh mất chữ đang nhập)
+const drawerBusy = () => { const d = $('#drawer'); return d.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)
+  || [...d.querySelectorAll('textarea, input[type=text]')].some(x => x.value.trim() && x.dataset.dirty); };
+async function openDrawer(kind, id, auto) {
+  if (drawer.kind !== kind || drawer.id !== id) {
+    drawer.sig = null;
+    if (!auto && $('#drawer').hidden) drawer.returnFocus = document.activeElement;   // đóng ngăn thì trả focus về đây
+  }
+  Object.assign(drawer, { kind, id });
+  const data = await api(`/api/v1/${kind === 'alert' ? 'alerts' : 'cases'}/${encodeURIComponent(id)}`, { auto });
+  // trong lúc chờ API người dùng đã sang chỗ khác (bấm nhanh) -> không mở lại ngăn đã đóng
+  const r = route();
+  if (drawer.kind !== kind || drawer.id !== id || r.id !== id || r.view !== (kind === 'alert' ? 'alerts' : 'cases')) return;
+  const sig = JSON.stringify(data);
+  if (auto && sig === drawer.sig) return;
+  drawer.sig = sig;
+  const d = $('#drawer'), body = d.querySelector('.body'), top = body ? body.scrollTop : 0;
+  d.replaceChildren(...(kind === 'alert' ? alertDrawer(data) : caseDrawer(data)));
+  d.style.setProperty('--edge', `var(--${data.severity || 'line2'})`);
+  d.hidden = false;
+  const nb = d.querySelector('.body'); if (nb) nb.scrollTop = top;
+  for (const x of d.querySelectorAll('textarea, input[type=text]')) x.addEventListener('input', () => { x.dataset.dirty = '1'; });
+  if (!auto) d.querySelector('h2')?.focus();
+  markSelected();
+}
+const closeX = () => el('button', { type: 'button', cls: 'x', 'aria-label': 'Đóng (Esc)', onClick: () => go('#/' + route().view) }, '×');
+const facts = pairs => el('dl', { cls: 'facts' }, pairs.filter(([, v]) => v != null && v !== '' && !(Array.isArray(v) && !v.length))
+  .flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)]));
+const hist = items => items.length ? el('ul', { cls: 'hist' }, items.map(h => el('li', {}, h.text, el('span', { cls: 'sub' }, `${h.by}, ${fmt(h.at)}`))))
+  : el('p', { cls: 'sub' }, 'Chưa có thao tác nào.');
+
+function alertDrawer(a) {
+  const agent = g(a, 'agent.id'), ip = g(a, 'source.ip'), pid = g(a, 'process.pid'), st = g(a, 'alert.status');
+  const note = el('textarea', { cls: 'field', placeholder: 'Ghi chú (không bắt buộc), vd lý do báo nhầm' });
+  const setSt = (b, s) => run(b, () => api('/api/v1/alerts/' + encodeURIComponent(a._id), { method: 'PATCH', body: { status: s, note: note.value } }),
+    `Đã chuyển cảnh báo sang “${ALERT_ST[s][0]}”.`).then(r => { if (r) { note.value = ''; delete note.dataset.dirty; refreshNow(); } });
+  const te = a.trigger_event || {};
+  const mitre = [g(a, 'rule.mitre.tactic'), (g(a, 'rule.mitre.technique') || []).join(', ')].filter(Boolean).join(': ');
+  const resp = [
+    isEndpoint(agent) && ip ? confirmButton(`Chặn IP ${ip}`, `Chặn ${ip} trên ${g(a, 'host.name') || agent}?`, b => sendAction(b, agent, 'block_ip', { ip }, a._id).then(() => refreshNow())) : null,
+    isEndpoint(agent) && pid ? confirmButton(`Kill PID ${pid}`, `Kill PID ${pid} và tiến trình con?`, b => sendAction(b, agent, 'kill_process', { pid }, a._id).then(() => refreshNow())) : null,
+    isEndpoint(agent) && can('lead') ? confirmButton('Cô lập máy', `Cô lập ${g(a, 'host.name') || agent}?`, b => sendAction(b, agent, 'isolate_host', {}, a._id).then(() => refreshNow())) : null,
+  ].filter(Boolean);
+  return [
+    el('header', {}, sev(a.severity), el('span', { cls: 'sub mono' }, g(a, 'rule.id')), stLabel(ALERT_ST, st), closeX()),
+    el('div', { cls: 'body' },
+      el('h2', { id: 'drawer-title', tabindex: '-1' }, g(a, 'rule.name')),
+      el('p', { cls: 'desc' }, g(a, 'rule.description') || ''),
+      facts([
+        ['Thời điểm', fmt(a['@timestamp'])], ['Risk', a.risk_score != null ? el('span', { cls: 'num' }, a.risk_score) : null],
+        ['Số event', a.count > 1 ? a.count : null], ['Phát hiện bởi', { rule: 'Rule siem-xdr', ml: 'Học máy', wazuh: 'Ruleset Wazuh' }[g(a, 'alert.source')] || g(a, 'alert.source')],
+        ['IP nguồn', ip ? el('span', { cls: 'mono' }, ip, g(a, 'source.port') ? ':' + g(a, 'source.port') : '') : null],
+        ['IP đích', g(a, 'destination.ip') ? el('span', { cls: 'mono' }, g(a, 'destination.ip')) : null],
+        ['Máy', [g(a, 'host.name'), agent ? `(agent ${agent})` : ''].filter(Boolean).join(' ')],
+        ['Tài sản', g(a, 'asset.id') ? `${g(a, 'asset.id')}, mức quan trọng ${g(a, 'asset.criticality') || '?'}` : null],
+        ['Tài khoản', g(a, 'user.name')], ['Tiến trình', pid || g(a, 'process.name') ? `${g(a, 'process.name') || ''} ${pid ? 'PID ' + pid : ''}`.trim() : null],
+        ['Dòng lệnh', g(a, 'process.command_line') ? el('span', { cls: 'mono' }, g(a, 'process.command_line')) : null],
+        ['URL', g(a, 'url.original') ? el('span', { cls: 'mono' }, g(a, 'url.original')) : null],
+        ['File', g(a, 'file.path') ? el('span', { cls: 'mono' }, g(a, 'file.path')) : null],
+        ['MITRE ATT&CK', mitre],
+      ]),
+      el('h3', {}, 'Xử lý'), note,
+      el('div', { cls: 'btns', style: 'margin-top:8px' },
+        button('Xác nhận', b => setSt(b, 'acknowledged')), button('Đang xử lý', b => setSt(b, 'in_progress')),
+        button('Đóng', b => setSt(b, 'closed'), 'primary'), button('Báo nhầm', b => setSt(b, 'false_positive'))),
+      el('h3', {}, 'Phản ứng'),
+      resp.length ? el('div', { cls: 'btns' }, resp) : el('p', { cls: 'sub' }, isEndpoint(agent)
+        ? 'Không có IP hoặc PID trong cảnh báo để phản ứng tự động; dùng trang Agent để chặn IP hay kill theo tên.'
+        : 'Cảnh báo đến từ log syslog (firewall, Suricata), không có agent để chạy lệnh trên máy.'),
+      el('div', { cls: 'btns', style: 'margin-top:8px' }, investigateLinks(a)),
+      (a.actions || []).length ? el('ul', { cls: 'items', style: 'margin-top:10px' }, a.actions.map(x => el('li', {},
+        el('b', {}, ACT_TYPE[x.type] || x.type), ' ', el('span', { cls: 'mono' }, x.target), ' ', stLabel(ACT_ST, x.status),
+        el('div', { cls: 'sub' }, `${x.requested_by || 'SOAR'}, ${fmt(x.created_at)}`, x.output ? ` — ${x.output}` : '')))) : null,
+      el('h3', {}, 'SOAR đã làm'),
+      (g(a, 'soar.results') || []).length ? el('ul', { cls: 'items' }, g(a, 'soar.results').map(r => el('li', {},
+        el('b', {}, ACTION_LABEL[r.action] || r.action), `: ${SOAR_ST[r.status] || r.status}`,
+        r.target ? el('span', { cls: 'mono' }, ' ' + r.target) : null, r.detail ? el('div', { cls: 'sub' }, r.detail) : null,
+        el('div', { cls: 'sub' }, `playbook ${r.playbook}`))))
+        : el('p', { cls: 'sub' }, 'Không khớp playbook tự động nào.'),
+      el('h3', {}, 'Case'),
+      (a.cases || []).length ? el('ul', { cls: 'items' }, a.cases.map(c => el('li', { cls: 'link', tabindex: '0',
+        onClick: () => go('#/cases/' + c._id), onKeydown: e => { if (e.key === 'Enter') go('#/cases/' + c._id); } },
+        el('b', {}, c.title), ' ', stLabel(CASE_ST, c.status))))
+        : el('p', { cls: 'sub' }, 'Cảnh báo chưa nằm trong case nào.'),
+      el('h3', {}, 'Lịch sử xử lý'), hist(g(a, 'alert.history') || []),
+      el('h3', {}, 'Sự kiện gốc'),
+      facts([['Loại', [g(te, 'event.category'), g(te, 'event.action'), g(te, 'event.outcome')].filter(Boolean).join(', ')],
+             ['Nguồn log', g(te, 'event.module') || g(te, 'event.dataset')], ['Thông điệp', g(te, 'message')],
+             ['HTTP', g(te, 'http.request.method') ? `${g(te, 'http.request.method')} ${g(te, 'http.response.status_code') || ''}` : null]]),
+      el('details', { cls: 'raw', style: 'margin-top:10px' }, el('summary', {}, 'Toàn bộ dữ liệu (JSON)'),
+        el('pre', {}, JSON.stringify({ rule: a.rule, ml: a.ml, wazuh: a.wazuh, trigger_event: te }, null, 2)))),
+  ];
+}
+
+function caseDrawer(c) {
+  const tasks = c.tasks || [], done = tasks.filter(t => t.done).length;
+  const note = el('textarea', { cls: 'field', placeholder: 'Ghi chú / kết luận (bắt buộc khi đóng case hoặc báo nhầm)' });
+  const who = el('input', { cls: 'field', type: 'text', value: c.assignee || '', placeholder: 'tài khoản xử lý', 'aria-label': 'Giao cho', style: 'width:180px' });
+  const upd = (b, body, msg) => run(b, () => api('/api/v1/cases/' + encodeURIComponent(c._id), { method: 'PATCH', body }), msg)
+    .then(r => { if (r) { note.value = ''; delete note.dataset.dirty; delete who.dataset.dirty; refreshNow(); } });
+  const st = (b, s) => upd(b, { status: s, note: note.value }, `Đã chuyển case sang “${CASE_ST[s][0]}”.`);
+  const late = c.status === 'open' && c.sla_due && new Date(c.sla_due).getTime() < Date.now();
+  let phase = null;
+  const checklist = [];
+  tasks.forEach((t, i) => {
+    if (t.phase !== phase) { phase = t.phase; checklist.push(el('div', { cls: 'phase' }, phase)); }
+    const cb = el('input', { type: 'checkbox' }); cb.checked = !!t.done;
+    cb.addEventListener('change', () => upd(cb, { task_index: i, task_done: cb.checked }, cb.checked ? 'Đã đánh dấu hoàn thành.' : 'Đã bỏ đánh dấu.'));
+    checklist.push(el('label', { cls: 'task' + (t.done ? ' done' : '') }, cb, el('span', {}, t.title),
+      t.approval ? el('span', { cls: 'appr' }, 'cần ' + t.approval + ' duyệt') : null,
+      t.done ? el('span', { cls: 'sub' }, `${t.done_by}, ${fmt(t.done_at)}`) : null));
+  });
+  return [
+    el('header', {}, el('span', { cls: 'prio ' + (c.priority || '') }, c.priority || ''), sev(c.severity), stLabel(CASE_ST, c.status), closeX()),
+    el('div', { cls: 'body' },
+      el('h2', { id: 'drawer-title', tabindex: '-1' }, c.title),
+      facts([['Playbook', c.playbook ? `${c.playbook.id} ${c.playbook.name}` : null], ['Thực thể', el('span', { cls: 'mono' }, c.entity)],
+             ['Máy', c.host], ['Mở lúc', fmt(c.created_at)],
+             ['Hạn triage', c.sla_due ? el('span', { cls: late ? 'late' : '' }, fmt(c.sla_due) + (late ? ', quá hạn' : '')) : null],
+             ['Người xử lý', c.assignee || 'chưa giao'], ['Số alert', c.alert_count]]),
+      el('div', { cls: 'btns', style: 'margin-top:10px' }, el('a', { cls: 'btn', href: '#/investigate?q=' + encodeURIComponent(entityQuery(c.entity)) }, 'Điều tra ' + c.entity)),
+      el('h3', {}, `Checklist xử lý (${done}/${tasks.length})`),
+      el('div', { cls: 'progress' }, el('i', { style: `width:${tasks.length ? 100 * done / tasks.length : 0}%` })),
+      checklist,
+      el('h3', {}, 'Xử lý'), note,
+      el('div', { cls: 'inline-form', style: 'margin-top:6px' }, who, button('Giao', b => upd(b, { assignee: who.value.trim(), note: note.value }, 'Đã giao case.')),
+        button('Lưu ghi chú', b => note.value.trim() ? upd(b, { note: note.value }, 'Đã lưu ghi chú.') : note.focus())),
+      el('div', { cls: 'btns', style: 'margin-top:6px' },
+        button('Đang xử lý', b => st(b, 'in_progress')), button('Đã ngăn chặn', b => st(b, 'contained')),
+        button('Đóng case', b => note.value.trim() ? st(b, 'closed') : (toast('Ghi kết luận vào ô ghi chú trước khi đóng case.', true), note.focus()), 'primary'),
+        button('Báo nhầm', b => note.value.trim() ? st(b, 'false_positive') : (toast('Ghi lý do báo nhầm vào ô ghi chú.', true), note.focus()))),
+      el('h3', {}, 'Cảnh báo trong case'),
+      (c.alerts || []).length ? el('ul', { cls: 'items' }, c.alerts.map(a => el('li', { cls: 'link', tabindex: '0',
+        onClick: () => go('#/alerts/' + a._id), onKeydown: e => { if (e.key === 'Enter') go('#/alerts/' + a._id); } },
+        sev(a.severity), ' ', el('b', {}, a.rule.name || a.rule.id), ' ', stLabel(ALERT_ST, a.status), el('div', { cls: 'sub' }, fmt(a['@timestamp'])))))
+        : el('p', { cls: 'sub' }, 'Không còn dữ liệu cảnh báo.'),
+      el('h3', {}, 'Lịch sử'), hist((c.notes || []).slice().reverse())),
+  ];
+}
+
+// ============================================================================ vẽ trang + làm mới
+// force: bộ lọc vừa đổi -> tải lại danh sách. Chỉ đổi alert / case đang mở (cùng trang) thì không tải lại danh sách.
+let GEN = 0;          // số thứ tự lần vẽ: lần vẽ cũ (người dùng đã chuyển trang trong lúc chờ API) dừng lại
+async function render(force = false) {
+  const gen = ++GEN, r = route(), v = VIEWS[r.view];
+  const sameView = CURRENT === r.view && listState[r.view] != null;
+  for (const a of document.querySelectorAll('#nav a')) {
+    if (a.dataset.view === r.view) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  }
+  $('#title').textContent = v.title;
+  document.title = v.title + ' – SIEM/XDR';
+  if (!sameView || force || !v.list) $('#tools').replaceChildren(...[].concat(v.tools ? v.tools() : []));
+  try {
+    if (v.list) { showList(); if (CURRENT !== r.view) { $('#content').replaceChildren(); listState[r.view] = null; } }
+    CURRENT = r.view;
+    if (!v.list || force || !sameView) await v.load();
+    if (gen !== GEN) return;
+    if ((r.view === 'alerts' || r.view === 'cases') && r.id) await openDrawer(r.view === 'alerts' ? 'alert' : 'case', r.id);
+    else if (drawer.kind) closeDrawer();
+    syncOk();
+  } catch (e) {
+    if (gen !== GEN) return;
+    if (e.code === 404 && r.id) { toast(sentence(e.message), true); go('#/' + r.view); return; }
+    syncFail(e);
+    if (e.code !== 401 && v.list) $('#content').prepend(el('div', { cls: 'notice', role: 'alert' }, 'Không tải được dữ liệu: ' + sentence(e.message) + ' Đang thử lại.'));
+  }
+}
+let CURRENT = null;
+async function refreshNow(auto = false) {
+  try {
+    await loadStats(auto);
+    const r = route(), v = VIEWS[r.view];
+    if (v.list) await v.load(auto);
+    if (drawer.kind && !(auto && drawerBusy())) await openDrawer(drawer.kind, drawer.id, true);
+    syncOk();
+  } catch (e) { syncFail(e); }
+}
+// làm mới tự động 10 giây/lần (không tính là thao tác -> quên màn hình vẫn hết phiên); ẩn tab thì nghỉ
+setInterval(() => { if (ME && !document.hidden) refreshNow(true); }, 10000);
+document.addEventListener('visibilitychange', () => { if (ME && !document.hidden) refreshNow(true); });
+window.addEventListener('hashchange', () => render());
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && drawer.kind) { go('#/' + route().view); return; }
+  if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
+    const s = $('#tools input[type=search]'); if (s) { e.preventDefault(); s.focus(); }
+  }
+});
+
+// ============================================================================ khởi động
+function showMe() {
+  $('#me').replaceChildren(el('b', {}, ME.username), el('span', { cls: 'role' }, { analyst: 'Analyst', lead: 'Trưởng nhóm IR', admin: 'Quản trị' }[ME.role] || ME.role),
+    el('div', { cls: 'links' },
+      el('button', { type: 'button', cls: 'linkbtn', onClick: () => location.assign('/login?change=1&next=' + encodeURIComponent('/' + location.hash)) }, 'Đổi mật khẩu'),
+      el('button', { type: 'button', cls: 'linkbtn', onClick: async () => {
+        LEAVING = true; ME = null;                     // dừng tự làm mới
+        try { await api('/api/v1/auth/logout', { method: 'POST' }); } catch (e) {}
+        location.replace('/login?reason=logged_out'); } }, 'Đăng xuất')),
+    el('div', { cls: 'idle' }, `Tự đăng xuất sau ${ME.idle_minutes} phút không thao tác`));
+}
+for (const f of document.querySelectorAll('.frame iframe')) hookFrame(f);
 (async () => {
-  try { await start(await api('/api/v1/auth/me')); } catch (e) { if (!ME) toLogin(''); }
+  try { ME = await api('/api/v1/auth/me'); } catch (e) { if (e.code !== 401) toLogin(''); return; }
+  if (ME.must_change) { toLogin('', true); return; }
+  buildNav(); showMe();
+  loadStats().catch(syncFail);
+  render();
 })();
-setInterval(() => { if (ME && !document.querySelector('details[open]')) refresh(true); }, 5000);
 </script>
 </body>
 </html>

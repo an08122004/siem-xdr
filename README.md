@@ -29,7 +29,7 @@ và danh mục tài sản `BTL/asset.txt`. Toàn bộ backend đóng gói bằng
 | Agent đa nền tảng (Windows/Linux) | **Wazuh agent 4.14.7** (bộ cài chính thức) + script phản ứng `siem-xdr` | `wazuh/agent/`, `demo/web/` |
 | Trạm thu của agent | **Wazuh manager 4.14.7** (chỉ manager, không indexer/dashboard) | `wazuh/manager/` |
 | Chuyển dữ liệu Wazuh vào Kafka | **Vector** 0.58, end-to-end acknowledgement | `vector/wazuh.yaml` |
-| Manager API + SOC console | FastAPI | `server/siem/manager/` |
+| Manager API + giao diện chung (SOC console + Grafana nhúng) | FastAPI | `server/siem/manager/` |
 | Syslog collector (UDP/TCP 514) | **Vector** 0.58 (Rust), hàng đợi trên đĩa | `vector/vector.yaml` (bản Python cũ `server/siem/collector/` chỉ giữ để đối chiếu) |
 | Message bus | Kafka 7.7 (Confluent) chế độ **KRaft**, không dùng ZooKeeper | `docker-compose.yml` |
 | Chuẩn hóa log (ECS rút gọn) + làm giàu | Python | `server/siem/pipeline/` |
@@ -39,7 +39,7 @@ và danh mục tài sản `BTL/asset.txt`. Toàn bộ backend đóng gói bằng
 | AI hỗ trợ viết rule (chỉ đề xuất) | Ollama (`qwen2.5-coder:7b`) + kiểm định tự động + duyệt trên console | `server/siem/ai/`, `tools/fetch_datasets.py`, `tools/convert_datasets.py` |
 | Bảo mật nội bộ | TLS (CA nội bộ), RBAC Elasticsearch + Wazuh API, Docker secrets + keystore | `security/setup.sh`, `tools/init_secrets.py`, `wazuh/manager/entrypoint/` |
 | Lưu trữ | Elasticsearch 8 (xpack security bật) | |
-| Trực quan hóa | Grafana 11 (dashboard được provision sẵn) | `grafana/` |
+| Trực quan hóa | Grafana 11 (2 dashboard provision sẵn, nhúng trong console, cùng tài khoản) | `grafana/`, `tools/gen_dashboard.py` |
 
 ## 1. Agent: Wazuh agent 4.14.7 (`wazuh/`)
 
@@ -144,14 +144,28 @@ rồi `docker compose up -d --force-recreate es-certs es-setup` để sinh chứ
 
 **Đăng nhập lần đầu**: mở https://localhost:8000, tài khoản `admin`, mật khẩu tạm trong `secrets/console_admin_password`.
 Trang đăng nhập bắt đặt mật khẩu mới ngay, sau đó vào tab *Tài khoản* để tạo tài khoản riêng cho từng người (xem mục 7).
-**Một tài khoản dùng cho cả console và Grafana**: Grafana nằm sau manager ở https://localhost:8000/grafana/ và dùng chung
-phiên đăng nhập (mở Grafana khi đã đăng nhập console thì vào thẳng, không hỏi lại mật khẩu).
+**Một hệ thống chung**: https://localhost:8000 là nơi làm việc duy nhất. SOC console là khung ứng dụng, dashboard Grafana
+được nhúng ngay bên trong (cùng tài khoản, cùng phiên, cùng giao diện tối), không cần mở Grafana riêng:
+
+| Mục (menu trái) | Nội dung |
+|---|---|
+| Tổng quan | Dashboard Grafana *Tổng quan SOC* nhúng trong console; chọn 1 giờ / 24 giờ / 7 ngày / 30 ngày ngay trên thanh công cụ |
+| Cảnh báo | Lọc theo trạng thái, mức độ, thời gian, tìm IP / máy / rule (phím `/`). Bấm dòng mở ngăn chi tiết: thực thể, MITRE, xử lý (xác nhận / đóng / báo nhầm kèm ghi chú, có lịch sử), phản ứng (chặn IP, kill PID, cô lập máy; bấm 2 lần để xác nhận), SOAR đã làm, case liên quan, sự kiện gốc |
+| Case | Checklist theo playbook, giao việc, đổi trạng thái (đóng phải có kết luận), cảnh báo trong case bấm được |
+| Điều tra | Dashboard Grafana *Điều tra thực thể* lọc theo IP / máy / tài khoản / truy vấn Lucene; gợi ý sẵn thực thể từ cảnh báo đang mở. Nút "Điều tra ..." trên cảnh báo, case, agent mở thẳng trang này |
+| Lệnh phản ứng, Agent, Đề xuất AI, Tài khoản | Như trước, nhập liệu bằng form ngay tại chỗ (không còn hộp `prompt`) |
+
+Liên kết hai chiều: trong bảng *Alert mới nhất* / *Case đang mở* của Grafana, bấm tên rule hoặc tiêu đề case là console mở
+chi tiết tại chỗ (`/go/alert/<id>`). Mọi trang có địa chỉ riêng (`/#/alerts/<id>`, `/#/cases/<id>`, `/#/investigate?q=...`) để
+gửi cho đồng đội; chưa đăng nhập thì sau khi đăng nhập quay về đúng trang đó. Console tự làm mới 10 giây/lần nhưng chỉ vẽ lại
+khi dữ liệu đổi, giữ nguyên vị trí cuộn và ngăn chi tiết đang mở, không làm mới khi đang gõ. Grafana đầy đủ (sửa dashboard)
+vẫn mở được ở https://localhost:8000/grafana/.
 Phần AI (`--profile ai`, xem mục 5) và máy web demo (`--profile demo`, xem bên dưới) nằm trong profile riêng, không chạy mặc định.
 
 | URL | Dùng để | Đăng nhập |
 |---|---|---|
-| https://localhost:8000 | SOC console: alert, agent, lệnh phản ứng, case, đề xuất AI, tài khoản | tài khoản riêng từng người (lần đầu: `admin` / `secrets/console_admin_password`) |
-| https://localhost:8000/grafana/ | Grafana, dashboard *SIEM/XDR — Tổng quan SOC*: tổng quan, phát hiện, telemetry, **phiên đăng nhập**, phản ứng | **cùng tài khoản và phiên với console** |
+| https://localhost:8000 | Hệ thống chung: dashboard, cảnh báo, case, điều tra, lệnh phản ứng, agent, đề xuất AI, tài khoản | tài khoản riêng từng người (lần đầu: `admin` / `secrets/console_admin_password`) |
+| https://localhost:8000/grafana/ | Grafana đầy đủ: *Tổng quan SOC* (tổng quan, phát hiện, telemetry, **phiên đăng nhập**, phản ứng, case) và *Điều tra thực thể* | **cùng tài khoản và phiên với console** |
 | https://localhost:8000/docs | Swagger của Manager API | |
 | http://127.0.0.1:8088 | Kafka UI (chỉ từ máy chạy docker) | |
 | https://127.0.0.1:9200 | Elasticsearch (chỉ từ máy chạy docker) | `analyst` / `secrets/analyst_es_password` (chỉ đọc) |
@@ -177,6 +191,8 @@ Trên Windows, lệnh `curl` (Schannel) cần thêm `--ssl-no-revoke --cacert ca
 http://localhost:8081. Truy cập trang này sẽ sinh log thật đi qua toàn bộ pipeline.
 Trang `/cgi-bin/ping.cgi` **cố ý có lỗ hổng command injection** để kiểm tra rule LNX-002 và lệnh kill/chặn IP.
 Tạo file trong `/usr/local/apache2/htdocs` để thử FIM. Chỉ chạy máy này trong lab cô lập.
+Container chạy với `init: true` (tini là PID 1): nếu để httpd làm PID 1, mọi tiến trình mồ côi (vd shell ngắn hạn của lượt quét
+SCA / rootcheck) bị gán cho httpd và trông như "web server sinh shell" — LNX-002 báo nhầm, SOAR còn tự kill (đã gặp 3/10/2026).
 
 **Firewall F001**: cấu hình remote syslog trỏ về `<IP máy docker>:514`, **ưu tiên TCP** nếu thiết bị hỗ trợ (xem bảng đánh giá bên dưới).
 Hệ thống parse được iptables/UFW, pfSense/OPNsense filterlog và Suricata eve (JSON qua syslog).
@@ -280,6 +296,10 @@ agent, lệnh còn hạn, hoặc lệnh thành công trong 10 phút gần đây.
 bản ghi chặn cũ không có hạn không được tin (lỗi E2E 30/9: SOAR bỏ qua kẻ tấn công vì tưởng IP đã bị chặn). Chặn lại cũng an toàn,
 vì script kiểm tra luật trước khi thêm.
 Đặt `SOAR_AUTO_RESPONSE=false` nếu chỉ muốn thông báo và tạo case.
+SOAR chỉ **tự** kill theo PID; kill theo tên (giết mọi tiến trình cùng tên, vd `httpd` là sập web) chỉ làm thủ công trên
+console. Hết hạn chặn thì SOAR tạo lệnh gỡ; chỉ khi lệnh gỡ báo thành công mới coi là đã gỡ, chưa được thì 15 phút sau gửi lại.
+Lệnh thủ công được kiểm tra trước khi tạo: IP hợp lệ, không phải loopback / multicast / nằm trong `SOAR_WHITELIST`, PID > 1,
+agent tồn tại. Kill một tiến trình đã tự kết thúc được tính là thành công (mục tiêu đã đạt).
 Lệnh (của playbook hoặc analyst tạo trên console) được SOAR gửi xuống agent qua Wazuh API mỗi 2 giây,
 kết quả thật lấy từ log agent gửi về (xem mục 1). Cảnh báo `WZH-*` từ ruleset Wazuh (FIM, rootcheck...) được thông báo và mở case PB-08.
 
@@ -430,14 +450,22 @@ Các biến cấu hình `AI_*` nằm trong `.env.example`.
 
 ```bash
 cd server && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt pytest httpx
-.venv/Scripts/python -m pytest -q      # 82 test: parser, rule, ML, SOAR, case playbook, API + đăng nhập, Grafana proxy, AI, Wazuh
+.venv/Scripts/python -m pytest -q      # 90 test: parser, rule, ML, SOAR, case playbook, API + đăng nhập, Grafana proxy, AI, Wazuh
 cd .. && docker run --rm -v ./vector:/etc/vector:ro timberio/vector:0.58.0-alpine test /etc/vector/wazuh.yaml /etc/vector/wazuh-tests.yaml
 ```
 **Kiểm thử end-to-end trên stack đang chạy** (cần `--profile demo`): `python tools/e2e_test.py`. Script không dùng tài
 khoản `admin` thật mà tự tạo quản trị viên tạm `e2e-admin`. Nó tấn công thật vào máy demo và kiểm tra cả chuỗi: SQLi → WEB-001 →
 chặn IP qua Wazuh → gỡ chặn; command injection → LNX-002 → kill cả cây tiến trình; webshell → FIM → case PB-08; phân quyền /
 phiên console; Grafana sau manager (cổng 3000 đóng, giả header vô tác dụng, Viewer không sửa được dashboard, Sign out trong
-Grafana thoát luôn phiên console). Mọi thứ nó tạo ra đều được dọn sau khi chạy. Lần chạy 30/9/2026: 34/34 đạt, mất khoảng 70 giây.
+Grafana thoát luôn phiên console) và hồi quy các lỗi đã sửa (10 request trong cùng giây phải thành đủ 10 event; PID 1 của
+demo-web không phải httpd). Mọi thứ nó tạo ra đều được dọn sau khi chạy. Lần chạy 3/10/2026: 37/37 đạt, khoảng 75 giây.
+
+**Kiểm thử giao diện bằng trình duyệt thật** (Microsoft Edge có sẵn trên Windows, không tải thêm trình duyệt):
+`pip install playwright` rồi `python tools/ui_test.py [thư-mục-ảnh]`. Script tự tạo quản trị viên tạm `ui-admin`, đăng nhập qua
+liên kết sâu, đi qua mọi trang, mở chi tiết cảnh báo / case, bấm liên kết trong dashboard Grafana nhúng, thử form chặn IP với IP
+sai, kiểm tra màn hình điện thoại 390px không tràn ngang, đăng xuất, và báo mọi lỗi JavaScript; ảnh chụp từng trang để soát
+giao diện. Lần chạy 3/10/2026: 21/21 đạt. Lần chạy đầu tìm ra 4 lỗi giao diện, đã sửa: lỗi cú pháp JavaScript, ngăn chi tiết mở
+lại khi chuyển trang nhanh, đăng xuất báo nhầm "phiên hết hạn", biểu đồ IP mất nhãn khi chỉ có 1 IP.
 Lần chạy đầu tìm ra 2 lỗi, đã sửa: SOAR tin bản ghi chặn cũ, và SOAR thiếu quyền refresh index khi đánh dấu lệnh chặn đã gỡ.
 
 Sinh lại dashboard Grafana: `python tools/gen_dashboard.py` (Grafana tự nạp lại file sau vài giây).
@@ -459,6 +487,8 @@ IP nguồn, máy, hình thức) và đăng nhập form web (POST tới đường
 | **Bí mật** | `tools/init_secrets.py` sinh ngẫu nhiên vào `secrets/` (đã gitignore). Mỗi service chỉ được mount **đúng** secret nó cần qua Docker secrets (`/run/secrets/...`), không có bí mật trong `.env`, biến môi trường hay compose. Mật khẩu `elastic` được Elasticsearch ghi vào **keystore** (`bootstrap.password`). |
 | **Khóa riêng** | Khóa CA chỉ root đọc được. Khóa của ES và manager chỉ uid của service tương ứng đọc được. Các container khác chỉ mount thư mục `ca/` (chứng chỉ công khai). |
 | **Mạng** | Elasticsearch, Kafka UI chỉ bind `127.0.0.1`. Kafka và Grafana không publish ra ngoài (Grafana chỉ vào qua manager). |
+| **Nhúng trang** | Mọi trang của manager (kể cả Grafana) gửi `X-Frame-Options: SAMEORIGIN` và `Content-Security-Policy: frame-ancestors 'self'`: console nhúng được dashboard của chính hệ thống, trang web khác không nhúng được để lừa bấm (clickjacking). |
+| **Giữ dữ liệu** | Index event theo ngày `siem-events-*` bị chính sách ILM `siem-events` xóa sau `EVENTS_RETENTION_DAYS` ngày (mặc định 30, tạo trong `security/setup.sh`). Cảnh báo, case, lệnh phản ứng không bị xóa. |
 
 | User Elasticsearch | Role | Quyền |
 |---|---|---|
@@ -477,6 +507,11 @@ tài khoản đều thành event trong `siem-events-*`.
 
 **Agent ở máy khác**: mở cổng 1514, 1515 của máy chạy docker cho dải IP của endpoint, rồi cài agent theo mục 1.
 Truy cập console từ máy khác thì đặt `MANAGER_TLS_IPS=<IP máy docker>` trong `.env` và xóa volume `certs` để sinh lại chứng chỉ.
+
+**Độ bền pipeline**: analyzer và SOAR chỉ xác nhận offset Kafka sau khi đã ghi xong (analyzer: event đã vào Elasticsearch và
+alert đã tới Kafka; SOAR: alert đã xử lý). Trước 3/10/2026 offset tự xác nhận 2 giây/lần trong khi event còn trong bộ đệm, nên
+dừng / tạo lại container đúng lúc đó là mất event. Event Wazuh có `event.id` cố định (id Wazuh + băm nội dung) nên đọc lại không
+thành bản ghi trùng; id Wazuh một mình không dùng được vì mọi event cùng giây của một agent trùng id (đã làm mất ~60% event).
 
 **Giới hạn còn lại**:
 - Kafka chạy plaintext trong mạng docker nội bộ.

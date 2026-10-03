@@ -122,4 +122,13 @@ user siem_soar     soar_es_password     siem_soar     "SIEM SOAR"
 user siem_ai       ai_es_password       siem_ai       "SIEM AI worker (chỉ đọc siem-*, chỉ ghi ai-*)"
 user grafana       grafana_es_password  siem_reader   "Grafana (chỉ đọc)"
 user analyst       analyst_es_password  siem_reader   "SOC analyst (chỉ đọc)"
+
+# Giữ event bao lâu: index theo ngày siem-events-YYYY.MM.DD bị xóa N ngày sau khi tạo (ILM). Template (server/siem/
+# store.py) gắn policy cho index mới; index đã có được gắn ở đây. Alert, case, lệnh phản ứng không bị xóa.
+DAYS=${EVENTS_RETENTION_DAYS:-30}
+case "$DAYS" in ''|*[!0-9]*) echo "[setup] EVENTS_RETENTION_DAYS phải là số ngày"; exit 1 ;; esac
+api PUT "/_ilm/policy/siem-events" "{\"policy\": {\"phases\": {\"hot\": {\"actions\": {}},
+  \"delete\": {\"min_age\": \"${DAYS}d\", \"actions\": {\"delete\": {}}}}}}"
+api PUT "/siem-events-*/_settings?allow_no_indices=true" '{"index.lifecycle.name": "siem-events"}'
+echo "[setup] event giữ ${DAYS} ngày (ILM policy siem-events)"
 echo "[setup] hoàn tất"

@@ -15,6 +15,7 @@ Event thô: {"timestamp", "agent_id", "hostname", "os", "source", "event_type", 
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import uuid
@@ -602,8 +603,14 @@ def _wazuh_ts(ts: Any) -> str | None:
 def parse_wazuh(ev: Doc, doc: Doc) -> None:
     ag = ev.get("agent") if isinstance(ev.get("agent"), dict) else {}
     if ev.get("id"):
-        # id của Wazuh (duy nhất trên manager) -> đọc lại không tạo bản ghi trùng; archives và alerts cùng 1 event
-        doc["event"]["id"] = f"wazuh-{ag.get('id', '000')}-{ev['id']}"
+        # id của Wazuh là <giây>.<vị trí trong alerts.log>, KHÔNG duy nhất: event không sinh cảnh báo không làm vị trí
+        # tăng, nên mọi event của một agent trong cùng giây trùng id (đã gặp: 8 event chung 1 id -> ES chỉ giữ 1).
+        # Thêm băm nội dung (thời điểm tới ms, agent, nguồn, dòng log): đọc lại cùng dòng vẫn ra cùng id (không trùng
+        # bản ghi), dòng trong alerts.json khớp dòng archives.json của cùng event, còn event khác nhau thì khác id.
+        body = ev.get("full_log") or json.dumps(ev.get("syscheck") or ev.get("data") or {}, sort_keys=True, default=str)
+        basis = "\x1f".join(str(x) for x in (ev.get("timestamp"), ag.get("id"), ev.get("location"), body))
+        digest = hashlib.sha1(basis.encode("utf-8", "replace")).hexdigest()[:12]
+        doc["event"]["id"] = f"wazuh-{ag.get('id', '000')}-{ev['id']}-{digest}"
     doc["agent"] = {k: v for k, v in {"id": ag.get("id"), "name": ag.get("name"), "hostname": ag.get("name"),
                                       "ip": ag.get("ip"), "type": "wazuh"}.items() if v}
     put(doc, "host.name", ag.get("name"))

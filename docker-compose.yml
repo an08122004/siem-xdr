@@ -52,6 +52,8 @@ services:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
     user: "0"
     command: ["bash", "/security/setup.sh", "users"]
+    environment:
+      EVENTS_RETENTION_DAYS: ${EVENTS_RETENTION_DAYS:-30}   # index event cũ hơn N ngày bị ILM xóa
     depends_on:
       elasticsearch: {condition: service_healthy}
     volumes:
@@ -163,6 +165,7 @@ services:
       GF_AUTH_SIGNOUT_REDIRECT_URL: /logout           # Sign out trong Grafana -> đăng xuất phiên console
       GF_SECURITY_COOKIE_SECURE: "true"
       GF_SECURITY_COOKIE_SAMESITE: strict
+      GF_SECURITY_ALLOW_EMBEDDING: "true"             # console nhúng dashboard; manager vẫn chỉ cho nhúng cùng origin
       GF_LIVE_MAX_CONNECTIONS: "0"                    # proxy không chuyển WebSocket; dashboard tự làm mới theo chu kỳ
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
@@ -356,6 +359,10 @@ services:
     restart: unless-stopped
     profiles: [demo]
     hostname: demo-web
+    # tini làm PID 1: tiến trình mồ côi (vd shell ngắn hạn của lượt quét SCA / rootcheck) được gán cho tini chứ không
+    # cho httpd. Thiếu dòng này thì httpd là PID 1 và mọi tiến trình mồ côi trông như "web server sinh shell" ->
+    # LNX-002 báo nhầm, SOAR còn tự kill (đã gặp 3/10: 2 alert critical lúc agent chạy quét SCA)
+    init: true
     cap_add: [NET_ADMIN]     # iptables cho block_ip / isolate_host
     secrets: [enrollment_key]
     volumes:

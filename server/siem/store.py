@@ -30,7 +30,8 @@ _TEMPLATES = {
     "siem-events": {
         "index_patterns": ["siem-events-*"],
         "template": {
-            "settings": {"number_of_shards": 1, "number_of_replicas": 0},
+            # policy siem-events (security/setup.sh): xóa index sau EVENTS_RETENTION_DAYS ngày
+            "settings": {"number_of_shards": 1, "number_of_replicas": 0, "index.lifecycle.name": "siem-events"},
             "mappings": {
                 "dynamic_templates": _DYNAMIC_TEMPLATES,
                 "properties": {
@@ -91,6 +92,7 @@ _TEMPLATES = {
                     "updated_at": {"type": "date"},
                     "last_seen": {"type": "date"},
                     "expires_at": {"type": "date"},
+                    "revert_requested_at": {"type": "date"},
                     "sla_due": {"type": "date"},
                     "params": {"type": "object", "enabled": False},
                 },

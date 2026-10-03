@@ -46,12 +46,14 @@ def main() -> None:
     else:
         log.warning("chưa cấu hình WAZUH_API_PASSWORD: lệnh phản ứng chỉ được tạo, KHÔNG gửi xuống agent")
     log.info("SOAR sẵn sàng (auto_response=%s, Wazuh API=%s)", settings.SOAR_AUTO_RESPONSE, settings.WAZUH_API_URL)
-    for alert in bus.consume("siem-soar", [settings.TOPIC_ALERTS]):
+    stream = bus.consume("siem-soar", [settings.TOPIC_ALERTS])
+    for alert in stream:
         if alert is not None:
             try:
                 soar.handle(alert)
             except Exception:  # noqa: BLE001
                 log.exception("xử lý alert lỗi")
+            stream.done()          # xác nhận sau khi xử lý xong (dừng giữa chừng thì lần sau xử lý lại alert này)
         for t in tasks:
             t()
 

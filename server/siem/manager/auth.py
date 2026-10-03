@@ -179,13 +179,24 @@ class Sessions:
     def _key(token: str) -> str:
         return hashlib.sha256(token.encode()).hexdigest()
 
+    @staticmethod
+    def _expired(s: Session, now: float) -> bool:
+        return now - s.last_active > settings.CONSOLE_IDLE_MINUTES * 60 or \
+            now - s.created > settings.CONSOLE_SESSION_HOURS * 3600
+
     def create(self, user: dict[str, Any], ip: str) -> tuple[str, Session]:
         token = secrets.token_urlsafe(32)
         now = time.time()
         s = Session(self._key(token), user["username"], user["role"], ip, now, now, bool(user.get("must_change")))
         with self._lock:
+            # dọn phiên bỏ dở (đóng trình duyệt không đăng xuất) để bộ nhớ không phình theo thời gian
+            for k in [k for k, x in self._d.items() if self._expired(x, now)]:
+                del self._d[k]
             self._d[s.key] = s
         return token, s
+
+    def __len__(self) -> int:
+        return len(self._d)
 
     def get(self, token: str, touch: bool = True) -> Session | None:
         now = time.time()
@@ -193,8 +204,7 @@ class Sessions:
             s = self._d.get(self._key(token))
             if not s:
                 return None
-            if now - s.last_active > settings.CONSOLE_IDLE_MINUTES * 60 or \
-                    now - s.created > settings.CONSOLE_SESSION_HOURS * 3600:
+            if self._expired(s, now):
                 del self._d[s.key]
                 return None
             if touch:
@@ -225,10 +235,17 @@ class Throttle:
         with self._lock:
             return max([self.locked[k] - now for k in keys if self.locked.get(k, 0) > now] or [0.0])
 
+    MAX_KEYS = 10_000      # thử hàng loạt tên đăng nhập ngẫu nhiên không được làm bảng đếm phình mãi
+
     def failure(self, *keys: str) -> bool:
         now = time.time()
         became_locked = False
         with self._lock:
+            if len(self.failures) + len(self.locked) > self.MAX_KEYS:
+                for k in [k for k, ts in self.failures.items() if not ts or now - ts[-1] >= self.WINDOW]:
+                    del self.failures[k]
+                for k in [k for k, until in self.locked.items() if until <= now]:
+                    del self.locked[k]
             for k in keys:
                 self.failures[k] = [t for t in self.failures[k] if now - t < self.WINDOW] + [now]
                 if len(self.failures[k]) >= settings.CONSOLE_MAX_FAILURES:

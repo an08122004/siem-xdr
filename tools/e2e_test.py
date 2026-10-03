@@ -264,7 +264,7 @@ check("grafana", "Sign out trong Grafana → đăng xuất luôn phiên console"
 st, orgs = admin.grafana("/api/user/orgs")
 check("grafana", "quản trị console (e2e-admin) → Admin trong Grafana", st == 200 and orgs[0]["role"] == "Admin")
 st, d = admin.grafana("/api/dashboards/uid/siem-overview")
-check("grafana", "dashboard SIEM/XDR tải được", st == 200 and len(d["dashboard"]["panels"]) == 35,
+check("grafana", "dashboard SIEM/XDR tải được", st == 200 and len(d["dashboard"]["panels"]) == 36,
       f"{len(d['dashboard']['panels'])} panel" if st == 200 else str(st))
 q = {"refId": "A", "datasource": {"type": "elasticsearch", "uid": "siem-events"},
      "query": "event.module:console AND event.category:authentication", "metrics": [{"id": "1", "type": "count"}],
@@ -274,6 +274,27 @@ st, res = admin.grafana("/api/ds/query", {"queries": [q], "from": "now-1h", "to"
 frames = res["results"]["A"].get("frames", []) if st == 200 else []
 n = int(sum(sum(v for v in f["data"]["values"][1] if v) for f in frames if len(f["data"]["values"]) > 1))
 check("grafana", "mục Phiên đăng nhập thấy lượt đăng nhập console vừa rồi", n > 0, f"{n} event trong 1 giờ")
+st, d = admin.grafana("/api/dashboards/uid/siem-investigate")
+check("grafana", "dashboard Điều tra thực thể (biến q) tải được", st == 200 and d["dashboard"]["templating"]["list"][0]["name"] == "q")
+
+# ----------------------------------------------------------------- 6. hồi quy các lỗi đã sửa 3/10
+print("\n6. Hồi quy")
+burst = f"e2e{int(time.time())}"
+for i in range(10):                                   # 10 request trong cùng 1 giây -> cùng id Wazuh
+    web(f"/index.html?{burst}={i}")
+q["query"] = f"event.module:apache AND url.original:*{burst}*"
+n = 0
+for _ in range(30):
+    st, res = admin.grafana("/api/ds/query", {"queries": [q], "from": "now-15m", "to": "now"})
+    frames = res["results"]["A"].get("frames", []) if st == 200 else []
+    n = int(sum(sum(v for v in f["data"]["values"][1] if v) for f in frames if len(f["data"]["values"]) > 1))
+    if n >= 10:
+        break
+    time.sleep(2)
+check("regress", "10 request trong cùng giây -> đủ 10 event trong ES (không ghi đè vì trùng id Wazuh)", n == 10, f"{n}/10")
+pid1 = subprocess.run(["docker", "compose", "exec", "-T", "demo-web", "cat", "/proc/1/comm"], capture_output=True, text=True)
+check("regress", "PID 1 của demo-web không phải httpd (tiến trình mồ côi không bị coi là web server sinh shell)",
+      pid1.stdout.strip() not in ("", "httpd"), pid1.stdout.strip())
 
 # ----------------------------------------------------------------- dọn dẹp
 print("\nDọn dẹp")
@@ -284,7 +305,7 @@ print("   đã xóa tài khoản test e2e-admin, e2e-an (console + Grafana)")
 # ----------------------------------------------------------------- tổng kết
 print(f"\nTỔNG KẾT ({time.time() - t_all:.0f} giây)")
 names = {"console": "Đăng nhập / phân quyền console", "sqli": "SQL injection → chặn IP", "cmdi": "Command injection → kill",
-         "fim": "Webshell → FIM → case", "grafana": "Grafana"}
+         "fim": "Webshell → FIM → case", "grafana": "Grafana", "regress": "Hồi quy lỗi đã sửa"}
 for key, label in names.items():
     rs = [ok for s, _, ok in RESULTS if s == key]
     print(f"   {label:34s} {sum(rs)}/{len(rs)}")

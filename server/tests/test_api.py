@@ -40,6 +40,7 @@ def env(monkeypatch):
     monkeypatch.setattr(settings, "GRAFANA_URL", "")                      # không gán quyền Grafana lúc khởi động
     monkeypatch.setattr(store, "create_action", lambda es, aid, t, p, **kw: actions.setdefault(
         f"a{len(actions)}", {"agent_id": aid, "type": t, "params": p, "status": "pending", **kw}))
+    monkeypatch.setattr(store, "list_agents", lambda es: [{"agent_id": "001", "hostname": "demo-web", "status": "online"}])
     with TestClient(api.app, base_url="https://testserver") as c:     # cookie Secure chỉ gửi qua https
         c.users, c.audit, c.actions, c.clock = users, audit, actions, clock
         yield c
@@ -73,7 +74,7 @@ def test_console_redirects_to_login_page_and_api_needs_login(env):
     r = env.get("/", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/login?next=%2F"          # chưa đăng nhập
     r = env.get("/login")
-    assert r.status_code == 200 and "Đăng nhập" in r.text and r.headers["x-frame-options"] == "DENY"
+    assert r.status_code == 200 and "Đăng nhập" in r.text and r.headers["x-frame-options"] == "SAMEORIGIN"
     assert "localStorage" not in r.text                                                # không lưu gì phía trình duyệt
     assert env.get("/api/v1/auth/policy").json() == {"idle_minutes": 30, "session_hours": 8, "max_failures": 5,
                                                      "lock_minutes": 15, "min_password": 12, "min_distinct": 6}
@@ -84,7 +85,7 @@ def test_console_redirects_to_login_page_and_api_needs_login(env):
     assert r.status_code == 303 and r.headers["location"] == "/login?change=1&next=%2F"   # mật khẩu tạm: đổi trước
     admin_login(env)
     r = env.get("/", follow_redirects=False)
-    assert r.status_code == 200 and "SIEM/XDR Console" in r.text and "X-API-Key" not in r.text
+    assert r.status_code == 200 and "Trung tâm giám sát an ninh" in r.text and "X-API-Key" not in r.text
 
 
 def test_logout_link_used_by_grafana(env):
@@ -132,6 +133,23 @@ def test_csrf_header_required(env):
     body = {"agent_id": "001", "type": "block_ip", "params": {"ip": "1.2.3.4"}}
     assert env.post("/api/v1/actions", json=body).status_code == 403
     assert env.post("/api/v1/actions", json=body, headers=H).status_code == 200
+
+
+def test_abandoned_sessions_and_failure_counters_are_pruned(env, monkeypatch):
+    from siem.manager import auth
+    for _ in range(3):
+        login(env, "admin", ADMIN_TMP)                       # 3 phiên, không đăng xuất
+    assert len(auth.sessions) == 3
+    env.clock.now += 31 * 60                                  # bỏ quên quá thời gian không thao tác
+    login(env, "admin", ADMIN_TMP)
+    assert len(auth.sessions) == 1                            # phiên mới tạo kéo theo dọn phiên hết hạn
+    monkeypatch.setattr(auth.Throttle, "MAX_KEYS", 50)
+    t = auth.Throttle()
+    for i in range(60):
+        t.failure(f"user:rand{i}")
+    env.clock.now += 16 * 60
+    t.failure("user:late")
+    assert len(t.failures) <= 2                               # bản ghi cũ hơn cửa sổ 15 phút đã bị dọn
 
 
 def test_session_idle_timeout_ignores_auto_refresh(env):
@@ -244,6 +262,76 @@ def test_case_workflow(env):
     assert env.patch("/api/v1/cases/c1", json={"status": "bậy"}, headers=H).status_code == 422
     env.post("/api/v1/auth/logout")
     assert env.patch("/api/v1/cases/c1", json={"note": "x"}, headers=H).status_code == 401
+
+
+# ------------------------------------------------------------------ alert, lệnh phản ứng, liên kết từ Grafana
+class DocES:
+    """ES giả: get / update theo id, NotFoundError khi không có, kiểm tra seq_no như ES thật."""
+
+    def __init__(self, docs):
+        self.docs, self.seq = docs, {k: 1 for k in docs}
+
+    def get(self, index, id):
+        from elasticsearch import NotFoundError
+        if id not in self.docs:
+            raise NotFoundError("not found", meta=type("M", (), {"status": 404})(), body={})
+        return {"_source": self.docs[id], "_seq_no": self.seq[id], "_primary_term": 1}
+
+    def update(self, index, id, doc, if_seq_no=None, **_):
+        for k, v in doc.items():
+            self.docs[id][k] = (self.docs[id].get(k) or {}) | v if isinstance(v, dict) else v
+        self.seq[id] += 1
+
+
+def test_alert_filters_detail_and_history(env, monkeypatch):
+    from siem.manager import api
+    searches = []
+
+    def search(es, index, query=None, size=100, sort=None):
+        searches.append((index, query))
+        return [{"_id": "c9", "id": "c9", "title": "SQLi — 1.2.3.4", "status": "open"}] if index == settings.IDX_CASES else []
+    monkeypatch.setattr(store, "search", search)
+    admin_login(env)
+    env.get("/api/v1/alerts?status=open,in_progress&severity=critical&since=24h&q=203.0.113.9")
+    flt = searches[-1][1]["bool"]["filter"]
+    assert {"terms": {"alert.status": ["open", "in_progress"]}} in flt and {"terms": {"severity": ["critical"]}} in flt
+    assert {"range": {"@timestamp": {"gte": "now-24h"}}} in flt
+    assert {"term": {"source.ip": "203.0.113.9"}} in flt[-1]["bool"]["should"]      # tìm IP -> so khớp trường IP
+    api._state["es"] = DocES({"a1": {"rule": {"id": "WEB-001"}, "alert": {"id": "a1", "status": "open"}}})
+    assert env.get("/api/v1/alerts/khong-co").status_code == 404
+    a = env.get("/api/v1/alerts/a1").json()
+    assert a["_id"] == "a1" and a["cases"][0]["id"] == "c9" and a["actions"] == []
+    assert env.patch("/api/v1/alerts/khong-co", json={"status": "closed"}, headers=H).status_code == 404
+    r = env.patch("/api/v1/alerts/a1", json={"status": "false_positive", "note": "quét bảo mật nội bộ"}, headers=H)
+    assert r.status_code == 200
+    hist = api._state["es"].docs["a1"]["alert"]["history"]
+    assert hist[0]["by"] == "admin" and "open -> false_positive" in hist[0]["text"] and "quét bảo mật" in hist[0]["text"]
+
+
+def test_manual_actions_are_validated(env):
+    admin_login(env)
+
+    def post(agent, typ, params):
+        return env.post("/api/v1/actions", json={"agent_id": agent, "type": typ, "params": params}, headers=H)
+    assert post("001", "block_ip", {"ip": "1.2.3.4; rm -rf /"}).status_code == 400
+    assert post("001", "block_ip", {"ip": "127.0.0.1"}).status_code == 400            # loopback + whitelist mặc định
+    assert post("001", "kill_process", {"pid": 1}).status_code == 400
+    assert post("001", "kill_process", {"name": "a b"}).status_code == 400
+    assert post("999", "block_ip", {"ip": "203.0.113.9"}).status_code == 400          # agent không tồn tại
+    assert post("001", "format_disk", {}).status_code == 400
+    assert post("001", "block_ip", {"ip": " 203.0.113.9 "}).json()["params"] == {"ip": "203.0.113.9"}
+    assert post("001", "kill_process", {"pid": "4242"}).json()["params"] == {"pid": 4242}
+
+
+def test_grafana_links_open_console_in_top_window(env):
+    for path in ("/go/alert/a1b2", "/grafana/go/case/c-9"):         # /grafana/go không bị chuyển sang Grafana
+        r = env.get(path)
+        assert r.status_code == 200 and "window.top" in r.text
+    assert '"/#/alerts/a1b2"' in env.get("/go/alert/a1b2").text
+    assert env.get("/go/user/x").status_code == 404
+    assert env.get("/go/alert/%22%3Balert(1)").status_code == 404                    # id lạ không chèn được vào script
+    r = env.get("/login")
+    assert r.headers["x-frame-options"] == "SAMEORIGIN" and r.headers["content-security-policy"] == "frame-ancestors 'self'"
 
 
 # ------------------------------------------------------------------ nhật ký đăng nhập thành event SIEM

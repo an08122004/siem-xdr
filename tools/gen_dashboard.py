@@ -1,14 +1,20 @@
 """Sinh Grafana dashboard JSON cho SIEM/XDR (chạy lại khi muốn chỉnh bố cục):
     python tools/gen_dashboard.py
+
+  siem-overview     Tổng quan SOC (trang Tổng quan của console nhúng dashboard này)
+  siem-investigate  Điều tra một thực thể: mọi panel lọc theo biến q (Lucene) do console truyền vào,
+                    vd source.ip:"203.0.113.9" hoặc host.name:"demo-web" (trang Điều tra của console)
+Bảng alert / case có liên kết "Mở trên SOC console" (/go/alert/<id>, /go/case/<id>, xem manager/api.py).
 """
 import json
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parent.parent / "grafana" / "dashboards" / "siem-overview.json"
+DIR = Path(__file__).resolve().parent.parent / "grafana" / "dashboards"
 
 EV = {"type": "elasticsearch", "uid": "siem-events"}
 AL = {"type": "elasticsearch", "uid": "siem-alerts"}
 AC = {"type": "elasticsearch", "uid": "siem-actions"}
+CS = {"type": "elasticsearch", "uid": "siem-cases"}
 SEV_COLORS = {"low": "blue", "medium": "yellow", "high": "orange", "critical": "red"}
 _id = [0]
 
@@ -59,9 +65,11 @@ def pie(title, ds, query, field, x, y, w=6, h=8, size=10):
 def bars(title, ds, query, field, x, y, w=6, h=8, size=10):
     return {"id": pid(), "type": "bargauge", "title": title, "datasource": ds, "gridPos": {"x": x, "y": y, "w": w, "h": h},
             "targets": [target(ds, query, [terms(field, size)])],
+            # min 0: khi chỉ có 1 giá trị, thanh không có màu (min = max). Grafana ẩn tên khi chỉ có 1 giá trị -> panel
+            # thường chỉ có 1 giá trị (vd IP tấn công trong lab) dùng pie, chú giải luôn có tên
             "options": {"reduceOptions": {"values": True, "calcs": ["lastNotNull"], "fields": ""}, "orientation": "horizontal",
                         "displayMode": "gradient", "showUnfilled": True},
-            "fieldConfig": {"defaults": {"color": {"mode": "continuous-YlRd"}}, "overrides": []}}
+            "fieldConfig": {"defaults": {"color": {"mode": "continuous-YlRd"}, "min": 0}, "overrides": []}}
 
 
 def color_cells(field, colors):
@@ -84,6 +92,17 @@ def table(title, ds, query, fields, x, y, w=24, h=10, time_field="@timestamp", o
 
 def row(title, y):
     return {"id": pid(), "type": "row", "title": title, "collapsed": False, "gridPos": {"x": 0, "y": y, "w": 24, "h": 1}, "panels": []}
+
+
+def console_link(kind, id_field, *columns):
+    """Bấm vào ô của các cột `columns` -> mở alert / case trên SOC console. Mở tab mới khi xem Grafana riêng; khi Grafana
+    nằm trong console, console bắt cú bấm và mở ngay chi tiết tại chỗ. Cột id được ẩn đi."""
+    links = [{"title": "Mở trên SOC console", "url": f'/go/{kind}/${{__data.fields["{id_field}"]}}', "targetBlank": True}]
+    return [*({"matcher": {"id": "byName", "options": c}, "properties": [{"id": "links", "value": links}]} for c in columns),
+            {"matcher": {"id": "byName", "options": id_field}, "properties": [{"id": "custom.hidden", "value": True}]}]
+
+
+CASE_COLORS = {"open": "red", "in_progress": "orange", "contained": "yellow", "closed": "green", "false_positive": "blue"}
 
 
 sev_overrides = [{"matcher": {"id": "byName", "options": k},
@@ -112,10 +131,12 @@ panels = [
     row("Phát hiện (Detection)", 13),
     bars("Top rule kích hoạt", AL, "", "rule.name", 0, 14, w=8, size=15),
     pie("MITRE ATT&CK tactic", AL, "", "rule.mitre.tactic", 8, 14),
-    bars("Top IP tấn công (từ alert)", AL, "", "source.ip", 14, 14, w=5),
+    pie("Top IP tấn công (từ alert)", AL, "", "source.ip", 14, 14, w=5),
     pie("Host bị nhắm tới", AL, "", "host.name", 19, 14, w=5),
-    table("Alert mới nhất", AL, "", ["@timestamp", "severity", "rule.id", "rule.name", "source.ip", "user.name",
-                                     "host.name", "agent.id", "risk_score", "alert.status", "message"], 0, 22),
+    table("Alert mới nhất — bấm tên rule để mở trên console", AL, "",
+          ["@timestamp", "severity", "rule.id", "rule.name", "source.ip", "user.name", "host.name", "agent.id",
+           "risk_score", "alert.status", "message", "alert.id"], 0, 22,
+          overrides=console_link("alert", "alert.id", "rule.id", "rule.name")),
     row("Telemetry", 32),
     timeseries("HTTP status code (Apache)", EV, "event.module:apache", "http.response.status_code", 0, 33, w=8),
     timeseries("Xác thực thất bại theo IP", EV, "event.category:authentication AND event.outcome:failure", "source.ip", 8, 33, w=8),
@@ -142,13 +163,48 @@ panels = [
     row("Phản ứng (XDR / SOAR)", 80),
     table("Lệnh phản ứng gần đây", AC, "", ["created_at", "agent_id", "type", "target", "source", "status", "expires_at", "output"],
           0, 81, h=9, time_field="created_at"),
+    table("Case đang mở — bấm tiêu đề để mở trên console", CS, "status:(open OR in_progress OR contained)",
+          ["created_at", "priority", "severity", "title", "entity", "alert_count", "assignee", "status", "id"],
+          0, 90, h=9, time_field="created_at",
+          overrides=[color_cells("status", CASE_COLORS), *console_link("case", "id", "title")]),
 ]
 
-dash = {
-    "uid": "siem-overview", "title": "SIEM/XDR — Tổng quan SOC", "tags": ["siem", "xdr", "soc"],
-    "timezone": "browser", "schemaVersion": 39, "version": 1, "refresh": "10s",
-    "time": {"from": "now-1h", "to": "now"}, "editable": True, "panels": panels,
-    "templating": {"list": []}, "annotations": {"list": []},
-}
-OUT.write_text(json.dumps(dash, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
-print(f"OK: {OUT} ({len(panels)} panels)")
+
+def dashboard(uid, title, panels, refresh="30s", time_from="now-1h", templating=None):
+    return {"uid": uid, "title": title, "tags": ["siem", "xdr", "soc"], "timezone": "browser", "schemaVersion": 39,
+            "version": 1, "refresh": refresh, "time": {"from": time_from, "to": "now"}, "editable": True,
+            "panels": panels, "templating": {"list": templating or []}, "annotations": {"list": []}}
+
+
+# ------------------------------------------------------------------ Điều tra thực thể
+# Biến q (Lucene) do console đặt khi bấm "Điều tra" trên alert / agent / case: IP -> source.ip hoặc destination.ip,
+# máy -> host.name, tài khoản -> user.name. Để trống (*) là xem toàn bộ.
+Q = "(${q:raw})"
+investigate = [
+    row("Thực thể: ${q}", 0),
+    stat("Event", EV, Q, 0, 1, "blue", w=6),
+    stat("Alert", AL, Q, 6, 1, "purple", w=6),
+    stat("Alert critical / high", AL, f"{Q} AND severity:(critical OR high)", 12, 1, "red", w=6),
+    stat("Đăng nhập thất bại", EV, f"{Q} AND {AUTH} AND event.outcome:failure", 18, 1, "orange", w=6),
+    timeseries("Event theo loại", EV, Q, "event.category", 0, 5),
+    timeseries("Alert theo mức độ", AL, Q, "severity", 12, 5, overrides=sev_overrides),
+    bars("Hành động (event.action)", EV, Q, "event.action", 0, 13, w=6),
+    bars("URL bị truy cập", EV, f"{Q} AND event.category:web", "url.path", 6, 13, w=6),
+    bars("Tiến trình", EV, f"{Q} AND event.category:process", "process.name", 12, 13, w=6),
+    pie("IP liên quan", EV, Q, "source.ip", 18, 13, w=6),
+    table("Alert của thực thể — bấm tên rule để mở trên console", AL, Q,
+          ["@timestamp", "severity", "rule.id", "rule.name", "source.ip", "user.name", "host.name", "alert.status",
+           "alert.id"], 0, 21, h=9, overrides=console_link("alert", "alert.id", "rule.id", "rule.name")),
+    table("Event gần đây", EV, Q, ["@timestamp", "event.category", "event.action", "event.outcome", "source.ip",
+                                   "user.name", "host.name", "process.name", "url.original", "message"], 0, 30, h=12),
+]
+q_var = {"type": "textbox", "name": "q", "label": "Bộ lọc (Lucene)", "query": "*",
+         "current": {"text": "*", "value": "*"}, "options": [{"selected": True, "text": "*", "value": "*"}]}
+
+for uid, title, body, extra in (
+        ("siem-overview", "SIEM/XDR — Tổng quan SOC", panels, {}),
+        ("siem-investigate", "SIEM/XDR — Điều tra thực thể", investigate, {"templating": [q_var], "time_from": "now-24h"})):
+    out = DIR / f"{uid}.json"
+    out.write_text(json.dumps(dashboard(uid, title, body, **extra), ensure_ascii=False, indent=2),
+                   encoding="utf-8", newline="\n")
+    print(f"OK: {out} ({len(body)} panels)")

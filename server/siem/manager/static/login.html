@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect x=%271%27 y=%271%27 width=%2714%27 height=%2714%27 rx=%273%27 fill=%27%23181b1f%27/%3E%3Crect x=%273%27 y=%2710%27 width=%272%27 height=%273%27 fill=%27%234f9dde%27/%3E%3Crect x=%276%27 y=%277%27 width=%272%27 height=%276%27 fill=%27%23e0b93b%27/%3E%3Crect x=%279%27 y=%275%27 width=%272%27 height=%278%27 fill=%27%23e7793a%27/%3E%3Crect x=%2712%27 y=%273%27 width=%272%27 height=%2710%27 fill=%27%23e2474b%27/%3E%3C/svg%3E">
 <meta name="robots" content="noindex">
 <title>Đăng nhập · SIEM/XDR</title>
 <style>
@@ -170,8 +171,11 @@
 const $ = s => document.querySelector(s);
 const params = new URLSearchParams(location.search);
 // chỉ cho chuyển tiếp tới đường dẫn nội bộ (chống open redirect: //evil.com, /\evil.com, http://...)
+// Hết phiên khi đang xem dashboard nhúng trong console: trang này được tải trong khung -> thoát ra cả cửa sổ
+if (window.top !== window.self) { try { window.top.location.replace(location.href); } catch (e) {} }
 const safeNext = n => (n && n.startsWith('/') && !n.startsWith('//') && !n.includes('\\')) ? n : '/';
-const NEXT = safeNext(params.get('next'));
+// giữ phần #/... (vd #/alerts/<id> từ liên kết Grafana) khi máy chủ chuyển hướng sang đây vì chưa đăng nhập
+const NEXT = (n => n.includes('#') ? n : n + location.hash)(safeNext(params.get('next')));
 const HDR = { 'Content-Type': 'application/json', 'X-Requested-With': 'siem-console' };
 let POLICY = { idle_minutes: 30, session_hours: 8, max_failures: 5, lock_minutes: 15, min_password: 12, min_distinct: 6 };
 let USER = '', CURRENT = '';

@@ -78,7 +78,8 @@ block_ip|unblock_ip)
 kill_process)
     if printf '%s' "$TARGET" | grep -Eq '^[0-9]+$'; then
         [ "$TARGET" -gt 1 ] || fail "không kill PID $TARGET"
-        [ -d "/proc/$TARGET" ] || fail "không còn tiến trình PID $TARGET"
+        # tiến trình đã tự kết thúc (vd shell chạy rất ngắn) -> mục tiêu "không còn chạy" đã đạt, không phải lỗi
+        [ -d "/proc/$TARGET" ] || { log success "PID $TARGET đã kết thúc trước khi kill, không cần xử lý"; exit 0; }
         NAME=$(cat "/proc/$TARGET/comm" 2>/dev/null)
         case "$NAME" in wazuh-*|systemd|init|sshd) fail "từ chối kill tiến trình hệ thống $NAME" ;; esac
         # kill cả cây tiến trình (vd shell của kẻ tấn công và lệnh nó đang chạy), gom hết trước rồi mới kill

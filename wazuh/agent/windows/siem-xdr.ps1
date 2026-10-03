@@ -75,7 +75,8 @@ try {
         'kill_process' {
             if ($Target -match '^\d+$') {
                 $p = Get-Process -Id ([int]$Target) -ErrorAction SilentlyContinue
-                if (-not $p) { Fail "không còn tiến trình PID $Target" }
+                # đã tự kết thúc -> mục tiêu "không còn chạy" đã đạt, không phải lỗi
+                if (-not $p) { Write-Result 'success' "PID $Target đã kết thúc trước khi kill, không cần xử lý"; exit 0 }
                 if ($Protected -contains $p.ProcessName) { Fail "từ chối kill tiến trình hệ thống $($p.ProcessName)" }
                 $tree = Get-Tree ([int]$Target)
                 $tree | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
