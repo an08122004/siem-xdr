@@ -28,7 +28,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from .. import settings, store
+from .. import rules_catalog, settings, store
 from . import auth, grafana_proxy
 from .auth import ROLES, Session, current_user, require_role
 
@@ -45,12 +45,31 @@ async def lifespan(_app: FastAPI):
     _state["es"] = store.connect()
     auth.setup(_state["es"])
     grafana_setup = asyncio.create_task(grafana_proxy.ensure_folder_permissions()) if settings.GRAFANA_URL else None
+    catalog = asyncio.create_task(catalog_loop()) if settings.RULES_CATALOG_SECONDS > 0 else None
     log.info("manager sẵn sàng")
     yield
-    if grafana_setup:
-        grafana_setup.cancel()
+    for t in (grafana_setup, catalog):
+        if t:
+            t.cancel()
     await grafana_proxy.close()
 
+
+async def catalog_loop() -> None:
+    """Đồng bộ danh mục rule (Grafana "Thư viện rule") định kỳ; lỗi chỉ ghi log, lần sau thử lại."""
+    while True:
+        try:
+            await asyncio.to_thread(rules_catalog.sync, es(), settings.RULES_DIR)
+        except Exception as e:  # noqa: BLE001
+            log.warning("đồng bộ danh mục rule lỗi: %s", e)
+        await asyncio.sleep(settings.RULES_CATALOG_SECONDS)
+
+
+def refresh_catalog() -> None:
+    """Sau khi duyệt / từ chối / gỡ đề xuất: cập nhật danh mục ngay, không chờ chu kỳ."""
+    try:
+        rules_catalog.sync(es(), settings.RULES_DIR)
+    except Exception as e:  # noqa: BLE001 - danh mục chỉ để tra cứu, không được làm hỏng thao tác duyệt
+        log.warning("cập nhật danh mục rule lỗi: %s", e)
 
 
 app = FastAPI(title="SIEM/XDR Manager", version="1.0.0", lifespan=lifespan)
@@ -338,7 +357,8 @@ def login_page() -> FileResponse:
     return FileResponse(STATIC / "login.html")
 
 
-GO_KINDS = {"alert": "alerts", "case": "cases"}
+GO_KINDS = {"alert": "alerts/{}", "case": "cases/{}", "proposal": "ai/{}",
+            "rule": "alerts?set=all&since=30d&q={}"}       # rule -> danh sách cảnh báo của rule đó
 
 
 @app.get("/go/{kind}/{doc_id}", include_in_schema=False)
@@ -346,9 +366,9 @@ GO_KINDS = {"alert": "alerts", "case": "cases"}
 def go(kind: str, doc_id: str) -> HTMLResponse:
     """Liên kết từ bảng Grafana sang chi tiết alert / case trên console. Grafana nằm trong khung (iframe) của console:
     trang này đưa CẢ CỬA SỔ (không phải riêng khung) tới /#/alerts/<id>; mở thẳng (tab mới) thì cũng chuyển như vậy."""
-    if kind not in GO_KINDS or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", doc_id):
+    if kind not in GO_KINDS or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", doc_id):
         raise HTTPException(404, "liên kết không hợp lệ")
-    target = f"/#/{GO_KINDS[kind]}/{doc_id}"
+    target = "/#/" + GO_KINDS[kind].format(doc_id)
     return HTMLResponse(f'<!doctype html><meta charset="utf-8"><title>Đang mở…</title>'
                         f'<script>(window.top === window ? location : window.top.location).replace("{target}")</script>'
                         f'<a href="{target}">Mở trên SOC console</a>')
@@ -367,15 +387,19 @@ class AIDecision(BaseModel):
 
 def _ai(fn, *args, **kw):
     try:
-        return fn(*args, **kw)
+        res = fn(*args, **kw)
     except ai_deploy.DeployError as e:
         raise HTTPException(e.code, str(e))
+    refresh_catalog()
+    return res
 
 
 @app.get("/api/v1/ai/proposals", dependencies=[Depends(current_user)])
 def ai_proposals(status: str | None = None, size: int = 100) -> list[dict[str, Any]]:
     q = {"bool": {"filter": [{"term": {"status": status}}]}} if status else None
-    return store.search(es(), settings.IDX_AI_PROPOSALS, q, size=min(size, 500), sort=[{"created_at": "desc"}])
+    rows = store.search(es(), settings.IDX_AI_PROPOSALS, q, size=min(size, 500), sort=[{"created_at": "desc"}])
+    # nhãn để mở phần "So sánh với rule hiện có" của dashboard Thư viện rule đúng đề xuất này
+    return [r | {"catalog_pick": rules_catalog.pick(r | {"id": r.get("id") or r["_id"]})} for r in rows]
 
 
 @app.post("/api/v1/ai/proposals/{pid}/approve")

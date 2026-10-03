@@ -276,6 +276,27 @@ n = int(sum(sum(v for v in f["data"]["values"][1] if v) for f in frames if len(f
 check("grafana", "mục Phiên đăng nhập thấy lượt đăng nhập console vừa rồi", n > 0, f"{n} event trong 1 giờ")
 st, d = admin.grafana("/api/dashboards/uid/siem-investigate")
 check("grafana", "dashboard Điều tra thực thể (biến q) tải được", st == 200 and d["dashboard"]["templating"]["list"][0]["name"] == "q")
+st, d = admin.grafana("/api/dashboards/uid/siem-rules")
+check("grafana", "dashboard Thư viện rule tải được", st == 200 and len(d["dashboard"]["panels"]) == 15)
+
+
+def catalog_count(query):
+    cq = {"refId": "A", "datasource": {"type": "elasticsearch", "uid": "siem-rules"}, "query": query,
+          "metrics": [{"id": "1", "type": "count"}], "timeField": "@timestamp", "intervalMs": 86400000,
+          "bucketAggs": [{"id": "2", "type": "date_histogram", "field": "@timestamp", "settings": {"interval": "auto"}}]}
+    st, res = admin.grafana("/api/ds/query", {"queries": [cq], "from": "now-20y", "to": "now"})
+    frames = res["results"]["A"].get("frames", []) if st == 200 else []
+    return int(sum(sum(v for v in f["data"]["values"][1] if v) for f in frames if len(f["data"]["values"]) > 1))
+
+
+n_files = sum(1 for f in Path("server/rules").glob("**/*.y*ml") if "exceptions" not in f.parts
+              for line in f.read_text(encoding="utf-8").splitlines() if line.startswith("- id:"))
+n_rules = catalog_count("origin:rule")
+check("grafana", "Thư viện rule liệt kê đủ rule trong server/rules (Grafana đọc qua siem-rules)", n_rules == n_files,
+      f"{n_rules}/{n_files} rule")
+n_prop, n_cmp = catalog_count("origin:ai_proposal"), catalog_count("origin:comparison")
+check("grafana", "đề xuất AI có trong thư viện, kèm cặp so sánh với rule hiện có", n_prop == 0 or n_cmp > 0,
+      f"{n_prop} đề xuất, {n_cmp} cặp so sánh")
 
 # ----------------------------------------------------------------- 6. hồi quy các lỗi đã sửa 3/10
 print("\n6. Hồi quy")

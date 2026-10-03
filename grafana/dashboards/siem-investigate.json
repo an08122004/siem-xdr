@@ -840,7 +840,8 @@
               "host.name": 6,
               "alert.status": 7,
               "alert.id": 8
-            }
+            },
+            "renameByName": {}
           }
         }
       ],
@@ -943,6 +944,7 @@
       },
       "options": {
         "showHeader": true,
+        "cellHeight": "sm",
         "sortBy": [
           {
             "displayName": "@timestamp",
@@ -1021,7 +1023,8 @@
               "process.name": 7,
               "url.original": 8,
               "message": 9
-            }
+            },
+            "renameByName": {}
           }
         }
       ],
@@ -1076,6 +1079,7 @@
       },
       "options": {
         "showHeader": true,
+        "cellHeight": "sm",
         "sortBy": [
           {
             "displayName": "@timestamp",

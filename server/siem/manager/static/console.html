@@ -211,6 +211,7 @@
     <div class="content" id="content"></div>
     <div class="frame" id="frame-overview" hidden><iframe title="Dashboard tổng quan SOC (Grafana)"></iframe></div>
     <div class="frame" id="frame-investigate" hidden><iframe title="Dashboard điều tra thực thể (Grafana)"></iframe></div>
+    <div class="frame" id="frame-rules" hidden><iframe title="Thư viện rule và so sánh với đề xuất AI (Grafana)"></iframe></div>
   </main>
 </div>
 <aside class="drawer" id="drawer" role="dialog" aria-modal="false" aria-labelledby="drawer-title" hidden></aside>
@@ -335,6 +336,8 @@ const NAV = [
   null,
   ['actions', 'Lệnh phản ứng', 'M9 1.5 3 9h4.5L7 14.5 13 7H8.5z'],
   ['agents', 'Agent', 'M2.5 3h11v4h-11z|M2.5 9h11v4h-11z|M5 5h.1|M5 11h.1'],
+  null,
+  ['rules', 'Thư viện rule', 'M3 2.5h8a1.5 1.5 0 0 1 1.5 1.5v9.5H4.5A1.5 1.5 0 0 1 3 12z|M3 12a1.5 1.5 0 0 1 1.5-1.5h8|M6 5.5h4'],
   ['ai', 'Đề xuất AI', 'M8 1.5v3|M8 11.5v3|M1.5 8h3|M11.5 8h3|M8 5.5 9 7l1.5 1L9 9l-1 1.5L7 9 5.5 8 7 7z'],
   ['users', 'Tài khoản', 'M8 2.5a3 3 0 1 0 0 6a3 3 0 1 0 0-6|M2.5 14c.8-2.6 3-4 5.5-4s4.7 1.4 5.5 4'],
 ];
@@ -373,11 +376,12 @@ function syncFail(e) { if (e.code === 401) return; const s = $('#sync'); s.class
 
 // ============================================================================ dashboard Grafana nhúng
 const RANGES = [['now-1h', '1 giờ'], ['now-24h', '24 giờ'], ['now-7d', '7 ngày'], ['now-30d', '30 ngày']];
-function grafanaUrl(uid, from, vars = {}) {
+function grafanaUrl(uid, from, vars = {}, { showVars = false } = {}) {
   const p = new URLSearchParams({ orgId: '1', from, to: 'now', refresh: '30s', theme: 'dark' });
   for (const [k, v] of Object.entries(vars)) p.set('var-' + k, v);
   // kiosk: bỏ thanh điều hướng Grafana; ẩn bộ chọn thời gian / biến của Grafana vì console đã có điều khiển riêng
-  return `/grafana/d/${uid}?${p}&kiosk&_dash.hideTimePicker&_dash.hideVariables&_dash.hideLinks`;
+  // (Thư viện rule giữ lại ô lọc của Grafana: lọc là cách dùng chính của trang đó)
+  return `/grafana/d/${uid}?${p}&kiosk&_dash.hideTimePicker${showVars ? '' : '&_dash.hideVariables'}&_dash.hideLinks`;
 }
 // Grafana cùng origin với console: bắt cú bấm vào liên kết "Mở trên SOC console" trong khung để mở chi tiết ngay tại chỗ
 // (thay vì Grafana tự điều hướng bên trong khung).
@@ -386,10 +390,11 @@ function hookFrame(iframe) {
     let w; try { w = iframe.contentWindow; void w.document; } catch (e) { return; }
     w.addEventListener('click', e => {
       const a = e.target && e.target.closest && e.target.closest('a[href]');
-      const m = a && /\/go\/(alert|case)\/([A-Za-z0-9_-]+)/.exec(a.getAttribute('href') || '');
+      const m = a && /\/go\/(alert|case|proposal|rule)\/([A-Za-z0-9_.-]+)/.exec(a.getAttribute('href') || '');
       if (!m) return;
       e.preventDefault(); e.stopImmediatePropagation();
-      go(`#/${m[1] === 'alert' ? 'alerts' : 'cases'}/${m[2]}`);
+      go({ alert: `#/alerts/${m[2]}`, case: `#/cases/${m[2]}`, proposal: `#/ai/${m[2]}`,
+           rule: `#/alerts?set=all&since=30d&q=${encodeURIComponent(m[2])}` }[m[1]]);
     }, true);
   });
 }
@@ -450,6 +455,12 @@ VIEWS.overview = {
 const ALERT_SETS = { active: ['Đang mở', 'open,acknowledged,in_progress'], done: ['Đã xử lý', 'closed,false_positive'], all: ['Tất cả', ''] };
 VIEWS.alerts = {
   title: 'Cảnh báo', list: true, f: { set: 'active', sev: [], since: '7d', q: '' },
+  fromRoute(r) {         // vd #/alerts?set=all&since=30d&q=WEB-001 (Thư viện rule: "xem cảnh báo của rule")
+    const p = r.params;
+    if (!['q', 'set', 'since'].some(k => p.has(k))) return;
+    Object.assign(this.f, { q: p.get('q') || '', sev: [], set: ALERT_SETS[p.get('set')] ? p.get('set') : this.f.set,
+                            since: ['24h', '7d', '30d', ''].includes(p.get('since')) ? p.get('since') : this.f.since });
+  },
   tools() {
     const f = this.f;
     const q = el('input', { cls: 'field search', type: 'search', placeholder: 'Tìm IP, máy, rule (phím /)', value: f.q, 'aria-label': 'Tìm cảnh báo' });
@@ -538,6 +549,19 @@ function entityQuery(t) {
   if (/[:*()]|\s(AND|OR|NOT)\s/.test(t)) return t;                 // đã là truy vấn Lucene
   return `host.name:${luceneValue(t)} OR user.name:${luceneValue(t)} OR agent.name:${luceneValue(t)}`;
 }
+// ---------------------------------------------------------------- Thư viện rule (dashboard Grafana siem-rules)
+VIEWS.rules = {
+  title: 'Thư viện rule',
+  tools() {
+    return [el('span', { cls: 'sub' }, 'Rule đang chạy, ngoại lệ và đề xuất AI cùng một bảng; chọn đề xuất ở ô “Đề xuất cần so sánh” để đặt cạnh rule liên quan.'),
+      el('a', { cls: 'btn', href: '/grafana/d/siem-rules', target: '_blank', rel: 'noopener' }, 'Mở Grafana đầy đủ (tab mới)')];
+  },
+  async load() {
+    const pick = route().params.get('proposal');
+    showFrame('rules', grafanaUrl('siem-rules', 'now-20y', pick ? { proposal: pick } : {}, { showVars: true }));
+  },
+};
+
 VIEWS.investigate = {
   title: 'Điều tra', range: 'now-24h',
   tools() {
@@ -638,6 +662,9 @@ const AI_ST = { pending: ['Chờ duyệt', 'work'], approved: ['Đã triển kha
                 rejected: ['Đã từ chối', 'done'], rolled_back: ['Đã gỡ', 'done'], no_action: ['Không cần làm gì', 'done'] };
 VIEWS.ai = {
   title: 'Đề xuất AI', list: true, f: { status: 'pending' }, expanded: new Set(),
+  fromRoute(r) {         // #/ai/<id> (liên kết từ Thư viện rule): hiện mọi trạng thái, mở sẵn đề xuất đó
+    if (r.id) { this.f.status = ''; this.expanded.add(r.id); this.scrollTo = r.id; }
+  },
   tools() {
     return [el('div', { cls: 'seg', role: 'group', 'aria-label': 'Trạng thái đề xuất' },
       [['pending', 'Chờ duyệt'], ['approved', 'Đã triển khai'], ['invalid', 'Không đạt'], ['', 'Tất cả']].map(([v, l]) =>
@@ -656,7 +683,7 @@ VIEWS.ai = {
       rows.length ? el('table', { cls: 'list' }, head(['Tạo lúc', 'Đề xuất', 'Kiểm định', 'Duyệt', 'Trạng thái']),
         el('tbody', {}, rows.flatMap(p => {
           const v = p.validation || {}, open = this.expanded.has(p.id);
-          const tr = el('tr', { cls: 'row', 'aria-expanded': String(open) },
+          const tr = el('tr', { cls: 'row', 'aria-expanded': String(open), 'data-id': p.id },
             el('td', {}, when(p.created_at)),
             el('td', {}, el('div', { cls: 'title' }, p.title), el('div', { cls: 'sub' }, KIND[p.kind] || p.kind, p.risk ? `, rủi ro ${p.risk}` : '')),
             el('td', {}, p.validation ? el('span', { cls: v.passed ? 'ok' : 'bad' }, v.passed ? 'Đạt' : 'Không đạt') : '—'),
@@ -668,6 +695,10 @@ VIEWS.ai = {
           return [tr, open ? el('tr', {}, el('td', { colspan: '5' }, aiDetail(p))) : null];
         })))
         : empty('Không có đề xuất nào ở mục này.', 'AI chỉ đề xuất; mọi rule hay ngoại lệ đều phải qua kiểm định tự động và người duyệt.')]);
+    if (this.scrollTo && !auto) {     // mở từ liên kết: đưa đề xuất đó vào giữa màn hình
+      document.querySelector(`#content tr[data-id="${CSS.escape(this.scrollTo)}"]`)?.scrollIntoView({ block: 'center' });
+      this.scrollTo = null;
+    }
   },
 };
 function aiDetail(p) {
@@ -686,6 +717,8 @@ function aiDetail(p) {
     el('ul', { cls: 'items', style: 'margin-top:6px' }, (v.checks || []).map(c => el('li', {},
       el('span', { cls: c.ok ? 'ok' : (c.blocking ? 'bad' : 'warn') }, c.ok ? 'Đạt' : (c.blocking ? 'Chặn' : 'Lưu ý')), ': ', el('b', {}, c.name), ' — ', c.detail))),
     el('h3', {}, 'Nội dung sẽ triển khai'), el('pre', {}, p.yaml || ''),
+    p.catalog_pick ? el('div', { cls: 'btns', style: 'margin-top:8px' }, el('a', { cls: 'btn',
+      href: '#/rules?proposal=' + encodeURIComponent(p.catalog_pick) }, 'So sánh với rule hiện có')) : null,
     el('h3', {}, 'Lịch sử'), el('ul', { cls: 'hist' }, (p.history || []).map(h => el('li', {}, h.text, el('span', { cls: 'sub' }, `${h.by}, ${fmt(h.at)}`)))),
     ['pending', 'invalid', 'approved'].includes(p.status) ? el('div', { style: 'margin-top:12px;display:grid;gap:8px' }, reason, el('div', { cls: 'btns' },
       p.status === 'pending' ? button('Duyệt', b => act(b, 'approve'), 'primary') : null,
@@ -895,7 +928,9 @@ function caseDrawer(c) {
 let GEN = 0;          // số thứ tự lần vẽ: lần vẽ cũ (người dùng đã chuyển trang trong lúc chờ API) dừng lại
 async function render(force = false) {
   const gen = ++GEN, r = route(), v = VIEWS[r.view];
-  const sameView = CURRENT === r.view && listState[r.view] != null;
+  const key = r.view + '?' + r.params.toString();
+  const sameView = CURRENT_KEY === key && listState[r.view] != null;
+  if (!sameView && v.fromRoute) v.fromRoute(r);       // tham số trên địa chỉ (vd liên kết từ Grafana) -> bộ lọc của trang
   for (const a of document.querySelectorAll('#nav a')) {
     if (a.dataset.view === r.view) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   }
@@ -904,7 +939,7 @@ async function render(force = false) {
   if (!sameView || force || !v.list) $('#tools').replaceChildren(...[].concat(v.tools ? v.tools() : []));
   try {
     if (v.list) { showList(); if (CURRENT !== r.view) { $('#content').replaceChildren(); listState[r.view] = null; } }
-    CURRENT = r.view;
+    CURRENT = r.view; CURRENT_KEY = key;
     if (!v.list || force || !sameView) await v.load();
     if (gen !== GEN) return;
     if ((r.view === 'alerts' || r.view === 'cases') && r.id) await openDrawer(r.view === 'alerts' ? 'alert' : 'case', r.id);
@@ -917,7 +952,7 @@ async function render(force = false) {
     if (e.code !== 401 && v.list) $('#content').prepend(el('div', { cls: 'notice', role: 'alert' }, 'Không tải được dữ liệu: ' + sentence(e.message) + ' Đang thử lại.'));
   }
 }
-let CURRENT = null;
+let CURRENT = null, CURRENT_KEY = null;
 async function refreshNow(auto = false) {
   try {
     await loadStats(auto);

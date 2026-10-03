@@ -38,6 +38,7 @@ def env(monkeypatch):
     monkeypatch.setattr(auth, "time", clock)
     monkeypatch.setattr(settings, "CONSOLE_ADMIN_PASSWORD", ADMIN_TMP)
     monkeypatch.setattr(settings, "GRAFANA_URL", "")                      # không gán quyền Grafana lúc khởi động
+    monkeypatch.setattr(settings, "RULES_CATALOG_SECONDS", 0)             # không đồng bộ danh mục rule nền
     monkeypatch.setattr(store, "create_action", lambda es, aid, t, p, **kw: actions.setdefault(
         f"a{len(actions)}", {"agent_id": aid, "type": t, "params": p, "status": "pending", **kw}))
     monkeypatch.setattr(store, "list_agents", lambda es: [{"agent_id": "001", "hostname": "demo-web", "status": "online"}])
@@ -328,6 +329,8 @@ def test_grafana_links_open_console_in_top_window(env):
         r = env.get(path)
         assert r.status_code == 200 and "window.top" in r.text
     assert '"/#/alerts/a1b2"' in env.get("/go/alert/a1b2").text
+    assert '"/#/alerts?set=all&since=30d&q=WEB-001"' in env.get("/go/rule/WEB-001").text   # Thư viện rule -> cảnh báo của rule
+    assert '"/#/ai/6410ad001f6c"' in env.get("/grafana/go/proposal/6410ad001f6c").text
     assert env.get("/go/user/x").status_code == 404
     assert env.get("/go/alert/%22%3Balert(1)").status_code == 404                    # id lạ không chèn được vào script
     r = env.get("/login")

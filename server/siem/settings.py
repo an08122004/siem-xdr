@@ -84,6 +84,9 @@ AGENT_OFFLINE_SECONDS = int(os.getenv("AGENT_OFFLINE_SECONDS", "90"))
 # analyst duyệt trên console; đề xuất ngoại lệ (làm giảm cảnh báo) cần 2 người duyệt.
 IDX_AI_PROPOSALS = "ai-rule-proposals"
 IDX_AI_JOBS = "ai-jobs"
+# Danh mục rule + đề xuất AI cho tra cứu / so sánh (rules_catalog.py, Grafana "Thư viện rule"); trong siem-* -> Grafana đọc được
+IDX_RULES = "siem-rules"
+RULES_CATALOG_SECONDS = int(os.getenv("RULES_CATALOG_SECONDS", "60"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
 AI_MODEL = os.getenv("AI_MODEL", "qwen2.5-coder:7b")
 AI_INTERVAL_MINUTES = int(os.getenv("AI_INTERVAL_MINUTES", "60"))       # chu kỳ tự chạy; 0 = chỉ chạy khi bấm

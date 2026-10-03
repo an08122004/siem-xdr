@@ -153,6 +153,7 @@ Trang đăng nhập bắt đặt mật khẩu mới ngay, sau đó vào tab *Tà
 | Cảnh báo | Lọc theo trạng thái, mức độ, thời gian, tìm IP / máy / rule (phím `/`). Bấm dòng mở ngăn chi tiết: thực thể, MITRE, xử lý (xác nhận / đóng / báo nhầm kèm ghi chú, có lịch sử), phản ứng (chặn IP, kill PID, cô lập máy; bấm 2 lần để xác nhận), SOAR đã làm, case liên quan, sự kiện gốc |
 | Case | Checklist theo playbook, giao việc, đổi trạng thái (đóng phải có kết luận), cảnh báo trong case bấm được |
 | Điều tra | Dashboard Grafana *Điều tra thực thể* lọc theo IP / máy / tài khoản / truy vấn Lucene; gợi ý sẵn thực thể từ cảnh báo đang mở. Nút "Điều tra ..." trên cảnh báo, case, agent mở thẳng trang này |
+| Thư viện rule | Dashboard Grafana *Thư viện rule*: mọi rule đang chạy, ngoại lệ và đề xuất AI trong cùng một bảng, cùng các cột (mã, tên, mức độ, MITRE, tag, trường log, điều kiện tóm tắt, số alert 24 giờ / 7 ngày); lọc theo nguồn, tactic, tag, trường log, từ khóa. Phần *So sánh*: chọn một đề xuất AI để thấy các rule hiện có liên quan, lý do liên quan và **điều kiện hai bên đặt cạnh nhau**. Bấm mã rule xem cảnh báo của rule đó |
 | Lệnh phản ứng, Agent, Đề xuất AI, Tài khoản | Như trước, nhập liệu bằng form ngay tại chỗ (không còn hộp `prompt`) |
 
 Liên kết hai chiều: trong bảng *Alert mới nhất* / *Case đang mở* của Grafana, bấm tên rule hoặc tiêu đề case là console mở
@@ -368,6 +369,16 @@ khi vẫn cùng model và prompt (xem *Kết quả chạy thử*). Ngoại lệ 
 | An toàn | Không khớp event nào của case đã xác nhận thật. Không làm mất mẫu tấn công nào mà rule đang bắt trong bộ mẫu vàng | Báo nhầm ≤ 0,1% trên tập bình thường. Rule web không khớp URL nào trong 23 URL của một website bình thường (`ORDINARY_URLS`: `/`, `/images/`, `/search?q=...`). Replay 7 ngày ≤ 20 alert/ngày. Severity chỉ `low`/`medium` |
 | Dùng chung được | | Rule từ dataset không được chứa đường dẫn hay tên file của ứng dụng mẫu (vd `tienda1`, `anadir.jsp`) |
 
+**So sánh với rule hiện có trước khi duyệt** (mục *Thư viện rule*, hoặc nút *So sánh với rule hiện có* trong chi tiết đề xuất):
+manager dựng danh mục `siem-rules` (`server/siem/rules_catalog.py`, cập nhật mỗi `RULES_CATALOG_SECONDS` giây và ngay sau khi duyệt /
+từ chối / gỡ) gồm rule đang chạy, ngoại lệ, đề xuất AI và các cặp *(đề xuất, rule liên quan)*. Mức liên quan cộng điểm theo: chính
+rule mà ngoại lệ nhắm tới; cùng loại tấn công (từ vựng của AI được ánh xạ sang tag viết tay, vd `path-traversal` ↔ `lfi`,
+`sensitive-path` ↔ `dirbusting` / `scanner`, chỉ tính khi cùng lĩnh vực web / linux / windows); cùng bắt chuỗi mẫu (vd `union`,
+`_vti_bin`); cùng kỹ thuật MITRE, tag, tactic, trường log. Đặc điểm càng nhiều rule cùng có thì càng ít điểm (T1190 có ở gần hết
+rule web nên gần như không tính). Ví dụ thật: đề xuất "dò tài nguyên mặc định" được đặt cạnh WEB-005 (công cụ quét) và WEB-006
+(dò thư mục); đề xuất SSI injection cạnh WEB-004 (command injection, cùng bắt `cmd`) và WEB-008 (webshell, cùng bắt `exec`, `cmd`).
+Danh mục chỉ để đọc; nguồn sự thật vẫn là file YAML và index `ai-rule-proposals`.
+
 **Duyệt và triển khai** (tab *Đề xuất AI* trên console):
 - Rule mới cần 1 analyst duyệt. Ngoại lệ cần 2 analyst **khác nhau**.
 - Ngay trước khi ghi file, manager kiểm tra lại với case thật mới nhất và bộ mẫu vàng. Không đạt thì không triển khai.
@@ -450,7 +461,7 @@ Các biến cấu hình `AI_*` nằm trong `.env.example`.
 
 ```bash
 cd server && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt pytest httpx
-.venv/Scripts/python -m pytest -q      # 90 test: parser, rule, ML, SOAR, case playbook, API + đăng nhập, Grafana proxy, AI, Wazuh
+.venv/Scripts/python -m pytest -q      # 95 test: parser, rule, ML, SOAR, case playbook, API + đăng nhập, Grafana proxy, AI, Wazuh, thư viện rule
 cd .. && docker run --rm -v ./vector:/etc/vector:ro timberio/vector:0.58.0-alpine test /etc/vector/wazuh.yaml /etc/vector/wazuh-tests.yaml
 ```
 **Kiểm thử end-to-end trên stack đang chạy** (cần `--profile demo`): `python tools/e2e_test.py`. Script không dùng tài
@@ -458,13 +469,13 @@ khoản `admin` thật mà tự tạo quản trị viên tạm `e2e-admin`. Nó 
 chặn IP qua Wazuh → gỡ chặn; command injection → LNX-002 → kill cả cây tiến trình; webshell → FIM → case PB-08; phân quyền /
 phiên console; Grafana sau manager (cổng 3000 đóng, giả header vô tác dụng, Viewer không sửa được dashboard, Sign out trong
 Grafana thoát luôn phiên console) và hồi quy các lỗi đã sửa (10 request trong cùng giây phải thành đủ 10 event; PID 1 của
-demo-web không phải httpd). Mọi thứ nó tạo ra đều được dọn sau khi chạy. Lần chạy 3/10/2026: 37/37 đạt, khoảng 75 giây.
+demo-web không phải httpd). Mọi thứ nó tạo ra đều được dọn sau khi chạy. Kèm kiểm tra dashboard *Thư viện rule* đọc đủ rule và cặp so sánh. Lần chạy 3/10/2026: 40/40 đạt, khoảng 75 giây.
 
 **Kiểm thử giao diện bằng trình duyệt thật** (Microsoft Edge có sẵn trên Windows, không tải thêm trình duyệt):
 `pip install playwright` rồi `python tools/ui_test.py [thư-mục-ảnh]`. Script tự tạo quản trị viên tạm `ui-admin`, đăng nhập qua
 liên kết sâu, đi qua mọi trang, mở chi tiết cảnh báo / case, bấm liên kết trong dashboard Grafana nhúng, thử form chặn IP với IP
 sai, kiểm tra màn hình điện thoại 390px không tràn ngang, đăng xuất, và báo mọi lỗi JavaScript; ảnh chụp từng trang để soát
-giao diện. Lần chạy 3/10/2026: 21/21 đạt. Lần chạy đầu tìm ra 4 lỗi giao diện, đã sửa: lỗi cú pháp JavaScript, ngăn chi tiết mở
+giao diện; ở *Thư viện rule* kiểm tra bảng danh mục và luồng "So sánh với rule hiện có" chọn đúng đề xuất. Lần chạy 3/10/2026: 25/25 đạt. Lần chạy đầu tìm ra 4 lỗi giao diện, đã sửa: lỗi cú pháp JavaScript, ngăn chi tiết mở
 lại khi chuyển trang nhanh, đăng xuất báo nhầm "phiên hết hạn", biểu đồ IP mất nhãn khi chỉ có 1 IP.
 Lần chạy đầu tìm ra 2 lỗi, đã sửa: SOAR tin bản ghi chặn cũ, và SOAR thiếu quyền refresh index khi đánh dấu lệnh chặn đã gỡ.
 
@@ -492,7 +503,7 @@ IP nguồn, máy, hình thức) và đăng nhập form web (POST tới đường
 
 | User Elasticsearch | Role | Quyền |
 |---|---|---|
-| `siem_manager` | siem_manager | đọc/ghi `siem-actions`, `siem-alerts`, `siem-cases`, `ai-*`, `console-users`; chỉ đọc `siem-events-*`, `siem-agents` |
+| `siem_manager` | siem_manager | đọc/ghi `siem-actions`, `siem-alerts`, `siem-cases`, `siem-rules`, `ai-*`, `console-users`; chỉ đọc `siem-events-*`, `siem-agents` |
 | `siem_analyzer` | siem_analyzer | chỉ ghi `siem-events-*`, `siem-alerts` (không đọc được action/case) |
 | `siem_soar` | siem_soar | đọc/ghi `siem-alerts`, `siem-actions`, `siem-cases`, `siem-agents` (đồng bộ từ Wazuh); chỉ đọc `siem-events-*` (kết quả lệnh) |
 | `siem_ai` | siem_ai | chỉ đọc `siem-events-*`, `siem-alerts`, `siem-cases`; đọc/ghi `ai-*` |

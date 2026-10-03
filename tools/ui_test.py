@@ -58,6 +58,19 @@ if r.status_code == 200:
 """)
 
 
+def scroll_frame(page, iframe_sel, locator, tries=14):
+    """Grafana chỉ vẽ panel khi cuộn tới: cuộn trong khung dashboard tới khi thấy `locator`."""
+    frame = page.frame_locator(iframe_sel)
+    box = page.locator(iframe_sel).bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    for _ in range(tries):
+        if frame.locator(locator).count():
+            return True
+        page.mouse.wheel(0, 500)
+        page.wait_for_timeout(1200)
+    return frame.locator(locator).count() > 0
+
+
 def shot(page, name):
     page.wait_for_timeout(350)                     # chờ hiệu ứng trượt của ngăn chi tiết
     page.screenshot(path=str(SHOTS / f"{name}.png"))
@@ -86,7 +99,7 @@ def main():
             page.wait_for_url(re.compile(r"#/alerts"))
             page.wait_for_selector("#content table.list, #content .empty")
             check("đăng nhập xong quay về đúng #/alerts", page.url.endswith("#/alerts"), page.url)
-            check("menu có đủ mục (admin thấy Tài khoản)", page.locator("#nav a").count() == 8)
+            check("menu có đủ mục (admin thấy Tài khoản)", page.locator("#nav a").count() == 9)
             shot(page, "01-alerts")
 
             print("2. Cảnh báo: lọc, mở chi tiết")
@@ -159,6 +172,35 @@ def main():
             page.wait_for_timeout(4000)
             check("dashboard Điều tra nhận bộ lọc từ console", 'host.name:"demo-web"' in page.input_value("#tools input[type=search]"))
             shot(page, "06-investigate")
+
+            print("5b. Thư viện rule: tra cứu + so sánh với đề xuất AI")
+            page.goto(f"{BASE}/#/rules")
+            frame = page.frame_locator("#frame-rules iframe")
+            frame.locator("text=Rule đang chạy").first.wait_for(timeout=120000)
+            page.wait_for_timeout(3000)
+            shot(page, "06b-rules")
+            check("Thư viện rule hiện trong console, có ô lọc (Hiển thị, MITRE tactic, Tag, Trường log)",
+                  all(frame.locator(f"text={t}").count() for t in ("Hiển thị", "MITRE tactic", "Trường log")))
+            found = scroll_frame(page, "#frame-rules iframe", "text=WEB-001")
+            check("bảng danh mục liệt kê rule (vd WEB-001)", found)
+            page.goto(f"{BASE}/#/ai")
+            page.wait_for_selector("#content p.sub")
+            page.click("#tools button:text-is('Tất cả')")
+            page.wait_for_timeout(800)
+            if page.locator("#content tr.row").count():
+                pid = page.locator("#content tr.row").first.get_attribute("data-id")
+                page.locator("#content tr.row").first.click()
+                page.click("text=So sánh với rule hiện có")
+                page.wait_for_url(re.compile(r"#/rules\?proposal="))
+                frame = page.frame_locator("#frame-rules iframe")
+                frame.locator("text=Rule đang chạy").first.wait_for(timeout=60000)
+                page.wait_for_timeout(2000)
+                check("từ đề xuất AI bấm “So sánh” -> Grafana chọn đúng đề xuất đó", frame.locator(f"text={pid}").count() > 0, pid)
+                ok = scroll_frame(page, "#frame-rules iframe", "text=Rule hiện có liên quan")
+                check("có bảng rule hiện có liên quan để so sánh", ok)
+                shot(page, "06c-rules-compare")
+            else:
+                check("có đề xuất AI để so sánh", False, "chưa có đề xuất nào")
 
             print("6. Các trang còn lại")
             for view, sel in (("actions", "#content table.list, #content .empty"), ("agents", "#content table.list"),

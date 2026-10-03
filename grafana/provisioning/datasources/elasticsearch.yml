@@ -47,3 +47,12 @@ datasources:
       index: "siem-cases"
       timeField: "created_at"
       maxConcurrentShardRequests: 5
+  # Danh mục rule + ngoại lệ + đề xuất AI + cặp so sánh (server/siem/rules_catalog.py), dashboard "Thư viện rule"
+  - <<: *es
+    name: SIEM Rules
+    uid: siem-rules
+    jsonData:
+      tlsAuthWithCACert: true
+      index: "siem-rules"
+      timeField: "@timestamp"
+      maxConcurrentShardRequests: 5

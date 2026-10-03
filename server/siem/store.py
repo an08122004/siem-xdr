@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 _DYNAMIC_TEMPLATES = [
     {"long_text": {
         "match_pattern": "regex",
-        "match": "^(message|command_line|original|script_block|description|output)$",
+        "match": "^(message|command_line|original|script_block|description|output|condition_text|yaml|reasons_text)$",
         "mapping": {"type": "keyword", "ignore_above": 8191, "fields": {"text": {"type": "text"}}},
     }},
     {"strings": {"match_mapping_type": "string", "mapping": {"type": "keyword", "ignore_above": 2048}}},
@@ -76,6 +76,24 @@ _TEMPLATES = {
                     "proposal": {"type": "object", "enabled": False},
                     "llm": {"type": "object", "enabled": False},
                     "evidence": {"type": "object", "enabled": False},
+                },
+            },
+        },
+    },
+    "siem-rules": {   # danh mục rule + đề xuất AI (rules_catalog.py)
+        "index_patterns": ["siem-rules"],
+        "template": {
+            "settings": {"number_of_shards": 1, "number_of_replicas": 0},
+            "mappings": {
+                "dynamic_templates": _DYNAMIC_TEMPLATES,
+                "properties": {
+                    "@timestamp": {"type": "date"},
+                    "updated_at": {"type": "date"},
+                    "severity_score": {"type": "integer"},
+                    "score": {"type": "float"},
+                    "alerts": {"properties": {"h24": {"type": "long"}, "d7": {"type": "long"}, "last": {"type": "date"}}},
+                    "proposal": {"properties": {"created_at": {"type": "date"}, "recall": {"type": "float"},
+                                                "alerts_per_day": {"type": "float"}, "passed": {"type": "boolean"}}},
                 },
             },
         },
