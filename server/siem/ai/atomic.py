@@ -67,6 +67,18 @@ def resolve(command: str, args: dict[str, Any], platform: str) -> str:
     return command.replace("PathToAtomicsFolder", ATOMIC_ROOT[platform]).replace("$PathToAtomicsFolder", ATOMIC_ROOT[platform])
 
 
+def lab_values(args: dict[str, Any], platform: str) -> list[str]:
+    """Giá trị mặc định của input_arguments (đã thay tham số lồng / PathToAtomicsFolder): tên file, đường dẫn, tên người
+    dùng... do người viết bài thử TỰ ĐẶT (/tmp/evilBinary, /tmp/hello, creds.txt). golden.lab_tokens lọc ra phần là
+    dấu vết lab — chạy thật 11/10: rule AI-154 qua kiểm định với `/tmp/evilBinary`, `/tmp/hello`."""
+    out = set()
+    for v in (args or {}).values():
+        d = str((v or {}).get("default", "")).strip()
+        if d and len(r := resolve(d, args, platform)) <= 300:
+            out.add(r)
+    return sorted(out)
+
+
 def command_lines(command: str, executor: str) -> list[str]:
     out = []
     for line in command.replace("\r", "").split("\n"):
@@ -174,7 +186,8 @@ def atomic_events(index: dict[str, Any]) -> Iterator[dict[str, Any]]:
                 continue
             label = {"dataset": "atomic-red-team", "class": "attack", "technique": tid, "technique_name": meta.get("name"),
                      "tactics": tactics, "test": test.get("name"), "guid": test.get("auto_generated_guid"),
-                     "platform": platform, "executor": executor, "observable": True}
+                     "platform": platform, "executor": executor, "observable": True,
+                     "lab_values": lab_values(test.get("input_arguments") or {}, platform)}
             shell_cmd = shell_command_line(executor, lines)
             procs = [("shell", shell_path, shell_cmd)]
             for line in lines:

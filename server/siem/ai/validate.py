@@ -299,6 +299,37 @@ PROGRAM_FIELDS = {"process.name", "process.executable", "process.parent.name", "
 SHELLS = {"cmd.exe", "powershell.exe", "pwsh.exe", "pwsh", "powershell", "sh", "bash", "dash", "zsh", "ksh", "csh",
           "busybox", "env", "sudo", "su", "python", "python3", "python.exe", "perl", "conhost.exe", "explorer.exe",
           "svchost.exe", "services.exe", "wmiprvse.exe", "systemd", "cron", "crond", "sshd"}
+# chương trình hệ thống / quản trị chạy hằng ngày: vế CHỈ có tên chương trình (không đối số nào) bắt mọi lần chạy hợp lệ.
+# Chạy thật 11/10: `Image|endswith '/usr/bin/su'` (model), `Image|endswith '/nohup'` (vế SigmaHQ) qua kiểm định vì tập
+# bình thường không có su / nohup. Không gồm Office / trình duyệt / eventvwr / fodhelper...: "con của winword.exe" hay
+# "con của eventvwr.exe" là chữ ký thật.
+COMMON_PROGRAMS = SHELLS | {
+    # Windows
+    "net.exe", "net1.exe", "reg.exe", "sc.exe", "schtasks.exe", "wmic.exe", "rundll32.exe", "regsvr32.exe", "msiexec.exe",
+    "certutil.exe", "whoami.exe", "ipconfig.exe", "systeminfo.exe", "tasklist.exe", "taskkill.exe", "findstr.exe",
+    "find.exe", "hostname.exe", "netsh.exe", "netstat.exe", "ping.exe", "nslookup.exe", "route.exe", "arp.exe",
+    "cscript.exe", "wscript.exe", "hh.exe", "control.exe", "mmc.exe", "notepad.exe", "robocopy.exe", "xcopy.exe",
+    "attrib.exe", "icacls.exe", "takeown.exe", "wevtutil.exe", "gpupdate.exe", "gpresult.exe", "dism.exe", "sfc.exe",
+    "curl.exe", "tar.exe", "expand.exe", "where.exe", "timeout.exe", "chcp.com", "more.com", "sort.exe", "quser.exe",
+    "query.exe", "klist.exe", "w32tm.exe", "bcdedit.exe", "vssadmin.exe", "wbadmin.exe", "auditpol.exe", "msinfo32.exe",
+    "taskmgr.exe", "dllhost.exe", "werfault.exe", "consent.exe", "runtimebroker.exe", "taskhostw.exe", "openwith.exe",
+    "smartscreen.exe", "searchprotocolhost.exe", "backgroundtaskhost.exe", "lsass.exe", "winlogon.exe", "userinit.exe",
+    # Linux / Unix
+    "ls", "cat", "cp", "mv", "rm", "mkdir", "rmdir", "touch", "chmod", "chown", "chgrp", "ln", "find", "grep", "egrep",
+    "awk", "gawk", "sed", "cut", "sort", "uniq", "head", "tail", "less", "more", "tee", "xargs", "wc", "tr", "date",
+    "sleep", "tar", "gzip", "gunzip", "zip", "unzip", "xz", "curl", "wget", "ssh", "scp", "sftp", "rsync", "systemctl",
+    "service", "journalctl", "crontab", "at", "nohup", "nice", "timeout", "kill", "pkill", "killall", "ps", "top",
+    "id", "whoami", "who", "w", "last", "uname", "hostname", "hostnamectl", "ip", "ifconfig", "ss", "netstat", "ping",
+    "mount", "umount", "df", "du", "lsblk", "free", "useradd", "usermod", "userdel", "groupadd", "groupmod", "adduser",
+    "deluser", "pw", "passwd", "chpasswd", "chsh", "chage", "visudo", "apt", "apt-get", "dpkg", "yum", "dnf", "rpm",
+    "snap", "pip", "pip3", "git", "make", "gcc", "cc", "ld", "python2", "node", "java", "docker", "kubectl", "openssl",
+    "dd", "stat", "file", "which", "whereis", "getent", "setfacl", "getfacl", "lsmod", "modprobe", "iptables", "ufw",
+    "firewall-cmd", "logger", "echo", "printf", "base64", "mktemp", "readlink", "realpath", "basename", "dirname",
+    "vi", "vim", "nano", "login", "agetty", "dbus-daemon", "systemd-run", "runuser", "flock", "update-alternatives",
+}
+# lớp bọc Invoke-AtomicTest: powershell.exe -Command "& {...}" — có cả trong log ghi thật của Splunk (bench 9/10: 9/26
+# rule qua chứa '& {', '& {Get-ADComputer'); gắn rule với lớp bọc này là gắn với cách chạy bài thử, không phải tấn công
+_LAB_WRAPPER = re.compile(r"&\s*\{")
 
 
 def _weak_list(c: dict[str, Any]) -> list[str]:
@@ -371,6 +402,53 @@ def weak_values(cond: Any) -> list[str]:
 
     walk(cond, False)
     return out
+
+
+def _program_leaf_names(node: Any) -> list[str] | None:
+    """Tên chương trình (chữ thường) mà lá — hoặc OR các lá — định danh chương trình nêu ra; None nếu không phải."""
+    if isinstance(node, dict) and "any" in node:
+        parts = [_program_leaf_names(c) for c in node["any"]]
+        return None if any(p is None for p in parts) else [n for p in parts for n in p]
+    if not (isinstance(node, dict) and node.get("field") in PROGRAM_FIELDS and node.get("op") in ("eq", "in", "endswith")):
+        return None
+    vals = node["value"] if isinstance(node["value"], list) else [node["value"]]
+    return [re.split(r"[\\/]", str(v).strip().lower())[-1] for v in vals]
+
+
+def common_program_only(cond: Any) -> list[str]:
+    """Vế CHỈ định danh chương trình phổ biến (tiến trình và / hoặc cha), không đối số nào: `Image|endswith
+    '/usr/bin/su'`, `ParentImage '\\explorer.exe' + Image '\\cmd.exe'` — khớp mọi lần chạy hợp lệ. Trả về các tên đó.
+    Lá trong một AND có điều kiện khác (đối số, cha lạ) đã bị ràng buộc, không xét."""
+    out: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            node = {"any": node}
+        if not isinstance(node, dict) or "not" in node:
+            return
+        if "all" in node:
+            kids = [c for c in node["all"] if not (isinstance(c, dict) and "not" in c)]
+            if len(kids) == 1:
+                walk(kids[0])
+                return
+            names = [_program_leaf_names(c) for c in kids]
+            if kids and all(n is not None and COMMON_PROGRAMS & set(n) for n in names):
+                out.extend(sorted({x for n in names for x in n if x in COMMON_PROGRAMS}))
+        elif "any" in node:
+            for c in node["any"]:
+                walk(c)
+        elif (names := _program_leaf_names(node)):
+            out.extend(n for n in names if n in COMMON_PROGRAMS)
+
+    walk(cond)
+    return out
+
+
+def lab_wrapper(cond: Any) -> list[str]:
+    """Giá trị dòng lệnh chứa lớp bọc `& {` của Invoke-AtomicTest (powershell.exe -Command "& {...}")."""
+    return [str(v) for c in leaves_of(cond, positive_only=True)
+            if c.get("field") in COMMAND_FIELDS and c.get("op") in _TEXT_OPS
+            for v in (c["value"] if isinstance(c["value"], list) else [c["value"]]) if _LAB_WRAPPER.search(str(v))]
 
 
 def describe(doc: Doc) -> str:
@@ -472,11 +550,14 @@ def validate_new_rule(rule_dict: dict[str, Any], existing: list[Rule], suspiciou
     rx = _regex_problems(clauses)
     checks.append(Check("regex an toàn", not rx, "ok" if not rx else "; ".join(rx)))
     if app_tokens is not None:     # rule học từ dataset: không được dựa vào ứng dụng mẫu / môi trường thử
-        tied = sorted(_app_specific(positive, app_tokens))
+        tied = sorted(_app_specific(positive, app_tokens)) + [f"lớp bọc {v!r}" for v in lab_wrapper(rule_dict["condition"])]
         checks.append(Check("dùng chung được", not tied, "không gắn với ứng dụng mẫu / môi trường thử của dataset"
                             if not tied else f"rule chỉ khớp dữ liệu của dataset (chứa {', '.join(tied[:5])})"))
     if (weak := weak_values(rule_dict["condition"])):
         checks.append(Check("đủ đặc trưng", False, f"đoạn dòng lệnh quá ngắn hoặc chỉ là một từ trơn, không phải chữ ký: {', '.join(weak[:5])}"))
+    if (bare := common_program_only(rule_dict["condition"])):
+        checks.append(Check("đủ đặc trưng", False, "vế chỉ có tên chương trình phổ biến, không đối số nào (khớp mọi lần "
+                            f"chạy hợp lệ): {', '.join(sorted(set(bare))[:5])}"))
 
     test = suspicious_test or suspicious_train
     hit = sum(rule.condition.match(d) for d in test)

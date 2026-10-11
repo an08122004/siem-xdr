@@ -290,6 +290,13 @@ WINDOWS += [
     (S32 + "bcdedit.exe", "bcdedit /enum", S32 + "cmd.exe"),
     (S32 + "icacls.exe", 'icacls "D:\\Share\\Ketoan" /grant "CORP\\ketoan":(OI)(CI)M', S32 + "cmd.exe"),
     (S32 + "cmd.exe", 'cmd.exe /c copy "\\\\fileserver\\templates\\Bao gia.xlsx" "C:\\Users\\lan\\Desktop\\"', "C:\\Windows\\explorer.exe"),
+    # thêm 11/10 (rà soát chạy thật): script quản trị chạy qua -Command "& {...}" như Invoke-AtomicTest, tác vụ định kỳ
+    (PS, 'powershell.exe -NoProfile -Command "& {Get-ADComputer -Filter * | Select-Object Name, OperatingSystem}"', "C:\\Windows\\explorer.exe"),
+    (PS, 'powershell.exe -ExecutionPolicy Bypass -Command "& {. \'C:\\Windows\\CCM\\SystemTemp\\inventory.ps1\'}"', "C:\\Windows\\CCM\\CcmExec.exe"),
+    (S32 + "schtasks.exe", 'schtasks /create /tn "Backup\\Nightly" /tr "C:\\Scripts\\backup.cmd" /sc daily /st 23:00 /ru SYSTEM /f', S32 + "cmd.exe"),
+    (S32 + "sc.exe", "sc config wuauserv start= auto", S32 + "cmd.exe"),
+    (S32 + "reg.exe", 'reg query "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion" /v ProductName', S32 + "cmd.exe"),
+    (S32 + "takeown.exe", 'takeown /f "D:\\Share\\Old" /r /d y', S32 + "cmd.exe"),
 ]
 LINUX += [
     # cài đặt / lập trình viên
@@ -331,6 +338,30 @@ LINUX += [
     ("/usr/bin/journalctl", "journalctl -k --since -1h", "sudo"),
     ("/usr/bin/docker", "docker exec -it web01 /bin/sh", "bash"),
     ("/usr/bin/ssh", "ssh -i /home/minh/.ssh/id_ed25519 deploy@web02", "bash"),
+    # thêm 11/10 — chạy thật 11/10 lọt kiểm định: `Image|endswith '/usr/bin/su'`, `systemctl daemon-reload`, `touch /tmp`,
+    # useradd `--shell /bin/bash --create-home --password` (đúng cách script cấp máy tạo tài khoản), `pw` của FreeBSD
+    ("/usr/bin/systemctl", "systemctl daemon-reload", "sudo"),
+    ("/usr/bin/systemctl", "systemctl enable --now nginx.service", "sudo"),
+    ("/usr/bin/systemctl", "systemctl start app-worker@2.service", "sudo"),
+    ("/bin/sh", "sh -c 'cp deploy/app.service /etc/systemd/system/ && systemctl daemon-reload && systemctl restart app'", "bash"),
+    ("/usr/bin/su", "su", "bash"),
+    ("/usr/bin/su", "su - postgres", "bash"),
+    ("/usr/bin/su", "su -c 'pg_dump appdb > /backup/appdb.sql' postgres", "cron"),
+    ("/usr/bin/nohup", "nohup java -jar /opt/app/app.jar --spring.profiles.active=prod", "bash"),
+    ("/usr/sbin/useradd", "useradd -m -s /bin/bash -G sudo deploy", "sudo"),
+    ("/usr/sbin/useradd", 'useradd --create-home --shell /bin/bash --password "$(openssl passwd -6 "$CI_PASS")" ci-runner', "bash"),
+    ("/usr/sbin/usermod", "usermod -aG docker minh", "sudo"),
+    ("/usr/sbin/usermod", "usermod -s /bin/sh backup", "sudo"),
+    ("/usr/bin/chsh", "chsh -s /bin/zsh minh", "bash"),
+    ("/usr/sbin/pw", "pw useradd deploy -m -s /bin/sh -G wheel", "sudo"),
+    ("/usr/sbin/pw", "pw groupmod wheel -m minh", "sudo"),
+    ("/usr/bin/passwd", "passwd -l olduser", "sudo"),
+    ("/usr/bin/touch", "touch /tmp/.deploy.lock", "bash"),
+    ("/usr/bin/touch", "touch /tmp/healthcheck", "sh"),
+    ("/usr/bin/chown", "chown root:root /etc/cron.d/backup", "sudo"),
+    ("/usr/bin/chown", "chown -R www-data:www-data /var/www/html", "sudo"),
+    ("/usr/bin/find", "find / -xdev -perm -2000 -type f -ls", "bash"),
+    ("/usr/bin/env", "/usr/bin/env bash /opt/scripts/deploy.sh", "bash"),
 ]
 
 

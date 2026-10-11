@@ -48,16 +48,26 @@ class OllamaClient:
         self.think = think
         self._thinking: bool | None = None
 
+    # Ollama khởi động lại giữa chu kỳ (máy ngủ dậy, tạo lại container): 10/10 mất 2 đề xuất vì "Connection refused" /
+    # "Remote end closed connection". Chỉ thử lại lỗi KẾT NỐI; hết thời gian chờ thì không (sinh lại mất thêm vài phút).
+    RETRY_WAIT = (10, 30)
+
     def _post(self, path: str, body: dict[str, Any], timeout: int | None = None) -> dict[str, Any]:
-        req = urllib.request.Request(self.base_url + path, data=json.dumps(body).encode(), method="POST",
-                                     headers={"Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=timeout or self.timeout) as r:
-                return json.loads(r.read() or b"{}")
-        except urllib.error.HTTPError as e:
-            raise LLMError(f"Ollama {path} trả về {e.code}: {e.read()[:300]!r}") from e
-        except (urllib.error.URLError, TimeoutError, OSError) as e:
-            raise LLMError(f"không gọi được Ollama {self.base_url}: {e}") from e
+        for wait in (*self.RETRY_WAIT, None):
+            req = urllib.request.Request(self.base_url + path, data=json.dumps(body).encode(), method="POST",
+                                         headers={"Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=timeout or self.timeout) as r:
+                    return json.loads(r.read() or b"{}")
+            except urllib.error.HTTPError as e:
+                raise LLMError(f"Ollama {path} trả về {e.code}: {e.read()[:300]!r}") from e
+            except (urllib.error.URLError, TimeoutError, OSError) as e:
+                reason = getattr(e, "reason", e)
+                if wait is None or not isinstance(reason, (ConnectionRefusedError, ConnectionResetError)):
+                    raise LLMError(f"không gọi được Ollama {self.base_url}: {e}") from e
+                log.warning("Ollama chưa sẵn sàng (%s) — thử lại sau %d giây", reason, wait)
+                time.sleep(wait)
+        raise AssertionError("unreachable")  # pragma: no cover
 
     def available_models(self) -> list[str]:
         req = urllib.request.Request(self.base_url + "/api/tags")

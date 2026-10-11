@@ -19,7 +19,7 @@ from ..detection.rules import Rule, RuleException, load_rules
 from .dataset import ESDataSource
 from .golden import PublicDatasets
 from .sigma import dump
-from .validate import _app_specific, describe, leaves_of, ordinary_hits, weak_values
+from .validate import _app_specific, common_program_only, describe, lab_wrapper, leaves_of, ordinary_hits, weak_values
 
 log = logging.getLogger("ai.deploy")
 _ID = re.compile(r"^[a-f0-9]{12}$")
@@ -103,10 +103,13 @@ def recheck_dataset_rule(rd: dict[str, Any], rule: Rule, g: PublicDatasets) -> l
         problems.append(f"rule khớp {len(hits)}/{len(normal)} {what}, vd: {describe(hits[0])[:120]}")
     cond = rd.get("condition") or {}
     positive = leaves_of(cond, positive_only=True)          # rule Sigma: cây lồng all / any / not
-    if (tied := _app_specific(positive, set() if endpoint else g.profile.app_tokens())):
-        problems.append(f"rule chỉ khớp dữ liệu của dataset (chứa {', '.join(sorted(tied)[:5])})")
+    tokens = g.lab_tokens(platform) if endpoint else g.profile.app_tokens()
+    if (tied := sorted(_app_specific(positive, tokens)) + [f"lớp bọc {v!r}" for v in lab_wrapper(cond)]):
+        problems.append(f"rule chỉ khớp dữ liệu của dataset (chứa {', '.join(tied[:5])})")
     if (weak := weak_values(cond)):
         problems.append(f"đoạn dòng lệnh quá ngắn hoặc chỉ là một từ trơn, không phải chữ ký: {', '.join(weak[:5])}")
+    if (bare := common_program_only(cond)):
+        problems.append(f"vế chỉ có tên chương trình phổ biến, không đối số nào: {', '.join(sorted(set(bare))[:5])}")
     if any(c.get("field", "").startswith("url.") for c in positive) and (oh := ordinary_hits(rule.condition)):
         problems.append(f"rule khớp URL bình thường: {', '.join(oh[:3])}")
     return problems

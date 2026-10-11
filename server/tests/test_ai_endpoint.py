@@ -251,7 +251,8 @@ def test_endpoint_rule_assembled_from_command_line_patterns(tmp_path, monkeypatc
     assert '"CommandLine"' in first and '"process_creation"' in first and "cs-uri" not in first
     assert '"samples"' in refine and '"procdump"' in refine.split('"kept_detections"')[1].split('"rejected')[0]
     assert "specific to the sample application or test environment" in refine and "not a signature" in refine
-    assert "normal events, e.g. reg " in refine
+    # reg.exe đứng riêng: chặn ngay vì chỉ có tên chương trình phổ biến (trước 11/10: mới biết khi khớp lệnh bình thường)
+    assert "only names a common program (reg.exe)" in refine
 
 
 def test_sigma_reference_prefers_same_technique_and_os_process_creation():

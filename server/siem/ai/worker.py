@@ -28,6 +28,7 @@ from ..detection.rules import Rule, load_rules, regex_risk
 from ..pipeline.normalize import Doc, get
 from .attack_types import TYPES
 from .dataset import ESDataSource, EventGroup
+from .deploy import recheck_dataset_rule
 from .golden import OS_NAME, PublicDatasets
 from . import sigma
 from .llm import LLMError, LLMResult, LLMTooLong, OllamaClient
@@ -35,8 +36,8 @@ from .prompts import (EXCEPTION_SCHEMA, EXCEPTION_SYSTEM, SIGMA_KNOWLEDGE_SYSTEM
                       exception_prompt, rule_to_yaml, sigma_knowledge_prompt, sigma_refine_prompt, sigma_rule_prompt,
                       sigma_view)
 from .sigma import SigmaError
-from .validate import (Check, Validation, _app_specific, build_condition, describe, leaves_of, ordinary_hits,
-                       scope_match, validate_exception, validate_new_rule, weak_values)
+from .validate import (Check, Validation, _app_specific, build_condition, common_program_only, describe, lab_wrapper,
+                       leaves_of, ordinary_hits, scope_match, validate_exception, validate_new_rule, weak_values)
 
 log = logging.getLogger("ai.worker")
 OPEN = ["pending", "approved"]
@@ -44,13 +45,17 @@ MITRE_ID = re.compile(r"^T\d{4}(\.\d{3})?$")
 T = TypeVar("T")
 # tăng khi đổi cách chọn mẫu / ghép mẫu / kiểm định (không đổi prompt) để đề xuất cũ bị loại được thử lại
 # 7: rule mới viết bằng Sigma (7/10); 8: nới / tổng quát hóa vế Sigma (8/10);
-# 9: vế ứng viên SigmaHQ, lượt hỏi kiến thức, tập bình thường lớn hơn (8/10)
-GENERATOR_REVISION = "9"
+# 9: vế ứng viên SigmaHQ, lượt hỏi kiến thức, tập bình thường lớn hơn (8/10);
+# 10: chặn vế chỉ có tên chương trình phổ biến / lớp bọc `& {` / tên file bài thử tự đặt, trần số vế SigmaHQ (11/10)
+GENERATOR_REVISION = "10"
 DOMAIN_ORDER = ("web", "windows", "linux")
 MIN_GAP_EVENTS = 10          # nhóm web / EVTX: số mẫu tối thiểu
 MIN_GAP_TESTS = 4            # nhóm Atomic Red Team: số bài thử tối thiểu (tách đôi train / kiểm tra theo bài thử)
 MAX_UNVERIFIED = 8           # vế của model (lượt đầu + lượt kiến thức) giữ lại dù chưa khớp mẫu train (xem _refine)
 MAX_UNVERIFIED_SIGMAHQ = 10  # vế từ rule SigmaHQ cùng kỹ thuật giữ lại dù chưa khớp mẫu train (endpoint)
+# ... và tối đa bấy nhiêu VẾ: một rule như "Netcat Reverse Shell" khai triển thành hàng chục vế (chạy thật 11/10: AI-153
+# mang 44 vế SigmaHQ chưa kiểm chứng; bench 9/10 trung vị 15 vế / rule) — quá dài cho người duyệt
+MAX_UNVERIFIED_SIGMAHQ_ATOMS = 12
 # mỗi vế phải có ít nhất một điều kiện trên các trường mang chữ ký (theo tiền tố)
 SIGNATURE_FIELDS = {"web": ("url.", "user_agent."),
                     "windows": ("process.command_line", "process.name", "process.executable", "process.parent."),
@@ -165,10 +170,13 @@ class AIWorker:
         rules = load_rules(self.rules_dir)
         ds = self.ds_factory(self.es)
         history = ds.proposals(since="now-30d")
+        gen = generator_id(self.llm.model)
+        summary = {"started_at": now_iso(), "requested_by": requested_by, "model": self.llm.model,
+                   "created": [], "skipped": [], "errors": [], "rechecked": []}
+        self._recheck_stale(history, gen, summary)
         open_targets = {p["target"] for p in history if p.get("status") in OPEN}
         rejected: dict[str, list[str]] = defaultdict(list)
         recent_closed = set()
-        gen = generator_id(self.llm.model)
         for p in history:
             st = p.get("status")
             # người từ chối / gỡ -> chặn 30 ngày; kiểm định tự động loại -> chỉ chặn khi CÙNG model + prompt
@@ -178,8 +186,6 @@ class AIWorker:
                 recent_closed.add(p["target"])
             if st in ("rejected", "rolled_back") and p.get("reject_reason"):
                 rejected[p["target"]].append(p["reject_reason"])
-        summary = {"started_at": now_iso(), "requested_by": requested_by, "model": self.llm.model,
-                   "created": [], "skipped": [], "errors": []}
         budget = settings.AI_MAX_PROPOSALS_PER_RUN
 
         # 1) ngoại lệ cho rule ồn
@@ -227,6 +233,42 @@ class AIWorker:
         summary["finished_at"] = now_iso()
         log.info("chu kỳ AI xong: %d đề xuất, %d lỗi", len(summary["created"]), len(summary["errors"]))
         return summary
+
+    def _recheck_stale(self, history: list[dict[str, Any]], gen: str, summary: dict[str, Any]) -> None:
+        """Đề xuất rule dataset đang chờ duyệt do logic / model CŨ sinh ra: chạy lại đúng bước kiểm tra lúc duyệt
+        (deploy.recheck_dataset_rule: tập bình thường, dấu vết lab, độ đặc trưng HIỆN TẠI). Trượt -> invalid kèm lý do,
+        như khi analyst bấm duyệt — để rule chắc chắn không triển khai được không giữ chỗ mãi (target có đề xuất pending
+        thì không được đề xuất lại bằng logic mới). Rà soát 11/10: 11/44 đề xuất cũ như vậy. Không tự duyệt / từ chối
+        thay người: đề xuất qua được vẫn chờ analyst."""
+        if not self.golden:
+            return
+        for p in history:
+            if p.get("status") != "pending" or p.get("kind") != "new_rule" or (p.get("llm") or {}).get("generator") == gen                     or not str(p.get("target", "")).startswith("gap-dataset:"):
+                continue
+            try:
+                problems = recheck_dataset_rule(p["proposal"], Rule.from_dict(p["proposal"]), self.golden)
+            except Exception as e:  # noqa: BLE001
+                problems = [f"không dựng lại được rule: {e}"]
+            if not problems:
+                continue
+            try:
+                cur = self.es.get(index=settings.IDX_AI_PROPOSALS, id=p["id"])
+                doc = cur["_source"]
+                if doc.get("status") != "pending":
+                    continue
+                doc.update(status="invalid", updated_at=now_iso())
+                doc.setdefault("history", []).append({
+                    "at": now_iso(), "by": "ai-worker",
+                    "text": "kiểm tra lại theo luật kiểm định hiện tại thất bại (đề xuất do phiên bản cũ của AI worker "
+                            "sinh ra): " + "; ".join(problems)})
+                self.es.index(index=settings.IDX_AI_PROPOSALS, id=p["id"], document=doc, refresh="wait_for",
+                              if_seq_no=cur["_seq_no"], if_primary_term=cur["_primary_term"])
+            except Exception as e:  # noqa: BLE001 — analyst vừa cập nhật đề xuất / ES lỗi: để chu kỳ sau
+                log.warning("không kiểm tra lại được đề xuất %s: %s", p.get("id"), e)
+                continue
+            p["status"] = "invalid"
+            summary["rechecked"].append(f"{p['id']} {p.get('title', '')[:80]}: {'; '.join(problems)[:200]}")
+            log.info("đề xuất cũ %s không còn qua kiểm định: %s", p["id"], "; ".join(problems)[:200])
 
     def _try(self, summary: dict, target: str, fn: Callable[[], dict | None]) -> None:
         try:
@@ -443,11 +485,12 @@ class AIWorker:
         # tập lệnh bình thường là danh sách để chặn rule quá chung chung (vai trò như ORDINARY_URLS), không phải mẫu
         # thống kê như CSIC normal -> ghép vế đo trên CẢ tập; chỉ dùng nửa thì lượt đầu giữ `reg add`
         # (nửa kia mới có lệnh reg add hợp lệ), dừng sớm vì bắt 91% train rồi bị kiểm định loại
-        final, attempts = self._refine(first, key, platform, train, normals, normal_all, app_tokens=set(),
+        lab_tokens = g.lab_tokens(platform)              # tên file / giá trị bài thử tự đặt (evilBinary, /tmp/hello)
+        final, attempts = self._refine(first, key, platform, train, normals, normal_all, app_tokens=lab_tokens,
                                        variant=variant, what=what, community=community)
         return self._finish_new_rule(final, f"gap-dataset:{key}", rules, ds, [x.doc for x in train],
                                      [x.doc for x in test], key, ["dataset-gap", "endpoint", platform, kind], platform,
-                                     app_tokens=set(), attempts=attempts, normal=normal_all,
+                                     app_tokens=lab_tokens, attempts=attempts, normal=normal_all,
                                      normal_label=f"lệnh {OS_NAME[platform]} bình thường",
                                      known_mitre={"technique": [tid], "tactic": tactics[0] if tactics else ""})
 
@@ -510,8 +553,8 @@ class AIWorker:
         n_bad = len(bad)
         added = absorb(self._measure_rule(first.data, *args, spare=unverified, source={"kind": "model"}))
         hq = self._community_atoms(community or [])
-        added += absorb(self._measure_atoms(hq, *args, spare=unverified_hq,
-                                            cap=0 if web else MAX_UNVERIFIED_SIGMAHQ, report=False, budget=200))
+        added += absorb(self._measure_atoms(hq, *args, spare=unverified_hq, cap=0 if web else MAX_UNVERIFIED_SIGMAHQ,
+                                            atom_cap=MAX_UNVERIFIED_SIGMAHQ_ATOMS, report=False, budget=200))
         record(0, None, first, added, n_bad, unverified=[sigma.detection_yaml(a) for a in unverified],
                sigmahq_candidates=len({id(a.get("source")) for a in hq}),
                sigmahq_unverified=[sigma.detection_yaml(a) for a in unverified_hq])
@@ -598,11 +641,12 @@ class AIWorker:
 
     def _measure_atoms(self, queue: list[dict[str, Any]], domain: str, train: list, normal: list[Doc],
                        app_tokens: set[str], seen: set[str], bad: list[dict[str, Any]],
-                       spare: list[dict[str, Any]] | None = None, cap: int | None = None, report: bool = True,
+                       spare: list[dict[str, Any]] | None = None, cap: int | None = None,
+                       atom_cap: int | None = None, report: bool = True,
                        budget: int = 24) -> list[tuple[dict[str, Any], set[int]]]:
         """Đo từng vế. Vế bị loại vì báo nhầm / quá yếu / dấu vết lab được TÁCH NHỎ (sigma.split); vế không khớp mẫu
         train nào được NỚI (sigma.relax: bỏ filter, |all -> OR) rồi đo lại phần con. spare: nơi giữ vế gốc an toàn nhưng
-        chưa khớp mẫu train nào (tối đa cap, mặc định MAX_UNVERIFIED) — trừ khi bản nới của chính nó đã bắt được mẫu
+        chưa khớp mẫu train nào (tối đa cap vế gốc, mặc định MAX_UNVERIFIED, và atom_cap vế) — trừ khi bản nới của chính nó đã bắt được mẫu
         (khi đó model chỉ viết sai cú pháp, không phải hiểu biết riêng). report=False: không đưa lý do loại cho model
         (vế SigmaHQ)."""
         cap = MAX_UNVERIFIED if cap is None else cap        # 0 = không giữ vế chưa kiểm chứng (web + SigmaHQ)
@@ -655,6 +699,8 @@ class AIWorker:
             # đã bắt được mẫu thì bỏ (model chỉ viết sai cú pháp, không phải hiểu biết riêng)
             roots = {a.get("_root") for a in spare}
             for root, atom, kind in candidates:
+                if atom_cap is not None and len(spare) >= atom_cap:
+                    break
                 if kind == "root" and id(root) in explained:
                     continue
                 rid = f"{id(self)}:{id(root)}:{len(seen)}" if "_root" not in root else root["_root"]
@@ -709,9 +755,15 @@ class AIWorker:
                         return set(), [], f"regex {pat!r}: {why}"
         if (tied := _app_specific(positive, app_tokens)):
             return set(), [], f"specific to the sample application or test environment ({', '.join(sorted(tied))})"
+        if (wrap := lab_wrapper(cond)):
+            return set(), [], (f"contains the test harness wrapper '& {{' ({wrap[0]!r}, from powershell -Command "
+                               "\"& {...}\" of the test runner): match the attack command itself")
         if (weak := weak_values(cond)):
             return set(), [], (f"too short or a single common word, not a signature ({weak[0]!r}): tie the program "
                                "(Image) to its distinctive arguments in the same selection")
+        if (bare := common_program_only(cond)):
+            return set(), [], (f"only names a common program ({', '.join(sorted(set(bare)))}), which matches every "
+                               "legitimate run: add its distinctive arguments (CommandLine) in the same selection")
         try:
             compiled = Rule.from_dict({"id": "_atom", "title": "atom", "condition": cond}).condition
         except Exception as e:  # noqa: BLE001

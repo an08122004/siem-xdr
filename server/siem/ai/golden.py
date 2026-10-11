@@ -48,6 +48,11 @@ ENDPOINT_NORMAL = {"baseline-endpoint", "splunk-background", "scenario-backgroun
 LAB_TRACE = re.compile(r"atomicredteam|invoke-atomictest|externalpayloads|ansible|\$json_raw|become-success|attackrange|"
                        r"\bart\b|\bt1\d{3}", re.I)
 BACKGROUND_MIN_TECHNIQUES = 3
+# nơi bài thử Atomic tự đặt tên file: thư mục tạm, thư mục Public, mã nguồn tự viết của bài thử (atomics/T…/src/).
+# KHÔNG gồm ExternalPayloads / atomics/T…/bin: đó là công cụ tấn công thật tải về (SOAPHound, firepwd...) — tên của
+# chúng là chữ ký hợp lệ; chính tên thư mục ExternalPayloads / AtomicRedTeam đã do ARTIFACT_RE chặn.
+LAB_DIR = re.compile(r"[\\/](?:tmp|temp|shm)[\\/]|%te?mp%|\$env:te?mp|%public%|\$env:public|[\\/]users[\\/]public[\\/]"
+                     r"|atomics[\\/]t\d{4}(?:\.\d{3})?[\\/]src[\\/]")
 SOURCE_NAME = {"atomic-red-team": "dựng lại từ Atomic Red Team", "splunk-attack-data": "log ghi thật (Splunk)",
                "evtx-attack-samples": "EVTX ghi thật"}
 OS_NAME = {"windows": "Windows", "linux": "Linux"}
@@ -71,6 +76,7 @@ class PublicDatasets:
     scenarios: list[Labeled] = field(default_factory=list)
     _sigma_tokens: list[set[str]] = field(default_factory=list)
     _profile: WebProfile | None = None
+    _lab: dict[str, set[str]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, directory: Path | None = None, config_dir: Path | None = None, max_normal: int = 10000) -> "PublicDatasets":
@@ -139,6 +145,40 @@ class PublicDatasets:
             return [x.doc for x in self.normal if x.label.get("dataset") not in ENDPOINT_NORMAL]
         return [x.doc for x in self.normal if x.label.get("dataset") in ENDPOINT_NORMAL
                 and (platform is None or x.label.get("platform") == platform)]
+
+    def lab_tokens(self, platform: str | None = None) -> set[str]:
+        """Tên file do người viết bài thử Atomic tự đặt trong thư mục tạm / thư mục bài thử (giá trị mặc định của
+        input_arguments: /tmp/evilBinary, .../T1548.001/src/hello.c -> evilbinary, hello.c, hello): rule dựa vào chúng
+        chỉ bắt đúng bài thử. Dạng đoạn như validate._app_specific so (chữ thường, tách theo ký tự ngoài
+        [a-z0-9_.-~]); lấy tên file và tên bỏ đuôi.
+        KHÔNG lấy: tên trong thư mục khác (~/.netrc, id_rsa, C:\\Windows\\System32\\sethc.exe là thứ kẻ tấn công nhắm
+        tới — chữ ký thật), dotfile, tên có trong lệnh bình thường / rule SigmaHQ / tên chương trình phổ biến (kể cả
+        khi bỏ đuôi: %TEMP%\\svchost.exe không làm `svchost` thành dấu vết lab), đoạn ngắn / chỉ là số."""
+        key = platform or "*"
+        if key not in self._lab:
+            from .validate import COMMON_PROGRAMS          # validate import golden -> import muộn
+            seg = re.compile(r"[^a-z0-9_.\-~]+")
+            values = {v for x in self.attack if platform is None or x.label.get("platform") == platform
+                      for v in x.label.get("lab_values") or []}
+            known = set(COMMON_PROGRAMS)
+            for d in self.normal_for("endpoint", platform):
+                known |= set(seg.split(f"{get(d, 'process.command_line') or ''} {get(d, 'process.executable') or ''}"
+                                       .lower()))
+            for r in self.sigma:
+                known |= set(seg.split(str(r.get("detection") or "").lower().replace("*", " ")))
+            known |= {k.rsplit(".", 1)[0] for k in known if "." in k.strip(".")}
+            cand = set()
+            for v in values:
+                v = v.strip().strip("\"'").lower()
+                if not LAB_DIR.search(v):
+                    continue
+                for s in seg.split(re.split(r"[\\/]", v)[-1]):
+                    if s.startswith("."):
+                        continue
+                    cand |= {s, s.rsplit(".", 1)[0]} if "." in s.strip(".") else {s}
+            self._lab[key] = {s for s in cand if len(s) >= 4 and re.search(r"[a-z]", s)
+                              and not re.fullmatch(r"[0-9a-f.\-]+", s) and s not in known}
+        return self._lab[key]
 
     # ------------------------------------------------------------ loại tấn công
     @property
