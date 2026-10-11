@@ -118,9 +118,17 @@ install_docker() {
   fi
   if ! docker info >/dev/null 2>&1; then
     if [ -d /run/systemd/system ]; then systemctl enable --now docker >/dev/null 2>&1 || true
-    else service docker start >/dev/null 2>&1 || true; fi
+    else
+      service docker start >/dev/null 2>&1 || true
+      sleep 3
+      # không có systemd (WSL, container) và script init lỗi (vd ulimit): chạy thẳng dockerd
+      if ! docker info >/dev/null 2>&1; then
+        warn "không có systemd: chạy dockerd nền, log ở /var/log/dockerd.log (khởi động lại máy phải chạy lại script)"
+        nohup dockerd >/var/log/dockerd.log 2>&1 &
+      fi
+    fi
     for _ in $(seq 30); do docker info >/dev/null 2>&1 && break; sleep 1; done
-    docker info >/dev/null 2>&1 || die "Docker không chạy (xem: journalctl -u docker)"
+    docker info >/dev/null 2>&1 || die "Docker không chạy (xem: journalctl -u docker hoặc /var/log/dockerd.log)"
   fi
   local major
   major=$(docker version --format '{{.Server.Version}}' | cut -d. -f1)
