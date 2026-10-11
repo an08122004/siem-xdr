@@ -88,7 +88,8 @@ IDX_AI_JOBS = "ai-jobs"
 IDX_RULES = "siem-rules"
 RULES_CATALOG_SECONDS = int(os.getenv("RULES_CATALOG_SECONDS", "60"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
-AI_MODEL = os.getenv("AI_MODEL", "qwen2.5-coder:7b")
+AI_MODEL = os.getenv("AI_MODEL", "qwen3.5:9b")   # tốt nhất trong 4 model đã đo (AI-README mục 10); ~6,6 GB
+AI_THINK = os.getenv("AI_THINK", "false").lower() in ("1", "true", "yes")   # bật chế độ suy nghĩ (qwen3...): chậm hơn nhiều
 AI_INTERVAL_MINUTES = int(os.getenv("AI_INTERVAL_MINUTES", "60"))       # chu kỳ tự chạy; 0 = chỉ chạy khi bấm
 AI_LOOKBACK_DAYS = int(os.getenv("AI_LOOKBACK_DAYS", "30"))             # lấy nhãn false positive / case thật
 AI_REPLAY_DAYS = int(os.getenv("AI_REPLAY_DAYS", "7"))                  # replay dữ liệu để ước lượng số alert
@@ -98,6 +99,8 @@ AI_MIN_GROUP_EVENTS = int(os.getenv("AI_MIN_GROUP_EVENTS", "20"))       # nhóm 
 AI_MAX_NEW_RULE_ALERTS_PER_DAY = float(os.getenv("AI_MAX_NEW_RULE_ALERTS_PER_DAY", "20"))
 AI_MAX_PROPOSALS_PER_RUN = int(os.getenv("AI_MAX_PROPOSALS_PER_RUN", "5"))
 AI_REFINE_ROUNDS = int(os.getenv("AI_REFINE_ROUNDS", "6"))            # rule từ dataset: số lượt LLM bổ sung mẫu cho biến thể còn sót
+AI_SIGMAHQ_CANDIDATES = os.getenv("AI_SIGMAHQ_CANDIDATES", "true").lower() in ("1", "true", "yes")  # vế từ rule SigmaHQ
+AI_KNOWLEDGE_ROUND = os.getenv("AI_KNOWLEDGE_ROUND", "true").lower() in ("1", "true", "yes")        # hỏi cách làm khác
 
 # Log từng request HTTP tới Elasticsearch quá nhiều -> chỉ giữ cảnh báo
 import logging as _logging  # noqa: E402

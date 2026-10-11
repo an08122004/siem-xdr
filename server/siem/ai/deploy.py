@@ -13,12 +13,13 @@ import re
 from pathlib import Path
 from typing import Any
 
-import yaml
 
 from .. import settings
 from ..detection.rules import Rule, RuleException, load_rules
 from .dataset import ESDataSource
 from .golden import PublicDatasets
+from .sigma import dump
+from .validate import _app_specific, describe, leaves_of, ordinary_hits, weak_values
 
 log = logging.getLogger("ai.deploy")
 _ID = re.compile(r"^[a-f0-9]{12}$")
@@ -82,15 +83,42 @@ def recheck(p: dict[str, Any], es, rules_dir: Path) -> list[str]:
     else:
         if p["proposal"]["id"] in rules:
             problems.append(f"ID {p['proposal']['id']} đã tồn tại")
-        Rule.from_dict(p["proposal"])
+        rule = Rule.from_dict(p["proposal"])
+        if str(p.get("target", "")).startswith("gap-dataset:"):
+            problems += recheck_dataset_rule(p["proposal"], rule, golden())
+    return problems
+
+
+def recheck_dataset_rule(rd: dict[str, Any], rule: Rule, g: PublicDatasets) -> list[str]:
+    """Rule học từ dataset: đối chiếu lại với tập bình thường và các kiểm tra 'dùng chung được' HIỆN TẠI. Tập lệnh
+    bình thường / dấu vết môi trường thử được bổ sung sau khi AI đề xuất thì đề xuất cũ đang chờ vẫn bị chặn."""
+    problems = []
+    tags = set(rd.get("tags") or [])
+    platform = next((t for t in ("windows", "linux") if t in tags), None)
+    endpoint = "endpoint" in tags
+    normal = g.normal_for("endpoint", platform) if endpoint else g.normal_for("web")
+    hits = [d for d in normal if rule.condition.match(d)]
+    if normal and len(hits) > 0.001 * len(normal):
+        what = f"lệnh {platform or 'endpoint'} bình thường" if endpoint else "request bình thường"
+        problems.append(f"rule khớp {len(hits)}/{len(normal)} {what}, vd: {describe(hits[0])[:120]}")
+    cond = rd.get("condition") or {}
+    positive = leaves_of(cond, positive_only=True)          # rule Sigma: cây lồng all / any / not
+    if (tied := _app_specific(positive, set() if endpoint else g.profile.app_tokens())):
+        problems.append(f"rule chỉ khớp dữ liệu của dataset (chứa {', '.join(sorted(tied)[:5])})")
+    if (weak := weak_values(cond)):
+        problems.append(f"đoạn dòng lệnh quá ngắn hoặc chỉ là một từ trơn, không phải chữ ký: {', '.join(weak[:5])}")
+    if any(c.get("field", "").startswith("url.") for c in positive) and (oh := ordinary_hits(rule.condition)):
+        problems.append(f"rule khớp URL bình thường: {', '.join(oh[:3])}")
     return problems
 
 
 def _write(path: Path, p: dict[str, Any], approvers: list[str]) -> None:
     header = (f"# Sinh bởi AI worker (model {p.get('llm', {}).get('model')}), đề xuất {p['id']}\n"
               f"# Duyệt bởi: {', '.join(approvers)} — {p['updated_at']}\n"
-              f"# Gỡ: nút 'Gỡ' trên console (hoặc xóa file này). Không sửa tay để còn truy vết.\n")
-    body = yaml.safe_dump([p["proposal"]], allow_unicode=True, sort_keys=False, width=200)
+              f"# Gỡ: nút 'Gỡ' trên console (hoặc xóa file này). Không sửa tay để còn truy vết.\n"
+              + ("# Khóa `sigma`: rule Sigma AI viết (nguồn); `condition`: bản đã biên dịch mà analyzer chạy.\n"
+                 if p["proposal"].get("sigma") else ""))
+    body = dump([p["proposal"]])
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(header + body, encoding="utf-8", newline="\n")

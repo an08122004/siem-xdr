@@ -146,10 +146,15 @@ class FakeLLM:
         self.answers = answers
         self.prompts = []
 
-    def chat_json(self, system, user, schema, temperature=0.2):
+    def chat_json(self, system, user, schema, temperature=0.2):        # ngoại lệ: JSON theo schema
         self.prompts.append(user)
-        data = self.answers["exception" if "Propose the exception" in user else "new_rule"]
-        return LLMResult(data=data, raw="{}", model="fake", seconds=0.1, prompt_tokens=10, output_tokens=5)
+        return LLMResult(data=self.answers["exception"], raw="{}", model="fake", seconds=0.1, prompt_tokens=10,
+                         output_tokens=5)
+
+    def chat_text(self, system, user, temperature=0.2):                 # rule mới: rule Sigma dạng YAML
+        self.prompts.append(user)
+        return LLMResult(data={}, raw=self.answers["new_rule"], model="fake", seconds=0.1, prompt_tokens=10,
+                         output_tokens=5)
 
 
 class FakeDS:
@@ -179,10 +184,11 @@ def test_worker_cycle_creates_validated_proposals(tmp_path, monkeypatch):
                             normal=[Labeled(ev(f"10.8.0.{i}", "/admin/backup.zip", 404, i=i), {"class": "normal"}) for i in range(20)])
     llm = FakeLLM({
         "exception": {"rationale": "máy giám sát", "match": "all", "clauses": [{"field": "source.ip", "op": "eq", "value": "10.50.0.7"}]},
-        "new_rule": {"propose": True, "rationale": "tải file backup", "title": "Tải file sao lưu", "description": "d",
-                     "severity": "high", "mitre_tactic": "Collection", "mitre_technique": ["t1005", "SQLi", "Cross-Site"], "match": "all",
-                     "clauses": [{"field": "url.path", "op": "endswith", "value": ".zip"},
-                                 {"field": "http.response.status_code", "op": "eq", "value": 200}]},
+        # model viết thêm lời dẫn ngoài khối yaml; level high; tag attack.* có cả tên tự do
+        "new_rule": "Đây là rule:\n```yaml\ntitle: Tải file sao lưu\ndescription: tải file backup\nlevel: high\n"
+                    "tags: [attack.collection, attack.t1005, attack.sqli-thing, attack.T1005]\n"
+                    "logsource: {category: webserver}\ndetection:\n  selection:\n    cs-uri-stem|endswith: '.zip'\n"
+                    "    sc-status: 200\n  condition: selection\n```\n",
     })
     saved = []
     w = AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS(evidence, fp), save=saved.append)
@@ -192,8 +198,11 @@ def test_worker_cycle_creates_validated_proposals(tmp_path, monkeypatch):
     nr = kinds["new_rule"]
     assert nr["status"] == "pending", nr["validation"]["checks"]
     assert nr["proposal"]["id"] == "AI-001" and nr["proposal"]["severity"] == "medium"   # AI không được đặt high
-    assert nr["proposal"]["mitre"]["technique"] == ["T1005"]                              # bỏ tên kỹ thuật tự do
+    assert nr["proposal"]["mitre"] == {"tactic": "collection", "technique": ["T1005"]}   # chỉ giữ ID ATT&CK thật
     assert nr["validation"]["metrics"]["test_is_holdout"] is True
+    # vế AND (đường dẫn .zip + mã 200) giữ nguyên: request bình thường cùng đường dẫn trả 404
+    assert nr["proposal"]["condition"]["all"][1] == {"field": "http.response.status_code", "op": "eq", "value": 200}
+    assert "sc-status: 200" in nr["sigma"] and "level: medium" in nr["sigma"] and "sigma: |" not in nr["yaml"]
     assert "DATA:" in llm.prompts[0] and len(summary["created"]) == 2
 
 
@@ -288,9 +297,7 @@ def test_dataset_gaps_grouped_by_type_and_app_specific_skipped(tmp_path, monkeyp
              [web(f"/shop/add.jsp?idA={i}&qty=2", i) for i in range(12)]
     golden = PublicDatasets(directory=Path("."), attack=[Labeled(d, {"dataset": "t"}) for d in attack],
                             normal=[Labeled(web(u, i), {"class": "normal"}) for i, u in enumerate(NORMAL_URLS * 5)])
-    llm = FakeLLM({"new_rule": {"propose": True, "rationale": "file sao lưu", "title": "Dò file .bak", "description": "d",
-                                "severity": "medium", "mitre_tactic": "Discovery", "mitre_technique": ["T1083"],
-                                "match": "all", "clauses": [{"field": "url.path", "op": "endswith", "value": ".bak"}]}})
+    llm = FakeLLM({"new_rule": "title: Dò file .bak\nlevel: medium\nlogsource: {category: webserver}\ndetection:\n  sel:\n    cs-uri-stem|endswith: '.bak'\n  condition: sel\n"})
     saved = []
     w = AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append)
     summary = w.run_cycle("an")
@@ -321,9 +328,7 @@ def test_retry_policy_depends_on_generator(tmp_path, monkeypatch):
     attack = [web(f"/shop/img/logo{i}.gif.bak", i) for i in range(12)]
     golden = PublicDatasets(directory=Path("."), attack=[Labeled(d, {"dataset": "t"}) for d in attack],
                             normal=[Labeled(web(u, i), {"class": "normal"}) for i, u in enumerate(NORMAL_URLS * 5)])
-    llm = FakeLLM({"new_rule": {"propose": True, "rationale": "r", "title": "t", "description": "d", "severity": "low",
-                                "mitre_tactic": "Discovery", "mitre_technique": [], "match": "all",
-                                "clauses": [{"field": "url.path", "op": "endswith", "value": ".bak"}]}})
+    llm = FakeLLM({"new_rule": "title: Dò file .bak\nlevel: medium\nlogsource: {category: webserver}\ndetection:\n  sel:\n    cs-uri-stem|endswith: '.bak'\n  condition: sel\n"})
     target = "gap-dataset:t:backup-file"
 
     def run(history):
@@ -374,35 +379,42 @@ class SeqLLM:
         self.prompts.append(user)
         return LLMResult(data=self.answers.pop(0), raw="{}", model="fake", seconds=0.1, prompt_tokens=1, output_tokens=1)
 
+    def chat_text(self, system, user, temperature=0.2):
+        self.prompts.append(user)
+        return LLMResult(data={}, raw=self.answers.pop(0), model="fake", seconds=0.1, prompt_tokens=1, output_tokens=1)
+
 
 def test_dataset_rule_assembled_from_measured_patterns(tmp_path, monkeypatch):
-    """Giữ mẫu bắt được tấn công ở tập train mà không khớp request bình thường; lượt sau hỏi riêng biến thể còn sót."""
+    """Giữ vế Sigma bắt được tấn công ở tập train mà không khớp request bình thường; lượt sau hỏi riêng biến thể còn sót."""
     rd = write_rules(tmp_path)
     monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
+    monkeypatch.setattr("siem.ai.worker.settings.AI_KNOWLEDGE_ROUND", False)   # test riêng ở test_ai_endpoint
     attack = [web(f"/shop/img/a{i:02d}.gif.bak", i) for i in range(12)] + \
              [web(f"/shop/img/b{i:02d}.gif.old", i) for i in range(12)]
     golden = PublicDatasets(directory=Path("."), attack=[Labeled(d, {"dataset": "t"}) for d in attack],
                             normal=[Labeled(web(u, i), {"class": "normal"}) for i, u in enumerate(NORMAL_URLS * 5)])
-    base = {"propose": True, "rationale": "r", "title": "Dò file sao lưu", "description": "d", "severity": "low",
-            "mitre_tactic": "Discovery", "mitre_technique": ["T1083"], "match": "any"}
     llm = SeqLLM([
-        # "/shop/" gắn với ứng dụng mẫu -> loại; "\.bak$" là regex nhưng model để op=contains -> tự sửa op;
-        # event.category là mệnh đề phạm vi -> bỏ; "/" khớp URL thư mục bình thường -> loại
-        {**base, "clauses": [{"field": "url.path", "op": "contains", "value": ["/shop/", r"\.bak$"]},
-                             {"field": "url.path", "op": "endswith", "value": "/"},
-                             {"field": "event.category", "op": "eq", "value": "web"}]},
-        {**base, "clauses": [{"field": "url.path", "op": "endswith", "value": ".old"}]},
+        # "/shop/" gắn với ứng dụng mẫu -> loại; "/" khớp URL thư mục bình thường -> loại; ".bak" giữ
+        "title: Dò file sao lưu\nlevel: low\nlogsource: {category: webserver}\ndetection:\n"
+        "  selection_app:\n    cs-uri-stem|contains: '/shop/'\n"
+        "  selection_bak:\n    cs-uri-stem|endswith: '.bak'\n"
+        "  selection_dir:\n    cs-uri-stem|endswith: '/'\n"
+        "  condition: 1 of selection_*\n",
+        "```yaml\ntitle: x\nlogsource: {category: webserver}\ndetection:\n  selection:\n"
+        "    cs-uri-stem|endswith: '.old'\n  condition: selection\n```",
     ])
     saved = []
     AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append).run_cycle("an")
     p = saved[0]
     assert p["status"] == "pending", p["validation"]["checks"]
-    assert p["proposal"]["condition"] == {"any": [{"field": "url.path", "op": "regex", "value": r"\.bak$"},
-                                                  {"field": "url.path", "op": "endswith", "value": ".old"}]}
+    assert p["proposal"]["condition"] == {"any": [{"field": "url.path", "op": "endswith", "value": [".bak", ".old"]},
+                                                  {"field": "url.decoded", "op": "endswith", "value": [".bak", ".old"]}]}
+    assert "condition: selection_bak_1 or selection_2" in p["sigma"] and "/shop/" not in p["sigma"]
     assert [(a["focus"], a["train_recall"]) for a in p["llm"]["attempts"]] == [(None, 0.5), (".old", 1.0)]
     assert '"variant": ".old (6 training events still missed)"' in llm.prompts[1]
     assert "Probing for backup" not in llm.prompts[1]          # lượt bổ sung không nêu tên loại tấn công
     assert "specific to the sample application" in llm.prompts[1] and "ordinary URLs" in llm.prompts[1]
+    assert '"cs-uri-stem|endswith": ".bak"' in llm.prompts[1]   # vế đã giữ đưa lại cho model
 
 
 def test_new_rule_matching_ordinary_urls_blocked():
@@ -413,3 +425,69 @@ def test_new_rule_matching_ordinary_urls_blocked():
     checks = {c.name: c.ok for c in val.checks}
     assert checks["báo nhầm trên dữ liệu bình thường"] and not checks["không khớp URL thông thường"]
     assert not val.passed
+
+
+def test_thinking_turned_off_only_for_models_that_support_it():
+    """qwen3 / qwen3.5 có chế độ suy nghĩ: mặc định gửi think=false; model khác không nhận tham số này."""
+    from siem.ai.llm import OllamaClient
+
+    def client(capabilities, think=False):
+        c = OllamaClient("http://ollama:11434", "m", think=think)
+        sent = []
+
+        def post(path, body, timeout=None):
+            sent.append((path, body))
+            if path == "/api/show":
+                return {"capabilities": capabilities}
+            return {"message": {"content": '{"ok": true}'}, "done_reason": "stop"}
+        c._post = post
+        c.chat_json("s", "u", {"type": "object"})
+        return [b for p, b in sent if p == "/api/chat"][0]
+
+    assert client(["completion", "thinking"])["think"] is False
+    assert "think" not in client(["completion", "tools"])
+    on = client(["completion", "thinking"], think=True)
+    assert on["think"] is True and on["options"]["num_predict"] == 4096   # suy nghĩ cần thêm chỗ cho token
+
+
+def test_too_long_answer_spoils_one_round_not_the_whole_proposal(tmp_path, monkeypatch):
+    """Chạy thật 9/10: một câu trả lời vượt giới hạn token ở lượt kiến thức làm hỏng cả đề xuất SQLi."""
+    from siem.ai.llm import LLMTooLong
+    rd = write_rules(tmp_path)
+    monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
+    attack = [web(f"/shop/img/a{i:02d}.gif.bak", i) for i in range(12)]
+    golden = PublicDatasets(directory=Path("."), attack=[Labeled(d, {"dataset": "t"}) for d in attack],
+                            normal=[Labeled(web(u, i), {"class": "normal"}) for i, u in enumerate(NORMAL_URLS * 5)])
+
+    class LongLLM(SeqLLM):
+        def chat_text(self, system, user, temperature=0.2):
+            if len(self.prompts) == 1:                    # lượt kiến thức
+                self.prompts.append(user)
+                raise LLMTooLong("output vượt 1024 token")
+            return super().chat_text(system, user, temperature)
+
+    llm = LongLLM(["detection:\n  sel:\n    cs-uri-stem|endswith: '.bak'\n  condition: sel\n"])
+    saved = []
+    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append).run_cycle("an")
+    assert saved and saved[0]["status"] == "pending", saved
+    assert "1024" in " ".join(saved[0]["llm"]["attempts"][1]["rejected"])
+
+
+def test_web_keeps_no_unverified_sigmahq_atoms(tmp_path, monkeypatch):
+    """Chạy thật 9/10: cap=0 bị hiểu là 'mặc định 8' -> rule SQLi mang 30 vế SigmaHQ (CVE) chưa khớp mẫu train nào."""
+    rd = write_rules(tmp_path)
+    monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
+    attack = [web(f"/shop/img/a{i:02d}.gif.bak", i) for i in range(12)]
+    cve = {"id": "cve-1", "title": "Some CVE probe", "author": "X", "level": "high", "status": "test", "path": "rules/web/x.yml",
+           "logsource": {"category": "webserver"}, "tags": ["attack.t1190"],
+           "detection": "selection:\n  cs-uri-stem|contains: '/vulnerable/endpoint.php'\ncondition: selection\n"}
+    golden = PublicDatasets(directory=Path("."), attack=[Labeled(d, {"dataset": "t"}) for d in attack],
+                            normal=[Labeled(web(u, i), {"class": "normal"}) for i, u in enumerate(NORMAL_URLS * 5)],
+                            sigma=[cve])
+    golden._sigma_tokens = [{"vulnerable", "endpoint", "backup", "probing"}]
+    llm = SeqLLM(["detection:\n  sel:\n    cs-uri-stem|endswith: '.bak'\n  condition: sel\n"] * 10)
+    saved = []
+    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append).run_cycle("an")
+    assert saved[0]["status"] == "pending"
+    assert not [a for a in saved[0]["llm"]["atoms"] if a["source"] == "sigmahq"]
+    assert "cve-1" not in saved[0]["sigma"]

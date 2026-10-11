@@ -53,7 +53,7 @@ def main() -> None:
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     es = store.connect(templates=False)
-    llm = OllamaClient(settings.OLLAMA_URL, settings.AI_MODEL)
+    llm = OllamaClient(settings.OLLAMA_URL, settings.AI_MODEL, think=settings.AI_THINK)
     while True:
         try:
             llm.ensure_model()

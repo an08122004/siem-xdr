@@ -329,7 +329,8 @@ services:
     profiles: [ai]
     environment:
       OLLAMA_KEEP_ALIVE: 30m
-    volumes: [ollama:/root/.ollama]
+    # model nặng 5-7 GB mỗi cái: OLLAMA_MODELS_DIR (trong .env) đặt sang ổ khác nếu ổ chứa dữ liệu Docker sắp đầy
+    volumes: ["${OLLAMA_MODELS_DIR:-ollama}:/root/.ollama"]
     networks: [soc]
 
   ai-worker:

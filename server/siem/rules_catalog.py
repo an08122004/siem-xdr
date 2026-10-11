@@ -159,6 +159,9 @@ def _yaml_docs(path: Path) -> list[dict[str, Any]]:
 
 
 def _dump(d: dict[str, Any]) -> str:
+    if d.get("sigma"):                     # rule AI: rule Sigma nhiều dòng hiển thị dạng khối, không phải chuỗi thoát \n
+        from .ai.sigma import dump
+        return dump([d])
     return yaml.safe_dump([d], allow_unicode=True, sort_keys=False, width=110)
 
 

@@ -1,0 +1,367 @@
+"""Hành vi BÌNH THƯỜNG trên endpoint (Windows / Linux) để kiểm định rule endpoint do AI đề xuất.
+
+Dataset web có tập request bình thường lớn (CSIC 2010 normal) để đo báo nhầm; endpoint thì không có tập công khai
+tương đương (Atomic Red Team / EVTX-ATTACK-SAMPLES chỉ có tấn công). Thiếu tập này thì rule kiểu
+`process.name = powershell.exe` vẫn "0 báo nhầm" -> phải có dữ liệu bình thường để đối chứng.
+
+Đây là danh sách lệnh hợp lệ thường gặp (hệ thống, quản trị, phần mềm, lập trình), CỐ Ý gồm cả công cụ "hai mặt"
+mà kẻ tấn công cũng dùng nhưng ở dạng vô hại: whoami, reg query, certutil -hashfile, schtasks /query, rundll32 mở
+Control Panel, curl tải gói, find ... -delete dọn log, base64 trong script, useradd của quản trị... Rule chỉ dựa vào
+tên chương trình hay đối số phổ biến sẽ khớp các lệnh này và bị loại (quá chung chung) — giống ORDINARY_URLS cho web.
+Event được dựng đúng định dạng agent gửi (Sysmon EventID 1 / process_creation) và đi qua bộ chuẩn hóa thật.
+Giới hạn: danh sách tự soạn, nhỏ (không thay được log của môi trường thật) — số alert khi replay dữ liệu thật
+7 ngày vẫn là kiểm tra cuối cùng.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from ..pipeline.normalize import Doc, normalize
+
+S32 = "C:\\Windows\\System32\\"
+PS = S32 + "WindowsPowerShell\\v1.0\\powershell.exe"
+# (đường dẫn chương trình, dòng lệnh, chương trình cha)
+WINDOWS: list[tuple[str, str, str]] = [
+    (S32 + "svchost.exe", "C:\\Windows\\system32\\svchost.exe -k netsvcs -p -s Schedule", S32 + "services.exe"),
+    (S32 + "svchost.exe", "C:\\Windows\\System32\\svchost.exe -k LocalServiceNetworkRestricted -p -s EventLog", S32 + "services.exe"),
+    (S32 + "RuntimeBroker.exe", "C:\\Windows\\System32\\RuntimeBroker.exe -Embedding", S32 + "svchost.exe"),
+    (S32 + "taskhostw.exe", "taskhostw.exe {222A245B-E637-4AE9-A93F-A59CA119A75E}", S32 + "svchost.exe"),
+    ("C:\\Windows\\explorer.exe", "C:\\Windows\\Explorer.EXE", S32 + "userinit.exe"),
+    (S32 + "conhost.exe", "\\??\\C:\\Windows\\system32\\conhost.exe 0xffffffff -ForceV1", S32 + "cmd.exe"),
+    ("C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+     '"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" --type=renderer --lang=vi --mojo-platform-channel-handle=4120 /prefetch:1',
+     "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"),
+    ("C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
+     '"C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE" /n "C:\\Users\\lan\\Documents\\Bao cao quy 3.docx"', "C:\\Windows\\explorer.exe"),
+    ("C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.24090.11-0\\MsMpEng.exe",
+     '"C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.24090.11-0\\MsMpEng.exe"', S32 + "services.exe"),
+    (S32 + "wuauclt.exe", '"C:\\Windows\\system32\\wuauclt.exe" /UpdateDeploymentProvider UpdateDeploymentProvider.dll /ClassId 7f6c /RunHandlerComServer', S32 + "svchost.exe"),
+    (S32 + "msiexec.exe", 'C:\\Windows\\system32\\msiexec.exe /i "C:\\Users\\lan\\Downloads\\7z2408-x64.msi" /qn', "C:\\Windows\\explorer.exe"),
+    (S32 + "cmd.exe", '"C:\\Windows\\system32\\cmd.exe" /c dir C:\\Users\\lan\\Documents', "C:\\Windows\\explorer.exe"),
+    (S32 + "cmd.exe", 'C:\\Windows\\system32\\cmd.exe /c "C:\\Scripts\\backup.bat"', S32 + "svchost.exe"),
+    (S32 + "cmd.exe", 'cmd.exe /c copy "\\\\fileserver\\share\\template.xlsx" C:\\Users\\lan\\Desktop\\', "C:\\Windows\\explorer.exe"),
+    (S32 + "whoami.exe", "whoami", S32 + "cmd.exe"),
+    (S32 + "whoami.exe", "whoami /groups", S32 + "cmd.exe"),
+    (S32 + "ipconfig.exe", "ipconfig /all", S32 + "cmd.exe"),
+    (S32 + "ipconfig.exe", "ipconfig /flushdns", S32 + "cmd.exe"),
+    (S32 + "PING.EXE", "ping -n 4 8.8.8.8", S32 + "cmd.exe"),
+    (S32 + "nslookup.exe", "nslookup intranet.company.local", S32 + "cmd.exe"),
+    (S32 + "net.exe", "net use Z: \\\\fileserver\\share /persistent:yes", S32 + "cmd.exe"),
+    (S32 + "net.exe", "net start", S32 + "cmd.exe"),
+    (S32 + "net.exe", "net time \\\\dc01", S32 + "cmd.exe"),
+    (S32 + "reg.exe", 'reg query "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion" /v ProductName', S32 + "cmd.exe"),
+    (S32 + "reg.exe", 'reg export HKCU\\Software\\MyApp C:\\Backup\\myapp.reg /y', S32 + "cmd.exe"),
+    (S32 + "reg.exe", 'reg add "HKCU\\Software\\MyApp\\Settings" /v Theme /t REG_SZ /d dark /f', S32 + "cmd.exe"),
+    (S32 + "sc.exe", "sc query wuauserv", S32 + "cmd.exe"),
+    (S32 + "sc.exe", "sc config Spooler start= auto", S32 + "cmd.exe"),
+    (S32 + "schtasks.exe", 'schtasks /query /fo LIST /v', S32 + "cmd.exe"),
+    (S32 + "schtasks.exe", 'schtasks /create /tn "Nightly Backup" /tr "C:\\Scripts\\backup.bat" /sc daily /st 23:00 /ru SYSTEM', S32 + "cmd.exe"),
+    (S32 + "tasklist.exe", "tasklist /svc", S32 + "cmd.exe"),
+    (S32 + "taskkill.exe", "taskkill /im notepad.exe /f", S32 + "cmd.exe"),
+    (S32 + "systeminfo.exe", "systeminfo", S32 + "cmd.exe"),
+    (S32 + "certutil.exe", 'certutil -hashfile "C:\\Users\\lan\\Downloads\\setup.exe" SHA256', S32 + "cmd.exe"),
+    (S32 + "certutil.exe", "certutil -store My", S32 + "cmd.exe"),
+    (S32 + "rundll32.exe", "rundll32.exe shell32.dll,Control_RunDLL desk.cpl", "C:\\Windows\\explorer.exe"),
+    (S32 + "rundll32.exe", 'rundll32.exe printui.dll,PrintUIEntry /in /n "\\\\printsrv\\HP-Tang2"', "C:\\Windows\\explorer.exe"),
+    (S32 + "regsvr32.exe", 'regsvr32 /s "C:\\Program Files\\MyApp\\myapp_shell.dll"', S32 + "msiexec.exe"),
+    (S32 + "wbem\\WMIC.exe", "wmic logicaldisk get caption,freespace,size", S32 + "cmd.exe"),
+    (S32 + "wbem\\WMIC.exe", "wmic os get caption,version", S32 + "cmd.exe"),
+    (S32 + "netsh.exe", "netsh wlan show interfaces", S32 + "cmd.exe"),
+    (S32 + "netsh.exe", 'netsh advfirewall firewall add rule name="Allow MyApp 8080" dir=in action=allow protocol=TCP localport=8080', S32 + "cmd.exe"),
+    (S32 + "Robocopy.exe", 'robocopy C:\\Data \\\\nas\\backup\\Data /MIR /R:2 /W:5 /LOG:C:\\Logs\\robocopy.log', S32 + "cmd.exe"),
+    (S32 + "xcopy.exe", "xcopy C:\\Projects D:\\Archive\\Projects /E /I /Y", S32 + "cmd.exe"),
+    (S32 + "gpupdate.exe", "gpupdate /force", S32 + "cmd.exe"),
+    (S32 + "gpresult.exe", "gpresult /r", S32 + "cmd.exe"),
+    (S32 + "icacls.exe", 'icacls "D:\\Shared\\KeToan" /grant "COMPANY\\ketoan:(OI)(CI)M"', S32 + "cmd.exe"),
+    (S32 + "findstr.exe", 'findstr /i "error" C:\\Logs\\app.log', S32 + "cmd.exe"),
+    (S32 + "bitsadmin.exe", "bitsadmin /list /allusers", S32 + "cmd.exe"),
+    (S32 + "wevtutil.exe", "wevtutil qe System /c:20 /rd:true /f:text", S32 + "cmd.exe"),
+    (S32 + "auditpol.exe", "auditpol /get /category:*", S32 + "cmd.exe"),
+    (S32 + "mstsc.exe", "mstsc /v:server01.company.local", "C:\\Windows\\explorer.exe"),
+    (S32 + "notepad.exe", '"C:\\Windows\\system32\\notepad.exe" C:\\Users\\lan\\Desktop\\ghichu.txt', "C:\\Windows\\explorer.exe"),
+    (PS, "powershell.exe -NoProfile -Command Get-Service | Where-Object {$_.Status -eq 'Running'}", S32 + "cmd.exe"),
+    (PS, 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\\Scripts\\Cleanup-TempFiles.ps1"', S32 + "svchost.exe"),
+    (PS, "powershell.exe -Command \"Get-ChildItem -Path C:\\Logs -Filter *.log | Where-Object LastWriteTime -lt (Get-Date).AddDays(-30) | Remove-Item\"", S32 + "svchost.exe"),
+    (PS, 'powershell.exe -Command "Install-Module -Name PSWindowsUpdate -Force -Scope CurrentUser"', "C:\\Windows\\explorer.exe"),
+    (PS, 'powershell.exe -Command "Invoke-WebRequest -Uri https://download.company.local/agent.msi -OutFile C:\\Temp\\agent.msi"', S32 + "cmd.exe"),
+    (PS, 'powershell.exe -Command "Get-WinEvent -LogName Security -MaxEvents 50"', S32 + "cmd.exe"),
+    (PS, 'powershell.exe -Command "Test-NetConnection server01 -Port 443"', S32 + "cmd.exe"),
+    ("C:\\Program Files\\Git\\cmd\\git.exe", "git pull origin main", S32 + "cmd.exe"),
+    ("C:\\Program Files\\Python312\\python.exe", "python manage.py runserver 0.0.0.0:8000", S32 + "cmd.exe"),
+    ("C:\\Program Files\\nodejs\\node.exe", "node C:\\Projects\\web\\node_modules\\vite\\bin\\vite.js build", S32 + "cmd.exe"),
+    ("C:\\Users\\lan\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+     '"C:\\Users\\lan\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe" C:\\Projects\\web', "C:\\Windows\\explorer.exe"),
+    (S32 + "curl.exe", "curl -L -o C:\\Temp\\report.pdf https://intranet.company.local/reports/2026-09.pdf", S32 + "cmd.exe"),
+    (S32 + "tar.exe", "tar -xf C:\\Users\\lan\\Downloads\\tools.zip -C C:\\Tools", S32 + "cmd.exe"),
+    # dừng / xóa / gỡ: thao tác quản trị hằng ngày, cũng là động từ kẻ tấn công dùng để tắt công cụ bảo vệ
+    (S32 + "sc.exe", "sc stop Spooler", S32 + "cmd.exe"),
+    (S32 + "sc.exe", "sc delete OldBackupAgent", S32 + "cmd.exe"),
+    (S32 + "net.exe", "net stop wuauserv", S32 + "cmd.exe"),
+    (S32 + "net.exe", "net localgroup administrators", S32 + "cmd.exe"),
+    (S32 + "net.exe", 'net user lan /domain', S32 + "cmd.exe"),
+    (S32 + "reg.exe", 'reg delete "HKCU\\Software\\MyApp\\Recent" /f', S32 + "cmd.exe"),
+    (S32 + "reg.exe", 'reg add "HKLM\\SOFTWARE\\Policies\\Google\\Chrome" /v HomepageLocation /t REG_SZ /d https://intranet.company.local /f', S32 + "cmd.exe"),
+    (S32 + "reg.exe", 'reg import C:\\Deploy\\printer-settings.reg', S32 + "cmd.exe"),
+    (S32 + "schtasks.exe", 'schtasks /run /tn "Nightly Backup"', S32 + "cmd.exe"),
+    (S32 + "schtasks.exe", 'schtasks /delete /tn "OldUpdater" /f', S32 + "cmd.exe"),
+    (S32 + "msiexec.exe", "msiexec /x {23170F69-40C1-2702-2408-000001000000} /qn", S32 + "cmd.exe"),
+    (S32 + "cmd.exe", 'cmd.exe /c del /q /s C:\\Windows\\Temp\\*.tmp', S32 + "svchost.exe"),
+    (S32 + "wevtutil.exe", "wevtutil epl Security C:\\Logs\\security-2026-09.evtx", S32 + "cmd.exe"),
+    (S32 + "vssadmin.exe", "vssadmin list shadows", S32 + "cmd.exe"),
+    (S32 + "bcdedit.exe", "bcdedit /enum", S32 + "cmd.exe"),
+    (S32 + "Dism.exe", "dism /online /cleanup-image /restorehealth", S32 + "cmd.exe"),
+    (S32 + "sfc.exe", "sfc /scannow", S32 + "cmd.exe"),
+    (S32 + "netsh.exe", "netsh advfirewall show allprofiles", S32 + "cmd.exe"),
+    (S32 + "wbem\\WMIC.exe", 'wmic process where name="notepad.exe" call terminate', S32 + "cmd.exe"),
+    (S32 + "takeown.exe", "takeown /f D:\\Shared\\Old /r /d y", S32 + "cmd.exe"),
+    (S32 + "attrib.exe", "attrib -r -h C:\\Users\\lan\\Desktop\\desktop.ini", S32 + "cmd.exe"),
+    (S32 + "where.exe", "where python", S32 + "cmd.exe"),
+    (PS, 'powershell.exe -Command "Stop-Service -Name Spooler -Force"', S32 + "cmd.exe"),
+    (PS, 'powershell.exe -Command "Set-ExecutionPolicy RemoteSigned -Scope CurrentUser"', "C:\\Windows\\explorer.exe"),
+    (PS, 'powershell.exe -Command "Get-MpComputerStatus | Select-Object AntivirusEnabled,RealTimeProtectionEnabled"', S32 + "cmd.exe"),
+    (PS, 'powershell.exe -Command "Set-ItemProperty -Path HKCU:\\Software\\MyApp -Name Theme -Value dark"', S32 + "cmd.exe"),
+    (PS, 'powershell.exe -Command "Get-ChildItem -Path C:\\ -Recurse -Filter *.config -ErrorAction SilentlyContinue"', S32 + "cmd.exe"),
+    (PS, 'powershell.exe -Command "Clear-RecycleBin -Force"', "C:\\Windows\\explorer.exe"),
+    ("C:\\Users\\lan\\AppData\\Local\\Microsoft\\WindowsApps\\winget.exe", "winget upgrade --all --silent", S32 + "cmd.exe"),
+    ("C:\\ProgramData\\chocolatey\\bin\\choco.exe", "choco install git -y", S32 + "cmd.exe"),
+    # lệnh bọc shell: trình cài đặt, GPO, công cụ quản trị gọi `cmd.exe /c ...` / `powershell -Command "& {...}"`
+    (S32 + "cmd.exe", '"C:\\Windows\\system32\\cmd.exe" /c "echo %DATE% %TIME% >> C:\\Logs\\login.log & net use"', S32 + "userinit.exe"),
+    (S32 + "cmd.exe", 'cmd.exe /c reg add "HKCU\\Software\\MyApp\\Settings" /v FirstRun /t REG_DWORD /d 0 /f', S32 + "msiexec.exe"),
+    (S32 + "cmd.exe", 'cmd.exe /c "timeout /t 2 & start "" "C:\\Program Files\\MyApp\\MyApp.exe""', "C:\\Program Files\\MyApp\\Updater.exe"),
+    (PS, 'powershell.exe -Command "& {Get-Service | Where-Object Status -eq Running | Export-Csv C:\\Temp\\services.csv}"', S32 + "cmd.exe"),
+    (PS, 'powershell.exe -NoProfile -Command "& {New-Item -Path HKCU:\\Software\\MyApp -Force; New-ItemProperty -Path HKCU:\\Software\\MyApp -Name Lang -Value vi -Force}"', S32 + "msiexec.exe"),
+    (PS, 'powershell.exe -Command "Start-Sleep -Seconds 2; Restart-Service -Name Spooler"', S32 + "cmd.exe"),
+]
+# (đường dẫn chương trình, dòng lệnh, chương trình cha)
+LINUX: list[tuple[str, str, str]] = [
+    ("/usr/lib/systemd/systemd", "/sbin/init splash", "swapper"),
+    ("/usr/sbin/cron", "/usr/sbin/cron -f", "systemd"),
+    ("/bin/sh", "/bin/sh -c cd / && run-parts --report /etc/cron.daily", "cron"),
+    ("/usr/bin/run-parts", "run-parts --report /etc/cron.daily", "sh"),
+    ("/usr/sbin/logrotate", "/usr/sbin/logrotate /etc/logrotate.conf", "sh"),
+    ("/usr/bin/apt-get", "apt-get update", "bash"),
+    ("/usr/bin/apt-get", "apt-get install -y nginx", "bash"),
+    ("/usr/bin/dpkg", "/usr/bin/dpkg --status-fd 41 --configure --pending", "apt-get"),
+    ("/usr/bin/python3", "/usr/bin/python3 /usr/bin/unattended-upgrade", "sh"),
+    ("/usr/sbin/sshd", "sshd: deploy [priv]", "sshd"),
+    ("/usr/bin/bash", "-bash", "sshd"),
+    ("/usr/bin/bash", "bash /opt/scripts/backup.sh", "cron"),
+    ("/usr/bin/sudo", "sudo systemctl restart nginx", "bash"),
+    ("/usr/bin/systemctl", "systemctl restart nginx", "sudo"),
+    ("/usr/bin/systemctl", "systemctl status ssh", "bash"),
+    ("/usr/bin/journalctl", "journalctl -u nginx --since today", "bash"),
+    ("/usr/bin/ps", "ps aux", "bash"),
+    ("/usr/bin/top", "top -b -n 1", "bash"),
+    ("/usr/bin/grep", "grep -r ERROR /var/log/app/", "bash"),
+    ("/usr/bin/grep", "grep -iE 'error|fatal|timeout' /var/log/syslog", "bash"),
+    ("/usr/bin/find", "find /var/log/app -name *.gz -mtime +30 -delete", "bash"),
+    ("/usr/bin/tar", "tar czf /backup/www-2026-10-01.tar.gz /var/www/html", "bash"),
+    ("/usr/bin/rsync", "rsync -az --delete /var/www/ backup@nas:/backup/www/", "bash"),
+    ("/usr/bin/scp", "scp /backup/db.sql.gz backup@nas:/backup/", "bash"),
+    ("/usr/bin/ssh", "ssh deploy@web02 uptime", "bash"),
+    ("/usr/bin/ssh-keygen", "ssh-keygen -t ed25519 -C deploy@web01", "bash"),
+    ("/usr/bin/curl", "curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /tmp/docker.gpg", "bash"),
+    ("/usr/bin/curl", "curl -s http://localhost:8080/health", "bash"),
+    ("/usr/bin/wget", "wget https://github.com/prometheus/node_exporter/releases/download/v1.8.2/node_exporter-1.8.2.linux-amd64.tar.gz", "bash"),
+    ("/usr/bin/git", "git pull origin main", "bash"),
+    ("/usr/bin/docker", "docker ps -a", "bash"),
+    ("/usr/bin/docker", "docker compose up -d", "bash"),
+    ("/usr/bin/kubectl", "kubectl get pods -n production", "bash"),
+    ("/usr/bin/python3", "python3 manage.py migrate", "bash"),
+    ("/usr/bin/node", "node /srv/app/server.js", "systemd"),
+    ("/usr/sbin/nginx", "nginx: worker process", "nginx"),
+    ("/usr/sbin/useradd", "useradd -m -s /bin/bash -G developers minh", "sudo"),
+    ("/usr/bin/passwd", "passwd minh", "sudo"),
+    ("/usr/sbin/usermod", "usermod -aG docker minh", "sudo"),
+    ("/usr/bin/chmod", "chmod 755 /opt/scripts/deploy.sh", "bash"),
+    ("/usr/bin/chown", "chown -R www-data:www-data /var/www/html", "sudo"),
+    ("/usr/bin/crontab", "crontab -l", "bash"),
+    ("/usr/bin/id", "id", "bash"),
+    ("/usr/bin/whoami", "whoami", "bash"),
+    ("/usr/bin/uname", "uname -a", "bash"),
+    ("/usr/bin/hostname", "hostname -I", "bash"),
+    ("/usr/sbin/ip", "ip addr show", "bash"),
+    ("/usr/bin/ss", "ss -tulpn", "bash"),
+    ("/usr/bin/df", "df -h", "bash"),
+    ("/usr/bin/cat", "cat /etc/os-release", "bash"),
+    ("/usr/bin/base64", "base64 -d /tmp/config.b64", "bash"),
+    ("/usr/bin/openssl", "openssl x509 -in /etc/ssl/certs/web.crt -noout -dates", "bash"),
+    ("/usr/sbin/iptables", "iptables -L -n", "sudo"),
+    ("/usr/bin/mysqldump", "mysqldump --single-transaction shop", "bash"),
+    ("/usr/bin/vim", "vim /etc/nginx/sites-available/default", "bash"),
+    ("/usr/bin/nano", "nano /etc/hosts", "sudo"),
+    ("/usr/bin/sed", "sed -i s/80/8080/ /etc/nginx/sites-available/default", "bash"),
+    ("/usr/bin/awk", "awk {print $1} /var/log/nginx/access.log", "bash"),
+    # dừng / tắt / xóa / tìm: thao tác quản trị hằng ngày, cũng là động từ kẻ tấn công dùng
+    ("/usr/bin/systemctl", "systemctl stop nginx", "sudo"),
+    ("/usr/bin/systemctl", "systemctl disable --now bluetooth", "sudo"),
+    ("/usr/bin/systemctl", "systemctl enable --now docker", "sudo"),
+    ("/usr/sbin/service", "service apache2 stop", "sudo"),
+    ("/usr/bin/kill", "kill -HUP 1432", "bash"),
+    ("/usr/bin/pkill", "pkill -f gunicorn", "bash"),
+    ("/usr/bin/rm", "rm -rf /tmp/build-cache", "bash"),
+    ("/usr/bin/find", "find / -name nginx.conf 2>/dev/null", "bash"),
+    ("/usr/bin/find", "find /home -type f -name *.log -size +100M", "sudo"),
+    ("/usr/bin/rsync", "rsync -avR /etc/nginx /etc/ssl backup@nas:/backup/web01/", "bash"),
+    ("/usr/sbin/swapoff", "swapoff -a", "sudo"),
+    ("/usr/bin/journalctl", "journalctl --vacuum-time=7d", "sudo"),
+    ("/usr/bin/truncate", "truncate -s 0 /var/log/app/debug.log", "sudo"),
+    ("/usr/bin/chattr", "chattr +i /etc/resolv.conf", "sudo"),
+    ("/usr/sbin/ufw", "ufw allow 443/tcp", "sudo"),
+    ("/usr/bin/ssh-copy-id", "ssh-copy-id deploy@web02", "bash"),
+    ("/usr/bin/nc", "nc -zv db01 5432", "bash"),
+    ("/usr/bin/python3", "python3 -m http.server 8000", "bash"),
+    ("/usr/bin/apt-get", "apt-get remove --purge -y apache2", "sudo"),
+    ("/usr/sbin/userdel", "userdel -r tempuser", "sudo"),
+    ("/usr/bin/crontab", "crontab /opt/scripts/crontab.txt", "bash"),
+    ("/usr/bin/zip", "zip -r /backup/docs-2026-09.zip /srv/docs", "bash"),
+    ("/usr/bin/gpg", "gpg --decrypt /backup/secrets.tar.gz.gpg", "bash"),
+    ("/usr/bin/aws", "aws s3 sync /backup s3://company-backup/web01/", "bash"),
+    ("/usr/bin/sudo", "sudo -l", "bash"),
+    ("/usr/bin/last", "last -n 20", "bash"),
+    ("/usr/bin/w", "w", "bash"),
+    # lệnh bọc shell: cron, systemd, docker, CI, script cài đặt gọi `sh -c '...'` / `bash -c "..."` liên tục
+    ("/bin/sh", "/bin/sh -c '[ -x /usr/lib/php/sessionclean ] && if [ ! -d /run/systemd/system ]; then /usr/lib/php/sessionclean; fi'", "cron"),
+    ("/bin/sh", "sh -c 'nginx -g \"daemon off;\"'", "containerd-shim"),
+    ("/bin/sh", "sh -c 'sleep 2; systemctl restart app'", "bash"),
+    ("/bin/bash", "bash -c 'source ~/.nvm/nvm.sh && npm ci && npm run build'", "bash"),
+    ("/bin/bash", "bash -c \"echo $(date) >> /var/log/deploy.log; git pull && docker compose up -d\"", "sshd"),
+    ("/bin/sh", "sh -c 'cat /etc/passwd | cut -d: -f1 | sort'", "bash"),
+    ("/bin/sh", "sh -c 'export AWS_REGION=ap-southeast-1; aws s3 ls'", "bash"),
+    ("/usr/bin/sleep", "sleep 30", "sh"),
+    ("/usr/sbin/swapon", "swapon -a", "sudo"),
+]
+
+
+# ----------------------------------------------------------------------------- hoạt động của CON NGƯỜI (thêm 8/10)
+# Tập nền ghi thật (Splunk / OTRF, golden.scenario_background) gần như chỉ là tiếng ồn máy: agent, dịch vụ hệ thống. Thiếu
+# thao tác của người dùng / quản trị viên / lập trình viên, nên rule rộng vẫn lọt (chạy thử 8/10: `hh.exe` đứng riêng,
+# `cmd /c` + `msiexec`, thư mục Startup, `sh` + `2>/dev/null`, `raw.githubusercontent.com`) và không thể nới luật từ trơn
+# (`Test-Path`, `Copy-Item` vắng mặt trong nền chỉ vì máy lab không có người). Viết theo LOẠI hoạt động, không theo rule.
+PF = "C:\\Program Files\\"
+WINDOWS += [
+    # cài đặt / gỡ / cập nhật phần mềm (GPO, SCCM, người dùng tự cài)
+    (S32 + "msiexec.exe", "C:\\Windows\\system32\\msiexec.exe /V", S32 + "services.exe"),
+    (S32 + "msiexec.exe", 'msiexec.exe /i "\\\\fileserver\\deploy\\GoogleChromeStandaloneEnterprise64.msi" /qn /norestart', S32 + "cmd.exe"),
+    (S32 + "cmd.exe", 'cmd.exe /c msiexec /i "C:\\Windows\\ccmcache\\4\\FortiClient.msi" /qn REBOOT=ReallySuppress', "C:\\Windows\\CCM\\CcmExec.exe"),
+    (S32 + "msiexec.exe", "MsiExec.exe /X{23170F69-40C1-2702-2408-000001000000} /qn", S32 + "cmd.exe"),
+    (S32 + "regsvr32.exe", 'regsvr32.exe /s "C:\\Program Files\\Common Files\\Adobe\\Acrobat\\ActiveX\\AcroPDF.dll"', S32 + "msiexec.exe"),
+    (S32 + "reg.exe", 'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v Teams /t REG_SZ /d "C:\\Users\\lan\\AppData\\Local\\Microsoft\\Teams\\Update.exe --processStart Teams.exe" /f',
+     "C:\\Users\\lan\\AppData\\Local\\Microsoft\\Teams\\Update.exe"),
+    (PF + "Zoom\\bin\\Zoom.exe", '"C:\\Program Files\\Zoom\\bin\\Zoom.exe" --autostart', "C:\\Windows\\explorer.exe"),
+    ("C:\\Users\\lan\\AppData\\Local\\Microsoft\\OneDrive\\OneDrive.exe", "\"C:\\Users\\lan\\AppData\\Local\\Microsoft\\OneDrive\\OneDrive.exe\" /background", "C:\\Windows\\explorer.exe"),
+    (S32 + "cmd.exe", 'C:\\Windows\\system32\\cmd.exe /c ""C:\\Users\\lan\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\map-drives.cmd" "', "C:\\Windows\\explorer.exe"),
+    (S32 + "net.exe", "net use Z: \\\\fileserver\\share /persistent:yes", S32 + "cmd.exe"),
+    # trợ giúp / tài liệu / in ấn
+    ("C:\\Windows\\hh.exe", '"C:\\Windows\\hh.exe" "C:\\Program Files\\Notepad++\\help\\notepad++.chm"', "C:\\Windows\\explorer.exe"),
+    ("C:\\Windows\\hh.exe", "hh.exe mk:@MSITStore:C:\\Program%20Files\\PuTTY\\putty.chm::/index.html", PF + "PuTTY\\putty.exe"),
+    (S32 + "rundll32.exe", "rundll32.exe printui.dll,PrintUIEntry /in /n \\\\printsrv\\HP-Floor2", S32 + "cmd.exe"),
+    # lập trình viên
+    (S32 + "curl.exe", "curl.exe -L -o C:\\Users\\dev\\Downloads\\jq.exe https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-windows-amd64.exe", S32 + "cmd.exe"),
+    (PS, 'powershell.exe -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/company/devtools/main/setup.ps1 -OutFile setup.ps1"', S32 + "cmd.exe"),
+    (PF + "Git\\cmd\\git.exe", "git.exe clone https://github.com/company/webapp.git", PS),
+    ("C:\\Users\\dev\\AppData\\Local\\Programs\\Python\\Python312\\python.exe", "python.exe -m pip install -r requirements.txt", PS),
+    (PF + "nodejs\\node.exe", '"C:\\Program Files\\nodejs\\node.exe" "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js" install', S32 + "cmd.exe"),
+    (S32 + "cmd.exe", 'cmd.exe /c "dotnet build -c Release && dotnet test"', PF + "Microsoft Visual Studio\\2022\\Community\\Common7\\IDE\\devenv.exe"),
+    # quản trị PowerShell / AD / helpdesk
+    (PS, 'powershell.exe -NoProfile -Command "if (Test-Path C:\\Backup\\daily.zip) { Copy-Item C:\\Backup\\daily.zip \\\\nas\\backup\\ }"', S32 + "svchost.exe"),
+    (PS, 'powershell.exe -Command "Set-Content -Path C:\\Scripts\\last-run.txt -Value (Get-Date)"', S32 + "svchost.exe"),
+    (PS, 'powershell.exe -Command "Get-Process | Sort-Object CPU -Descending | Select-Object -First 10"', "C:\\Windows\\explorer.exe"),
+    (PS, 'powershell.exe -Command "Invoke-Command -ComputerName SRV01 -ScriptBlock { Get-Service W3SVC }"', "C:\\Windows\\explorer.exe"),
+    (PS, 'powershell.exe -Command "Get-ADUser -Identity lan -Properties LastLogonDate,LockedOut"', "C:\\Windows\\explorer.exe"),
+    (PS, 'powershell.exe -Command "Get-ADComputer -Filter * -SearchBase \'OU=Workstations,DC=corp,DC=local\' | Measure-Object"', "C:\\Windows\\explorer.exe"),
+    (PS, 'powershell.exe -Command "Get-MpComputerStatus | Select AntivirusEnabled,AntivirusSignatureLastUpdated"', S32 + "cmd.exe"),
+    (PS, 'powershell.exe -ExecutionPolicy Bypass -File "\\\\corp.local\\NETLOGON\\inventory.ps1"', S32 + "svchost.exe"),
+    (S32 + "net.exe", "net localgroup administrators", S32 + "cmd.exe"),
+    (S32 + "net.exe", "net user lan /domain", S32 + "cmd.exe"),
+    (S32 + "wbem\\WMIC.exe", "wmic logicaldisk get caption,size,freespace", S32 + "cmd.exe"),
+    (S32 + "wbem\\WMIC.exe", "wmic product get name,version", S32 + "cmd.exe"),
+    (S32 + "vssadmin.exe", "vssadmin list shadows", S32 + "cmd.exe"),
+    (S32 + "wbadmin.exe", "wbadmin get versions", S32 + "cmd.exe"),
+    (S32 + "tasklist.exe", "tasklist /v /fi \"IMAGENAME eq excel.exe\"", S32 + "cmd.exe"),
+    (S32 + "taskkill.exe", "taskkill /im excel.exe /f", S32 + "cmd.exe"),
+    (S32 + "systeminfo.exe", "systeminfo", S32 + "cmd.exe"),
+    (S32 + "ipconfig.exe", "ipconfig /all", S32 + "cmd.exe"),
+    (S32 + "nslookup.exe", "nslookup intranet.corp.local", S32 + "cmd.exe"),
+    (S32 + "gpupdate.exe", "gpupdate /force", S32 + "cmd.exe"),
+    (S32 + "robocopy.exe", "robocopy C:\\Users\\lan\\Documents \\\\nas\\home\\lan /MIR /R:2 /W:5", S32 + "cmd.exe"),
+    (S32 + "schtasks.exe", 'schtasks /run /tn "\\Microsoft\\Windows\\Defrag\\ScheduledDefrag"', S32 + "cmd.exe"),
+    (S32 + "sc.exe", "sc query wuauserv", S32 + "cmd.exe"),
+    (S32 + "bcdedit.exe", "bcdedit /enum", S32 + "cmd.exe"),
+    (S32 + "icacls.exe", 'icacls "D:\\Share\\Ketoan" /grant "CORP\\ketoan":(OI)(CI)M', S32 + "cmd.exe"),
+    (S32 + "cmd.exe", 'cmd.exe /c copy "\\\\fileserver\\templates\\Bao gia.xlsx" "C:\\Users\\lan\\Desktop\\"', "C:\\Windows\\explorer.exe"),
+]
+LINUX += [
+    # cài đặt / lập trình viên
+    ("/bin/bash", "bash -c 'curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash'", "bash"),
+    ("/bin/sh", "sh -c 'wget -qO- https://get.docker.com | sh'", "bash"),
+    ("/usr/bin/curl", "curl -LO https://raw.githubusercontent.com/company/infra/main/scripts/healthcheck.sh", "bash"),
+    ("/usr/bin/pip3", "pip3 install --user -r requirements.txt", "bash"),
+    ("/usr/bin/npm", "npm install --save-dev eslint", "bash"),
+    ("/usr/bin/make", "make -j4", "bash"),
+    ("/usr/bin/gcc", "gcc -O2 -o tool tool.c", "make"),
+    ("/usr/bin/git", "git clone https://github.com/company/backend.git", "bash"),
+    ("/usr/bin/grep", "grep -rn password /srv/app/config/ --include=*.yml", "bash"),
+    ("/usr/bin/grep", "grep docker /home/minh/.bash_history", "bash"),
+    ("/usr/bin/cat", "cat /home/minh/.aws/config", "bash"),
+    ("/usr/bin/aws", "aws configure list", "bash"),
+    ("/usr/bin/ssh-add", "ssh-add /home/minh/.ssh/id_ed25519", "bash"),
+    ("/usr/bin/env", "env", "bash"),
+    # script cron / systemd với chuyển hướng đầu ra
+    ("/bin/sh", "/bin/sh -c '/usr/local/bin/backup.sh > /dev/null 2>&1'", "cron"),
+    ("/bin/sh", "sh -c 'apt-get update -qq 2>/dev/null && apt-get -y upgrade'", "cron"),
+    ("/bin/sh", "sh -c 'nohup python3 /srv/app/worker.py > /var/log/worker.log 2>&1 &'", "bash"),
+    ("/bin/sh", "sh -c 'find /tmp -type f -atime +7 -delete 2>/dev/null'", "cron"),
+    # kiểm tra bảo mật / quản trị hệ thống
+    ("/usr/bin/find", "find / -perm -4000 -type f 2>/dev/null", "bash"),
+    ("/usr/sbin/lynis", "lynis audit system --quick", "sudo"),
+    ("/usr/sbin/visudo", "visudo -c", "sudo"),
+    ("/usr/bin/ls", "ls -la /etc/sudoers.d/", "sudo"),
+    ("/usr/bin/getent", "getent passwd deploy", "bash"),
+    ("/usr/bin/sudo", "sudo -u postgres psql -c 'select version()'", "bash"),
+    ("/usr/bin/sudo", "sudo apt-get upgrade -y", "bash"),
+    ("/usr/sbin/setcap", "setcap cap_net_bind_service=+ep /usr/local/bin/caddy", "sudo"),
+    ("/usr/sbin/modprobe", "modprobe br_netfilter", "sudo"),
+    ("/usr/sbin/lsmod", "lsmod", "bash"),
+    ("/usr/sbin/depmod", "depmod -a", "dpkg"),
+    ("/usr/bin/chmod", "chmod +x /opt/scripts/rotate-logs.sh", "bash"),
+    ("/usr/bin/tar", "tar czf - /etc | ssh backup@nas 'cat > /backup/etc.tgz'", "bash"),
+    ("/usr/bin/base64", "base64 -w0 /etc/ssl/certs/web.crt", "bash"),
+    ("/usr/bin/crontab", "crontab -e", "bash"),
+    ("/usr/bin/journalctl", "journalctl -k --since -1h", "sudo"),
+    ("/usr/bin/docker", "docker exec -it web01 /bin/sh", "bash"),
+    ("/usr/bin/ssh", "ssh -i /home/minh/.ssh/id_ed25519 deploy@web02", "bash"),
+]
+
+
+def _windows_raw(i: int, image: str, cmd: str, parent: str) -> dict[str, Any]:
+    return {"timestamp": f"2026-03-01T08:{i // 60 % 60:02d}:{i % 60:02d}+00:00", "agent_id": "baseline-win",
+            "hostname": "pc-ketoan-01", "os": "windows", "source": "eventlog", "event_type": "windows_event",
+            "data": {"event_id": 1, "channel": "Microsoft-Windows-Sysmon/Operational", "provider": "Microsoft-Windows-Sysmon",
+                     "computer": "pc-ketoan-01", "record_id": i,
+                     "fields": {"Image": image, "CommandLine": cmd, "ParentImage": parent, "User": "COMPANY\\lan"}}}
+
+
+def _linux_raw(i: int, exe: str, cmd: str, parent: str) -> dict[str, Any]:
+    return {"timestamp": f"2026-03-01T09:{i // 60 % 60:02d}:{i % 60:02d}+00:00", "agent_id": "baseline-linux",
+            "hostname": "web01", "os": "linux", "source": "process", "event_type": "process_creation",
+            "data": {"pid": 2000 + i, "ppid": 1000, "uid": 1000, "name": exe.rsplit("/", 1)[-1], "executable": exe,
+                     "command_line": cmd, "parent_name": parent}}
+
+
+_DOCS: dict[str, list[Doc]] = {}
+
+
+def ordinary_processes(platform: str) -> list[Doc]:
+    """Event tiến trình bình thường (đã chuẩn hóa) của 'windows' hoặc 'linux'."""
+    if platform not in _DOCS:
+        rows = WINDOWS if platform == "windows" else LINUX
+        build = _windows_raw if platform == "windows" else _linux_raw
+        _DOCS[platform] = [normalize(build(i, *r)) for i, r in enumerate(rows)]
+    return _DOCS[platform]
+
+
+def platform_of(doc: Doc) -> str:
+    """windows / linux của một event tiến trình (Sysmon -> windows, process / auditd -> linux)."""
+    mod = str((doc.get("event") or {}).get("module") or "")
+    return "windows" if mod in ("windows", "sysmon") or (doc.get("winlog") or {}) else "linux"
