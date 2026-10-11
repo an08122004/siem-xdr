@@ -74,6 +74,8 @@ ML_BOOTSTRAP_SYNTHETIC = _bool("ML_BOOTSTRAP_SYNTHETIC", True)
 # SOAR
 SOAR_AUTO_RESPONSE = _bool("SOAR_AUTO_RESPONSE", True)
 SOAR_WHITELIST = [c.strip() for c in os.getenv("SOAR_WHITELIST", "127.0.0.0/8").split(",") if c.strip()]
+# tối đa N lệnh kill tự động trên mỗi agent trong 60 giây, quá thì để analyst quyết định; 0 = không giới hạn
+SOAR_MAX_AUTO_KILLS = int(os.getenv("SOAR_MAX_AUTO_KILLS", "10"))
 NOTIFY_WEBHOOK_URL = os.getenv("NOTIFY_WEBHOOK_URL", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")

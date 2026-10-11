@@ -405,7 +405,27 @@ def test_soar_auto_kill_only_by_pid(monkeypatch):
     assert soar.run_step({"action": "kill_process"}, no_pid)["status"] == "skipped"
     with_pid = {"alert": {"id": "b"}, "agent": {"id": "001"}, "process": {"name": "sh", "pid": 4242}}
     assert soar.run_step({"action": "kill_process"}, with_pid)["status"] == "queued"
-    assert created == [("001", "kill_process", {"pid": 4242})]
+    # kèm tên trong alert để agent không kill PID đã được cấp lại; tên có ký tự lạ thì không gửi (kill như trước)
+    odd_name = {"alert": {"id": "c"}, "agent": {"id": "001"}, "process": {"name": "php-fpm: pool", "pid": 77}}
+    assert soar.run_step({"action": "kill_process"}, odd_name)["status"] == "queued"
+    assert created == [("001", "kill_process", {"pid": 4242, "expect": "sh"}), ("001", "kill_process", {"pid": 77})]
+
+
+def test_soar_auto_kill_rate_limited_per_agent(monkeypatch):
+    """Alert giả / báo nhầm hàng loạt không được biến SOAR thành công cụ kill dần mọi tiến trình trên một máy."""
+    from siem.soar.engine import AUTO_KILL_WINDOW_SECONDS, Soar
+    created, t = [], [0.0]
+    monkeypatch.setattr(store, "create_action", lambda es, aid, typ, p, **kw: created.append(aid) or {"id": "x"})
+    soar = Soar(FakeES(), [], whitelist=[], max_auto_kills=2, clock=lambda: t[0])
+    kill = lambda agent, pid: soar.run_step({"action": "kill_process"}, {   # noqa: E731
+        "alert": {"id": f"a{pid}"}, "agent": {"id": agent}, "process": {"name": "sh", "pid": pid}})
+    assert [kill("001", p)["status"] for p in (11, 12, 13)] == ["queued", "queued", "skipped"]
+    assert "analyst" in kill("001", 14)["detail"]
+    assert kill("002", 21)["status"] == "queued"                            # agent khác: đếm riêng
+    t[0] = AUTO_KILL_WINDOW_SECONDS + 1
+    assert kill("001", 15)["status"] == "queued"                            # hết cửa sổ: tự kill lại được
+    assert created == ["001", "001", "002", "001"]
+    assert Soar(FakeES(), [], whitelist=[]).max_auto_kills == 0             # mặc định không giới hạn
 
 
 def _es_match(doc, q):
@@ -630,7 +650,11 @@ def test_notifier_cooldown_merges_same_rule_and_entity(monkeypatch):
 def test_ar_arguments_validation():
     ok = soar_wazuh.ar_arguments({"id": "x", "type": "kill_process", "params": {"name": "xmrig"}})
     assert ok == ["kill_process", "xmrig", "x"]
+    ok = soar_wazuh.ar_arguments({"id": "x", "type": "kill_process", "params": {"pid": 947, "expect": "sh"}})
+    assert ok == ["kill_process", "947", "x", "sh"]                         # tham số 4: tên tiến trình mong đợi
     for bad in ({"type": "kill_process", "params": {"name": "a b"}}, {"type": "block_ip", "params": {"ip": "$(id)"}},
-                {"type": "format_disk", "params": {}}):
+                {"type": "format_disk", "params": {}},
+                {"type": "kill_process", "params": {"pid": 947, "expect": "sh; reboot"}},
+                {"type": "kill_process", "params": {"name": "xmrig", "expect": "xmrig"}}):   # expect chỉ đi với PID
         with pytest.raises(ValueError):
             soar_wazuh.ar_arguments({"id": "x", **bad})

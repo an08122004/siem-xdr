@@ -29,6 +29,7 @@ import yaml
 
 from .. import settings, store
 from .cases import CasePlaybooks
+from .wazuh import PROC_NAME
 from ..detection.rules import SEVERITY_SCORE
 from ..pipeline.normalize import get
 
@@ -41,6 +42,8 @@ OPEN_CASE_STATUSES = ("open", "in_progress", "contained")
 BLOCK_TRUST_MINUTES = 10
 # Lệnh gỡ chặn (khi hết hạn) chưa thành công sau N phút -> tạo lại (xem Soar.housekeeping)
 REVERT_RETRY_MINUTES = 15
+# Cửa sổ đếm giới hạn số lệnh kill tự động trên mỗi agent (xem Soar._allow_kill)
+AUTO_KILL_WINDOW_SECONDS = 60
 # Bước chỉ chạy 1 lần cho mỗi alert dù nhiều playbook cùng khớp (vd playbook riêng + "Cảnh báo chung mức critical")
 ONCE_PER_ALERT = ("notify", "create_case")
 CASE_MAX_ALERT_IDS = 500
@@ -103,13 +106,16 @@ def load_playbooks(path: Path) -> list[Playbook]:
 
 class Soar:
     def __init__(self, es, playbooks: list[Playbook], auto_response: bool = True,
-                 whitelist: list[str] | None = None, notifier=None, case_playbooks: CasePlaybooks | None = None):
+                 whitelist: list[str] | None = None, notifier=None, case_playbooks: CasePlaybooks | None = None,
+                 max_auto_kills: int = 0, clock=time.monotonic):
         self.es = es
         self.playbooks = playbooks
         self.case_playbooks = case_playbooks or CasePlaybooks(None)
         self.auto_response = auto_response
         self.whitelist = [ipaddress.ip_network(c, strict=False) for c in (whitelist or [])]
         self.notifier = notifier or Notifier()
+        self.max_auto_kills, self.clock = max_auto_kills, clock      # 0 = không giới hạn
+        self._kills: dict[str, list[float]] = {}                     # agent -> thời điểm các lần tự kill gần đây
 
     # ------------------------------------------------------------------
     def handle(self, alert: dict[str, Any]) -> list[dict[str, Any]]:
@@ -162,11 +168,31 @@ class Soar:
             pid = get(alert, "process.pid")
             if not pid:
                 return {"status": "skipped", "detail": "alert không có PID, không tự kill theo tên tiến trình"}
-            a = store.create_action(self.es, agent_id, "kill_process", {"pid": pid},
+            if not self._allow_kill(agent_id):
+                return {"status": "skipped", "detail": f"đã tự kill {self.max_auto_kills} lần trên agent {agent_id} trong "
+                                                       f"{AUTO_KILL_WINDOW_SECONDS} giây qua, lệnh tiếp theo để analyst quyết định"}
+            params: dict[str, Any] = {"pid": pid}
+            # tên tiến trình trong alert: script trên agent không kill nếu PID đã được cấp lại cho tiến trình khác
+            # (tên có ký tự lạ thì không gửi, script kill như trước)
+            if PROC_NAME.match(str(get(alert, "process.name") or "")):
+                params["expect"] = get(alert, "process.name")
+            a = store.create_action(self.es, agent_id, "kill_process", params,
                                     alert_id=get(alert, "alert.id"), source="soar")
             return {"status": "queued", "action_id": a["id"], "agent_id": agent_id, "target": str(pid)}
         a = store.create_action(self.es, agent_id, "isolate_host", {}, alert_id=get(alert, "alert.id"), source="soar")
         return {"status": "queued", "action_id": a["id"], "agent_id": agent_id}
+
+    def _allow_kill(self, agent_id: str) -> bool:
+        """Tối đa `max_auto_kills` lệnh kill tự động trên một agent trong AUTO_KILL_WINDOW_SECONDS giây. Chặn trường hợp
+        alert giả / báo nhầm hàng loạt biến SOAR thành công cụ kill dần mọi tiến trình trên máy (vd lỗ hổng tiêm log sửa
+        11/10/2026: mỗi request một PID). Alert vượt giới hạn vẫn được thông báo và gom case."""
+        if self.max_auto_kills <= 0:
+            return True
+        now = self.clock()
+        recent = [t for t in self._kills.get(agent_id, []) if now - t < AUTO_KILL_WINDOW_SECONDS]
+        allowed = len(recent) < self.max_auto_kills
+        self._kills[agent_id] = recent + [now] if allowed else recent
+        return allowed
 
     def block_ip(self, step: dict[str, Any], alert: dict[str, Any]) -> dict[str, Any]:
         ip = get(alert, step.get("target", "source.ip"))

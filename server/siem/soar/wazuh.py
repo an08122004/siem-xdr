@@ -31,7 +31,7 @@ from .. import settings, store
 log = logging.getLogger("soar.wazuh")
 
 _IP = re.compile(r"^[0-9A-Fa-f:.]{2,45}$")
-_PROC = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+PROC_NAME = re.compile(r"^[A-Za-z0-9._-]{1,64}$")     # tên tiến trình được phép đưa xuống script trên agent
 
 
 class WazuhError(RuntimeError):
@@ -101,21 +101,28 @@ def ar_script(platform: str | None) -> str:
 
 
 def ar_arguments(action: dict[str, Any]) -> list[str]:
-    """Tham số cho script siem-xdr: [loại, đích, action_id]. Kiểm tra chặt ở đây VÀ trong script trên agent."""
+    """Tham số cho script siem-xdr: [loại, đích, action_id] và, với kill theo PID của SOAR, [tên tiến trình mong đợi]
+    (script không kill nếu PID đã thuộc tiến trình khác; script cũ chỉ đọc 3 tham số đầu nên vẫn chạy được).
+    Kiểm tra chặt ở đây VÀ trong script trên agent."""
     typ, params = action["type"], action.get("params") or {}
+    extra: list[str] = []
     if typ in ("block_ip", "unblock_ip"):
         target = str(params.get("ip") or "")
         if not _IP.match(target):
             raise ValueError(f"IP không hợp lệ: {target!r}")
     elif typ == "kill_process":
         target = str(params.get("pid") or params.get("name") or "")
-        if not (target.isdigit() or _PROC.match(target)):
+        if not (target.isdigit() or PROC_NAME.match(target)):
             raise ValueError(f"PID / tên tiến trình không hợp lệ: {target!r}")
+        if expect := params.get("expect"):
+            if not (target.isdigit() and PROC_NAME.match(str(expect))):
+                raise ValueError(f"tên tiến trình mong đợi không hợp lệ: {expect!r}")
+            extra = [str(expect)]
     elif typ in ("isolate_host", "unisolate_host"):
         target = "-"
     else:
         raise ValueError(f"loại lệnh không hỗ trợ: {typ}")
-    return [typ, target, action["id"]]
+    return [typ, target, action["id"], *extra]
 
 
 class Responder:

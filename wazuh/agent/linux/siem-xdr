@@ -6,7 +6,7 @@
 #
 #   block_ip <ip> <id>        chặn IP vào máy (iptables/ip6tables, chain INPUT)
 #   unblock_ip <ip> <id>      gỡ chặn
-#   kill_process <pid|tên> <id>
+#   kill_process <pid|tên> <id> [tên mong đợi]   (SOAR gửi tên trong alert: PID đã thuộc tiến trình khác thì không kill)
 #   isolate_host - <id>       cô lập máy: chỉ còn nói chuyện được với wazuh-manager (để vẫn nhận lệnh gỡ)
 #   unisolate_host - <id>
 #
@@ -25,7 +25,7 @@ set -f   # không mở rộng ký tự đại diện khi tách tham số (dữ l
 # shellcheck disable=SC2086
 set -- $ARGS
 set +f
-TYPE=${1:-}; TARGET=${2:-}; ID=${3:-}
+TYPE=${1:-}; TARGET=${2:-}; ID=${3:-}; EXPECT=${4:-}
 COMMAND=$(printf '%s' "$INPUT" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p')
 
 log() {  # log <success|failed> <mô tả>
@@ -56,6 +56,21 @@ tree() {  # PID và mọi tiến trình con cháu (theo PPid trong /proc)
     echo "$1"
 }
 
+protected() {  # protected <tên>: không bao giờ kill (Wazuh agent, init / systemd, sshd là kênh quản trị, docker)
+    case "$1" in wazuh-*|init|systemd|systemd-*|sshd|sshd-session|sshd-auth|dockerd|containerd*|docker-init) return 0 ;; esac
+    return 1
+}
+
+comm_of() {  # tên tiến trình (comm, tối đa 15 ký tự), ký tự lạ thành "_" (siem-procs cũng đổi khoảng trắng thành "_")
+    tr -d '\n' 2>/dev/null < "/proc/$1/comm" | tr -c 'A-Za-z0-9._:/@+-' '_'
+}
+
+alive() {  # alive <pid>: còn chạy (zombie = đã chết, chỉ chờ tiến trình cha thu dọn)
+    s=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+    s=${s##*) }
+    [ "${s%% *}" != Z ]
+}
+
 ipt() {  # chọn iptables / ip6tables theo địa chỉ
     case "$1" in *:*) echo ip6tables ;; *) echo iptables ;; esac
 }
@@ -79,17 +94,32 @@ kill_process)
     if printf '%s' "$TARGET" | grep -Eq '^[0-9]+$'; then
         [ "$TARGET" -gt 1 ] || fail "không kill PID $TARGET"
         # tiến trình đã tự kết thúc (vd shell chạy rất ngắn) -> mục tiêu "không còn chạy" đã đạt, không phải lỗi
-        [ -d "/proc/$TARGET" ] || { log success "PID $TARGET đã kết thúc trước khi kill, không cần xử lý"; exit 0; }
-        NAME=$(cat "/proc/$TARGET/comm" 2>/dev/null)
-        case "$NAME" in wazuh-*|systemd|init|sshd) fail "từ chối kill tiến trình hệ thống $NAME" ;; esac
-        # kill cả cây tiến trình (vd shell của kẻ tấn công và lệnh nó đang chạy), gom hết trước rồi mới kill
-        PIDS=$(tree "$TARGET")
+        alive "$TARGET" || { log success "PID $TARGET đã kết thúc trước khi kill, không cần xử lý"; exit 0; }
+        NAME=$(comm_of "$TARGET")
+        protected "$NAME" && fail "từ chối kill tiến trình hệ thống $NAME"
+        if [ -n "$EXPECT" ]; then   # comm chỉ giữ 15 ký tự đầu của tên
+            printf '%s' "$EXPECT" | grep -Eq '^[A-Za-z0-9._-]{1,64}$' || fail "tên tiến trình mong đợi không hợp lệ"
+            [ "$(printf '%s' "$NAME" | cut -c1-15)" = "$(printf '%s' "$EXPECT" | cut -c1-15)" ] \
+                || fail "không kill: PID $TARGET hiện là $NAME, không phải $EXPECT như trong alert (PID có thể đã được cấp lại)"
+        fi
+        # kill cả cây tiến trình (vd shell của kẻ tấn công và lệnh nó đang chạy), gom hết trước rồi mới kill;
+        # tiến trình hệ thống nằm trong cây (vd dịch vụ do shell đó khởi động lại) thì giữ nguyên
+        PIDS=""; KEPT=0
+        for p in $(tree "$TARGET"); do
+            if [ "$p" != "$TARGET" ] && protected "$(comm_of "$p")"; then KEPT=$((KEPT + 1)); continue; fi
+            PIDS="$PIDS $p"
+        done
         # shellcheck disable=SC2086
-        kill -9 $PIDS 2>/dev/null && log success "đã kill PID $TARGET ($NAME) và $(($(echo $PIDS | wc -w) - 1)) tiến trình con" \
-            || fail "kill PID $TARGET thất bại"
+        kill -9 $PIDS 2>/dev/null
+        # tiến trình con tự thoát trước làm `kill` báo lỗi: chỉ thất bại khi chính PID mục tiêu vẫn còn chạy
+        i=0; while alive "$TARGET" && [ $i -lt 20 ]; do sleep 0.1; i=$((i + 1)); done
+        alive "$TARGET" && fail "kill PID $TARGET thất bại"
+        # shellcheck disable=SC2086
+        N=$(($(echo $PIDS | wc -w) - 1))
+        log success "đã kill PID $TARGET ($NAME) và $N tiến trình con$([ "$KEPT" -gt 0 ] && echo ", giữ $KEPT tiến trình hệ thống")"
     else
         printf '%s' "$TARGET" | grep -Eq '^[A-Za-z0-9._-]{1,64}$' || fail "tên tiến trình không hợp lệ"
-        case "$TARGET" in wazuh-*|systemd|init|sshd) fail "từ chối kill tiến trình hệ thống $TARGET" ;; esac
+        protected "$TARGET" && fail "từ chối kill tiến trình hệ thống $TARGET"
         pkill -9 -x "$TARGET" 2>/dev/null && log success "đã kill mọi tiến trình $TARGET" || fail "không có tiến trình $TARGET"
     fi
     ;;

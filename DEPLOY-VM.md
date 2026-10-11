@@ -295,9 +295,9 @@ auditpol /set /subcategory:"Process Creation" /success:enable
 reg add "HKLM\Software\Microsoft\Windows\CurrentVersion\Policies\System\Audit" /v ProcessCreationIncludeCmdLine_Enabled /t REG_DWORD /d 1 /f
 ```
 
-Cô lập máy dùng Windows Firewall: giữ dịch vụ *Windows Defender Firewall* bật. **Script Windows chưa từng được chạy thử
-trên máy thật** (README mục 1): thử *Cô lập máy* khi đang mở được màn hình VM (console của hypervisor) để tự gỡ nếu cần,
-và chụp snapshot trước.
+Cô lập máy dùng Windows Firewall: giữ dịch vụ *Windows Defender Firewall* bật. Script Windows mới được chạy thử nhánh kill
+tiến trình; **chặn IP và cô lập máy chưa từng chạy trên máy thật** (README mục 1): thử *Cô lập máy* khi đang mở được màn
+hình VM (console của hypervisor) để tự gỡ nếu cần, và chụp snapshot trước.
 
 ## 5. Firewall / Suricata (tùy chọn)
 

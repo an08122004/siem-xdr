@@ -2,7 +2,8 @@
 # SOAR gửi: PUT /active-response {"command": "!siem-xdr.cmd", "arguments": [<loại>, <đích>, <action_id>]}
 #
 #   block_ip / unblock_ip <ip>      Windows Firewall, rule "siem-xdr block <ip>" (chặn chiều vào)
-#   kill_process <pid|tên>          kill cả cây tiến trình; từ chối tiến trình hệ thống và Wazuh agent
+#   kill_process <pid|tên> [tên]    kill cả cây tiến trình; từ chối tiến trình hệ thống và Wazuh agent; SOAR gửi kèm
+#                                   tên trong alert: PID đã thuộc tiến trình khác thì không kill
 #   isolate_host / unisolate_host   chặn mọi địa chỉ TRỪ wazuh-manager (rule block với dải bù của IP manager,
 #                                   vì trong Windows Firewall rule block luôn thắng rule allow)
 # Kết quả ghi vào active-responses.log (agent mặc định gửi file này về), cùng định dạng với bản Linux:
@@ -14,7 +15,7 @@ $Conf = Join-Path $AgentDir 'ossec.conf'
 
 $msg = [Console]::In.ReadLine() | ConvertFrom-Json
 $argv = @($msg.parameters.extra_args)
-$Type, $Target, $Id = [string]$argv[0], [string]$argv[1], [string]$argv[2]
+$Type, $Target, $Id, $Expect = [string]$argv[0], [string]$argv[1], [string]$argv[2], [string]$argv[3]
 
 function Write-Result([string]$Status, [string]$Detail) {
     $line = '{0} siem-xdr: action={1} type={2} target={3} status={4} detail={5}' -f `
@@ -35,8 +36,12 @@ function Get-ManagerIPs {
     return @([System.Net.Dns]::GetHostAddresses($addr) | ForEach-Object { $_.IPAddressToString })
 }
 
-function Get-Tree([int]$ProcId) {   # PID và mọi tiến trình con cháu
-    $children = Get-CimInstance Win32_Process -Filter "ParentProcessId=$ProcId" | ForEach-Object { Get-Tree $_.ProcessId }
+function Get-Tree([int]$ProcId, [datetime]$Since) {
+    # PID và mọi tiến trình con cháu. Windows không gán lại cha khi tiến trình cha kết thúc, nên ParentProcessId có thể
+    # trỏ tới một PID đã được cấp lại cho chính tiến trình đang kill: chỉ tính là con nếu được tạo SAU tiến trình cha,
+    # không thì kill nhầm tiến trình không liên quan.
+    $children = Get-CimInstance Win32_Process -Filter "ParentProcessId=$ProcId" |
+        Where-Object { $_.CreationDate -gt $Since } | ForEach-Object { Get-Tree $_.ProcessId $_.CreationDate }
     @($children) + $ProcId
 }
 
@@ -78,9 +83,26 @@ try {
                 # đã tự kết thúc -> mục tiêu "không còn chạy" đã đạt, không phải lỗi
                 if (-not $p) { Write-Result 'success' "PID $Target đã kết thúc trước khi kill, không cần xử lý"; exit 0 }
                 if ($Protected -contains $p.ProcessName) { Fail "từ chối kill tiến trình hệ thống $($p.ProcessName)" }
-                $tree = Get-Tree ([int]$Target)
-                $tree | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
-                Write-Result 'success' "đã kill PID $Target ($($p.ProcessName)) và $($tree.Count - 1) tiến trình con"
+                if ($Expect) {   # tên trong alert có đuôi .exe (Sysmon), ProcessName thì không; so không phân biệt hoa thường
+                    if ($Expect -notmatch '^[A-Za-z0-9._-]{1,64}$') { Fail 'tên tiến trình mong đợi không hợp lệ' }
+                    if ($p.ProcessName -ne ($Expect -replace '\.exe$', '')) {
+                        Fail "không kill: PID $Target hiện là $($p.ProcessName), không phải $Expect như trong alert (PID có thể đã được cấp lại)"
+                    }
+                }
+                $root = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$Target)"
+                $since = if ($root) { $root.CreationDate } else { Get-Date }
+                $tree = @(Get-Tree ([int]$Target) $since)
+                $kept = 0
+                foreach ($procId in $tree) {
+                    if ($procId -ne [int]$Target) {     # tiến trình hệ thống nằm trong cây thì giữ nguyên
+                        $c = Get-Process -Id $procId -ErrorAction SilentlyContinue
+                        if ($c -and $Protected -contains $c.ProcessName) { $kept++; continue }
+                    }
+                    Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+                }
+                if (-not $p.WaitForExit(2000)) { Fail "kill PID $Target thất bại" }
+                $note = if ($kept) { ", giữ $kept tiến trình hệ thống" } else { '' }
+                Write-Result 'success' "đã kill PID $Target ($($p.ProcessName)) và $($tree.Count - 1 - $kept) tiến trình con$note"
             } elseif ($Target -match '^[A-Za-z0-9._-]{1,64}$') {
                 $name = $Target -replace '\.exe$', ''
                 if ($Protected -contains $name) { Fail "từ chối kill tiến trình hệ thống $name" }

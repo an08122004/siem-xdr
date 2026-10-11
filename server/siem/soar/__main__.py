@@ -36,6 +36,7 @@ def main() -> None:
         notifier=Notifier(settings.NOTIFY_WEBHOOK_URL, settings.TELEGRAM_BOT_TOKEN, settings.TELEGRAM_CHAT_ID,
                           cooldown=settings.NOTIFY_COOLDOWN_SECONDS),
         case_playbooks=CasePlaybooks(settings.CONFIG_DIR / "case_playbooks.yml"),
+        max_auto_kills=settings.SOAR_MAX_AUTO_KILLS,
     )
     tasks = [Every(30, "housekeeping", soar.housekeeping)]
     if settings.WAZUH_API_PASSWORD:

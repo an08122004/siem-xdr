@@ -111,6 +111,10 @@ Agent chạy script `siem-xdr` bằng quyền root/SYSTEM:
 | `isolate_host` / `unisolate_host` | chain riêng: chỉ cho phép loopback và IP wazuh-manager | rule chặn dải bù của IP manager (trong Windows Firewall rule chặn luôn thắng rule cho phép) |
 
 Script kiểm tra chặt tham số: không chặn loopback hay IP manager, không kill PID 1 hay tiến trình của Wazuh / hệ thống.
+Khi kill theo PID, SOAR gửi kèm tên tiến trình trong alert (tham số thứ 4): PID đã thuộc tiến trình khác (tiến trình gốc kết
+thúc, PID được cấp lại) thì script không kill và báo `failed`. Kill cả cây nhưng giữ nguyên tiến trình hệ thống nằm trong cây
+(Wazuh, systemd, sshd, docker; Windows: danh sách `$Protected`). Bản Windows chỉ coi là con những tiến trình tạo **sau** tiến
+trình cha, vì Windows không gán lại cha khi cha kết thúc: `ParentProcessId` có thể trỏ tới một PID đã được cấp lại.
 Kết quả được ghi vào `active-responses.log`, agent gửi dòng đó về như log thường, và SOAR khớp theo ID lệnh để đánh dấu
 `success` / `failed`. Agent chỉ báo được kết quả cho lệnh của chính nó. Active response của Wazuh là "gửi rồi quên" (API chỉ xác nhận
 đã chuyển lệnh), nên đây là cách duy nhất biết lệnh có chạy thật hay không. Lệnh `sent` quá 10 phút chuyển sang `timeout`.
@@ -127,7 +131,9 @@ Kết quả được ghi vào `active-responses.log`, agent gửi dòng đó v�
 | SCA máy demo | 207 kết quả CIS Debian, 83 mục không đạt. Không chuyển thành alert (xem mục 3). |
 
 **Giới hạn**:
-- Script Windows (`siem-xdr.ps1`) chưa chạy thử trên máy thật: máy lab hiện không có quyền Administrator.
+- Script Windows (`siem-xdr.ps1`): mới chạy thử nhánh kill (11/10/2026, Windows 11, PowerShell 5.1, gọi qua `siem-xdr.cmd`
+  với tiến trình thử: tên sai / đúng, cây có tiến trình bảo vệ, PID không tồn tại). Chặn IP và cô lập máy (Windows Firewall)
+  chưa chạy thử trên máy thật vì máy lab không có quyền Administrator.
 - Vulnerability detection của Wazuh (từ 4.8) cần Wazuh indexer nên đang tắt.
 - Tiến trình sống ngắn hơn khoảng 1 giây có thể lọt khỏi `siem-procs`.
 - Rootcheck / SCA trên container demo chấm chính container, nên có nhiều mục không đạt.
@@ -345,6 +351,9 @@ SOAR chỉ **tự** kill theo PID; kill theo tên (giết mọi tiến trình c�
 console. Hết hạn chặn thì SOAR tạo lệnh gỡ; chỉ khi lệnh gỡ báo thành công mới coi là đã gỡ, chưa được thì 15 phút sau gửi lại.
 Lệnh thủ công được kiểm tra trước khi tạo: IP hợp lệ, không phải loopback / multicast / nằm trong `SOAR_WHITELIST`, PID > 1,
 agent tồn tại. Kill một tiến trình đã tự kết thúc được tính là thành công (mục tiêu đã đạt).
+Mỗi agent tối đa `SOAR_MAX_AUTO_KILLS` lệnh kill tự động trong 60 giây (mặc định 10, `0` = không giới hạn). Quá giới hạn thì
+SOAR không tự kill nữa mà để analyst quyết định; alert vẫn được thông báo và gom case. Mục đích: alert giả hay báo nhầm hàng
+loạt không biến SOAR thành công cụ kill dần mọi tiến trình trên một máy.
 Lệnh (của playbook hoặc analyst tạo trên console) được SOAR gửi xuống agent qua Wazuh API mỗi 2 giây,
 kết quả thật lấy từ log agent gửi về (xem mục 1). Cảnh báo `WZH-*` từ ruleset Wazuh (FIM, rootcheck...) được thông báo và mở case PB-08.
 
@@ -398,7 +407,7 @@ docker compose exec ai-worker python -m siem.ai --once                          
 
 ```bash
 cd server && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt pytest httpx
-.venv/Scripts/python -m pytest -q      # 160 test: parser, rule, ML, SOAR (gia hạn chặn, gỡ chặn, gom case, thông báo), case playbook, API + đăng nhập, Grafana proxy, AI (web + endpoint, log thật, Sigma), Wazuh (kể cả chống giả mạo telemetry), thư viện rule
+.venv/Scripts/python -m pytest -q      # 168 test: parser, rule, ML, SOAR (gia hạn chặn, gỡ chặn, gom case, thông báo, giới hạn kill), case playbook, API + đăng nhập, Grafana proxy, AI (web + endpoint, log thật, Sigma), Wazuh (kể cả chống giả mạo telemetry), thư viện rule
 cd .. && docker run --rm -v ./vector:/etc/vector:ro timberio/vector:0.58.0-alpine test /etc/vector/wazuh.yaml /etc/vector/wazuh-tests.yaml
 ```
 **Kiểm thử end-to-end trên stack đang chạy** (cần `--profile demo`): `python tools/e2e_test.py`. Script không dùng tài
