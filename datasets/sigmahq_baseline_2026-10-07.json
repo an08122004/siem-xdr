@@ -1,0 +1,182 @@
+[
+ {
+  "group": "atomic-red-team:windows-T1087.002",
+  "sigmahq_rules": 10,
+  "noisy_rules": 1,
+  "union_recall": 0.625,
+  "test": 8,
+  "best_rule": "PUA - AdFind Suspicious Execution",
+  "best_recall": 0.375,
+  "best_normal_hits": 0
+ },
+ {
+  "group": "atomic-red-team:linux-T1552.001",
+  "sigmahq_rules": 3,
+  "noisy_rules": 1,
+  "union_recall": 0.0,
+  "test": 19,
+  "best_rule": "Linux Recon Indicators",
+  "best_recall": 0.0,
+  "best_normal_hits": 1
+ },
+ {
+  "group": "atomic-red-team:windows-T1547.001",
+  "sigmahq_rules": 7,
+  "noisy_rules": 2,
+  "union_recall": 0.083,
+  "test": 12,
+  "best_rule": "Potential Persistence Attempt Via Run Keys Using Reg.EXE",
+  "best_recall": 0.083,
+  "best_normal_hits": 1
+ },
+ {
+  "group": "atomic-red-team:windows-T1218.011",
+  "sigmahq_rules": 32,
+  "noisy_rules": 3,
+  "union_recall": 0.214,
+  "test": 14,
+  "best_rule": "Rundll32 Execution With Uncommon DLL Extension",
+  "best_recall": 0.214,
+  "best_normal_hits": 1
+ },
+ {
+  "group": "atomic-red-team:linux-T1059.004",
+  "sigmahq_rules": 7,
+  "noisy_rules": 0,
+  "union_recall": 0.0,
+  "test": 8,
+  "best_rule": "Suspicious Download and Execute Pattern via Curl/Wget",
+  "best_recall": 0.0,
+  "best_normal_hits": 0
+ },
+ {
+  "group": "atomic-red-team:windows-T1548.002",
+  "sigmahq_rules": 15,
+  "noisy_rules": 1,
+  "union_recall": 0.2,
+  "test": 15,
+  "best_rule": "Registry Modification of MS-settings Protocol Handler",
+  "best_recall": 0.2,
+  "best_normal_hits": 0
+ },
+ {
+  "group": "splunk-attack-data:windows-T1036.003",
+  "sigmahq_rules": 13,
+  "noisy_rules": 0,
+  "union_recall": 0.095,
+  "test": 21,
+  "best_rule": "Suspicious Copy From or To System Directory",
+  "best_recall": 0.048,
+  "best_normal_hits": 0
+ },
+ {
+  "group": "splunk-attack-data:windows-T1218.011",
+  "sigmahq_rules": 32,
+  "noisy_rules": 3,
+  "union_recall": 0.0,
+  "test": 6,
+  "best_rule": "Rundll32 UNC Path Execution",
+  "best_recall": 0.0,
+  "best_normal_hits": 1
+ },
+ {
+  "group": "splunk-attack-data:windows-T1548.002",
+  "sigmahq_rules": 15,
+  "noisy_rules": 1,
+  "union_recall": 0.5,
+  "test": 8,
+  "best_rule": "Registry Modification of MS-settings Protocol Handler",
+  "best_recall": 0.5,
+  "best_normal_hits": 0
+ },
+ {
+  "group": "splunk-attack-data:windows-T1547.001",
+  "sigmahq_rules": 7,
+  "noisy_rules": 2,
+  "union_recall": 0.0,
+  "test": 8,
+  "best_rule": "Potential Persistence Attempt Via Run Keys Using Reg.EXE",
+  "best_recall": 0.25,
+  "best_normal_hits": 1
+ },
+ {
+  "group": "splunk-attack-data:windows-T1003.003",
+  "sigmahq_rules": 12,
+  "noisy_rules": 0,
+  "union_recall": 0.833,
+  "test": 6,
+  "best_rule": "Suspicious Process Patterns NTDS.DIT Exfil",
+  "best_recall": 0.5,
+  "best_normal_hits": 0
+ },
+ {
+  "group": "splunk-attack-data:windows-T1059.001",
+  "sigmahq_rules": 90,
+  "noisy_rules": 6,
+  "union_recall": 0.4,
+  "test": 10,
+  "best_rule": "Change PowerShell Policies to an Insecure Level",
+  "best_recall": 0.2,
+  "best_normal_hits": 8
+ },
+ {
+  "group": "splunk-attack-data:windows-T1105",
+  "sigmahq_rules": 43,
+  "noisy_rules": 2,
+  "union_recall": 0.5,
+  "test": 18,
+  "best_rule": "Suspicious File Downloaded From File-Sharing Website Via Cer",
+  "best_recall": 0.5,
+  "best_normal_hits": 0
+ },
+ {
+  "group": "splunk-attack-data:linux-T1548",
+  "sigmahq_rules": 1,
+  "noisy_rules": 0,
+  "union_recall": 0.0,
+  "test": 8,
+  "best_rule": "Potential Exploitation of CVE-2025-5054 or CVE-2025-4598",
+  "best_recall": 0.0,
+  "best_normal_hits": 0
+ },
+ {
+  "group": "splunk-attack-data:windows-T1218.001",
+  "sigmahq_rules": 4,
+  "noisy_rules": 0,
+  "union_recall": 0.0,
+  "test": 9,
+  "best_rule": "Suspicious HH.EXE Execution",
+  "best_recall": 0.0,
+  "best_normal_hits": 0
+ },
+ {
+  "group": "splunk-attack-data:windows-T1218.007",
+  "sigmahq_rules": 7,
+  "noisy_rules": 2,
+  "union_recall": 0.0,
+  "test": 7,
+  "best_rule": "Msiexec Quiet Installation",
+  "best_recall": 0.571,
+  "best_normal_hits": 2
+ },
+ {
+  "group": "atomic-red-team:windows-T1518.001",
+  "sigmahq_rules": 2,
+  "noisy_rules": 0,
+  "union_recall": 0.0,
+  "test": 4,
+  "best_rule": "Sysmon Discovery Via Default Driver Altitude Using Findstr.E",
+  "best_recall": 0.0,
+  "best_normal_hits": 0
+ },
+ {
+  "group": "atomic-red-team:linux-T1548.001",
+  "sigmahq_rules": 0,
+  "noisy_rules": 0,
+  "union_recall": 0.0,
+  "test": 11,
+  "best_rule": "-",
+  "best_recall": 0.0,
+  "best_normal_hits": 0
+ }
+]
