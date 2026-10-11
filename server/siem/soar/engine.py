@@ -37,10 +37,26 @@ log = logging.getLogger("soar")
 
 # Case chưa đóng -> alert mới cùng rule + thực thể được gom vào case này
 OPEN_CASE_STATUSES = ("open", "in_progress", "contained")
-# Lệnh chặn thành công không có hạn chỉ được coi là còn hiệu lực trong N phút (xem Soar._already_blocked)
+# Lệnh chặn thành công không có hạn chỉ được coi là còn hiệu lực trong N phút (xem Soar._active_block)
 BLOCK_TRUST_MINUTES = 10
 # Lệnh gỡ chặn (khi hết hạn) chưa thành công sau N phút -> tạo lại (xem Soar.housekeeping)
 REVERT_RETRY_MINUTES = 15
+# Bước chỉ chạy 1 lần cho mỗi alert dù nhiều playbook cùng khớp (vd playbook riêng + "Cảnh báo chung mức critical")
+ONCE_PER_ALERT = ("notify", "create_case")
+CASE_MAX_ALERT_IDS = 500
+# Thêm alert vào case NGAY TRÊN Elasticsearch (bản mới nhất của case), bỏ qua nếu đã có (Kafka giao lại alert sau khi
+# SOAR khởi động lại). Trước đây SOAR ghi đè alert_ids bằng danh sách đọc từ kết quả search, vốn trễ tới 1 giây so với
+# bản mới nhất: alert dồn dập cùng rule + thực thể ghi đè nhau và bị mất khỏi case.
+CASE_ADD_ALERT = """
+if (ctx._source.alert_ids == null) { ctx._source.alert_ids = new ArrayList(); }
+if (ctx._source.alert_ids.contains(params.id)) { ctx.op = 'noop'; }
+else {
+  ctx._source.alert_ids.add(params.id);
+  if (ctx._source.alert_ids.size() > params.max) { ctx._source.alert_ids.remove(0); }
+  ctx._source.alert_count = (ctx._source.alert_count == null ? 0 : ctx._source.alert_count) + 1;
+  ctx._source.updated_at = params.now;
+}
+"""
 
 
 def endpoint_agent(alert: dict[str, Any]) -> str | None:
@@ -48,6 +64,11 @@ def endpoint_agent(alert: dict[str, Any]) -> str | None:
     không có agent nào để chạy lệnh trên đó."""
     agent_id = get(alert, "agent.id")
     return None if not agent_id or str(agent_id).startswith("syslog-") else str(agent_id)
+
+
+def case_entity(alert: dict[str, Any]) -> str:
+    """Thực thể chính của alert: gom case và gộp thông báo theo (rule, thực thể)."""
+    return str(get(alert, "source.ip") or get(alert, "user.name") or get(alert, "host.name") or "unknown")
 
 
 class Playbook:
@@ -93,17 +114,25 @@ class Soar:
     # ------------------------------------------------------------------
     def handle(self, alert: dict[str, Any]) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
+        done: set[str] = set()
         for pb in self.playbooks:
             if not pb.matches(alert):
                 continue
             log.info("alert %s khớp playbook '%s'", get(alert, "rule.id"), pb.name)
             for step in pb.steps:
+                action = step.get("action")
+                if action in ONCE_PER_ALERT and action in done:
+                    results.append({"playbook": pb.name, "action": action, "status": "skipped",
+                                    "detail": "đã thực hiện ở playbook trước"})
+                    continue
                 try:
                     res = self.run_step(step, alert)
                 except Exception as e:  # noqa: BLE001
-                    log.exception("bước %s lỗi", step.get("action"))
+                    log.exception("bước %s lỗi", action)
                     res = {"status": "error", "detail": str(e)}
-                results.append({"playbook": pb.name, "action": step.get("action"), **res})
+                if action in ONCE_PER_ALERT:
+                    done.add(action)
+                results.append({"playbook": pb.name, "action": action, **res})
         if results:
             self._update_alert(alert, results)
         return results
@@ -157,57 +186,74 @@ class Soar:
 
         duration = int(step.get("duration", 3600))
         expires = (datetime.now(timezone.utc) + timedelta(seconds=duration)).isoformat() if duration > 0 else None
-        queued, dup = [], []
+        queued, dup, extended = [], [], []
         for agent_id in agents:
-            if self._already_blocked(agent_id, str(addr)):
-                dup.append(agent_id)
+            if cur := self._active_block(agent_id, str(addr)):
+                (extended if self._extend_block(cur, expires) else dup).append(agent_id)
                 continue
             a = store.create_action(self.es, agent_id, "block_ip", {"ip": str(addr), "duration": duration},
                                     alert_id=get(alert, "alert.id"), source="soar", expires_at=expires)
             queued.append(a["id"])
-        status = "queued" if queued else "skipped"
-        return {"status": status, "target": str(addr), "agents": agents, "action_ids": queued,
-                "detail": f"đã chặn sẵn trên {dup}" if dup else ""}
+        status = "queued" if queued else "extended" if extended else "skipped"
+        detail = "; ".join(x for x in (f"gia hạn chặn tới {expires or 'vĩnh viễn'} trên {extended}" if extended else "",
+                                        f"đã chặn sẵn trên {dup}" if dup else "") if x)
+        return {"status": status, "target": str(addr), "agents": agents, "action_ids": queued, "detail": detail}
 
-    def _already_blocked(self, agent_id: str, ip: str) -> bool:
-        """Có lệnh chặn IP này trên agent còn hiệu lực không (để không chặn trùng khi alert dồn dập).
+    def _active_block(self, agent_id: str, ip: str) -> dict[str, Any] | None:
+        """Lệnh chặn IP này trên agent còn hiệu lực (để không chặn trùng khi alert dồn dập), không có thì None.
         Chỉ tin: lệnh đang gửi/chờ kết quả, lệnh thành công còn hạn, hoặc thành công trong BLOCK_TRUST_MINUTES gần đây.
         Không tin lệnh thành công cũ không có hạn: luật iptables trên agent mất khi máy / container khởi động lại, mà
         bản ghi vẫn ghi 'đang chặn' -> kẻ tấn công không bị chặn lại (đã gặp khi chạy E2E 30/9). Script chặn trên agent
-        kiểm tra luật trước khi thêm nên gửi lại lệnh chặn không gây hại."""
+        kiểm tra luật trước khi thêm nên gửi lại lệnh chặn không gây hại. Lệnh đã được yêu cầu gỡ (hết hạn) cũng không
+        tính: luật của nó sắp bị lệnh gỡ xóa."""
         now = datetime.now(timezone.utc)
         recent = (now - timedelta(minutes=BLOCK_TRUST_MINUTES)).isoformat()
         success = [{"term": {"status": "success"}}]
         hits = store.search(self.es, settings.IDX_ACTIONS, size=1, query={"bool": {
             "filter": [{"term": {"agent_id": agent_id}}, {"term": {"type": "block_ip"}}, {"term": {"target": ip}},
                        {"term": {"reverted": False}}],
+            "must_not": [{"exists": {"field": "revert_requested_at"}}],
             "should": [{"terms": {"status": ["pending", "sent"]}},
                        {"bool": {"filter": success + [{"range": {"expires_at": {"gt": now.isoformat()}}}]}},
                        {"bool": {"filter": success + [{"range": {"created_at": {"gte": recent}}}]}}],
             "minimum_should_match": 1,
         }}, sort=[{"created_at": "desc"}])
-        return bool(hits)
+        return hits[0] if hits else None
+
+    def _extend_block(self, block: dict[str, Any], expires: str | None) -> bool:
+        """Lệnh chặn đang hiệu lực hết hạn sớm hơn lần chặn mới (`expires` None = vĩnh viễn) -> kéo dài hạn của chính
+        lệnh đó; luật trên agent vẫn còn nên không cần gửi lại. Trước đây lần chặn mới bị bỏ qua: AUTH-001 chặn 1 giờ rồi
+        AUTH-002 (tài khoản có thể đã bị chiếm, playbook chặn 24 giờ) cùng IP thì IP vẫn được gỡ sau 1 giờ."""
+        old = block.get("expires_at")
+        if old is None:
+            return False                                    # đang chặn vĩnh viễn
+        if expires is not None and datetime.fromisoformat(expires) <= datetime.fromisoformat(old):
+            return False
+        # không đổi updated_at: housekeeping dùng nó tính quá hạn cho lệnh còn chờ agent báo kết quả
+        self.es.update(index=settings.IDX_ACTIONS, id=block["_id"], refresh="wait_for", doc={"expires_at": expires})
+        log.info("gia hạn chặn %s trên %s: %s -> %s", block.get("target"), block.get("agent_id"), old, expires or "vĩnh viễn")
+        return True
 
     def create_case(self, alert: dict[str, Any]) -> dict[str, Any]:
         """Gom alert vào case đang mở cùng rule + cùng thực thể trong 24h, nếu không có thì tạo mới."""
-        entity = get(alert, "source.ip") or get(alert, "user.name") or get(alert, "host.name") or "unknown"
+        entity = case_entity(alert)
         since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
         existing = store.search(self.es, settings.IDX_CASES, size=1, query={"bool": {"filter": [
-            {"term": {"rule_id": get(alert, "rule.id")}}, {"term": {"entity": str(entity)}},
+            {"term": {"rule_id": get(alert, "rule.id")}}, {"term": {"entity": entity}},
             {"terms": {"status": list(OPEN_CASE_STATUSES)}}, {"range": {"created_at": {"gte": since}}},
         ]}}, sort=[{"created_at": "desc"}])
         alert_id = get(alert, "alert.id")
         if existing:
             case = existing[0]
-            ids = (case.get("alert_ids") or []) + [alert_id]
-            self.es.update(index=settings.IDX_CASES, id=case["_id"],
-                           doc={"alert_ids": ids[-500:], "alert_count": len(ids), "updated_at": store.now_iso()})
+            self.es.update(index=settings.IDX_CASES, id=case["_id"], retry_on_conflict=5, script={
+                "lang": "painless", "source": CASE_ADD_ALERT,
+                "params": {"id": alert_id, "now": store.now_iso(), "max": CASE_MAX_ALERT_IDS}})
             return {"status": "updated", "case_id": case["_id"]}
         case_id = store.new_id()
         self.es.index(index=settings.IDX_CASES, id=case_id, refresh="wait_for", document={
             "@timestamp": store.now_iso(), "created_at": store.now_iso(), "updated_at": store.now_iso(),
             "id": case_id, "title": f"{get(alert, 'rule.name')} — {entity}", "rule_id": get(alert, "rule.id"),
-            "entity": str(entity), "severity": alert.get("severity"), "status": "open",
+            "entity": entity, "severity": alert.get("severity"), "status": "open",
             "alert_ids": [alert_id], "alert_count": 1, "assignee": None,
             "host": get(alert, "host.name") or get(alert, "agent.id"), "notes": [],
             **self.case_playbooks.build(str(get(alert, "rule.id", "")), alert.get("severity", "medium")),
@@ -216,7 +262,8 @@ class Soar:
 
     def _update_alert(self, alert: dict[str, Any], results: list[dict[str, Any]]) -> None:
         alert_id = get(alert, "alert.id")
-        status = "in_progress" if any(r.get("status") == "queued" for r in results) else get(alert, "alert.status", "open")
+        acted = any(r.get("status") in ("queued", "extended") for r in results)
+        status = "in_progress" if acted else get(alert, "alert.status", "open")
         for attempt in range(5):
             try:
                 self.es.update(index=settings.IDX_ALERTS, id=alert_id, retry_on_conflict=3,
@@ -260,15 +307,42 @@ class Soar:
 
 
 class Notifier:
-    def __init__(self, webhook: str = "", tg_token: str = "", tg_chat: str = ""):
+    """`cooldown` > 0: mỗi (rule, thực thể) tối đa 1 thông báo trong `cooldown` giây; alert cùng khóa trong khoảng đó
+    được gộp và đếm vào thông báo kế tiếp. Rule match (vd LNX-*, WIN-*) không có suppress nên một đợt tấn công sinh
+    hàng loạt alert; trước đây mỗi alert là 1 tin nhắn (Telegram còn chặn khi gửi quá nhanh). Alert vẫn đủ trong case."""
+
+    def __init__(self, webhook: str = "", tg_token: str = "", tg_chat: str = "", cooldown: int = 0,
+                 clock=time.monotonic):
         self.webhook = webhook
         self.tg_token = tg_token
         self.tg_chat = tg_chat
+        self.cooldown, self.clock = cooldown, clock
+        self._last: dict[tuple[str, str], tuple[float, int]] = {}   # (rule, thực thể) -> (lần gửi, số alert đã gộp)
+
+    def _throttle(self, alert: dict[str, Any]) -> int | None:
+        """None: đang trong thời gian chờ, gộp alert này. Ngược lại: số alert đã gộp kể từ lần gửi trước."""
+        if self.cooldown <= 0:
+            return 0
+        key, now = (str(get(alert, "rule.id")), case_entity(alert)), self.clock()
+        last = self._last.get(key)
+        if last and now - last[0] < self.cooldown:
+            self._last[key] = (last[0], last[1] + 1)
+            return None
+        self._last[key] = (now, 0)
+        if len(self._last) > 10000:                     # không giữ mãi khóa của các IP chỉ xuất hiện một lần
+            self._last = {k: v for k, v in self._last.items() if now - v[0] < self.cooldown}
+        return last[1] if last else 0
 
     def send(self, alert: dict[str, Any]) -> dict[str, Any]:
+        merged = self._throttle(alert)
+        if merged is None:
+            return {"status": "throttled",
+                    "detail": f"{get(alert, 'rule.id')} / {case_entity(alert)} đã thông báo trong {self.cooldown} giây qua"}
         text = (f"🚨 {alert.get('message')}\nRule: {get(alert, 'rule.id')} — {get(alert, 'rule.description', '')}\n"
                 f"MITRE: {get(alert, 'rule.mitre.tactic')} {get(alert, 'rule.mitre.technique')}\n"
                 f"Risk: {alert.get('risk_score')}")
+        if merged:
+            text += f"\n(+{merged} cảnh báo cùng rule và thực thể từ lần thông báo trước, xem case)"
         sent = []
         if self.webhook:
             self._post(self.webhook, {"text": text, "content": text, "alert": {k: v for k, v in alert.items() if k != "trigger_event"}})

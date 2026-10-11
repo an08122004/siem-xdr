@@ -329,8 +329,18 @@ AUTH-002 → chặn 24 giờ, còn cô lập máy thì chờ analyst duyệt (`a
 SOAR tự tạo lệnh gỡ chặn khi hết hạn, bỏ qua IP trong `SOAR_WHITELIST` và không chặn trùng. "Đang chặn" chỉ tính lệnh đang chờ
 agent, lệnh còn hạn, hoặc lệnh thành công trong 10 phút gần đây. Luật iptables trên agent mất khi máy/container khởi động lại, nên
 bản ghi chặn cũ không có hạn không được tin (lỗi E2E 30/9: SOAR bỏ qua kẻ tấn công vì tưởng IP đã bị chặn). Chặn lại cũng an toàn,
-vì script kiểm tra luật trước khi thêm.
+vì script kiểm tra luật trước khi thêm. Lệnh đã được yêu cầu gỡ (hết hạn) cũng không tính là đang chặn.
+IP đang bị chặn mà playbook khác muốn chặn **lâu hơn** thì SOAR gia hạn lệnh chặn sẵn có (trạng thái *gia hạn chặn*), không gửi
+lệnh mới. Trước 11/10/2026 lần chặn sau bị bỏ qua: AUTH-001 chặn 1 giờ rồi AUTH-002 cùng IP thì IP vẫn được gỡ sau 1 giờ.
+Lệnh gỡ chặn chỉ đánh dấu đã gỡ các lệnh chặn tạo **trước** nó; lệnh chặn mới hơn (IP tấn công lại ngay khi vừa hết hạn) vẫn được
+gỡ đúng hạn của nó, không thành chặn vĩnh viễn.
 Đặt `SOAR_AUTO_RESPONSE=false` nếu chỉ muốn thông báo và tạo case.
+**Thông báo và case**: mỗi alert chỉ được thông báo và gom case **một lần**, kể cả khi khớp nhiều playbook (vd LNX-002 khớp
+playbook riêng và "Cảnh báo chung mức critical"). Mỗi cặp rule + thực thể (IP nguồn, tài khoản hoặc máy) tối đa 1 thông báo
+trong `NOTIFY_COOLDOWN_SECONDS` giây (mặc định 300, `0` = tắt); alert cùng cặp trong khoảng đó được gộp, số lượng ghi vào
+thông báo kế tiếp, còn alert thì vẫn có đủ trong case. Alert được thêm vào case bằng script chạy ngay trên Elasticsearch, alert đã
+có (Kafka giao lại) thì bỏ qua. Trước 11/10/2026 SOAR ghi đè danh sách alert của case bằng bản đọc từ search (trễ tới 1 giây):
+thử trên ES thật, 21 alert dồn dập chỉ còn 2 trong case.
 SOAR chỉ **tự** kill theo PID; kill theo tên (giết mọi tiến trình cùng tên, vd `httpd` là sập web) chỉ làm thủ công trên
 console. Hết hạn chặn thì SOAR tạo lệnh gỡ; chỉ khi lệnh gỡ báo thành công mới coi là đã gỡ, chưa được thì 15 phút sau gửi lại.
 Lệnh thủ công được kiểm tra trước khi tạo: IP hợp lệ, không phải loopback / multicast / nằm trong `SOAR_WHITELIST`, PID > 1,
@@ -388,7 +398,7 @@ docker compose exec ai-worker python -m siem.ai --once                          
 
 ```bash
 cd server && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt pytest httpx
-.venv/Scripts/python -m pytest -q      # 154 test: parser, rule, ML, SOAR, case playbook, API + đăng nhập, Grafana proxy, AI (web + endpoint, log thật, Sigma), Wazuh (kể cả chống giả mạo telemetry), thư viện rule
+.venv/Scripts/python -m pytest -q      # 160 test: parser, rule, ML, SOAR (gia hạn chặn, gỡ chặn, gom case, thông báo), case playbook, API + đăng nhập, Grafana proxy, AI (web + endpoint, log thật, Sigma), Wazuh (kể cả chống giả mạo telemetry), thư viện rule
 cd .. && docker run --rm -v ./vector:/etc/vector:ro timberio/vector:0.58.0-alpine test /etc/vector/wazuh.yaml /etc/vector/wazuh-tests.yaml
 ```
 **Kiểm thử end-to-end trên stack đang chạy** (cần `--profile demo`): `python tools/e2e_test.py`. Script không dùng tài

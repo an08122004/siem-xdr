@@ -77,6 +77,8 @@ SOAR_WHITELIST = [c.strip() for c in os.getenv("SOAR_WHITELIST", "127.0.0.0/8").
 NOTIFY_WEBHOOK_URL = os.getenv("NOTIFY_WEBHOOK_URL", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+# mỗi (rule, thực thể) tối đa 1 thông báo trong N giây, alert cùng khóa được gộp vào lần sau; 0 = không giới hạn
+NOTIFY_COOLDOWN_SECONDS = int(os.getenv("NOTIFY_COOLDOWN_SECONDS", "300"))
 
 AGENT_OFFLINE_SECONDS = int(os.getenv("AGENT_OFFLINE_SECONDS", "90"))
 

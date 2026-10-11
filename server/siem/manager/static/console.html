@@ -266,7 +266,8 @@ const ACT_ST = { pending: ['Chờ gửi', 'work'], sent: ['Đã gửi, chờ age
 const ACT_TYPE = { block_ip: 'Chặn IP', unblock_ip: 'Gỡ chặn IP', kill_process: 'Kill tiến trình', isolate_host: 'Cô lập máy',
                    unisolate_host: 'Bỏ cô lập' };
 const SOAR_ST = { queued: 'đã gửi lệnh', skipped: 'bỏ qua', created: 'tạo case mới', updated: 'gom vào case', logged: 'đã ghi log',
-                  sent: 'đã gửi', awaiting_approval: 'chờ duyệt', error: 'lỗi' };
+                  sent: 'đã gửi', awaiting_approval: 'chờ duyệt', error: 'lỗi', extended: 'gia hạn chặn',
+                  throttled: 'gộp thông báo' };
 const ACTION_LABEL = { notify: 'Thông báo', create_case: 'Case', block_ip: 'Chặn IP', kill_process: 'Kill', isolate_host: 'Cô lập' };
 const RESPONSE = ['block_ip', 'kill_process', 'isolate_host'];
 const sev = s => el('span', { cls: 'sev ' + (s || '') }, el('i'), SEV[s] || s || '');

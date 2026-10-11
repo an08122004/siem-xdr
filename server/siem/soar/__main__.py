@@ -33,7 +33,8 @@ def main() -> None:
     soar = Soar(
         es, load_playbooks(settings.CONFIG_DIR / "playbooks.yml"),
         auto_response=settings.SOAR_AUTO_RESPONSE, whitelist=settings.SOAR_WHITELIST,
-        notifier=Notifier(settings.NOTIFY_WEBHOOK_URL, settings.TELEGRAM_BOT_TOKEN, settings.TELEGRAM_CHAT_ID),
+        notifier=Notifier(settings.NOTIFY_WEBHOOK_URL, settings.TELEGRAM_BOT_TOKEN, settings.TELEGRAM_CHAT_ID,
+                          cooldown=settings.NOTIFY_COOLDOWN_SECONDS),
         case_playbooks=CasePlaybooks(settings.CONFIG_DIR / "case_playbooks.yml"),
     )
     tasks = [Every(30, "housekeeping", soar.housekeeping)]

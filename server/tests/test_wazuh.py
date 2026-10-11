@@ -467,15 +467,164 @@ def test_already_blocked_ignores_stale_permanent_block(monkeypatch):
     monkeypatch.setattr(store, "search", lambda es, index, query=None, **kw: [d for d in docs if _es_match(d, query)])
     soar = Soar(FakeES(), [], whitelist=[])
     docs[:] = [{**base, "status": "success", "created_at": iso(days=-2), "expires_at": None}]
-    assert not soar._already_blocked("001", "172.18.0.1")                     # cũ, không hạn -> chặn lại
+    assert not soar._active_block("001", "172.18.0.1")                     # cũ, không hạn -> chặn lại
     docs[:] = [{**base, "status": "success", "created_at": iso(minutes=-3), "expires_at": None}]
-    assert soar._already_blocked("001", "172.18.0.1")                         # vừa chặn xong
+    assert soar._active_block("001", "172.18.0.1")                         # vừa chặn xong
     docs[:] = [{**base, "status": "success", "created_at": iso(hours=-2), "expires_at": iso(hours=20)}]
-    assert soar._already_blocked("001", "172.18.0.1")                         # chặn có hạn, còn hạn
+    assert soar._active_block("001", "172.18.0.1")                         # chặn có hạn, còn hạn
     docs[:] = [{**base, "status": "sent", "created_at": iso(hours=-2), "expires_at": None}]
-    assert soar._already_blocked("001", "172.18.0.1")                         # đang chờ agent báo kết quả
+    assert soar._active_block("001", "172.18.0.1")                         # đang chờ agent báo kết quả
     docs[:] = [{**base, "status": "success", "created_at": iso(minutes=-1), "expires_at": None, "reverted": True}]
-    assert not soar._already_blocked("001", "172.18.0.1")                     # đã gỡ
+    assert not soar._active_block("001", "172.18.0.1")                     # đã gỡ
+    docs[:] = [{**base, "status": "success", "created_at": iso(minutes=-3), "expires_at": iso(minutes=-1),
+                "revert_requested_at": iso(seconds=-20)}]
+    assert not soar._active_block("001", "172.18.0.1")                     # hết hạn, lệnh gỡ đang chạy
+
+
+# ------------------------------------------------------------------ SOAR: gia hạn chặn, gỡ chặn, gom case, thông báo
+class SoarES:
+    """ES giả cho SOAR: lệnh phản ứng nằm trong `docs` (store.search / create_action được thay bằng bản đọc-ghi
+    `docs`), update theo doc thì ghi vào đúng bản ghi, mọi lệnh gọi được lưu lại để kiểm tra."""
+
+    def __init__(self, docs):
+        self.docs, self.calls = docs, []
+
+    def index(self, index, id, document, **kw):
+        self.calls.append(("index", index, id, document, kw))
+
+    def update(self, index, id, doc=None, **kw):
+        self.calls.append(("update", index, id, doc, kw))
+        for d in self.docs:
+            if doc is not None and d.get("_id") == id:
+                d.update(doc)
+
+
+@pytest.fixture()
+def soar_env(monkeypatch):
+    from datetime import datetime, timezone
+    docs = []
+
+    def create_action(es, agent_id, typ, params, **kw):
+        d = {"_id": f"act{len(docs)}", "id": f"act{len(docs)}", "agent_id": agent_id, "type": typ, "params": params,
+             "target": str(params.get("ip")), "status": "pending", "reverted": False,
+             "created_at": datetime.now(timezone.utc).isoformat(), "expires_at": kw.get("expires_at")}
+        docs.append(d)
+        return d
+    monkeypatch.setattr(store, "search", lambda es, index, query=None, **kw:
+                        [d for d in docs if index == settings.IDX_ACTIONS and _es_match(d, query)])
+    monkeypatch.setattr(store, "create_action", create_action)
+    monkeypatch.setattr(store, "list_agents", lambda es: [{"agent_id": "001", "status": "online"}])
+    return docs, SoarES(docs)
+
+
+def _auth_alert(rule_id, severity, score, ip="203.0.113.50"):
+    return {"alert": {"id": f"al-{rule_id}", "source": "rule"}, "rule": {"id": rule_id, "name": rule_id},
+            "severity": severity, "severity_score": score, "source": {"ip": ip}, "agent": {"id": "001"}, "message": "x"}
+
+
+def test_longer_block_extends_shorter_one(soar_env):
+    """AUTH-001 chặn 1 giờ rồi AUTH-002 (đăng nhập thành công sau dò mật khẩu, playbook chặn 24 giờ) cùng IP: trước
+    đây lần chặn 24 giờ bị bỏ qua vì "đã chặn sẵn", IP được gỡ sau 1 giờ."""
+    from datetime import datetime, timedelta, timezone
+    from siem.soar.engine import Soar, load_playbooks
+    docs, es = soar_env
+    soar = Soar(es, load_playbooks(ROOT / "config" / "playbooks.yml"), whitelist=[])
+    soar.create_case = lambda alert: {"status": "created"}
+    block = lambda res: next(r for r in res if r["action"] == "block_ip")   # noqa: E731
+    left = lambda: datetime.fromisoformat(docs[0]["expires_at"]) - datetime.now(timezone.utc)   # noqa: E731
+
+    assert block(soar.handle(_auth_alert("AUTH-001", "high", 3)))["status"] == "queued"
+    docs[0]["status"] = "success"
+    r = block(soar.handle(_auth_alert("AUTH-002", "critical", 4)))
+    assert r["status"] == "extended" and "gia hạn" in r["detail"] and len(docs) == 1   # không gửi lệnh chặn mới
+    assert left() > timedelta(hours=23)
+    ext, = [c for c in es.calls if c[1] == settings.IDX_ACTIONS]
+    assert ext[3] == {"expires_at": docs[0]["expires_at"]} and ext[4]["refresh"] == "wait_for"   # giữ updated_at
+    r = block(soar.handle(_auth_alert("AUTH-001", "high", 3)))                       # chặn ngắn hơn: giữ hạn 24 giờ
+    assert r["status"] == "skipped" and left() > timedelta(hours=23)
+    alert_status = [c[3]["alert"]["status"] for c in es.calls if c[1] == settings.IDX_ALERTS]
+    assert alert_status == ["in_progress", "in_progress", "open"]                    # gia hạn cũng là đã phản ứng
+
+
+def test_permanent_block_extends_and_stays_permanent(soar_env):
+    from siem.soar.engine import Soar
+    docs, es = soar_env
+    soar = Soar(es, [], whitelist=[])
+    alert = _auth_alert("X", "high", 3)
+    assert soar.block_ip({"duration": 3600}, alert)["status"] == "queued"
+    docs[0]["status"] = "success"
+    assert soar.block_ip({"duration": 0}, alert)["status"] == "extended" and docs[0]["expires_at"] is None
+    assert soar.block_ip({"duration": 86400}, alert)["status"] == "skipped" and docs[0]["expires_at"] is None
+
+
+def test_unblock_marks_only_blocks_created_before_it():
+    """Hết hạn -> SOAR tạo lệnh gỡ; IP tấn công lại ngay -> lệnh chặn mới (gửi SAU lệnh gỡ, luật còn trên agent). Trước
+    đây lệnh gỡ thành công đánh dấu cả lệnh chặn mới là đã gỡ -> housekeeping không bao giờ gỡ nó: chặn vĩnh viễn."""
+    unblock = {"id": "u1", "agent_id": "001", "type": "unblock_ip", "target": "203.0.113.50",
+               "created_at": "2026-10-11T10:00:00+00:00"}
+    blocks = [{"id": "old", "agent_id": "001", "type": "block_ip", "target": "203.0.113.50", "reverted": False,
+               "created_at": "2026-10-11T09:00:00+00:00"},
+              {"id": "new", "agent_id": "001", "type": "block_ip", "target": "203.0.113.50", "reverted": False,
+               "created_at": "2026-10-11T10:00:05+00:00"}]
+
+    class ES:
+        def get(self, index, id):
+            return {"_source": unblock}
+
+        def update(self, index, id, doc, **kw):
+            unblock.update(doc)
+
+        def update_by_query(self, index, query, script, **kw):
+            for b in blocks:
+                if _es_match(b, query):
+                    b["reverted"] = True
+    assert store.finish_action(ES(), "u1", "001", "success", "đã gỡ chặn")
+    assert {b["id"]: b["reverted"] for b in blocks} == {"old": True, "new": False}
+
+
+def test_case_merge_adds_alert_atomically_on_es(monkeypatch):
+    """Gom alert vào case bằng script trên ES (thêm vào bản mới nhất, bỏ qua alert đã có), không ghi đè alert_ids bằng
+    danh sách đọc từ search (trễ tới 1 giây -> alert dồn dập ghi đè nhau, mất khỏi case)."""
+    from siem.soar.engine import CASE_ADD_ALERT, Soar
+    monkeypatch.setattr(store, "search", lambda es, index, query=None, **kw: [{"_id": "c1", "alert_ids": ["a0"]}])
+    es = SoarES([])
+    res = Soar(es, [], whitelist=[]).create_case({"alert": {"id": "a1"}, "rule": {"id": "AUTH-001"},
+                                                  "source": {"ip": "203.0.113.50"}})
+    assert res == {"status": "updated", "case_id": "c1"}
+    (kind, index, case_id, doc, kw), = es.calls
+    assert index == settings.IDX_CASES and case_id == "c1" and doc is None
+    assert kw["script"]["source"] == CASE_ADD_ALERT and kw["script"]["params"]["id"] == "a1"
+    assert kw["retry_on_conflict"] >= 3 and "contains(params.id)" in CASE_ADD_ALERT
+
+
+def test_notify_and_case_run_once_per_alert(soar_env):
+    """LNX-002 (critical) khớp playbook "Diệt tiến trình" VÀ "Cảnh báo chung mức critical": trước đây thông báo 2 lần."""
+    from siem.soar.engine import Soar, load_playbooks
+    docs, es = soar_env
+    soar = Soar(es, load_playbooks(ROOT / "config" / "playbooks.yml"), whitelist=[])
+    soar.create_case = lambda alert: {"status": "created"}
+    res = soar.handle({"alert": {"id": "a1", "source": "rule"}, "rule": {"id": "LNX-002", "name": "x"},
+                       "severity": "critical", "severity_score": 4, "agent": {"id": "001"},
+                       "process": {"pid": 4242, "name": "sh"}, "message": "x"})
+    notify = [r for r in res if r["action"] == "notify"]
+    assert [r["status"] for r in notify] == ["logged", "skipped"] and "playbook trước" in notify[1]["detail"]
+    assert sum(r["action"] == "create_case" and r["status"] == "created" for r in res) == 1
+
+
+def test_notifier_cooldown_merges_same_rule_and_entity(monkeypatch):
+    from siem.soar.engine import Notifier
+    sent, t = [], [0.0]
+    monkeypatch.setattr(Notifier, "_post", staticmethod(lambda url, payload: sent.append(payload["text"])))
+    n = Notifier(webhook="http://hook.invalid", cooldown=300, clock=lambda: t[0])
+    a = lambda ip: {"rule": {"id": "WIN-006"}, "source": {"ip": ip}, "message": "m"}   # noqa: E731
+    assert n.send(a("10.0.0.5"))["status"] == "sent"
+    t[0] = 10
+    assert n.send(a("10.0.0.5"))["status"] == "throttled"
+    assert n.send(a("10.0.0.5"))["status"] == "throttled"
+    assert n.send(a("10.0.0.6"))["status"] == "sent"                   # thực thể khác: gửi
+    t[0] = 400
+    assert n.send(a("10.0.0.5"))["status"] == "sent" and "+2 cảnh báo" in sent[-1]
+    assert Notifier(webhook="http://hook.invalid").send(a("10.0.0.5"))["status"] == "sent"   # mặc định không giới hạn
 
 
 def test_ar_arguments_validation():

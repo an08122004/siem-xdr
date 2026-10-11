@@ -273,10 +273,13 @@ def finish_action(es: Elasticsearch, action_id: str, agent_id: str, status: str,
     if cur.get("type") == "unblock_ip" and status == "success":
         # Gỡ chặn (thủ công hoặc do hết hạn) -> đánh dấu các lệnh chặn cũ cùng IP là đã gỡ,
         # nếu không SOAR sẽ tưởng IP vẫn đang bị chặn và bỏ qua lần tấn công sau.
+        # Chỉ lệnh chặn tạo TRƯỚC lệnh gỡ: lệnh chặn mới hơn (vd IP tấn công lại ngay sau khi hết hạn) được gửi sau lệnh
+        # gỡ nên luật của nó vẫn còn trên agent; đánh dấu nó đã gỡ thì housekeeping không bao giờ gỡ -> chặn vĩnh viễn.
         # không refresh=True: cần quyền maintenance mà SOAR không có (lỗi 403 làm mất bước đánh dấu này)
+        older = [{"range": {"created_at": {"lt": cur["created_at"]}}}] if cur.get("created_at") else []
         es.update_by_query(index=settings.IDX_ACTIONS, conflicts="proceed", query={"bool": {"filter": [
             {"term": {"agent_id": agent_id}}, {"term": {"type": "block_ip"}}, {"term": {"target": cur.get("target")}},
-            {"term": {"reverted": False}}]}}, script={"source": "ctx._source.reverted = true", "lang": "painless"})
+            {"term": {"reverted": False}}, *older]}}, script={"source": "ctx._source.reverted = true", "lang": "painless"})
     return True
 
 
