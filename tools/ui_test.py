@@ -58,11 +58,15 @@ if r.status_code == 200:
 """)
 
 
-def scroll_frame(page, iframe_sel, locator, tries=14):
-    """Grafana chỉ vẽ panel khi cuộn tới: cuộn trong khung dashboard tới khi thấy `locator`."""
+def scroll_frame(page, iframe_sel, locator, tries=14, edge=False):
+    """Grafana chỉ vẽ panel khi cuộn tới: cuộn trong khung dashboard tới khi thấy `locator`.
+    Bánh xe cuộn thứ nằm dưới chuột. Chuột ở giữa khung (mặc định) cuộn bảng ở đó: dùng để tìm một dòng trong bảng
+    (bảng chỉ vẽ các dòng đang hiện). `edge=True` đặt chuột ở lề trái 16px của dashboard (kiosk), ngoài mọi panel,
+    để cuộn cả trang tới panel nằm dưới: chuột nằm trên bảng danh mục dài hàng trăm dòng thì mọi lần cuộn chỉ cuộn bảng
+    đó (đã gặp 11/10/2026 khi có 155 đề xuất AI: không tới được bảng so sánh)."""
     frame = page.frame_locator(iframe_sel)
     box = page.locator(iframe_sel).bounding_box()
-    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.move(box["x"] + (4 if edge else box["width"] / 2), box["y"] + box["height"] / 2)
     for _ in range(tries):
         if frame.locator(locator).count():
             return True
@@ -196,7 +200,7 @@ def main():
                 frame.locator("text=Rule đang chạy").first.wait_for(timeout=60000)
                 page.wait_for_timeout(2000)
                 check("từ đề xuất AI bấm “So sánh” -> Grafana chọn đúng đề xuất đó", frame.locator(f"text={pid}").count() > 0, pid)
-                ok = scroll_frame(page, "#frame-rules iframe", "text=Rule hiện có liên quan")
+                ok = scroll_frame(page, "#frame-rules iframe", "text=Rule hiện có liên quan", edge=True)
                 check("có bảng rule hiện có liên quan để so sánh", ok)
                 shot(page, "06c-rules-compare")
             else:

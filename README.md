@@ -93,6 +93,8 @@ Máy agent cần tới được cổng 1514 và 1515 của máy chạy docker. T
   ```
   Telemetry tiến trình: dùng auditd (rule `execve`, Wazuh đọc `/var/log/audit/audit.log` với `log_format audit`),
   hoặc thêm `siem-procs` như máy demo. auditd không ghi tên tiến trình cha, nên rule LNX-002 (web server sinh shell) cần `siem-procs`.
+  Khai báo `siem-procs` trong `<localfile>` **cục bộ** của agent với `<alias>siem-procs</alias>` (xem `demo/web/wazuh-agent.conf`):
+  analyzer chỉ tin dòng `siem-proc:` đến từ nguồn này (mục 7, *Telemetry của agent*).
 - Máy web demo: image `demo/web/` cài sẵn agent, script và cấu hình (`demo/web/wazuh-agent.conf`), enroll tự động với tên `demo-web`.
 
 Kiểm tra agent: `docker compose exec wazuh-manager /var/ossec/bin/agent_control -l`, hoặc tab *Agent* trên console
@@ -132,6 +134,8 @@ Kết quả được ghi vào `active-responses.log`, agent gửi dòng đó v�
 - Agent Go cũ đã được gỡ khỏi repo. Mã vẫn còn trong lịch sử git (commit `32897dc`) và nhánh `worktree-agent-hardening`.
 
 ## 2. Backend
+
+Dựng trên máy ảo (một VM backend và các VM endpoint cài agent): xem **[DEPLOY-VM.md](DEPLOY-VM.md)**.
 
 ```bash
 python tools/init_secrets.py   # sinh mật khẩu/key ngẫu nhiên vào secrets/ (chỉ lần đầu)
@@ -384,7 +388,7 @@ docker compose exec ai-worker python -m siem.ai --once                          
 
 ```bash
 cd server && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt pytest httpx
-.venv/Scripts/python -m pytest -q      # 135 test: parser, rule, ML, SOAR, case playbook, API + đăng nhập, Grafana proxy, AI (web + endpoint, log thật, Sigma), Wazuh, thư viện rule
+.venv/Scripts/python -m pytest -q      # 154 test: parser, rule, ML, SOAR, case playbook, API + đăng nhập, Grafana proxy, AI (web + endpoint, log thật, Sigma), Wazuh (kể cả chống giả mạo telemetry), thư viện rule
 cd .. && docker run --rm -v ./vector:/etc/vector:ro timberio/vector:0.58.0-alpine test /etc/vector/wazuh.yaml /etc/vector/wazuh-tests.yaml
 ```
 **Kiểm thử end-to-end trên stack đang chạy** (cần `--profile demo`): `python tools/e2e_test.py`. Script không dùng tài
@@ -392,13 +396,14 @@ khoản `admin` thật mà tự tạo quản trị viên tạm `e2e-admin`. Nó 
 chặn IP qua Wazuh → gỡ chặn; command injection → LNX-002 → kill cả cây tiến trình; webshell → FIM → case PB-08; phân quyền /
 phiên console; Grafana sau manager (cổng 3000 đóng, giả header vô tác dụng, Viewer không sửa được dashboard, Sign out trong
 Grafana thoát luôn phiên console) và hồi quy các lỗi đã sửa (10 request trong cùng giây phải thành đủ 10 event; PID 1 của
-demo-web không phải httpd). Mọi thứ nó tạo ra đều được dọn sau khi chạy. Kèm kiểm tra dashboard *Thư viện rule* đọc đủ rule và cặp so sánh. Lần chạy 3/10/2026: 40/40 đạt, khoảng 75 giây.
+demo-web không phải httpd; request có User-Agent giả dòng `siem-proc:` / `siem-xdr:` vẫn là request web, không sinh LNX-002
+hay lệnh kill). Mọi thứ nó tạo ra đều được dọn sau khi chạy. Kèm kiểm tra dashboard *Thư viện rule* đọc đủ rule và cặp so sánh. Lần chạy 11/10/2026: 42/42 đạt, khoảng 80 giây.
 
 **Kiểm thử giao diện bằng trình duyệt thật** (Microsoft Edge có sẵn trên Windows, không tải thêm trình duyệt):
 `pip install playwright` rồi `python tools/ui_test.py [thư-mục-ảnh]`. Script tự tạo quản trị viên tạm `ui-admin`, đăng nhập qua
 liên kết sâu, đi qua mọi trang, mở chi tiết cảnh báo / case, bấm liên kết trong dashboard Grafana nhúng, thử form chặn IP với IP
 sai, kiểm tra màn hình điện thoại 390px không tràn ngang, đăng xuất, và báo mọi lỗi JavaScript; ảnh chụp từng trang để soát
-giao diện; ở *Thư viện rule* kiểm tra bảng danh mục và luồng "So sánh với rule hiện có" chọn đúng đề xuất. Lần chạy 3/10/2026: 25/25 đạt. Lần chạy đầu tìm ra 4 lỗi giao diện, đã sửa: lỗi cú pháp JavaScript, ngăn chi tiết mở
+giao diện; ở *Thư viện rule* kiểm tra bảng danh mục và luồng "So sánh với rule hiện có" chọn đúng đề xuất. Lần chạy 11/10/2026: 25/25 đạt. Lần chạy đầu tìm ra 4 lỗi giao diện, đã sửa: lỗi cú pháp JavaScript, ngăn chi tiết mở
 lại khi chuyển trang nhanh, đăng xuất báo nhầm "phiên hết hạn", biểu đồ IP mất nhãn khi chỉ có 1 IP.
 Lần chạy đầu tìm ra 2 lỗi, đã sửa: SOAR tin bản ghi chặn cũ, và SOAR thiếu quyền refresh index khi đánh dấu lệnh chặn đã gỡ.
 
@@ -412,6 +417,7 @@ IP nguồn, máy, hình thức) và đăng nhập form web (POST tới đường
 |---|---|
 | **TLS** | `es-certs` sinh CA nội bộ và chứng chỉ cho `elasticsearch`, `manager` và `wazuh-manager` (Wazuh API). Elasticsearch bật TLS cho HTTP và transport. Manager API và Wazuh API chạy HTTPS. Grafana và các service Python (kể cả SOAR khi gọi Wazuh API) đều **xác thực chứng chỉ bằng CA** (không dùng `insecure`). |
 | **Kênh agent** | Wazuh agent mã hóa event bằng AES với khóa riêng từng agent. Enroll (1515) qua TLS và **bắt buộc mật khẩu** (`secrets/enrollment_key`, manager chép vào `etc/authd.pass` mỗi lần khởi động). |
+| **Telemetry của agent** | Dòng tiến trình `siem-proc:` chỉ được tin khi đến từ nguồn `siem-procs`, dòng kết quả lệnh `siem-xdr:` chỉ khi đến từ `active-responses.log`, và phải khớp từ đầu dòng (`server/siem/pipeline/normalize.py`). Nguồn (location) do cấu hình agent đặt, kẻ tấn công không đổi được. Trước 11/10/2026 hai dòng này được tìm ở mọi log: chỉ cần User-Agent hay tên user SSH chứa `siem-proc: pid=...` là có event tiến trình giả → LNX-002 → SOAR tự kill PID do kẻ tấn công chọn; chứa `siem-xdr: ...` thì request tấn công thành "kết quả lệnh" và thoát mọi rule web. |
 | **Wazuh API** | Không publish cổng 55000. SOAR dùng user `siem-soar` chỉ có 2 quyền: `active-response:command` và `agent:read` (đọc rule hay sửa cấu hình → 403). Hai user mặc định `wazuh` / `wazuh-wui` (mật khẩu mặc định công khai) bị đổi sang mật khẩu ngẫu nhiên mỗi lần khởi động. |
 | **Đăng nhập console** | Trang đăng nhập chung `/login` cho console và Grafana (`server/siem/manager/static/login.html`). Tài khoản riêng từng người thay cho API key dùng chung (`server/siem/manager/auth.py`). Mật khẩu băm scrypt, tối thiểu 12 ký tự, không chứa tên đăng nhập. Phiên nằm trong cookie `HttpOnly` + `Secure` + `SameSite=Strict`, JavaScript không đọc được, không lưu gì vào localStorage. Hết hạn sau 30 phút không thao tác (lần tự làm mới 5 giây/lần của console không được tính) và tối đa 8 giờ. Sai mật khẩu 5 lần / 15 phút (theo tài khoản hoặc IP) thì khóa 15 phút. Request thay đổi dữ liệu phải có header `X-Requested-With` (chống CSRF). Cấu hình: `CONSOLE_IDLE_MINUTES`, `CONSOLE_SESSION_HOURS`, `CONSOLE_MAX_FAILURES`. |
 | **Grafana dùng chung phiên** | Grafana không mở cổng ra ngoài. Mọi request đi qua manager (`server/siem/manager/grafana_proxy.py`), nên Grafana có cùng chính sách phiên, khóa tài khoản và nhật ký đăng nhập với console. Manager kiểm tra phiên (chưa đăng nhập → `/login`), xóa header `X-WEBAUTH-*` do trình duyệt gửi, rồi gửi tên và vai trò sang Grafana ở chế độ *auth proxy*. Form đăng nhập, basic auth và phiên riêng của Grafana đều tắt. Grafana chỉ tin header từ IP của manager (`10.250.30.10`) trên mạng riêng `grafana-auth`, và chỉ lắng nghe trên mạng đó, nên container khác trong lab (vd. máy web demo bị chiếm) không gọi thẳng được. Vai trò: `admin` → Admin, `lead` → Editor (sửa dashboard), `analyst` → Viewer (chỉ xem). Dashboard tự làm mới 10 giây/lần không gia hạn phiên. Bấm *Sign out* trong Grafana là đăng xuất cả console. Lúc khởi động, manager gán quyền mặc định (Viewer xem, Editor sửa) cho thư mục SIEM-XDR, vì Grafana 11 tạo thư mục provisioning mà không kèm quyền nào. |

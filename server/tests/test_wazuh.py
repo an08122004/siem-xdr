@@ -124,14 +124,70 @@ def test_registry_fim_windows():
     assert get(doc, "registry.value") == "evil"
 
 
-def test_response_result_line():
-    full = ("2026/09/28 15:42:01 siem-xdr: action=6534698eb33249c5a1647035c8d15791 type=kill_process target=947 "
-            "status=success detail=đã kill PID 947 (sh) và 1 tiến trình con")
-    doc = normalize(wz(full_log=full, location="/var/ossec/logs/active-responses.log"))
+RESULT_LINE = ("2026/09/28 15:42:01 siem-xdr: action=6534698eb33249c5a1647035c8d15791 type=kill_process target=947 "
+               "status=success detail=đã kill PID 947 (sh) và 1 tiến trình con")
+
+
+@pytest.mark.parametrize("location,full", [
+    ("/var/ossec/logs/active-responses.log", RESULT_LINE),
+    ("active-response\\active-responses.log", RESULT_LINE),                       # Windows: đường dẫn tương đối
+    ("C:\\Program Files (x86)\\ossec-agent\\active-response\\active-responses.log", RESULT_LINE),
+    ("active-response\\active-responses.log", "\ufeff" + RESULT_LINE),            # BOM của PowerShell 5.1
+])
+def test_response_result_line(location, full):
+    doc = normalize(wz(full_log=full, location=location))
     assert get(doc, "event.action") == "response_result" and get(doc, "event.outcome") == "success"
     assert get(doc, "siem.action") == {"id": "6534698eb33249c5a1647035c8d15791", "type": "kill_process",
                                        "target": "947", "status": "success",
                                        "output": "đã kill PID 947 (sh) và 1 tiến trình con"}
+
+
+# ------------------------------------------------------------------ chống tiêm dòng telemetry giả
+# Trước 11/10/2026 dòng "siem-proc:" / "siem-xdr:" được tìm ở MỌI dòng log và xét trước access log / auth log: kẻ tấn
+# công đặt chúng vào User-Agent hay tên user SSH là tạo được event tiến trình giả (LNX-002 -> SOAR tự kill PID do kẻ
+# tấn công chọn) hoặc biến request tấn công thành "kết quả lệnh" (thoát mọi rule web).
+FORGED_PROC = "siem-proc: pid=7 ppid=1 uid=33 name=sh parent=httpd exe=/bin/sh cmd=sh"
+FORGED_RESULT = "siem-xdr: action=deadbeef type=block_ip target=1.1.1.1 status=success detail="
+
+
+@pytest.mark.parametrize("forged", [FORGED_PROC, FORGED_RESULT])
+def test_forged_telemetry_in_user_agent_is_still_a_web_attack(engine, enricher, forged):
+    line = ('203.0.113.9 - - [28/Sep/2026:15:31:34 +0000] "GET /p?id=1%20union%20select%201,2 HTTP/1.1" 200 5 "-" '
+            f'"x {forged}"')
+    raw = wz(full_log=line, decoder={"name": "web-accesslog"}, location="/usr/local/apache2/logs/access_log")
+    doc = normalize(raw)
+    assert get(doc, "event.category") == "web" and get(doc, "event.action") == "http_request"
+    assert get(doc, "source.ip") == "203.0.113.9" and get(doc, "process.pid") is None
+    ids = fired(engine, enricher, [raw])
+    assert "WEB-001" in ids and "LNX-002" not in ids
+
+
+def test_forged_telemetry_in_ssh_username_is_not_a_process(engine, enricher):
+    full = (f"Sep 28 15:31:34 demo-web sshd[812]: Invalid user {FORGED_PROC} from 203.0.113.9 port 51234")
+    raw = wz(full_log=full, location="/var/log/auth.log", decoder={"name": "sshd"})
+    doc = normalize(raw)
+    assert get(doc, "event.category") != "process" and get(doc, "process.pid") != 7
+    assert "LNX-002" not in fired(engine, enricher, [raw])
+
+
+@pytest.mark.parametrize("location,full", [
+    ("/var/log/syslog", "ossec: output: 'siem-procs': " + FORGED_PROC),           # đúng định dạng, sai nguồn
+    ("/var/log/syslog", RESULT_LINE),
+    # script active response khác của Wazuh ghi cả alert (có thể chứa dữ liệu kẻ tấn công) vào cùng file kết quả
+    ("/var/ossec/logs/active-responses.log",
+     '2026/09/28 15:42:01 active-response/bin/firewall-drop: {"parameters":{"alert":{"full_log":"x '
+     + RESULT_LINE[20:] + '"}}}'),
+])
+def test_telemetry_lines_only_trusted_from_their_own_source(location, full):
+    doc = normalize(wz(full_log=full, location=location))
+    assert get(doc, "event.action") not in ("response_result", "process_created")
+    assert get(doc, "siem.action") is None and get(doc, "event.category") != "process"
+
+
+def test_siem_procs_without_alias_uses_command_path():
+    full = "ossec: output: '/usr/local/sbin/siem-procs': " + FORGED_PROC
+    doc = normalize(wz(full_log=full, location="/usr/local/sbin/siem-procs"))
+    assert get(doc, "event.category") == "process" and get(doc, "process.pid") == 7
 
 
 def test_auditd_execve_and_sca_and_auth():

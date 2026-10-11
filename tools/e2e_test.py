@@ -74,10 +74,11 @@ class Console:
         return self.call("GET", path)[1]
 
 
-def web(path, timeout=5):
+def web(path, timeout=5, ua=None):
     t0 = time.time()
+    req = urllib.request.Request(WEB + path, headers={"User-Agent": ua} if ua else {})
     try:
-        with urllib.request.urlopen(WEB + path, timeout=timeout) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             r.read()                        # đọc hết nội dung: CGI gửi header ngay, thân trả về khi lệnh chạy xong
             return r.status, time.time() - t0
     except urllib.error.HTTPError as e:
@@ -298,24 +299,42 @@ n_prop, n_cmp = catalog_count("origin:ai_proposal"), catalog_count("origin:compa
 check("grafana", "đề xuất AI có trong thư viện, kèm cặp so sánh với rule hiện có", n_prop == 0 or n_cmp > 0,
       f"{n_prop} đề xuất, {n_cmp} cặp so sánh")
 
-# ----------------------------------------------------------------- 6. hồi quy các lỗi đã sửa 3/10
+# ----------------------------------------------------------------- 6. hồi quy các lỗi đã sửa 3/10, 11/10
+def count_events(query, want):
+    """Số event khớp truy vấn Lucene trong 15 phút gần đây (qua datasource Grafana), chờ tới khi đủ `want`."""
+    q["query"] = query
+    n = 0
+    for _ in range(30):
+        st, res = admin.grafana("/api/ds/query", {"queries": [q], "from": "now-15m", "to": "now"})
+        frames = res["results"]["A"].get("frames", []) if st == 200 else []
+        n = int(sum(sum(v for v in f["data"]["values"][1] if v) for f in frames if len(f["data"]["values"]) > 1))
+        if n >= want:
+            break
+        time.sleep(2)
+    return n
+
+
 print("\n6. Hồi quy")
 burst = f"e2e{int(time.time())}"
 for i in range(10):                                   # 10 request trong cùng 1 giây -> cùng id Wazuh
     web(f"/index.html?{burst}={i}")
-q["query"] = f"event.module:apache AND url.original:*{burst}*"
-n = 0
-for _ in range(30):
-    st, res = admin.grafana("/api/ds/query", {"queries": [q], "from": "now-15m", "to": "now"})
-    frames = res["results"]["A"].get("frames", []) if st == 200 else []
-    n = int(sum(sum(v for v in f["data"]["values"][1] if v) for f in frames if len(f["data"]["values"]) > 1))
-    if n >= 10:
-        break
-    time.sleep(2)
+n = count_events(f"event.module:apache AND url.original:*{burst}*", 10)
 check("regress", "10 request trong cùng giây -> đủ 10 event trong ES (không ghi đè vì trùng id Wazuh)", n == 10, f"{n}/10")
 pid1 = subprocess.run(["docker", "compose", "exec", "-T", "demo-web", "cat", "/proc/1/comm"], capture_output=True, text=True)
 check("regress", "PID 1 của demo-web không phải httpd (tiến trình mồ côi không bị coi là web server sinh shell)",
       pid1.stdout.strip() not in ("", "httpd"), pid1.stdout.strip())
+# User-Agent giả dòng telemetry của agent (sửa 11/10): trước đây thành event tiến trình -> LNX-002 -> SOAR tự kill PID
+# do kẻ tấn công chọn, hoặc thành "kết quả lệnh" và thoát mọi rule web. URL vô hại nên không có lệnh chặn IP nào.
+forged = f"e2ef{int(time.time())}"
+web(f"/index.html?{forged}=proc", ua="x siem-proc: pid=999999 ppid=1 uid=33 name=sh parent=httpd exe=/bin/sh cmd=sh")
+web(f"/index.html?{forged}=xdr", ua="x siem-xdr: action=deadbeef type=block_ip target=1.1.1.1 status=success detail=")
+n = count_events(f"event.category:web AND event.action:http_request AND url.original:*{forged}*", 2)
+check("regress", "User-Agent giả dòng telemetry của agent -> vẫn là request web", n == 2, f"{n}/2")
+fake_kill = [a for a in admin.get("/api/v1/actions?size=200") if a["created_at"] >= START
+             and a["type"] == "kill_process" and a["target"] == "999999"]
+fake_alert = alert(admin, "LNX-002", lambda a: str((a.get("process") or {}).get("pid")) == "999999")
+check("regress", "... không sinh LNX-002 / lệnh kill cho PID giả", not fake_kill and not fake_alert,
+      f"{len(fake_kill)} lệnh kill, alert {'có' if fake_alert else 'không'}")
 
 # ----------------------------------------------------------------- dọn dẹp
 print("\nDọn dẹp")
