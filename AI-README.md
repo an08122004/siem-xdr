@@ -116,7 +116,7 @@ ghi SHA-256 từng file trong `datasets/raw/<bộ>/manifest.json`.
 | Atomic Red Team (MIT, `index.yaml`) | 1.665 bài thử (1.251 Windows, 414 Linux), dựng thành 3.364 tiến trình | Mẫu tấn công endpoint **dựng lại** |
 | [Splunk attack_data](https://github.com/splunk/attack_data) (Apache-2.0, 2.011 file, 4,9 GB) | Log **ghi thật** khi chạy tấn công trong Splunk Attack Range: Sysmon, Security 4688, Sysmon for Linux, auditd | Mẫu tấn công thật có nhãn từng event, hoạt động nền thật, đo theo bộ |
 | [OTRF Security-Datasets](https://github.com/OTRF/Security-Datasets) (MIT, 323 file, 558 MB) | Log Windows ghi thật khi giả lập tấn công (Empire, Covenant, Metasploit, APT29, Log4Shell) | Đo theo bộ |
-| `server/siem/ai/baseline.py` (tự soạn) | 102 lệnh Windows, 94 lệnh Linux bình thường | Chặn rule endpoint quá chung chung |
+| `server/siem/ai/baseline.py` (tự soạn) | 153 lệnh Windows, 152 lệnh Linux bình thường | Chặn rule endpoint quá chung chung |
 | SigmaHQ (DRL 1.1) | 3.302 rule cộng đồng | Tài liệu tham khảo trong prompt (RAG) |
 | EVTX-ATTACK-SAMPLES (tùy chọn) | Windows event theo tactic | Chưa dùng (cần `python-evtx`, antivirus có thể chặn) |
 
@@ -133,7 +133,8 @@ dấu "ngoài tầm nhìn" (9.977 mẫu), vì access log không ghi body.
 `process_creation` cho Linux): 1 tiến trình shell chạy cả khối lệnh và 1 tiến trình con cho mỗi chương trình được gọi. Lệnh nội
 bộ của shell và cmdlet PowerShell không tạo tiến trình. Tham số `#{...}` được thay bằng giá trị mặc định. Đây là telemetry dựng
 lại từ định nghĩa bài thử: có dòng lệnh, không có hành vi sinh ra sau đó. Bài thử chạy qua công cụ giả lập tấn công cloud
-Stratus Red Team bị bỏ.
+Stratus Red Team bị bỏ. Nhãn mỗi event giữ cả giá trị mặc định của tham số (`lab_values`), để nhận ra tên file bài thử tự đặt
+(mục 7, 9.10).
 
 **Log ghi thật** (`endpoint_logs.py`). Chỉ lấy event tạo tiến trình, đọc được XML, văn bản WinEventLog của Splunk, JSON OTRF,
 auditd dạng hex và dạng đã giải mã. Hai bộ dữ liệu chỉ ghi kỹ thuật cho cả bộ, nên nhãn từng event được suy ra:
@@ -153,12 +154,14 @@ auditd dạng hex và dạng đã giải mã. Hai bộ dữ liệu chỉ ghi k�
 | Nền thật (bình thường) | 112 Windows; Linux chưa có |
 | Đo theo bộ | 15.421 tiến trình, 168 kỹ thuật (Splunk 479 bộ, OTRF 117 bộ) |
 
-**Tập bình thường endpoint** (từ 9/10/2026; mục 9.8, 9.9). Windows 665 tiến trình, Linux 178:
-- **Lệnh tự soạn** (`baseline.py`: 147 Windows, 130 Linux): lệnh hệ thống, quản trị, cài đặt, sao lưu, lập trình. Có cả công cụ
+**Tập bình thường endpoint** (từ 9/10/2026, bổ sung 11/10; mục 9.8–9.10). Windows 671 tiến trình, Linux 200:
+- **Lệnh tự soạn** (`baseline.py`: 153 Windows, 152 Linux): lệnh hệ thống, quản trị, cài đặt, sao lưu, lập trình. Có cả công cụ
   "hai mặt" ở dạng vô hại (`reg add`, `rundll32` mở Control Panel, `certutil -hashfile`, `msiexec /V`, `hh.exe` mở file trợ
   giúp, `find / -perm -4000` khi kiểm tra bảo mật) và lệnh bọc shell. Riêng phần "hoạt động của con người" thêm 8/10: cài đặt
   qua GPO / SCCM, Teams ghi Run key, script trong thư mục Startup, lập trình viên tải từ GitHub (`curl ... | bash`), quản trị
-  PowerShell / AD (`Test-Path`, `Copy-Item`, `Get-ADUser`), cron có `2>/dev/null`.
+  PowerShell / AD (`Test-Path`, `Copy-Item`, `Get-ADUser`), cron có `2>/dev/null`. Thêm 11/10 sau khi rule rộng lọt khi chạy
+  thật: `systemctl daemon-reload` / `enable`, `su`, `nohup`, `useradd` / `usermod` / `pw`, `touch /tmp/...`, `chown root`, script
+  quản trị chạy qua `powershell -Command "& {...}"`.
 - **112 tiến trình nền Windows ghi thật** từ thư mục `atomic_red_team` của Splunk (lặp ở ≥ 2 kỹ thuật).
 - **Nền ghi thật từ các bộ đo theo bộ** (`golden.scenario_background`: 406 Windows, 48 Linux): dòng lệnh đã chuẩn hóa lặp ở ≥ 3
   kỹ thuật, bỏ dấu vết công cụ thử, bỏ lệnh trùng mẫu tấn công.
@@ -308,7 +311,8 @@ bình thường, không dấu vết môi trường thử, đủ đặc trưng), 
 
 **Vế từ SigmaHQ và lượt kiến thức** (từ 9/10, mục 9.9). Ở lượt đầu, rule SigmaHQ `process_creation` cùng kỹ thuật cũng được
 tách thành vế và đo như vế của model. Vế khớp mẫu train thì được giữ như thường. Vế sạch nhưng chưa khớp mẫu train được giữ làm vế
-chưa kiểm chứng: tối đa 10 rule gốc, chỉ rule chung (không lấy rule chiến dịch / CVE), chỉ cho endpoint. Ngay sau lượt đầu là
+chưa kiểm chứng: tối đa 10 vế gốc và 12 vế tất cả (từ 11/10), chỉ rule chung (không lấy rule chiến dịch / CVE), chỉ cho
+endpoint. Ngay sau lượt đầu là
 **lượt kiến thức**, hỏi các công cụ / cách làm khác của kỹ thuật mà mẫu chưa có. Lượt này luôn chạy, vì mục tiêu "khớp train" không
 thưởng cho kiến thức (mục 9.7). Mỗi vế mang nguồn (`model` / `knowledge` / `sigmahq`), ghi trong `llm.atoms` của đề xuất.
 
@@ -338,9 +342,10 @@ Lý do thiết kế như vậy (rút ra khi chạy thử với `qwen2.5-coder:7b
 |---|---|---|
 | Chung | Compile được, trường có thật, toán tử được phép, regex không có nguy cơ ReDoS, không chậm engine | Rule Sigma đọc và biên dịch được (tập con ở mục 5); như bên trái, thêm ID không trùng. Trường có thật: nhánh OR chỉ tính là thiếu khi mọi lựa chọn đều thiếu |
 | Độ chính xác | Neo vào thực thể cụ thể (IP, user, host, process, URL); khớp ≥ 50% alert báo nhầm | Bắt ≥ 30% **tập kiểm tra** model không thấy |
-| An toàn | Không khớp event nào của case thật; không làm mất mẫu tấn công nào rule đang bắt | Báo nhầm ≤ 0,1% trên tập bình thường cùng lĩnh vực (endpoint thực tế là 0); rule web không khớp 23 URL của website bình thường; replay 7 ngày ≤ 20 alert/ngày; severity chỉ `low` / `medium` |
-| Dùng chung được | | Không chứa đường dẫn / tên file của ứng dụng mẫu (`tienda1`, `anadir.jsp`) hay dấu vết môi trường thử (`C:\AtomicRedTeam`, `ExternalPayloads`, file đặt theo mã kỹ thuật, user `art`, tên kỹ thuật Stratus) |
+| An toàn | Không khớp event nào của case thật; không làm mất mẫu tấn công nào rule đang bắt | Báo nhầm ≤ 0,1% trên tập bình thường cùng lĩnh vực (endpoint thực tế là 0); rule web không khớp 38 URL của website bình thường; replay 7 ngày ≤ 20 alert/ngày; severity chỉ `low` / `medium` |
+| Dùng chung được | | Không chứa đường dẫn / tên file của ứng dụng mẫu (`tienda1`, `anadir.jsp`) hay dấu vết môi trường thử (`C:\AtomicRedTeam`, `ExternalPayloads`, file đặt theo mã kỹ thuật, user `art`, tên kỹ thuật Stratus). Từ 11/10: tên file bài thử tự đặt trong thư mục tạm / Public / mã nguồn bài thử, lấy từ giá trị mặc định của tham số (`/tmp/evilBinary`, `hello.c`), và lớp bọc `& {` của Invoke-AtomicTest |
 | Đủ đặc trưng (dòng lệnh) | | Không có đoạn < 4 ký tự (`/c`), không có từ trơn (`startup`, `Test-Path`), kể cả viết dưới dạng regex: `(?i)(startup\|autostart)`, nhánh có < 4 ký tự bắt buộc như `.*\#2.*`, `\s&\s*\{`. **Trừ khi** cùng vế AND đã neo vào một chương trình cụ thể (`Image\|endswith: '\ntdsutil.exe'` + `ifm`), có một đoạn dòng lệnh mạnh (`save` + `hklm\sam`), hoặc ≥ 2 đoạn dài ≥ 4 ký tự cùng phải có (`contains\|all`). Vỏ lệnh (`cmd.exe`, `powershell.exe`, `sh`, `bash`...) và đuôi `.exe` không tính là neo; phần `not filter` không xét. Đuôi file đứng riêng (`.inf`, `.dll`, `.ps1`) cũng là yếu |
+| Đủ đặc trưng (chương trình) | | Từ 11/10: vế không được chỉ định danh chương trình thông dụng (tiến trình và / hoặc cha) mà không có đối số nào: `Image\|endswith: '/usr/bin/su'`, `'\nohup'`, `ParentImage '\explorer.exe'` + `Image '\cmd.exe'`. Chương trình ít gặp (`akagi64.exe`) hay cha lạ (`winword.exe`, `eventvwr.exe`) thì vẫn là chữ ký |
 
 Hai bước sửa trước khi kiểm định (không làm rule rộng thêm): regex chứa đường dẫn Windows biên dịch lỗi (`\P`, `\M`, `\U`) thì
 `\` trước chữ cái được hiểu là dấu `\` của đường dẫn; regex vẫn lỗi (vd bị cắt, lệch ngoặc) thì giữ nguyên để kiểm định báo sai
@@ -348,7 +353,8 @@ cấu trúc.
 
 **Kiểm tra lại lúc duyệt** (`deploy.py`): ngoại lệ được đối chiếu với case thật mới nhất và bộ mẫu vàng; rule học từ dataset được
 đối chiếu lại với tập bình thường và các kiểm tra "dùng chung được" / "đủ đặc trưng" *hiện tại*. Kiểm định được nâng cấp sau thì
-đề xuất cũ đang chờ vẫn bị chặn.
+đề xuất cũ đang chờ vẫn bị chặn. Từ 11/10 worker còn tự chạy bước này mỗi chu kỳ cho đề xuất `pending` do phiên bản cũ sinh ra:
+trượt thì chuyển `invalid` kèm lý do (để không giữ chỗ target), qua thì vẫn chờ người duyệt.
 
 ## 8. Duyệt, triển khai, so sánh với rule hiện có
 
@@ -767,6 +773,42 @@ tra chỉ với vế của model, rồi thêm vế lượt kiến thức, rồi 
 - Đổi lại, rule dài hơn và người duyệt phải đọc nhiều hơn.
 - Nhóm chưa dùng khi thiết kế vẫn gần như trượt hết.
 
+### 9.10 Rà soát vận hành thật (11/10/2026)
+
+Từ 10/10 worker chạy `qwen3.5:9b` với code Sigma (rev 9) trên hệ thống thật. Đọc lại 7 đề xuất nó tạo trong 2 chu kỳ đầu, 44 đề
+xuất cũ đang chờ duyệt, và chạy thử bước duyệt (chỉ đọc) cho từng đề xuất.
+
+**Lỗ hổng tìm thấy và cách sửa** (`GENERATOR_REVISION` 10):
+
+| Vấn đề | Ví dụ thật | Sửa |
+|---|---|---|
+| Vế chỉ có tên chương trình phổ biến vẫn qua kiểm định, vì luật từ trơn chỉ xét dòng lệnh | AI-157 `Image\|endswith: '/usr/bin/su'` (mọi lần chạy `su`); vế SigmaHQ "Nohup Execution" `Image\|endswith: '/nohup'` (AI-153) | `validate.common_program_only`: vế chỉ định danh chương trình thông dụng (tiến trình và / hoặc cha), không đối số, là yếu. Không tính Office, trình duyệt, `eventvwr.exe`, `fodhelper.exe`: "con của `winword.exe`" là chữ ký thật |
+| Tên file do bài thử tự đặt lọt qua (luật cũ chỉ nhận ra `atomic`, `T1xxx`, `art`) | AI-154 `/tmp/evilBinary`, `/tmp/hello` | `atomic.py` ghi `lab_values` (giá trị mặc định của `input_arguments`). `golden.lab_tokens` lấy tên file trong thư mục tạm, thư mục Public, `atomics/T…/src/`; bỏ dotfile, tên có trong lệnh bình thường / rule SigmaHQ / chương trình phổ biến. Nhờ vậy `~/.netrc`, `sethc.exe`, công cụ tải về như `SOAPHound.exe` vẫn dùng được làm chữ ký. Kết quả: 286 tên Windows, 144 tên Linux |
+| Lớp bọc `powershell -Command "& {...}"` của Invoke-AtomicTest | Mục 9.9: 9/26 rule qua chứa `& {`, `& {Get-ADComputer` | `validate.lab_wrapper` chặn mọi giá trị dòng lệnh chứa `& {` |
+| Tập bình thường thiếu lệnh quản trị hằng ngày | AI-155 `systemctl daemon-reload`; AI-157 `useradd --shell /bin/bash --create-home --password`; AI-154 `touch /tmp` | `baseline.py` thêm 6 lệnh Windows, 22 lệnh Linux: Windows 671, Linux 200 tiến trình |
+| Rule quá dài | AI-153 mang 44 vế SigmaHQ chưa kiểm chứng dù trần là 10 vế gốc: vế gốc khớp lệnh bình thường bị tách nhỏ, mọi mảnh sạch đều được giữ | Thêm trần 12 vế (`MAX_UNVERIFIED_SIGMAHQ_ATOMS`) |
+| Đề xuất cũ giữ chỗ | 11/44 đề xuất cũ đang chờ sẽ bị chặn lúc duyệt, nhưng target có đề xuất `pending` thì không được đề xuất lại bằng logic mới | Mỗi chu kỳ chạy lại `deploy.recheck_dataset_rule` cho đề xuất `pending` của generator cũ. Trượt thì `invalid` kèm lý do trong lịch sử; qua thì vẫn chờ người duyệt |
+| Ollama khởi động lại giữa chu kỳ | 10/10: mất 2/5 đề xuất vì "Connection refused" / "Remote end closed connection" | `llm` thử lại sau 10 giây và 30 giây, chỉ với lỗi kết nối |
+
+**Đã kiểm tra:** bước duyệt rule Sigma (kiểm tra lại, ghi file, rule engine nạp lại) chạy đúng với cả 4 đề xuất Sigma, thử trong thư
+mục tạm. Trước đó chưa có rule AI nào được triển khai thật nên đường này mới chỉ có unit test.
+
+**Tác động:**
+- **Chấm lại 26 rule đạt của mục 9.9** (bỏ vế bị luật mới chặn, đo lại tập kiểm tra): 25/26 vẫn đạt. 20 vế bị bỏ (14 của model, 6
+  của SigmaHQ); lý do: 9 lớp bọc `& {`, 9 chỉ có tên chương trình, 3 khớp tập bình thường mới, 1 tên file bài thử (một vế có thể
+  có nhiều lý do). Rule duy nhất trượt là Linux T1548.001 (36% còn 0%), vì nó chỉ dựa vào `/tmp/evilBinary`. T1087.002 giảm từ
+  100% / 88% còn 88% / 75% vì bỏ các vế `& {`.
+- **Chạy thật** (worker tạo lại lúc 22:25 ngày 11/10): ngay chu kỳ đầu, 14 đề xuất `pending` chuyển `invalid` kèm lý do: 11 rule DSL
+  cũ của `qwen2.5-coder:7b` và AI-154/155/157 của `qwen3.5:9b`. Còn 28 đề xuất chờ người duyệt, đều qua luật mới.
+
+**Chưa giải quyết:**
+- Khả năng khái quát sang nhóm chưa dùng khi thiết kế vẫn kém (0/4 nhóm kiểm chứng ở 9.9).
+- Một số kỹ thuật bản chất là thao tác quản trị: tạo tài khoản (T1078.003, T1136), tạo dịch vụ (T1543, T1569), dò tài khoản domain.
+  Rule chữ ký theo dòng lệnh không phân biệt được với quản trị viên. Tập bình thường càng đầy đủ thì các nhóm này càng trượt; đó là
+  kết quả đúng chứ không phải lỗi. Hướng đúng là rule mức "săn tìm" (`low`) hoặc dùng thêm ngữ cảnh (người chạy, tiến trình cha,
+  giờ).
+- Tập bình thường vẫn do người soạn. Cần log tiến trình thật của lab (mục 11).
+
 ## 10. Đánh giá các model và vì sao tỉ lệ đạt thấp
 
 ### 10.1 Từng model
@@ -844,13 +886,16 @@ Sigma. Vì vậy rule mới chuyển sang Sigma.
 ## 11. Hướng cải thiện
 
 Đã làm 9/10 (mục 9.9): tập bình thường đại diện hơn, vế ứng viên SigmaHQ, lượt kiến thức, đo 3 lần mỗi nhóm. 10/10: model mặc định đổi sang `qwen3.5:9b`.
+11/10 (mục 9.10): tự lọc tên file bài thử từ tham số Atomic và lớp bọc `& {`, chặn vế chỉ có tên chương trình phổ biến, trần 12 vế
+SigmaHQ, kiểm tra lại đề xuất cũ mỗi chu kỳ.
 
 Theo thứ tự đáng làm tiếp:
-1. **Tự lọc dấu vết lab từ định nghĩa bài thử Atomic**: 9/26 rule qua ở 9.9 còn mang dấu vết lab. Cần lọc:
-   - tên file / giá trị mặc định của `input_arguments` (`/tmp/creds.txt`, `evilBinary`, `vbsstartup`);
-   - lớp bọc `powershell -Command "& {...}"` của Invoke-AtomicTest.
-2. **Gọn rule cho người duyệt**: trung vị 15 vế, dài nhất 38 (mục 9.9). Ví dụ: chỉ giữ vế SigmaHQ chưa kiểm chứng khi nó khớp
-   mẫu ghi thật của cùng kỹ thuật ở bộ dữ liệu khác, hoặc tách thành đề xuất riêng "nhập rule SigmaHQ".
+1. **Rule mức "săn tìm" cho kỹ thuật là thao tác quản trị** (tạo tài khoản, tạo dịch vụ, dò tài khoản domain; mục 9.10): rule
+   chữ ký dòng lệnh không phân biệt được với quản trị viên. Đề xuất ở `level: low` hoặc thêm ngữ cảnh (người chạy, tiến trình cha,
+   giờ) thay vì cố vượt tập bình thường.
+2. **Gọn rule cho người duyệt**: trung vị 15 vế, dài nhất 38 (mục 9.9); 11/10 đã thêm trần 12 vế SigmaHQ. Tiếp: chỉ giữ vế
+   SigmaHQ chưa kiểm chứng khi nó khớp mẫu ghi thật của cùng kỹ thuật ở bộ dữ liệu khác, hoặc tách thành đề xuất riêng "nhập rule
+   SigmaHQ". Dấu vết lab ngoài thư mục tạm (tên file trong thư mục Startup như `vbsstartup.vbs`) vẫn chưa lọc tự động.
 3. **Log tiến trình thật của chính lab** (agent Wazuh, vài tuần) cho tập bình thường; nới luật từ trơn theo dữ liệu đó (mục 9.8).
 4. **Đổi đơn vị bài toán** từ "kỹ thuật" sang "cách làm" (kỹ thuật con + công cụ): chỉ giao nhóm mà tập kiểm tra dùng cùng công cụ
    với train; báo cáo riêng độ phủ "cách làm đã thấy" và "cách làm chưa thấy".
@@ -872,7 +917,8 @@ Theo thứ tự đáng làm tiếp:
 ```bash
 python tools/fetch_datasets.py                           # dataset nhỏ (CSIC, Atomic, Sigma) vào datasets/raw
 python tools/fetch_datasets.py splunk otrf               # log endpoint ghi thật, khoảng 5,4 GB, chỉ tải khi gọi tên
-server/.venv/Scripts/python tools/convert_datasets.py    # chuyển sang datasets/processed (riêng log thật: ... real)
+server/.venv/Scripts/python tools/convert_datasets.py    # chuyển sang datasets/processed (riêng log thật: ... real);
+                                                         # chạy lại sau 11/10 để atomic.jsonl.gz có lab_values
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai up -d   # GPU NVIDIA (bỏ file gpu để chạy CPU)
 docker compose exec ai-worker python -m siem.ai --once   # chạy đúng 1 chu kỳ
 cd server && .venv/Scripts/python -m siem.ai.benchmark --write ../datasets/report.md   # độ phủ rule trên dataset
@@ -913,3 +959,4 @@ Khi đã dùng GPU thì mọi lệnh `up` sau đó đều phải kèm `-f docker
 | 8/10 | Nới vế không khớp mẫu nào (bỏ filter, `\|all` thành OR, tách `all of`); tổng quát hóa vế đạt khi vẫn sạch; vế phải có chữ ký; sửa YAML (dấu hai chấm, khóa lặp) và condition hỏng; chặn đuôi file đứng riêng (`GENERATOR_REVISION` 8) | Lần chạy thử Sigma đầu: SQLi 22% vì `\|all` dùng sai, T1087.002 0% vì AdFind gắn với đối số train, 5/40 câu trả lời sai cú pháp, `.inf` đứng riêng qua kiểm định |
 | 9/10 | Vế ứng viên SigmaHQ (ghi nguồn DRL), lượt kiến thức, tập bình thường endpoint ×3 (nền ghi thật + hoạt động của con người), thêm URL thường gặp, `LLMTooLong` không làm hỏng cả đề xuất (`GENERATOR_REVISION` 9) | Mục 9.7–9.8: mục tiêu "khớp train" không thưởng kiến thức; tập bình thường nhỏ để rule rộng lọt |
 | 10/10 | Model mặc định `qwen2.5-coder:7b` → `qwen3.5:9b`; tạo lại container `ai-worker`, `manager` với code Sigma (`GENERATOR_REVISION` 9) | Tốt nhất trong 4 model ở cả DSL lẫn Sigma (mục 9.4, 9.6, 9.9, 10) |
+| 11/10 | Chặn vế chỉ có tên chương trình phổ biến, tên file bài thử tự đặt (`lab_values` của Atomic), lớp bọc `& {`; tập bình thường thêm lệnh quản trị (Windows 671, Linux 200); trần 12 vế SigmaHQ; kiểm tra lại đề xuất `pending` của generator cũ mỗi chu kỳ; thử lại khi Ollama khởi động lại (`GENERATOR_REVISION` 10) | Rà soát chạy thật (mục 9.10): AI-157 `/usr/bin/su`, AI-154 `/tmp/evilBinary`, AI-155 `systemctl daemon-reload`, AI-153 44 vế, 11/44 đề xuất cũ giữ chỗ |
