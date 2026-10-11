@@ -3,6 +3,9 @@
   Đưa mã nguồn siem-xdr lên máy chủ Ubuntu / Debian và cài bằng MỘT lệnh, chạy trên máy Windows đang có mã nguồn.
 
 .EXAMPLE
+  # Windows mặc định chặn chạy file .ps1: gọi qua powershell -ExecutionPolicy Bypass -File (không đổi cấu hình máy)
+  powershell -ExecutionPolicy Bypass -File .\tools\deploy-vm.ps1 user@192.168.56.10
+.EXAMPLE
   .\tools\deploy-vm.ps1 user@192.168.56.10            # lần đầu: cài toàn bộ hệ thống
   .\tools\deploy-vm.ps1 user@192.168.56.10 -Demo      # kèm máy web demo (có lỗ hổng cố ý)
   .\tools\deploy-vm.ps1 user@192.168.56.10 -Update    # sau khi sửa và commit code: gửi bản mới, build lại
@@ -22,7 +25,9 @@ param(
   [int]$Port = 22,                                                # cổng SSH của máy chủ
   [string[]]$SshOption = @()                                      # tùy chọn thêm cho ssh/scp, vd -SshOption '-i','C:\keys\vm'
 )
-$ErrorActionPreference = "Stop"
+# Không dùng "Stop": PowerShell 5.1 coi dòng cảnh báo trên stderr của ssh / scp là lỗi chặn khi đầu ra bị chuyển hướng.
+# Mỗi lệnh ngoài được kiểm tra bằng $LASTEXITCODE.
+$ErrorActionPreference = "Continue"
 $repo = Split-Path -Parent $PSScriptRoot
 foreach ($tool in "git", "ssh", "scp") {
   if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
