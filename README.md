@@ -138,7 +138,7 @@ Kết quả được ghi vào `active-responses.log`, agent gửi dòng đó v�
 **Máy chủ Ubuntu / Debian: cài bằng một lệnh** (mô hình lab trên máy ảo và cài agent: **[DEPLOY-VM.md](DEPLOY-VM.md)**):
 ```bash
 sudo ./install.sh                                   # trên máy chủ, trong thư mục mã nguồn
-.\tools\deploy-vm.ps1 <user>@<IP máy chủ>           # hoặc từ máy Windows: gửi mã nguồn sang rồi chạy install.sh
+powershell -ExecutionPolicy Bypass -File .\tools\deploy-vm.ps1 <user>@<IP máy chủ>   # hoặc từ máy Windows
 ```
 Script tự cài Docker, đặt tham số kernel, phát hiện IP, sinh bí mật, viết `.env`, khởi động, chờ hệ thống sẵn sàng, xuất CA,
 rồi in địa chỉ console, mật khẩu `admin` tạm và lệnh cài agent đã điền sẵn IP / mật khẩu enroll. Chạy lại an toàn;

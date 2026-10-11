@@ -67,8 +67,10 @@ sudo apt-get install -y openssh-server
 ```
 Trên máy Windows, mở PowerShell trong thư mục mã nguồn `siem-xdr`:
 ```powershell
-.\tools\deploy-vm.ps1 <user>@192.168.56.10            # thêm -Demo: máy web demo, -AI: AI đề xuất rule
+powershell -ExecutionPolicy Bypass -File .\tools\deploy-vm.ps1 <user>@192.168.56.10      # thêm -Demo: máy web demo, -AI: AI
 ```
+(`-ExecutionPolicy Bypass` chỉ áp cho lần chạy này: Windows mặc định chặn chạy file `.ps1`. SSH khác cổng 22 hoặc dùng khóa:
+thêm `-Port 2222`, `-SshOption '-i','C:\keys\vm'`.)
 Nhập mật khẩu SSH, rồi mật khẩu sudo khi được hỏi. Script gửi **bản đã commit** của repo (`git archive`: đúng ký tự xuống dòng
 cho Linux, không mang theo `.venv`, `datasets`, `secrets`, `.env`) sang VM và chạy `sudo ./install.sh`. IP của máy Windows
 (nhìn từ VM) được thêm vào `SOAR_WHITELIST`, nên SOAR không bao giờ chặn máy quản trị. Lần đầu mất khoảng 5–20 phút
@@ -101,13 +103,19 @@ sudo ./install.sh --demo --admin-ip 192.168.56.1     # kèm máy web demo, khai 
 Chạy lại bao nhiêu lần cũng được: bí mật, `.env` và dữ liệu giữ nguyên. Đổi IP máy chủ (`--ip` khác lần trước) thì script hỏi
 rồi sinh lại chứng chỉ TLS (dữ liệu giữ nguyên).
 
+Đã thử ngày 11/10/2026 trên Ubuntu 24.04 sạch (2 card mạng như mô hình lab): cài từ đầu kể cả Docker, phát hiện đúng IP
+card lab; chạy lại và cập nhật qua `deploy-vm.ps1` giữ nguyên bí mật / `.env`; đổi IP rồi đổi lại, dữ liệu còn nguyên.
+Sau cài: manager (uid 10001) và Grafana (uid 472) đọc được bí mật, analyzer ghi event vào Elasticsearch, SOAR đồng bộ agent
+qua Wazuh API, đăng nhập console được, agent demo *Active*. Chưa thử: `--update` (build lại image) và `--ai`.
+
 ### 2.4 Lệnh thường dùng sau khi cài
 
 | Việc | Lệnh (trên VM, thư mục `~/siem-xdr`) |
 |---|---|
 | Xem trạng thái | `sudo ./install.sh status` |
 | In lại địa chỉ, mật khẩu tạm, lệnh cài agent | `sudo ./install.sh info` |
-| Cập nhật mã nguồn mới | trên Windows: `.\tools\deploy-vm.ps1 <user>@192.168.56.10 -Update` (gửi bản commit mới, build lại image) |
+| Cập nhật mã nguồn mới | trên Windows: `powershell -ExecutionPolicy Bypass -File .\tools\deploy-vm.ps1 <user>@192.168.56.10 -Update` (gửi bản commit mới, build lại image; rule AI đã duyệt trên VM giữ nguyên) |
+| Đổi IP máy chủ | `sudo ./install.sh --ip <IP mới>`: script hỏi, sinh lại chứng chỉ (CA mới: import lại `ca.crt`), giữ dữ liệu; agent đã cài phải sửa `<address>` trong `ossec.conf` |
 | Bật thêm máy demo / AI | `sudo ./install.sh --demo` / `sudo ./install.sh --ai` (GPU NVIDIA tự dùng nếu có nvidia-container-toolkit) |
 | Mọi lệnh compose | `docker compose ps`, `docker compose logs -f analyzer`... — **không cần** `-f` hay `--profile`: `.env` đã ghi `COMPOSE_FILE`, `COMPOSE_PROFILES` |
 
