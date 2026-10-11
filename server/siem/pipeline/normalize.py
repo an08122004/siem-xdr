@@ -581,10 +581,17 @@ _WAZUH_TS = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?)\d*([+-]
 _ACCESS_LOC = re.compile(r"access[._]log", re.I)
 _ERROR_LOC = re.compile(r"error[._]log", re.I)
 _AUTH_LOC = re.compile(r"/(auth\.log|secure)$")
-# dòng do script của siem-xdr cài trên agent in ra (wazuh/agent/linux/)
-_SIEM_PROC = re.compile(r"siem-proc: pid=(?P<pid>\d+) ppid=(?P<ppid>\d+) uid=(?P<uid>\d*) name=(?P<name>\S*) "
-                        r"parent=(?P<parent>\S*) exe=(?P<exe>\S*) cmd=(?P<cmd>.*)$")
-_SIEM_XDR = re.compile(r"siem-xdr: action=(?P<id>[0-9a-f]{8,64}) type=(?P<type>[a-z_]+) target=(?P<target>\S*) "
+# dòng do script của siem-xdr cài trên agent in ra (wazuh/agent/linux/, windows/). Chỉ tin khi đến từ ĐÚNG nguồn
+# (location do cấu hình agent đặt, kẻ tấn công không đổi được) và khớp TỪ ĐẦU dòng. Trước đây tìm ở mọi dòng log:
+# User-Agent / tên user SSH chứa "siem-proc: pid=..." thành event tiến trình giả -> LNX-002 -> SOAR tự kill PID do
+# kẻ tấn công chọn; chứa "siem-xdr: action=..." thì thành kết quả lệnh và request tấn công thoát mọi rule web.
+_SIEM_PROC_LOC = re.compile(r"(?:^|/)siem-procs$")                       # alias của <localfile>, hoặc đường dẫn lệnh
+_SIEM_XDR_LOC = re.compile(r"(?:^|[/\\])active-responses\.log$", re.I)   # Linux: đường dẫn tuyệt đối, Windows: tương đối
+_SIEM_PROC = re.compile(r"(?:ossec: output: '[^']*': )?siem-proc: pid=(?P<pid>\d+) ppid=(?P<ppid>\d+) uid=(?P<uid>\d*) "
+                        r"name=(?P<name>\S*) parent=(?P<parent>\S*) exe=(?P<exe>\S*) cmd=(?P<cmd>.*)$")
+# BOM: Add-Content -Encoding UTF8 của PowerShell 5.1 ghi BOM nếu chính script Windows tạo file log
+_SIEM_XDR = re.compile(r"\ufeff?(?:\d{4}/\d\d/\d\d \d\d:\d\d:\d\d )?siem-xdr: action=(?P<id>[0-9a-f]{8,64}) "
+                       r"type=(?P<type>[a-z_]+) target=(?P<target>\S*) "
                        r"status=(?P<status>success|failed)(?: detail=(?P<detail>.*))?$")
 _FIM_EVENTS = {"added": ("creation", "file_created"), "modified": ("change", "file_modified"),
                "deleted": ("deletion", "file_deleted")}
@@ -632,9 +639,9 @@ def parse_wazuh(ev: Doc, doc: Doc) -> None:
         _wazuh_fim(ev["syscheck"], doc)
     elif isinstance(data.get("win"), dict):
         _wazuh_windows(data["win"], doc, ag.get("name"))
-    elif full and (m := _SIEM_XDR.search(full)):
+    elif full and _SIEM_XDR_LOC.search(loc) and (m := _SIEM_XDR.match(full)):
         _wazuh_response(m, doc)
-    elif full and (m := _SIEM_PROC.search(full)):
+    elif full and _SIEM_PROC_LOC.search(loc) and (m := _SIEM_PROC.match(full)):
         parse_process({"pid": m["pid"], "ppid": m["ppid"], "uid": m["uid"], "name": m["name"], "executable": m["exe"],
                        "command_line": m["cmd"], "parent_name": m["parent"]}, doc)
     elif isinstance(data.get("audit"), dict) and _wazuh_audit(data["audit"], doc):
