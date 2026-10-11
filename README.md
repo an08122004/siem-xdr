@@ -36,7 +36,7 @@ và danh mục tài sản `BTL/asset.txt`. Toàn bộ backend đóng gói bằng
 | Phân tích dựa trên luật | Rule engine YAML (match / threshold / sequence) + cảnh báo chọn lọc từ ruleset Wazuh | `server/siem/detection/`, `server/rules/` |
 | Phân tích dựa trên ML (**tạm dừng**) | Isolation Forest (scikit-learn) | `server/siem/detection/ml.py` |
 | SOAR + quản lý case | Playbook tự động + case playbook NIST, phản ứng qua Wazuh active response | `server/siem/soar/`, `server/config/playbooks.yml`, `server/config/case_playbooks.yml` |
-| AI hỗ trợ viết rule (chỉ đề xuất) | Ollama (`qwen2.5-coder:7b`) + kiểm định tự động + duyệt trên console | `server/siem/ai/`, `tools/fetch_datasets.py`, `tools/convert_datasets.py` |
+| AI hỗ trợ viết rule (chỉ đề xuất) | Ollama (`qwen3.5:9b`) + kiểm định tự động + duyệt trên console | `server/siem/ai/`, `tools/fetch_datasets.py`, `tools/convert_datasets.py` |
 | Bảo mật nội bộ | TLS (CA nội bộ), RBAC Elasticsearch + Wazuh API, Docker secrets + keystore | `security/setup.sh`, `tools/init_secrets.py`, `wazuh/manager/entrypoint/` |
 | Lưu trữ | Elasticsearch 8 (xpack security bật) | |
 | Trực quan hóa | Grafana 11 (2 dashboard provision sẵn, nhúng trong console, cùng tài khoản) | `grafana/`, `tools/gen_dashboard.py` |
@@ -285,6 +285,36 @@ cộng mọi cảnh báo level ≥ 12. Alert có `rule.id = WZH-<id rule Wazuh>`
 và đó là đánh giá cấu hình, không phải sự cố. Xem SCA trong event `event.module: sca`.
 Rule Wazuh riêng đặt ở `wazuh/manager/local_rules.xml` (ID từ 100000).
 
+**Độ phủ của ruleset gốc Wazuh so với rule tự viết** (đo 6/10/2026, `tools/wazuh_coverage.py`, chi tiết ở
+`datasets/report_wazuh.md`). Cùng dataset với báo cáo độ phủ trong `AI-README.md` (mục 9.1), đưa vào analysisd của một wazuh-manager **tạm**
+(không nối mạng, không chung volume) đúng định dạng agent gửi: access log Apache, Sysmon EventID 1 dạng XML eventchannel,
+auditd (key `audit-wazuh-c`). Không dùng `wazuh-logtest`: bản 4.14 không chạy bộ giải mã eventchannel nên mọi rule Windows
+đều không khớp trong logtest. Cột *Wazuh cụ thể* bỏ 4 rule khớp theo cấu trúc chung chung (bảng dưới).
+
+| Lĩnh vực | Wazuh mọi alert | Wazuh cụ thể | Rule tự viết | Hợp | Báo nhầm Wazuh cụ thể / tự viết |
+|---|---|---|---|---|---|
+| Web (15.088 request) | 5,8% | 5,8% | 11,0% | 11,8% | 0 / 0 trên 36.000 |
+| Windows (1.251 bài thử, 133 kỹ thuật) | — | 12,8% bài thử, 62 kỹ thuật | 8,4% bài thử, 37 kỹ thuật | 20,9%, 76 kỹ thuật | 14 / 1 trên 102 lệnh |
+| Linux (414 bài thử, 76 kỹ thuật) | 98,6% event (chỉ ghi nhận) | 0,7% bài thử, 3 kỹ thuật | 2,9%, 7 kỹ thuật | 3,6%, 10 kỹ thuật | 1 / 0 trên 94 lệnh |
+
+- **Web:** Wazuh chỉ có rule SQLi (31164) và "tấn công trả về 200" (31106), bắt 48,5% SQLi và 38% XSS; bỏ sót hoàn
+  toàn SSI, CRLF, mã hóa né tránh, dò file sao lưu / tài nguyên nhạy cảm. Rule tự viết bắt SQLi 67,4%, XSS 100%, SSI 26,8%.
+  Wazuh vẫn bắt thêm 124 mẫu SQLi mà rule tự viết bỏ sót.
+- **Windows:** ruleset Sysmon của Wazuh (`0800-sysmon_id_1.xml`) phủ nhiều kỹ thuật hơn rule tự viết. Đổi lại, nó báo nhầm
+  14/102 lệnh bình thường, chủ yếu là rule thông tin level 3–4 (`net start`, `net use`, `net localgroup`, cmd do trình cài
+  đặt / script gọi) và rule 92043 level 10 với lệnh admin mở cổng firewall. Hai bộ rule bổ sung cho nhau: phần hợp gấp đôi
+  từng bộ.
+- **Linux:** cả hai đều yếu. Ngoài rule 80792 ghi nhận mọi lệnh, Wazuh chỉ có vài rule hành vi (`ps aux`, chạy python từ
+  `/tmp`). Wazuh cũng cần auditd, trong khi hệ thống hiện thu tiến trình bằng script `siem-procs` (định dạng riêng, Wazuh
+  không có rule nào cho định dạng này). Đây là chỗ thiếu lớn nhất của cả hai bộ rule.
+- **Lỗi trong ruleset gốc phát hiện được khi đo:** 92041 (level 10, "giá trị registry dạng Base64") có regex mà mọi nhóm sau
+  `/d` đều tùy chọn, nên khớp mọi `reg add ... /d`. 92021 ("PowerShell xóa file") thiếu `\b` đầu nhánh `ri|rd|rm...`, nên khớp
+  cả `Invoke-WebRequest -Uri`.
+- **Rule khớp theo cấu trúc, không tính là phát hiện:** 80792 (mọi lệnh auditd), 92032 (mọi tiến trình con của `cmd.exe /c`),
+  92036 (`net.exe` con của `cmd /c`), 92041 (lỗi regex ở trên).
+- **Giới hạn:** event Windows dựng lại không có hash, Description / Company, cũng không có event registry / file / mạng /
+  PowerShell script block. Rule của cả hai bên dựa vào các thông tin đó đều không có cơ hội khớp.
+
 **Làm giàu**: Threat Intel (`server/config/intel/*.txt`: IP/CIDR, domain, hash, tự nạp lại khi file đổi),
 tài sản (`server/config/assets.yml`, lấy từ `asset.txt`) dùng để tính `risk_score` theo mức quan trọng của tài sản.
 
@@ -335,133 +365,26 @@ Mỗi playbook là checklist task theo 5 giai đoạn của NIST SP 800-61 (Phá
 
 ## 5. AI hỗ trợ viết rule (`server/siem/ai/`)
 
-AI **chỉ đề xuất**. Mọi thay đổi rule đều phải qua kiểm định tự động và người duyệt trên console.
-LLM chạy nội bộ bằng Ollama, không publish cổng, log không rời khỏi máy.
+Toàn bộ pipeline, dữ liệu, cách kiểm định, kết quả chạy thử và đánh giá các model nằm trong **[AI-README.md](AI-README.md)**.
+
+- AI **chỉ đề xuất**: ngoại lệ cho rule hay báo nhầm, rule mới cho mẫu tấn công chưa rule nào bắt. Mọi đề xuất qua kiểm định tự
+  động rồi chờ người duyệt trên tab *Đề xuất AI* của console. LLM chạy nội bộ bằng Ollama, log không rời khỏi máy.
+- Model không được huấn luyện lại. Rule mới được viết bằng **Sigma**, hệ thống biên dịch sang rule engine, ghép vế qua nhiều lượt
+  hỏi và kiểm định trên dữ liệu model chưa thấy (CSIC 2010, Atomic Red Team, log ghi thật của Splunk attack_data và OTRF).
+  File rule AI lưu cả rule Sigma lẫn bản đã biên dịch.
+- Kết quả chạy thử: web có rule đạt kiểm định cho 4/6 loại tấn công; endpoint chỉ đạt ở vài kỹ thuật có công cụ đặc trưng (vd dò
+  tài khoản domain). Trong 4 model đã so sánh, `qwen3.5:9b` cho kết quả tốt nhất.
 
 ```bash
-python tools/fetch_datasets.py                           # tải dataset công khai vào datasets/raw (lần đầu)
-server/.venv/Scripts/python tools/convert_datasets.py    # chuyển sang datasets/processed
-docker compose --profile ai up -d                        # chạy trên CPU (chậm)
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai up -d   # GPU NVIDIA
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai up -d   # bật AI trên GPU NVIDIA
+docker compose exec ai-worker python -m siem.ai --once                              # chạy đúng 1 chu kỳ
 ```
-- Lần đầu worker tự tải model (`AI_MODEL`, mặc định `qwen2.5-coder:7b`, khoảng 4,7 GB).
-- Khi đã dùng GPU thì **mọi** lệnh `up` sau đó đều phải kèm `-f docker-compose.gpu.yml`, nếu không Ollama bị tạo lại không có GPU.
-- Chạy đúng 1 chu kỳ để thử: `docker compose exec ai-worker python -m siem.ai --once`.
-
-**Mỗi chu kỳ** (mặc định 60 phút, hoặc bấm *Chạy phân tích AI ngay* trên tab *Đề xuất AI*) worker tìm ứng viên từ 3 nguồn:
-
-| Nguồn | Khi nào | AI đề xuất |
-|---|---|---|
-| `exception` | Rule có ≥ 3 alert bị đánh dấu false positive (trên alert hoặc case đóng dạng `false_positive`) trong 30 ngày | Ngoại lệ hẹp cho rule đó |
-| `gap-dataset` | Mẫu tấn công trong dataset công khai mà chưa rule `match` nào bắt, gom theo **loại tấn công** (≥ 10 mẫu, xem bên dưới) | Rule mới cho loại tấn công đó |
-| `gap-own` | Nhóm event thật (module / category / action, ≥ 20 event trong 7 ngày) chưa rule nào xem xét | Rule mới, hoặc kết luận không cần rule |
-
-Tối đa 5 đề xuất mỗi chu kỳ, và không tạo đề xuất mới cho mục tiêu đang có đề xuất chờ duyệt hoặc đã triển khai.
-Rule mới bị người từ chối thì không đề xuất lại cho cùng mục tiêu trong 30 ngày. Nếu bị kiểm định tự động loại thì chỉ bị chặn
-khi vẫn cùng model và prompt (xem *Kết quả chạy thử*). Ngoại lệ bị từ chối thì được đề xuất lại, kèm lý do từ chối trước đó trong prompt.
-
-**Kiểm định tự động** (`validate.py`, không tin output của model):
-
-| | Ngoại lệ (làm giảm cảnh báo, rủi ro cao) | Rule mới |
-|---|---|---|
-| Chung | Compile được, trường có thật trong dữ liệu, toán tử được phép, regex không có nguy cơ ReDoS, không chậm engine | như bên trái, thêm ID không trùng |
-| Độ chính xác | Neo vào thực thể cụ thể (IP, user, host, process, URL), không được loại cả `event.category`. Khớp ≥ 50% alert báo nhầm | Bắt ≥ 30% mẫu nghi vấn. Với mẫu từ dataset thì đo trên **tập kiểm tra** (một nửa số mẫu giữ riêng, LLM không thấy) |
-| An toàn | Không khớp event nào của case đã xác nhận thật. Không làm mất mẫu tấn công nào mà rule đang bắt trong bộ mẫu vàng | Báo nhầm ≤ 0,1% trên tập bình thường. Rule web không khớp URL nào trong 23 URL của một website bình thường (`ORDINARY_URLS`: `/`, `/images/`, `/search?q=...`). Replay 7 ngày ≤ 20 alert/ngày. Severity chỉ `low`/`medium` |
-| Dùng chung được | | Rule từ dataset không được chứa đường dẫn hay tên file của ứng dụng mẫu (vd `tienda1`, `anadir.jsp`) |
-
-**So sánh với rule hiện có trước khi duyệt** (mục *Thư viện rule*, hoặc nút *So sánh với rule hiện có* trong chi tiết đề xuất):
-manager dựng danh mục `siem-rules` (`server/siem/rules_catalog.py`, cập nhật mỗi `RULES_CATALOG_SECONDS` giây và ngay sau khi duyệt /
-từ chối / gỡ) gồm rule đang chạy, ngoại lệ, đề xuất AI và các cặp *(đề xuất, rule liên quan)*. Mức liên quan cộng điểm theo: chính
-rule mà ngoại lệ nhắm tới; cùng loại tấn công (từ vựng của AI được ánh xạ sang tag viết tay, vd `path-traversal` ↔ `lfi`,
-`sensitive-path` ↔ `dirbusting` / `scanner`, chỉ tính khi cùng lĩnh vực web / linux / windows); cùng bắt chuỗi mẫu (vd `union`,
-`_vti_bin`); cùng kỹ thuật MITRE, tag, tactic, trường log. Đặc điểm càng nhiều rule cùng có thì càng ít điểm (T1190 có ở gần hết
-rule web nên gần như không tính). Ví dụ thật: đề xuất "dò tài nguyên mặc định" được đặt cạnh WEB-005 (công cụ quét) và WEB-006
-(dò thư mục); đề xuất SSI injection cạnh WEB-004 (command injection, cùng bắt `cmd`) và WEB-008 (webshell, cùng bắt `exec`, `cmd`).
-Danh mục chỉ để đọc; nguồn sự thật vẫn là file YAML và index `ai-rule-proposals`.
-
-**Duyệt và triển khai** (tab *Đề xuất AI* trên console):
-- Rule mới cần 1 analyst duyệt. Ngoại lệ cần 2 analyst **khác nhau**.
-- Ngay trước khi ghi file, manager kiểm tra lại với case thật mới nhất và bộ mẫu vàng. Không đạt thì không triển khai.
-- Triển khai là ghi 1 file riêng: `server/rules/ai/AI-xxx.yml` hoặc `server/rules/exceptions/<id>.yml`. Analyzer tự nạp lại rule khi file đổi.
-  Nút *Gỡ* xóa đúng file đó. Từ chối và gỡ đều bắt buộc ghi lý do.
-- Manager là service duy nhất ghi được 2 thư mục này, còn rule gốc được mount chỉ đọc. Worker chỉ đọc `siem-*` và chỉ ghi `ai-*`.
-
-**Chống prompt injection**: nội dung log (do kẻ tấn công kiểm soát) chỉ nằm trong khối `DATA`, đã cắt ngắn và lọc ký tự điều khiển.
-Output bị ép theo JSON schema (structured output của Ollama) và giới hạn 1024 token. Mã MITRE không đúng dạng `Txxxx` bị bỏ.
-
-**Dataset công khai** (`datasets/`, không đưa vào repo; nguồn, giấy phép và SHA-256 ghi trong `datasets/SOURCES.md`):
-
-| Dataset | Dùng cho |
-|---|---|
-| HTTP DATASET CSIC 2010 (anomalous) | Mẫu tấn công web có nhãn: tìm khoảng trống và làm bộ mẫu vàng |
-| HTTP DATASET CSIC 2010 (normal) | Đo báo nhầm của rule mới |
-| SigmaHQ rules (DRL 1.1) | Rule cộng đồng tương tự đưa vào prompt làm tài liệu tham khảo (RAG) |
-| EVTX-ATTACK-SAMPLES (tùy chọn) | Mẫu Windows event theo tactic ATT&CK. Cần `python-evtx`; antivirus có thể chặn file này |
-
-Dataset chỉ được chạy offline qua bộ chuẩn hóa và rule engine, không bơm vào index thật.
-Đo độ phủ rule hiện tại: `cd server && .venv/Scripts/python -m siem.ai.benchmark --write ../datasets/report.md`.
-Kết quả hiện tại: bắt 11% mẫu tấn công quan sát được, 0 báo nhầm. Có thêm 9.977 mẫu tấn công nằm trong body POST, access log không ghi nên không thể phát hiện.
-
-**Gom theo loại tấn công** (`attack_types.py`): mỗi mẫu tấn công web được gán một loại bằng heuristic thô, chỉ để gom nhóm.
-Nhờ vậy mỗi lần gọi, LLM chỉ thấy một kiểu tấn công, kèm mô tả loại đó.
-CSIC 2010 gán nhãn "bất thường" cho cả những request sai định dạng của riêng ứng dụng mẫu. Rule chữ ký cho các nhóm này
-chỉ khớp ứng dụng đó, nên chúng chỉ được báo cáo, không giao cho AI. Muốn bắt cần mô hình hành vi hoặc allowlist theo từng ứng dụng.
-Dấu nháy đơn lẻ giữa chữ (tên riêng như `D'estats`, hoặc dataset chèn nháy ngẫu nhiên) không tính là SQLi, vì không viết được
-chữ ký chung cho nó mà không báo nhầm tên người hay địa chỉ hợp lệ.
-
-Mỗi mẫu còn được gán **biến thể** (kiểu con trong cùng loại, vd SQLi `tautology-quoted` / `quote-breakout`, hay thư mục bị dò
-`/_vti_bin/`) và **payload** (đoạn làm request bị nghi vấn). LLM nhận 8 mẫu trải đều theo biến thể, biến thể đông trước,
-thống kê biến thể của cả tập train và payload của từng mẫu. URL dài bị cắt khi đưa vào prompt, còn payload thì không bị cắt.
-Chuỗi giữ chỗ `INJECTED_PARAM` của CSIC bị bỏ khỏi payload, và rule chứa nó bị kiểm định loại.
-
-| Loại | Mẫu rule hiện tại chưa bắt | Giao cho AI |
-|---|---|---|
-| Dò file sao lưu / mã nguồn (`.bak`, `.old`, `~`, `.inc`...) | 2.615 | có |
-| Dò tài nguyên nhạy cảm / mặc định (`/_vti_bin`, `/cfide`, `.nsf`...) | 885 | có |
-| CRLF / chèn header (`%0A Set-cookie:`) | 540 | có |
-| Mã hóa né tránh (`%25xx`, `%00`) | 466 | có |
-| SQL Injection (dạng rule hiện tại bỏ sót, vd `'OR'a='a`, `AND 1=1`) | 392 | có |
-| Server-Side Include (`<!--#exec`) | 265 | có |
-| Tham số lạ / giá trị sai định dạng / đường dẫn không tồn tại (riêng ứng dụng) | 8.266 | không |
-
-**Ghép rule theo biến thể** (`worker._refine`, chỉ cho nhóm web): câu trả lời đầu của LLM được tách thành từng mẫu (giá trị
-của mệnh đề). Mỗi mẫu được đo trên tập train và nửa tập bình thường, và chỉ được giữ nếu bắt thêm được tấn công mà không khớp
-request bình thường, không khớp URL thông thường, không gắn với ứng dụng mẫu. Sau đó, tối đa `AI_REFINE_ROUNDS` (mặc định 6)
-lượt bổ sung hỏi riêng **một biến thể** còn sót nhiều nhất. Mỗi lượt dùng prompt mới, kèm mẫu đã giữ và mẫu bị loại (có lý do),
-nhưng không kèm câu trả lời cũ và không nêu tên loại tấn công. Hỏi lại cùng biến thể thì tăng temperature và luân phiên kiểu payload
-(khúc URL / đúng cặp tham số=giá trị). Rule cuối là OR các mẫu đã giữ, rồi mới qua kiểm định trên tập kiểm tra. Tập kiểm tra
-không được dùng ở bước ghép. Lý do thiết kế như vậy, rút ra khi chạy thử với `qwen2.5-coder:7b`:
-- Gửi lại rule cũ kèm phản hồi chi tiết từng giá trị thì model chỉ chép lại nguyên văn, kể cả ở temperature 0,8.
-- Prompt có nhắc "SQL injection" thì model viết payload sách giáo khoa (`' OR 1=1`), dù cả 8 payload đưa vào đều là `'OR'a='a`.
-- Model hay viết cú pháp regex (`AND\s*1=1`) nhưng lại để op là `contains`. Worker tự đổi op sang `regex`.
-- Thêm ví dụ mẫu (few-shot) từ loại tấn công khác làm kết quả tệ hơn.
-
-Các biến cấu hình `AI_*` nằm trong `.env.example`.
-
-**Kết quả chạy thử** (27/9/2026, `qwen2.5-coder:7b` trên GPU Quadro RTX 4000 8 GB, mỗi lần gọi LLM 30–60 giây):
-
-| Cách làm | Đề xuất qua kiểm định |
-|---|---|
-| Gom theo `url.path` (bản đầu) | 0/10: 7 học vẹt chuỗi trong mẫu (bắt 0–9% tập kiểm tra), 2 quá rộng (báo nhầm 100%), 1 không đề xuất |
-| Gom theo loại tấn công | 2/6 (file sao lưu, mã hóa né tránh). SSI và SQLi hỏng vì LLM so payload đã giải mã với `url.query` còn mã hóa |
-| Gom theo loại + prompt nói rõ `url.query` thô / `url.decoded` đã giải mã | **4/6**: file sao lưu (bắt 82% tập kiểm tra), CRLF (100%), mã hóa né tránh (60%), SSI (100%), đều 0 báo nhầm |
-
-- Hai loại vẫn chưa đạt: SQLi (bắt 18%) và tài nguyên nhạy cảm (15%). Model chỉ chép lại vài chuỗi cụ thể trong mẫu.
-- Nếu duyệt cả 4 rule đạt, độ phủ trên mẫu tấn công quan sát được tăng từ 11,0% lên **32,3%** (riêng các loại có chữ ký dùng chung: 23% → 69%),
-  báo nhầm vẫn 0/36.000. Các rule này đang chờ duyệt trên console. Người duyệt nên xem kỹ nội dung
-  (vd AI-010 dùng regex chưa neo cuối đường dẫn, phần mô tả bị lặp).
-- Chính sách thử lại: đề xuất do con người từ chối hoặc gỡ thì mục tiêu đó bị chặn 30 ngày. Đề xuất bị kiểm định tự động loại
-  thì chỉ bị chặn khi vẫn cùng model và cùng prompt; đổi `AI_MODEL` hoặc sửa prompt là được thử lại ngay.
-- Luồng đề xuất ngoại lệ đã chạy trên dữ liệu thật: máy backup nội bộ `10.50.0.7` đăng nhập SSH bằng root theo lịch,
-  làm AUTH-004 bắn 5 lần và analyst đánh dấu cả 5 là false positive. LLM đề xuất ngoại lệ `source.ip eq 10.50.0.7`
-  (37,5 giây), qua đủ 9 bước kiểm định (khớp 5/5 báo nhầm, replay 5 → 0 alert). Hệ thống đánh giá **rủi ro cao** vì rule
-  chưa có case thật hay mẫu vàng để đối chứng và ngoại lệ tắt 100% alert của rule. Đề xuất đang chờ 2 người duyệt.
 
 ## 6. Kiểm thử
 
 ```bash
 cd server && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt pytest httpx
-.venv/Scripts/python -m pytest -q      # 95 test: parser, rule, ML, SOAR, case playbook, API + đăng nhập, Grafana proxy, AI, Wazuh, thư viện rule
+.venv/Scripts/python -m pytest -q      # 135 test: parser, rule, ML, SOAR, case playbook, API + đăng nhập, Grafana proxy, AI (web + endpoint, log thật, Sigma), Wazuh, thư viện rule
 cd .. && docker run --rm -v ./vector:/etc/vector:ro timberio/vector:0.58.0-alpine test /etc/vector/wazuh.yaml /etc/vector/wazuh-tests.yaml
 ```
 **Kiểm thử end-to-end trên stack đang chạy** (cần `--profile demo`): `python tools/e2e_test.py`. Script không dùng tài
