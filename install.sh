@@ -199,6 +199,8 @@ configure() {
     confirm "Dừng hệ thống và sinh lại chứng chỉ?" || die "giữ IP cũ: chạy lại với --ip $old_ip"
     compose down >/dev/null 2>&1 || true
     docker volume rm "${PROJECT}_certs" >/dev/null
+    warn "CA nội bộ được sinh MỚI: import lại ca.crt trên máy quản trị (lệnh ở cuối)"
+    warn "agent đã cài vẫn trỏ $old_ip: sửa <address> trong ossec.conf của agent thành $IP rồi khởi động lại agent"
   fi
   env_set COMPOSE_PROJECT_NAME "$PROJECT"
   env_set MANAGER_TLS_IPS "$IP"
@@ -210,6 +212,9 @@ configure() {
   if [ -z "$ADMIN_IP" ]; then ADMIN_IP=$(who am i 2>/dev/null | sed -n 's/.*(\([0-9.]*\)).*/\1/p' | head -n1); fi
   if [ -n "$ADMIN_IP" ] && ! valid_ipv4 "$ADMIN_IP"; then ADMIN_IP=""; fi
   local wl item; wl=$(env_get SOAR_WHITELIST)
+  if [ -n "$old_ip" ] && [ "$old_ip" != "$IP" ]; then   # IP cũ của máy chủ có thể được cấp cho máy khác
+    wl=$(printf '%s' "$wl" | tr ',' '\n' | grep -vxF "$old_ip/32" | paste -sd, -)
+  fi
   for item in 127.0.0.0/8 "$IP/32" ${ADMIN_IP:+"$ADMIN_IP/32"}; do
     case ",$wl," in *",$item,"*) ;; *) wl=${wl:+$wl,}$item ;; esac
   done
