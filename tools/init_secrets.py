@@ -43,11 +43,18 @@ for name in NAMES:
         print(f"giữ nguyên  {p.name}")
         continue
     p.write_text(generate(name), encoding="utf-8")
-    try:
-        p.chmod(0o600)
-    except OSError:
-        pass
     print(f"đã tạo      {p.name}")
+
+# Quyền trên Linux: docker compose (không swarm) bind-mount nguyên file secret vào /run/secrets, GIỮ quyền của host.
+# Service chạy bằng user riêng (manager/analyzer/soar/ai-worker uid 10001, Grafana uid 472) nên file phải đọc được
+# với mọi uid (644); bảo vệ ở cấp THƯ MỤC (700): user khác trên máy không vào được secrets/. File 600 thì service
+# không đọc được secret và hỏng ngay khi khởi động (Docker Desktop trên Windows không lộ lỗi này).
+try:
+    out.chmod(0o700)
+    for p in out.iterdir():
+        p.chmod(0o644)
+except OSError:
+    pass
 print(f"\nThư mục: {out}")
 print(r"Đăng nhập console lần đầu: tài khoản admin, mật khẩu tạm trong secrets\console_admin_password "
       r"(type secrets\console_admin_password | cat secrets/console_admin_password) — console buộc đổi ngay.")
