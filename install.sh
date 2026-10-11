@@ -253,7 +253,7 @@ wait_until() {   # wait_until GIÂY lệnh...
 service_state() { compose ps -a --format '{{.Service}} {{.State}} {{.ExitCode}}' | awk -v s="$1" '$1==s {print $2, $3}'; }
 es_setup_done() { [ "$(service_state es-setup)" = "exited 0" ]; }
 healthy() { [ "$(docker inspect -f '{{.State.Health.Status}}' "$(compose ps -q "$1")")" = healthy ]; }
-console_up() { curl -sf --cacert ca.crt "https://127.0.0.1:8000/health"; }
+console_up() { curl -sf --cacert ca.crt "https://127.0.0.1:8000/health" >/dev/null; }
 
 wait_ready() {
   say "6/8 Chờ hệ thống sẵn sàng"

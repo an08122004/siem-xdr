@@ -18,7 +18,9 @@ param(
   [switch]$AI,
   [switch]$Update,
   [string]$Ref = "HEAD",                                          # commit / nhánh muốn gửi
-  [string]$Dir = "siem-xdr"                                       # thư mục cài trong home của user trên máy chủ
+  [string]$Dir = "siem-xdr",                                      # thư mục cài trong home của user trên máy chủ
+  [int]$Port = 22,                                                # cổng SSH của máy chủ
+  [string[]]$SshOption = @()                                      # tùy chọn thêm cho ssh/scp, vd -SshOption '-i','C:\keys\vm'
 )
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
@@ -34,7 +36,7 @@ try {
   git archive --format=tar.gz --prefix="$Dir/" -o $tgz $Ref
   if ($LASTEXITCODE -ne 0) { throw "git archive thất bại" }
   Write-Host "==> Gửi mã nguồn ($([math]::Round((Get-Item $tgz).Length / 1MB, 1)) MB, $Ref) tới $Target"
-  scp $tgz "${Target}:siem-xdr-deploy.tgz"
+  scp -P $Port @SshOption $tgz "${Target}:siem-xdr-deploy.tgz"
   if ($LASTEXITCODE -ne 0) { throw "scp thất bại" }
 
   $flags = @()
@@ -46,7 +48,7 @@ try {
   $remote = "set -e; tar -xzf siem-xdr-deploy.tgz --exclude=$Dir/server/rules/ai --exclude=$Dir/server/rules/exceptions; " +
             "rm -f siem-xdr-deploy.tgz; cd $Dir; sudo ./install.sh --admin-ip `${SSH_CLIENT%% *} $($flags -join ' ')"
   Write-Host "==> Cài trên máy chủ"
-  ssh -t $Target $remote
+  ssh -t -p $Port @SshOption $Target $remote
   if ($LASTEXITCODE -ne 0) { throw "cài đặt trên máy chủ thất bại (mã $LASTEXITCODE), xem thông báo ở trên" }
 }
 finally {

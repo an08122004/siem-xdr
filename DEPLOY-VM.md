@@ -22,7 +22,7 @@ thành phần nằm ở [README.md](README.md); tài liệu này chỉ đi theo 
 
 | VM | Vai trò | Tên agent (bắt buộc) | CPU / RAM / Đĩa |
 |---|---|---|---|
-| `siem-server` | Elasticsearch, Kafka, Wazuh manager, Vector, analyzer, SOAR, console, Grafana | — | 4 vCPU / **8 GB** / 60 GB. Bật AI: 16 GB+ / 100 GB (xem mục 2.5) |
+| `siem-server` | Elasticsearch, Kafka, Wazuh manager, Vector, analyzer, SOAR, console, Grafana | — | 4 vCPU / **8 GB** / 60 GB. Bật AI: 16 GB+ / 100 GB (xem mục 2.4) |
 | `Web-01` | Máy chủ web S001 | `Web-01` | 2 vCPU / 2 GB / 20 GB |
 | `Ubuntu-01` | Máy trạm Linux A003 | `Ubuntu-01` | 2 vCPU / 2 GB / 20 GB |
 | `PC-01` | Máy trạm Windows A001 | `PC-01` | 2 vCPU / 4 GB / 50 GB |
@@ -57,103 +57,74 @@ này để gắn tài sản và mức quan trọng (`risk_score`). Đổi mô h�
 
 ## 2. Máy chủ SIEM (`siem-server`, 192.168.56.10)
 
-### 2.1 Cài Docker Engine + Compose plugin
+Cài bằng **một lệnh**. Script `install.sh` tự làm mọi bước (bảng ở 2.3); các bước làm tay để ở [phụ lục A](#phụ-lục-a-cài-máy-chủ-bằng-tay).
 
+### 2.1 Cách nhanh nhất: một lệnh từ máy Windows
+
+Chuẩn bị trên VM `siem-server`: Ubuntu 24.04 (hoặc 22.04 / Debian 12), đã đặt IP host-only ở mục 1, bật SSH:
 ```bash
-sudo apt-get update && sudo apt-get install -y ca-certificates curl python3
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
-  | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
-sudo apt-get update
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo usermod -aG docker "$USER"     # đăng xuất / đăng nhập lại để có hiệu lực
+sudo apt-get install -y openssh-server
 ```
-
-### 2.2 Tham số kernel
-
-```bash
-sudo tee /etc/sysctl.d/99-siem.conf >/dev/null <<'EOF'
-vm.max_map_count=262144          # Elasticsearch
-net.core.rmem_max=33554432       # buffer UDP 32 MB cho syslog (vector/vector.yaml)
-EOF
-sudo sysctl --system
-```
-
-### 2.3 Đưa mã nguồn lên VM
-
-Từ máy Windows đang có mã nguồn (PowerShell, `tar` có sẵn trên Windows 10+). Không mang theo môi trường Python, dữ liệu
-AI, bí mật và `.env` của máy cũ:
-
+Trên máy Windows, mở PowerShell trong thư mục mã nguồn `siem-xdr`:
 ```powershell
-cd D:\GSANM\BTL
-tar -czf siem-xdr.tgz --exclude=siem-xdr/server/.venv --exclude=siem-xdr/.claude --exclude=siem-xdr/datasets `
-    --exclude=siem-xdr/ui-shots --exclude=siem-xdr/secrets --exclude=siem-xdr/.env siem-xdr
-scp siem-xdr.tgz <user>@192.168.56.10:~
+.\tools\deploy-vm.ps1 <user>@192.168.56.10            # thêm -Demo: máy web demo, -AI: AI đề xuất rule
 ```
+Nhập mật khẩu SSH, rồi mật khẩu sudo khi được hỏi. Script gửi **bản đã commit** của repo (`git archive`: đúng ký tự xuống dòng
+cho Linux, không mang theo `.venv`, `datasets`, `secrets`, `.env`) sang VM và chạy `sudo ./install.sh`. IP của máy Windows
+(nhìn từ VM) được thêm vào `SOAR_WHITELIST`, nên SOAR không bao giờ chặn máy quản trị. Lần đầu mất khoảng 5–20 phút
+(cài Docker, tải image, build image Python).
 
-Trên `siem-server`:
+Màn hình cuối in sẵn: địa chỉ console, mật khẩu `admin` tạm, đường dẫn file CA, lệnh cài agent Linux / Windows **đã điền IP
+và mật khẩu enroll**. In lại lúc nào cũng được: `sudo ./install.sh info` (trong thư mục `~/siem-xdr` trên VM).
 
+### 2.2 Hoặc chạy ngay trên VM
+
+Nếu mã nguồn đã có trên VM (vd `git clone` bằng token GitHub, repo đang riêng tư):
 ```bash
-tar -xzf siem-xdr.tgz && cd siem-xdr
-mkdir -p secrets                  # thư mục bí mật mới cho máy này
+cd siem-xdr
+sudo ./install.sh                      # tự phát hiện IP; máy nhiều IP thì hỏi, hoặc chỉ định --ip 192.168.56.10
+sudo ./install.sh --demo --admin-ip 192.168.56.1     # kèm máy web demo, khai IP máy quản trị
 ```
 
-Repo bắt buộc LF cho script (`.gitattributes`), nên script chạy được ngay trên Linux. Nếu đã chép bằng cách khác và gặp
-lỗi `/bin/sh^M: bad interpreter` thì chạy `find . -name '*.sh' -o -path './wazuh/agent/linux/*' | xargs sed -i 's/\r$//'`.
+### 2.3 `install.sh` làm gì
 
-### 2.4 Bí mật và cấu hình
+| Bước | Việc |
+|---|---|
+| 1 | Kiểm tra: quyền root, Ubuntu / Debian, RAM (nên 8 GB), đĩa trống (nên ≥ 20 GB), file có bị đổi sang CRLF không |
+| 2 | Cài Docker Engine + Compose từ `download.docker.com` nếu chưa có (cần Docker ≥ 26), thêm user vào nhóm `docker` |
+| 3 | Tham số kernel `vm.max_map_count` (Elasticsearch), `net.core.rmem_max` (buffer UDP syslog), bật đồng bộ giờ |
+| 4 | Sinh bí mật vào `secrets/` (thư mục chỉ root vào được); viết `.env`: IP máy chủ (chứng chỉ TLS), `GRAFANA_ROOT_URL`, `SOAR_WHITELIST` (127.0.0.0/8, IP máy chủ, IP máy quản trị), profile và file compose đang dùng |
+| 5 | `docker compose up -d` |
+| 6 | Chờ Elasticsearch + tài khoản RBAC, Wazuh manager, console; xuất CA nội bộ ra `ca.crt` |
+| 7–8 | Kiểm tra nhanh trạng thái, in thông tin đăng nhập và lệnh cài agent |
 
-```bash
-python3 tools/init_secrets.py      # sinh mật khẩu / key ngẫu nhiên vào secrets/
-cp .env.example .env
-```
+Chạy lại bao nhiêu lần cũng được: bí mật, `.env` và dữ liệu giữ nguyên. Đổi IP máy chủ (`--ip` khác lần trước) thì script hỏi
+rồi sinh lại chứng chỉ TLS (dữ liệu giữ nguyên).
 
-Sửa `.env` **trước lần khởi động đầu** (chứng chỉ TLS sinh một lần theo `MANAGER_TLS_IPS`):
+### 2.4 Lệnh thường dùng sau khi cài
 
-```ini
-MANAGER_TLS_IPS=192.168.56.10
-GRAFANA_ROOT_URL=https://192.168.56.10:8000/grafana/
-# Không bao giờ để SOAR chặn máy quản trị và chính máy SIEM. KHÔNG thêm IP máy attacker.
-SOAR_WHITELIST=127.0.0.0/8,192.168.56.1/32,192.168.56.10/32
-```
+| Việc | Lệnh (trên VM, thư mục `~/siem-xdr`) |
+|---|---|
+| Xem trạng thái | `sudo ./install.sh status` |
+| In lại địa chỉ, mật khẩu tạm, lệnh cài agent | `sudo ./install.sh info` |
+| Cập nhật mã nguồn mới | trên Windows: `.\tools\deploy-vm.ps1 <user>@192.168.56.10 -Update` (gửi bản commit mới, build lại image) |
+| Bật thêm máy demo / AI | `sudo ./install.sh --demo` / `sudo ./install.sh --ai` (GPU NVIDIA tự dùng nếu có nvidia-container-toolkit) |
+| Mọi lệnh compose | `docker compose ps`, `docker compose logs -f analyzer`... — **không cần** `-f` hay `--profile`: `.env` đã ghi `COMPOSE_FILE`, `COMPOSE_PROFILES` |
 
-Đã khởi động rồi mới đổi `MANAGER_TLS_IPS` thì phải sinh lại chứng chỉ: `docker compose down`, xóa volume `certs`
-(`docker volume rm siem-xdr_certs`), rồi khởi động lại.
+### 2.5 Đăng nhập console và tin cậy CA
 
-### 2.5 Khởi động
-
-```bash
-docker compose up -d --build
-docker compose ps        # es-setup phải "Exited (0)"; kafka, elasticsearch, wazuh-manager "healthy"
-```
-
-Lần đầu mất vài phút (tải image, build image Python). Tùy chọn:
-
-- `--profile demo`: thêm container web demo (`demo-web`, chỉ mở `127.0.0.1:8081` trên VM). Không cần khi đã có VM `Web-01`.
-- `--profile ai`: AI đề xuất rule (Ollama, model `qwen3.5:9b` 5–7 GB). Trên VM thường **không có GPU**, Ollama chạy CPU rất
-  chậm; cần thêm ~8 GB RAM. Chỉ dùng `-f docker-compose.gpu.yml` khi VM có GPU NVIDIA và đã cài NVIDIA Container Toolkit.
-  Mục 2.3 bỏ thư mục `datasets/`; dùng AI thì chép thêm thư mục này, hoặc tải lại bằng `tools/fetch_datasets.py` và
-  `tools/convert_datasets.py` (xem AI-README.md).
-
-### 2.6 Đăng nhập console và tin cậy CA
-
-1. Lấy mật khẩu tạm của admin: `cat secrets/console_admin_password`.
-2. Trên máy host mở **https://192.168.56.10:8000**, đăng nhập `admin`, đặt mật khẩu mới, rồi tạo tài khoản riêng
-   (tab *Tài khoản*): ít nhất 1 `analyst` và 1 `lead` (chỉ `lead` cô lập được máy).
-3. Hết cảnh báo chứng chỉ: lấy CA nội bộ rồi import vào *Trusted Root Certification Authorities* của máy host:
-   ```bash
-   docker compose cp elasticsearch:/usr/share/elasticsearch/config/certs/ca/ca.crt ./ca.crt   # trên VM
-   ```
+1. Trên máy host mở **https://192.168.56.10:8000**, đăng nhập `admin` bằng mật khẩu tạm (màn hình cuối của script, hoặc
+   `sudo ./install.sh info`), đặt mật khẩu mới, rồi tạo tài khoản riêng (tab *Tài khoản*): ít nhất 1 `analyst` và 1 `lead`
+   (chỉ `lead` cô lập được máy).
+2. Hết cảnh báo chứng chỉ: chép CA về máy host rồi import (lệnh in sẵn ở màn hình cuối):
    ```powershell
-   scp <user>@192.168.56.10:~/siem-xdr/ca.crt .                                                 # trên host
+   scp <user>@192.168.56.10:~/siem-xdr/ca.crt .
    Import-Certificate -FilePath .\ca.crt -CertStoreLocation Cert:\LocalMachine\Root            # PowerShell Administrator
    ```
-4. Kafka UI và Elasticsearch chỉ nghe trên `127.0.0.1` của VM. Xem từ host bằng SSH tunnel:
+3. Kafka UI và Elasticsearch chỉ nghe trên `127.0.0.1` của VM. Xem từ host bằng SSH tunnel:
    `ssh -L 8088:127.0.0.1:8088 -L 9200:127.0.0.1:9200 <user>@192.168.56.10`, rồi mở http://127.0.0.1:8088.
 
-### 2.7 Cổng mạng
+### 2.6 Cổng mạng
 
 | Cổng | Ai cần tới | Ghi chú |
 |---|---|---|
@@ -338,13 +309,67 @@ Kết quả đúng: không có alert LNX-002 và không có lệnh *Kill tiến 
 | Không có alert LNX-* | Thiếu `siem-procs` hoặc alias khác `siem-procs` (mục 3.3). |
 | Không có alert AUTH-* (SSH) | Agent phải đọc `/var/log/auth.log`: `grep -n auth.log /var/ossec/etc/ossec.conf`; thiếu thì thêm `<localfile>` `log_format syslog` cho file này. Ubuntu cần `rsyslog` để có file đó (`sudo apt-get install -y rsyslog`). |
 | Không có alert WIN-* | Chưa có Sysmon / audit 4688; xem *Event Viewer → Applications and Services → Microsoft → Windows → Sysmon*. |
-| `elasticsearch` khởi động lại liên tục | `docker compose logs elasticsearch`; thường do thiếu RAM hoặc `vm.max_map_count` (mục 2.2). |
-| Trình duyệt báo chứng chỉ sai tên | `MANAGER_TLS_IPS` không chứa IP đang dùng: sửa `.env`, xóa volume `certs`, khởi động lại (mục 2.4). |
+| `elasticsearch` khởi động lại liên tục | `docker compose logs elasticsearch`; thường do thiếu RAM hoặc `vm.max_map_count` (`install.sh` đặt sẵn; cài tay: phụ lục A). |
+| Trình duyệt báo chứng chỉ sai tên | `MANAGER_TLS_IPS` không chứa IP đang dùng: `sudo ./install.sh --ip <IP đúng>` (script hỏi rồi sinh lại chứng chỉ). |
 | SOAR chặn nhầm máy quản trị | Thêm IP vào `SOAR_WHITELIST`, `docker compose up -d soar manager`, gỡ chặn trên console. |
 
 ## 8. Làm lại từ đầu
 
 - Gỡ agent Linux: `sudo apt-get purge -y wazuh-agent && sudo rm -rf /var/ossec`; Windows: gỡ *Wazuh Agent* trong
   *Apps*. Xóa agent khỏi manager bằng `manage_agents -r <id>`.
-- Xóa sạch backend (mất toàn bộ event, alert, case, tài khoản): `docker compose down -v`, rồi làm lại từ mục 2.4.
+- Xóa sạch backend (mất toàn bộ event, alert, case, tài khoản): `docker compose down -v`, rồi chạy lại `sudo ./install.sh` (bí mật cũ được giữ).
 - Nhanh nhất: quay về snapshot "sạch" của mục 1.
+
+## Phụ lục A. Cài máy chủ bằng tay
+
+Chỉ cần khi không dùng `install.sh` (vd máy không phải Ubuntu / Debian). Đây đúng là các bước script làm.
+
+1. Cài Docker Engine + Compose plugin (cần Docker ≥ 26 vì `docker-compose.yml` dùng volume `subpath`):
+   ```bash
+   sudo apt-get update && sudo apt-get install -y ca-certificates curl python3
+   sudo install -m 0755 -d /etc/apt/keyrings
+   sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+   sudo chmod a+r /etc/apt/keyrings/docker.asc
+   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+     | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+   sudo apt-get update
+   sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+   ```
+2. Tham số kernel:
+   ```bash
+   printf 'vm.max_map_count=262144\nnet.core.rmem_max=33554432\n' | sudo tee /etc/sysctl.d/99-siem-xdr.conf
+   sudo sysctl --system
+   ```
+3. Đưa mã nguồn lên VM bằng `git archive` (giữ ký tự xuống dòng LF), không chép thẳng thư mục từ Windows:
+   ```powershell
+   git archive --format=tar.gz --prefix=siem-xdr/ -o siem-xdr.tgz HEAD
+   scp siem-xdr.tgz <user>@192.168.56.10:~
+   ```
+   Trên VM: `tar -xzf siem-xdr.tgz && cd siem-xdr`.
+4. Bí mật và quyền. Container chạy bằng user riêng (uid 10001, Grafana 472) nên file bí mật phải đọc được (644), bảo vệ ở
+   cấp thư mục (700); manager ghi rule AI đã duyệt vào 2 thư mục rules:
+   ```bash
+   sudo python3 tools/init_secrets.py
+   sudo chown -R root:root secrets && sudo chmod 700 secrets && sudo chmod 644 secrets/*
+   mkdir -p server/rules/ai server/rules/exceptions && sudo chown -R 10001:10001 server/rules/ai server/rules/exceptions
+   ```
+5. Cấu hình `.env` **trước lần khởi động đầu** (chứng chỉ TLS sinh một lần theo `MANAGER_TLS_IPS`):
+   ```bash
+   cp .env.example .env
+   ```
+   ```ini
+   MANAGER_TLS_IPS=192.168.56.10
+   GRAFANA_ROOT_URL=https://192.168.56.10:8000/grafana/
+   # Không bao giờ để SOAR chặn máy quản trị và chính máy SIEM. KHÔNG thêm IP máy attacker.
+   SOAR_WHITELIST=127.0.0.0/8,192.168.56.1/32,192.168.56.10/32
+   COMPOSE_PROFILES=            # demo, ai (cách nhau bằng dấu phẩy) nếu cần
+   ```
+   Đã khởi động rồi mới đổi `MANAGER_TLS_IPS` thì phải sinh lại chứng chỉ: `docker compose down`, xóa volume `certs`
+   (`docker volume rm siem-xdr_certs`), rồi khởi động lại.
+6. Khởi động và lấy CA:
+   ```bash
+   sudo docker compose up -d --build
+   sudo docker compose ps        # es-setup phải "Exited (0)"; kafka, elasticsearch, wazuh-manager "healthy"
+   sudo docker compose cp elasticsearch:/usr/share/elasticsearch/config/certs/ca/ca.crt ./ca.crt
+   sudo cat secrets/console_admin_password    # mật khẩu tạm của admin
+   ```
