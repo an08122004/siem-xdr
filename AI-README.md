@@ -382,13 +382,27 @@ trượt thì chuyển `invalid` kèm lý do (để không giữ chỗ target), 
 | Lĩnh vực | Mẫu tấn công | Rule viết tay bắt được | Kỹ thuật / loại có ít nhất 1 mẫu bị bắt | Báo nhầm |
 |---|---|---|---|---|
 | Web (CSIC 2010) | 15.088 | 1.659 (11,0%) | 3/10 loại | 0/36.000 |
-| Windows, dựng lại | 2.218 | 127 (5,7%) | 37/133 | 1/214 (WIN-013 bắt `schtasks /create` của job sao lưu) |
-| Windows, log thật | 595 | 67 (11,3%) | 13/35 | (chung tập bình thường) |
-| Linux, dựng lại | 1.146 | 12 (1,0%) | 7/76 | 0/94 |
+| Windows, dựng lại | 2.218 | 127 (5,7%) | 37/133 | 0/671 |
+| Windows, log thật | 595 | 56 (9,4%) | 11/35 | (chung tập bình thường) |
+| Linux, dựng lại | 1.146 | 12 (1,0%) | 7/76 | 0/200 |
 | Linux, log thật | 268 | 0 (0%) | 0/22 | (chung tập bình thường) |
 
-Đo theo bộ (một bộ bị phát hiện khi rule bắn trên ít nhất một tiến trình của bộ): Windows Splunk 80/417 bộ (19,2%), Windows OTRF
+Đo theo bộ (một bộ bị phát hiện khi rule bắn trên ít nhất một tiến trình của bộ): Windows Splunk 60/417 bộ (14,4%), Windows OTRF
 25/117 (21,4%), Linux Splunk 5/62 (8,1%). So sánh với ruleset gốc của Wazuh: xem `README.md` mục 3 và `datasets/report_wazuh.md`.
+
+**Chỉnh 3 rule viết tay (12/10/2026).** Tập bình thường mở rộng (mục 9.10) lộ 7 báo nhầm của rule viết tay (Windows 5/671, Linux
+2/200), vượt ngưỡng 0,1% mà kiểm định áp cho rule AI:
+- **WIN-005** (`-EncodedCommand`) bắt lớp vỏ PowerShell của Ansible khi quản trị qua WinRM (giải mã base64: `Set-StrictMode`,
+  `&chcp.com 65001 ... $exec_wrapper`, `[Console]::InputEncoding = ...`). 11/14 "mẫu tấn công" rule từng bắt cũng là lớp vỏ này,
+  gắn nhãn nhầm vì nằm trong cây tiến trình của lần chạy bài thử; chúng có mặt ở rất nhiều bộ log Splunk, nên trước đây đẩy số bộ
+  "bị phát hiện" lên 80 (nay 60). Rule giờ bỏ qua đúng chuỗi tham số của Ansible; bắt 3 mẫu tấn công thật (T1047, T1059.001, T1027).
+- **WIN-013** bắt mọi `schtasks /create`, kể cả tác vụ sao lưu. Giờ chỉ bắt khi tác vụ chạy trình thông dịch / LOLBin, file
+  `.msc` / script, hoặc file trong thư mục người dùng ghi được: vẫn bắt đủ 14/14 mẫu tấn công.
+- **LNX-003** (`curl | sh`) bắt bộ cài chính thức (nvm, Docker). Giờ bỏ qua đoạn tải từ danh sách nguồn cài đặt chính thức (theo
+  tên miền / repo, không bỏ cả `raw.githubusercontent.com`); vẫn bắt đủ 8/8.
+
+Đổi lại: kẻ tấn công chép đúng chuỗi tham số của Ansible hoặc tải từ đúng các URL trong danh sách sẽ lọt; danh sách cần chỉnh theo
+công cụ tổ chức thật sự dùng (chú thích trong `server/rules/*.yml`).
 
 ### 9.2 Chạy thử với web (27/9/2026, `qwen2.5-coder:7b`)
 

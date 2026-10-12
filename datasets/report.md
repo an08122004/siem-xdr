@@ -5,10 +5,10 @@ Sinh bởi `python -m siem.ai.benchmark`. Chỉ tính rule dạng `match` ở m�
 | Lĩnh vực | Mẫu tấn công | Phát hiện | Nhóm có ít nhất 1 mẫu bị bắt | Mẫu bình thường | Báo nhầm |
 |---|---|---|---|---|---|
 | Web (CSIC 2010) | 15,088 | 1,659 (11.0%) | 3/10 loại | 36,000 | 0 (0.0%) |
-| Windows (tổng) | 2,813 | 194 (6.9%) | 41/134 kỹ thuật | 214 | 1 (0.5%) |
+| Windows (tổng) | 2,813 | 183 (6.5%) | 39/134 kỹ thuật | 671 | 0 (0.0%) |
 | &nbsp;&nbsp;Windows: dựng lại từ Atomic Red Team | 2,218 | 127 (5.7%) | 37/133 kỹ thuật |  |  |
-| &nbsp;&nbsp;Windows: log ghi thật (Splunk) | 595 | 67 (11.3%) | 13/35 kỹ thuật |  |  |
-| Linux (tổng) | 1,414 | 12 (0.8%) | 7/78 kỹ thuật | 94 | 0 (0.0%) |
+| &nbsp;&nbsp;Windows: log ghi thật (Splunk) | 595 | 56 (9.4%) | 11/35 kỹ thuật |  |  |
+| Linux (tổng) | 1,414 | 12 (0.8%) | 7/78 kỹ thuật | 200 | 0 (0.0%) |
 | &nbsp;&nbsp;Linux: dựng lại từ Atomic Red Team | 1,146 | 12 (1.0%) | 7/76 kỹ thuật |  |  |
 | &nbsp;&nbsp;Linux: log ghi thật (Splunk) | 268 | 0 (0.0%) | 0/22 kỹ thuật |  |  |
 
@@ -18,13 +18,9 @@ Ngoài ra 9,977 mẫu web nằm ngoài tầm nhìn (payload trong body POST/PUT,
 
 | Bộ dữ liệu | Số bộ | Tiến trình | Bộ bị phát hiện | Kỹ thuật có ít nhất 1 bộ bị phát hiện |
 |---|---|---|---|---|
-| Windows, Splunk | 417 | 11,062 | 80 (19.2%) | 38/142 |
+| Windows, Splunk | 417 | 11,062 | 60 (14.4%) | 29/142 |
 | Windows, OTRF | 117 | 2,783 | 25 (21.4%) | 18/51 |
 | Linux, Splunk | 62 | 1,576 | 5 (8.1%) | 3/22 |
-
-Báo nhầm trên lệnh bình thường endpoint:
-
-- windows: `schtasks /create /tn "Nightly Backup" /tr "C:\Scripts\backup.bat" /sc daily /st 23:00 /ru SYSTEM` — WIN-013
 
 ## Web theo loại tấn công
 
@@ -136,7 +132,7 @@ Nhóm = kỹ thuật gốc theo hệ điều hành. AI chỉ nhận nhóm có t�
 | Windows | T1547 | Boot or Logon Autostart Execution | 44 | 1 | 92 | 2 | 2.2% |
 | Windows | T1059 | Command and Scripting Interpreter | 37 | 4 | 77 | 10 | 13.0% |
 | Windows | T1082 | System Information Discovery | 30 | 10 | 72 | 10 | 13.9% |
-| Windows | T1018 | Remote System Discovery | 17 | 1 | 68 | 6 | 8.8% |
+| Windows | T1018 | Remote System Discovery | 17 | 0 | 68 | 0 | 0.0% |
 | Windows | T1548 | Abuse Elevation Control Mechanism | 29 | 4 | 58 | 4 | 6.9% |
 | Windows | T1036 | Masquerading | 17 | 1 | 56 | 1 | 1.8% |
 | Windows | T1564 | Hide Artifacts | 23 | 1 | 51 | 2 | 3.9% |
@@ -149,7 +145,7 @@ Nhóm = kỹ thuật gốc theo hệ điều hành. AI chỉ nhận nhóm có t�
 | Windows | T1033 | System Owner/User Discovery | 8 | 0 | 35 | 0 | 0.0% |
 | Windows | T1012 | Query Registry | 6 | 0 | 34 | 0 | 0.0% |
 | Windows | T1047 | Windows Management Instrumentation | 12 | 1 | 33 | 1 | 3.0% |
-| Windows | T1531 | Account Access Removal | 4 | 1 | 32 | 5 | 15.6% |
+| Windows | T1531 | Account Access Removal | 4 | 0 | 32 | 0 | 0.0% |
 | Windows | T1555 | Credentials from Password Stores | 25 | 7 | 32 | 7 | 21.9% |
 | Windows | T1027 | Obfuscated Files or Information | 20 | 1 | 31 | 1 | 3.2% |
 | Windows | T1222 | File and Directory Permissions Modification | 9 | 0 | 31 | 0 | 0.0% |
@@ -274,8 +270,8 @@ Nhóm = kỹ thuật gốc theo hệ điều hành. AI chỉ nhận nhóm có t�
 | WIN-012 | Lạm dụng LOLBins để tải/thực thi mã | 47 | 0 |
 | WIN-007 | Đánh cắp thông tin đăng nhập (Mimikatz / dump LSASS) | 32 | 0 |
 | WIN-010 | Xóa Shadow Copy (dấu hiệu Ransomware) | 16 | 0 |
-| WIN-005 | PowerShell chạy lệnh mã hóa (-EncodedCommand) | 14 | 0 |
-| WIN-013 | Tạo Scheduled Task (cơ chế duy trì truy cập) | 14 | 1 |
+| WIN-013 | Tạo Scheduled Task (cơ chế duy trì truy cập) | 14 | 0 |
 | LNX-003 | Tải về và thực thi script (curl/wget | sh) | 8 | 0 |
 | LNX-006 | Can thiệp cơ chế duy trì (crontab / authorized_keys / systemd) | 3 | 0 |
+| WIN-005 | PowerShell chạy lệnh mã hóa (-EncodedCommand) | 3 | 0 |
 | LNX-001 | Reverse shell | 1 | 0 |

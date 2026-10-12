@@ -24,6 +24,11 @@
 
 - id: LNX-003
   title: Tải về và thực thi script (curl/wget | sh)
+  # Bộ cài chính thức cũng dùng đúng cách này (12/10/2026: `curl ... nvm-sh/nvm/.../install.sh | bash`,
+  # `wget -qO- https://get.docker.com | sh` khớp nhầm), và cấu trúc lệnh không phân biệt được với tấn công -> bỏ qua đoạn
+  # tải từ nguồn cài đặt chính thức (theo tên miền / repo, không phải cả raw.githubusercontent.com: tấn công cũng dùng nó).
+  # Danh sách chỉnh theo công cụ tổ chức thật sự dùng; kẻ tấn công tải từ đúng các URL này sẽ lọt.
+  description: Tải script từ mạng rồi chạy thẳng qua shell, trừ bộ cài chính thức (Docker, nvm, rustup, k3s, Homebrew...)
   severity: high
   mitre: {tactic: Execution, technique: [T1105, T1059.004]}
   tags: [linux, download]
@@ -31,7 +36,7 @@
   condition:
     all:
       - {field: event.category, op: eq, value: process}
-      - {field: process.command_line, op: regex, value: ["(curl|wget)\\s+[^|]*\\|\\s*(ba)?sh", "(curl|wget).*(-O|-o)\\s*/tmp/.*&&\\s*chmod\\s+\\+x"]}
+      - {field: process.command_line, op: regex, value: ["(curl|wget)\\s+(?![^|]*://(get\\.docker\\.com|sh\\.rustup\\.rs|get\\.k3s\\.io|install\\.python-poetry\\.org|deb\\.nodesource\\.com/|raw\\.githubusercontent\\.com/(nvm-sh/nvm|homebrew/install|ohmyzsh/ohmyzsh|helm/helm)/))[^|]*\\|\\s*(ba)?sh", "(curl|wget).*(-O|-o)\\s*/tmp/.*&&\\s*chmod\\s+\\+x"]}
 
 - id: LNX-004
   title: Crypto miner

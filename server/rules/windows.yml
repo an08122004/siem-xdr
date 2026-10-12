@@ -44,6 +44,12 @@
 
 - id: WIN-005
   title: PowerShell chạy lệnh mã hóa (-EncodedCommand)
+  # Bỏ qua lớp vỏ của Ansible khi quản trị Windows qua WinRM (12/10/2026): log nền ghi thật của Splunk Attack Range có
+  # `PowerShell -NoProfile -NonInteractive -ExecutionPolicy Unrestricted -EncodedCommand` (giải mã: `Set-StrictMode`,
+  # `Get-WmiObject Win32_OperatingSystem`, `&chcp.com 65001 ... $exec_wrapper`) và `powershell -noninteractive
+  # -encodedcommand` mở đầu bằng `[Console]::InputEncoding = New-Object Text.UTF8Encoding` (base64 WwBDAG8A...).
+  # Kẻ tấn công chép đúng chuỗi tham số này sẽ lọt; máy không quản trị bằng Ansible / WinRM thì xóa 2 dòng `not`.
+  description: PowerShell chạy lệnh mã hóa base64, trừ lớp vỏ của Ansible qua WinRM
   severity: high
   mitre: {tactic: Execution, technique: [T1059.001, T1027]}
   tags: [windows, powershell]
@@ -53,6 +59,8 @@
       - {field: event.category, op: eq, value: process}
       - {field: process.name, op: in, value: [powershell.exe, pwsh.exe]}
       - {field: process.command_line, op: regex, value: "\\s-(e|en|enc|enco|encod|encode|encoded|encodedcommand)\\s+[A-Za-z0-9+/=]{20,}"}
+      - not: {field: process.command_line, op: regex, value: "-NoProfile\\s+-NonInteractive\\s+-ExecutionPolicy\\s+Unrestricted\\s+-EncodedCommand\\s"}
+      - not: {field: process.command_line, op: regex, value: "-noninteractive\\s+-encodedcommand\\s+WwBDAG8AbgBzAG8AbABlAF0AOgA6AEkAbgBwAHUAdABFAG4AYwBvAGQAaQBuAGcA"}
 
 - id: WIN-006
   title: Script PowerShell độc hại (download cradle / bypass AMSI / Mimikatz)
@@ -137,6 +145,10 @@
 
 - id: WIN-013
   title: Tạo Scheduled Task (cơ chế duy trì truy cập)
+  # Trước 12/10/2026 rule bắt MỌI lệnh `schtasks /create`, kể cả tác vụ sao lưu `/tr "C:\Scripts\backup.bat"` của quản
+  # trị viên. Cả 14 mẫu tấn công (Atomic + Splunk) đều cho tác vụ chạy trình thông dịch / LOLBin (cmd, PowerShell,
+  # wscript, javaw...), file .msc / script, hoặc file trong thư mục người dùng ghi được (%TEMP%, %APPDATA%, Public).
+  description: schtasks /create chạy trình thông dịch, LOLBin, file script hoặc file trong thư mục người dùng ghi được
   severity: medium
   mitre: {tactic: Persistence, technique: [T1053.005]}
   tags: [windows, persistence]
@@ -147,3 +159,4 @@
       - all:
           - {field: process.name, op: eq, value: schtasks.exe}
           - {field: process.command_line, op: contains, value: /create}
+          - {field: process.command_line, op: regex, value: ["(^|[\\\\/\\s\"'])(cmd|powershell|pwsh|wscript|cscript|mshta|rundll32|regsvr32|certutil|bitsadmin|javaw?)(\\.exe)?([\\s\"']|$)", "\\.(msc|js|jse|vbs|vbe|hta|ps1)([\\s\"']|$)", "%(temp|tmp|appdata|localappdata|public|programdata)%|\\\\(appdata|users\\\\public|programdata|windows\\\\temp)\\\\"]}
