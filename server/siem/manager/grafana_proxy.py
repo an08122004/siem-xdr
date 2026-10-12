@@ -35,6 +35,13 @@ _HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
 # request nền do dashboard tự gửi (tự làm mới, số liệu frontend) -> không phải thao tác của người dùng
 _BACKGROUND_WRITES = ("api/ds/query", "api/frontend-metrics", "api/live/")
 _USER_READS = ("api/dashboards/", "api/search")   # xem / tìm dashboard trong ứng dụng một trang của Grafana
+# Grafana không có phiên riêng (GF_AUTH_PROXY_ENABLE_LOGIN_TOKEN=false). Cookie phiên Grafana còn sót trong trình duyệt
+# (bản cũ mở Grafana ở localhost:3000 với form đăng nhập riêng; cookie không phân biệt cổng nên vẫn tới :8000) làm
+# frontend Grafana 11 đọc grafana_session_expiry đã quá hạn -> gọi api/user/auth-tokens/rotate -> 401 -> tự tải lại
+# trang -> lặp mãi: dashboard nhúng tải lại ~2 lần/giây, không bao giờ hiện xong (đã gặp 12/10/2026, 3270 lần / 30 phút).
+# Không chuyển tiếp sang Grafana và xóa hẳn trong trình duyệt (mọi path Grafana có thể đã đặt).
+_STALE_COOKIES = ("grafana_session", "grafana_session_expiry")
+_STALE_PATHS = ("/", "/grafana", "/grafana/")
 
 _client: httpx.AsyncClient | None = None
 
@@ -126,8 +133,10 @@ async def grafana(path: str, request: Request) -> Response:
 
     headers = [(k, v) for k, v in request.headers.items()
                if k.lower() not in _HOP and k.lower() != "cookie" and not k.lower().startswith("x-webauth-")]
-    cookie = "; ".join(c for c in request.headers.get("cookie", "").split("; ")
-                       if c and not c.startswith(auth.COOKIE + "="))      # cookie phiên console không đi sang Grafana
+    jar = [(c.split("=", 1)[0], c) for c in (x.strip() for x in request.headers.get("cookie", "").split(";")) if c]
+    stale = sorted({name for name, _ in jar if name in _STALE_COOKIES})
+    # cookie phiên console và cookie phiên Grafana cũ không đi sang Grafana
+    cookie = "; ".join(c for name, c in jar if name != auth.COOKIE and name not in _STALE_COOKIES)
     if cookie:
         headers.append(("cookie", cookie))
     headers += [("x-webauth-user", s.username), ("x-webauth-name", s.username),
@@ -140,7 +149,10 @@ async def grafana(path: str, request: Request) -> Response:
         log.warning("không chuyển tiếp được tới Grafana: %s", e)
         return JSONResponse({"detail": "Grafana không phản hồi"}, status_code=502)
     resp = StreamingResponse(r.aiter_raw(), status_code=r.status_code, background=BackgroundTask(r.aclose))
-    # giữ nguyên header của Grafana (kể cả nhiều Set-Cookie), bỏ header hop-by-hop
+    # giữ nguyên header của Grafana (kể cả nhiều Set-Cookie), bỏ header hop-by-hop và cookie phiên Grafana
     resp.raw_headers = [(k.encode("latin-1"), v.encode("latin-1")) for k, v in r.headers.multi_items()
-                        if k.lower() not in _HOP]
+                        if k.lower() not in _HOP and not (k.lower() == "set-cookie" and
+                                                          v.split("=", 1)[0].strip() in _STALE_COOKIES)]
+    resp.raw_headers += [(b"set-cookie", f"{name}=; Path={p}; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT".encode())
+                         for name in stale for p in _STALE_PATHS]
     return resp

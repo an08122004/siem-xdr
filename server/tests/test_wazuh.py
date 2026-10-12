@@ -392,6 +392,10 @@ def test_soar_no_endpoint_action_for_syslog_source(monkeypatch):
              "process": {"pid": 5}}
     assert soar.run_step({"action": "kill_process"}, alert)["status"] == "skipped"
     assert soar.run_step({"action": "block_ip", "scope": "origin"}, alert)["status"] == "skipped"
+    # sự kiện đăng nhập của chính SOC console (agent.id soc-console): cũng không có agent nào
+    console = alert | {"agent": {"id": "soc-console"}}
+    assert soar.run_step({"action": "isolate_host"}, console)["status"] == "skipped"
+    assert soar.run_step({"action": "block_ip", "scope": "origin"}, console)["status"] == "skipped"
     assert created == []
 
 

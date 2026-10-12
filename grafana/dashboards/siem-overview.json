@@ -357,7 +357,9 @@
           "unit": "short"
         },
         "overrides": []
-      }
+      },
+      "timeFrom": "10y",
+      "hideTimeOverride": true
     },
     {
       "id": 7,
@@ -2700,7 +2702,9 @@
             "desc": true
           }
         ]
-      }
+      },
+      "timeFrom": "10y",
+      "hideTimeOverride": true
     }
   ],
   "templating": {

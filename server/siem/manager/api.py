@@ -107,6 +107,7 @@ class NewAction(BaseModel):
 
 
 ALERT_STATUSES = ("open", "acknowledged", "in_progress", "closed", "false_positive")
+ACTIVE_ALERT_STATUSES = ALERT_STATUSES[:3]              # chưa đóng
 
 
 class AlertUpdate(BaseModel):
@@ -121,10 +122,14 @@ def _csv(v: str | None) -> list[str]:
     return [x.strip() for x in (v or "").split(",") if x.strip()]
 
 
-def _text_query(q: str, fields: list[str], ip_fields: list[str]) -> dict[str, Any]:
-    """Ô tìm kiếm của console: IP -> so khớp trường IP; còn lại tìm theo từ trong các trường văn bản."""
+def _text_query(q: str, fields: list[str], ip_fields: list[str], contains: tuple[str, ...] = ()) -> dict[str, Any]:
+    """Ô tìm kiếm của console: IP -> so khớp trường IP; còn lại tìm theo từ trong các trường văn bản.
+    `contains`: trường keyword (không có bản .text) tìm theo chuỗi con, không phân biệt hoa thường — vd tiêu đề case:
+    simple_query_string trên keyword chỉ khớp khi gõ nguyên văn cả tiêu đề, gõ "brute" không ra case nào."""
     should: list[dict] = [{"simple_query_string": {"query": q, "fields": fields, "default_operator": "and",
                                                    "lenient": True}}]
+    pattern = "*" + re.sub(r"([\\*?])", r"\\\1", q) + "*"
+    should += [{"wildcard": {f: {"value": pattern, "case_insensitive": True}}} for f in contains]
     try:
         ipaddress.ip_address(q)
         should += [{"term": {f: q}} for f in ip_fields]
@@ -305,7 +310,7 @@ def cases(status: str | None = None, q: str | None = None, alert_id: str | None 
     if alert_id:
         filters.append({"term": {"alert_ids": alert_id}})
     if q and q.strip():
-        filters.append(_text_query(q.strip()[:200], ["title", "entity", "rule_id"], ["entity"]))
+        filters.append(_text_query(q.strip()[:200], ["title", "entity", "rule_id"], ["entity"], contains=("title",)))
     return store.search(es(), settings.IDX_CASES, {"bool": {"filter": filters}}, size=min(max(size, 1), 1000),
                         sort=[{"created_at": "desc"}])
 
@@ -404,7 +409,8 @@ def stats() -> dict[str, Any]:
     return {
         "events_24h": count(f"{settings.IDX_EVENTS}-*", last24),
         "alerts_24h": count(settings.IDX_ALERTS, last24),
-        "alerts_open": count(settings.IDX_ALERTS, {"terms": {"alert.status": ["open", "in_progress"]}}),
+        # cùng tập trạng thái với mục "Đang mở" của console (trước đây thiếu acknowledged: số trên menu nhỏ hơn danh sách)
+        "alerts_open": count(settings.IDX_ALERTS, {"terms": {"alert.status": list(ACTIVE_ALERT_STATUSES)}}),
         "agents_total": len(ag),
         "agents_online": sum(a["status"] == "online" for a in ag),
         "actions_pending": count(settings.IDX_ACTIONS, {"terms": {"status": ["pending", "sent"]}}),

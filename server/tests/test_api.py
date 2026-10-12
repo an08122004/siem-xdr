@@ -363,6 +363,26 @@ def test_alert_filters_detail_and_history(env, monkeypatch):
     assert hist[0]["by"] == "admin" and "open -> false_positive" in hist[0]["text"] and "quét bảo mật" in hist[0]["text"]
 
 
+def test_case_search_by_title_words_and_active_alert_count(env, monkeypatch):
+    from siem.manager import api
+    searches, counts = [], []
+    monkeypatch.setattr(store, "search", lambda es, index, query=None, **kw: searches.append(query) or [])
+    admin_login(env)
+    env.get("/api/v1/cases?q=brute*")
+    should = searches[-1]["bool"]["filter"][-1]["bool"]["should"]
+    # title là keyword: phải tìm được theo chuỗi con, không phân biệt hoa thường; * do người dùng gõ là ký tự thường
+    assert {"wildcard": {"title": {"value": "*brute\\**", "case_insensitive": True}}} in should
+
+    class CountES:
+        def count(self, index, query):
+            counts.append((index, query))
+            return {"count": 0}
+    api._state["es"] = CountES()
+    env.get("/api/v1/stats")
+    # số trên menu "Cảnh báo" = danh sách "Đang mở" của console (gồm cả đã xác nhận)
+    assert (settings.IDX_ALERTS, {"terms": {"alert.status": ["open", "acknowledged", "in_progress"]}}) in counts
+
+
 def test_manual_actions_are_validated(env):
     admin_login(env)
 
@@ -457,6 +477,35 @@ def test_grafana_identity_headers_and_role_mapping(env, grafana):
     admin_login(env)
     env.get("/grafana/", headers=NAV)
     assert grafana[-1].headers["x-webauth-role"] == "Admin"
+
+
+def test_grafana_stale_session_cookies_removed(env, grafana):
+    """Cookie phiên Grafana cũ (thời Grafana mở ở :3000 có form đăng nhập) làm frontend Grafana gọi rotate -> 401 -> tải
+    lại trang mãi. Không chuyển tiếp sang Grafana và xóa trong trình duyệt."""
+    admin_login(env)
+    r = env.get("/grafana/d/x", headers={**NAV, "Cookie": "grafana_session_expiry=1700000000; grafana_session=abc; "
+                                         "grafana_x=1; siem_session=" + env.cookies.get("siem_session")})
+    assert r.status_code == 200
+    assert grafana[-1].headers["cookie"] == "grafana_x=1"
+    cleared = [c for c in r.headers.get_list("set-cookie") if "Max-Age=0" in c]
+    assert sorted(c.split(";")[0] + c.split(";")[1] for c in cleared) == sorted(
+        f"{n}= Path={p}" for n in ("grafana_session", "grafana_session_expiry") for p in ("/", "/grafana", "/grafana/"))
+    r = env.get("/grafana/d/x", headers=NAV)                                         # không có cookie cũ: không xóa gì
+    assert r.headers.get_list("set-cookie") == ["a=1", "b=2"]
+
+
+def test_grafana_never_sets_session_cookies(env):
+    """Grafana không có phiên riêng: cookie phiên Grafana đặt ra (vd bật nhầm login token) không tới trình duyệt."""
+    import httpx
+    from siem.manager import grafana_proxy
+    grafana_proxy.set_client(httpx.AsyncClient(base_url="http://g", transport=httpx.MockTransport(lambda req: httpx.Response(
+        200, headers=[("set-cookie", "grafana_session=t; Path=/grafana"), ("set-cookie", "grafana_session_expiry=1; Path=/grafana"),
+                      ("set-cookie", "a=1")], stream=httpx.ByteStream(b"ok")))))
+    try:
+        admin_login(env)
+        assert env.get("/grafana/d/x", headers=NAV).headers.get_list("set-cookie") == ["a=1"]
+    finally:
+        grafana_proxy.set_client(None)
 
 
 def test_grafana_auto_refresh_does_not_extend_session(env, grafana):

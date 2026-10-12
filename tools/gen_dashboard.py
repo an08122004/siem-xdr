@@ -121,6 +121,12 @@ def hide(field):
     return {"matcher": {"id": "byName", "options": field}, "properties": [{"id": "custom.hidden", "value": True}]}
 
 
+def all_time(panel):
+    """Panel trạng thái hiện tại (vd case đang mở) không lọc theo khoảng thời gian của dashboard: datasource case lọc theo
+    created_at, nên xem "1 giờ" thì case mở từ hôm qua biến mất khỏi ô "Case đang mở" (số khác hẳn menu console)."""
+    return panel | {"timeFrom": "10y", "hideTimeOverride": True}
+
+
 def row(title, y):
     return {"id": pid(), "type": "row", "title": title, "collapsed": False, "gridPos": {"x": 0, "y": y, "w": 24, "h": 1}, "panels": []}
 
@@ -155,7 +161,7 @@ panels = [
     stat("Tổng alert", AL, "", 4, 1, "purple"),
     stat("Alert critical", AL, "severity:critical", 8, 1, "red"),
     stat("Alert high", AL, "severity:high", 12, 1, "orange"),
-    stat("Case đang mở", {"type": "elasticsearch", "uid": "siem-cases"}, "status:(open OR in_progress OR contained)", 16, 1, "yellow"),
+    all_time(stat("Case đang mở", CS, "status:(open OR in_progress OR contained)", 16, 1, "yellow")),
     stat("Lệnh phản ứng XDR", AC, "", 20, 1, "green"),
     timeseries("Alert theo mức độ", AL, "", "severity", 0, 5, overrides=sev_overrides),
     timeseries("Event theo loại (event.category)", EV, "", "event.category", 12, 5),
@@ -194,10 +200,10 @@ panels = [
     row("Phản ứng (XDR / SOAR)", 80),
     table("Lệnh phản ứng gần đây", AC, "", ["created_at", "agent_id", "type", "target", "source", "status", "expires_at", "output"],
           0, 81, h=9, time_field="created_at"),
-    table("Case đang mở — bấm tiêu đề để mở trên console", CS, "status:(open OR in_progress OR contained)",
-          ["created_at", "priority", "severity", "title", "entity", "alert_count", "assignee", "status", "id"],
-          0, 90, h=9, time_field="created_at",
-          overrides=[color_cells("status", CASE_COLORS), *console_link("case", "id", "title")]),
+    all_time(table("Case đang mở — bấm tiêu đề để mở trên console", CS, "status:(open OR in_progress OR contained)",
+                   ["created_at", "priority", "severity", "title", "entity", "alert_count", "assignee", "status", "id"],
+                   0, 90, h=9, time_field="created_at",
+                   overrides=[color_cells("status", CASE_COLORS), *console_link("case", "id", "title")])),
 ]
 
 

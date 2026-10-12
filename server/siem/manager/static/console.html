@@ -256,7 +256,9 @@ function ago(t) {
   return new Date(t).toLocaleDateString('vi-VN');
 }
 const when = t => el('span', { cls: 'when', title: fmt(t) }, ago(t));
-const isEndpoint = id => !!id && !String(id).startsWith('syslog-');
+// máy có Wazuh agent để chạy lệnh: log syslog mang agent.id giả `syslog-<ip>`, sự kiện đăng nhập của chính console
+// mang `soc-console` (không có agent nào -> nút chặn / cô lập chỉ nhận lỗi "không có agent")
+const isEndpoint = id => !!id && !String(id).startsWith('syslog-') && id !== 'soc-console';
 const luceneValue = v => '"' + String(v).replace(/[\\"]/g, m => '\\' + m) + '"';
 const isIP = s => /^(\d{1,3}\.){3}\d{1,3}$/.test(s) || (/^[0-9a-f:]+$/i.test(s) && s.includes(':') && s.length > 2);
 
@@ -740,7 +742,9 @@ VIEWS.users = {
   async load(auto) {
     if (!can('admin')) { go('#/alerts'); return; }
     const rows = await api('/api/v1/users', { auto });
-    const upd = (b, u, body, msg) => run(b, () => api('/api/v1/users/' + encodeURIComponent(u), { method: 'PATCH', body }), msg).then(() => this.load());
+    // onOk chạy TRƯỚC khi vẽ lại (vd đóng form đặt lại mật khẩu); lỗi thì giữ form để sửa
+    const upd = (b, u, body, msg, onOk) => run(b, () => api('/api/v1/users/' + encodeURIComponent(u), { method: 'PATCH', body }), msg)
+      .then(r => { if (r && onOk) onOk(); return this.load(); });
     paint('users', { rows, open: this.open }, () => [
       this.open === '+new' ? newUserForm() : null,
       el('p', { cls: 'sub', style: 'margin:12px 20px 4px' }, 'Analyst xử lý cảnh báo, case, chặn IP, kill tiến trình. Lead làm được thêm cô lập máy. Admin quản lý thêm tài khoản. Cùng tài khoản dùng cho Grafana: analyst xem, lead sửa dashboard, admin quản trị.'),
@@ -763,21 +767,43 @@ VIEWS.users = {
           this.open === u.username ? el('tr', {}, el('td', { colspan: '5' }, resetForm(u.username, upd))) : null])))]);
   },
 };
+// cùng chính sách với máy chủ (manager/auth.py: USERNAME_PATTERN, password_problem) -> báo lỗi tiếng Việt ngay tại chỗ
+// thay vì lỗi 422 của pydantic ("String should match pattern ...")
+const USERNAME_RE = /^[a-z0-9][a-z0-9._-]{1,31}$/;
+function passwordProblem(pw, username) {
+  if (pw.length < 12) return 'Mật khẩu tối thiểu 12 ký tự.';
+  if (username && pw.toLowerCase().includes(username.toLowerCase())) return 'Mật khẩu không được chứa tên đăng nhập.';
+  if (new Set(pw).size < 6) return 'Mật khẩu quá đơn giản (cần ít nhất 6 ký tự khác nhau).';
+  return null;
+}
 function newUserForm() {
   const name = el('input', { cls: 'field', placeholder: 'tên đăng nhập', 'aria-label': 'Tên đăng nhập', autocomplete: 'off' });
   const role = el('select', { cls: 'field', 'aria-label': 'Vai trò' }, ['analyst', 'lead', 'admin'].map(r => el('option', { value: r }, r)));
   const pw = el('input', { cls: 'field', type: 'password', placeholder: 'mật khẩu tạm, từ 12 ký tự', 'aria-label': 'Mật khẩu tạm', autocomplete: 'new-password' });
   setTimeout(() => name.focus());
   return el('div', { cls: 'inline-form', style: 'margin:12px 20px 0' }, name, role, pw,
-    button('Tạo tài khoản', b => run(b, () => api('/api/v1/users', { method: 'POST', body: { username: name.value.trim().toLowerCase(), role: role.value, password: pw.value } }),
-      `Đã tạo ${name.value.trim().toLowerCase()}. Người dùng phải đổi mật khẩu ở lần đăng nhập đầu.`).then(r => { if (r) { VIEWS.users.open = null; VIEWS.users.load(); } }), 'primary'),
+    button('Tạo tài khoản', b => {
+      const username = name.value.trim().toLowerCase();
+      if (!USERNAME_RE.test(username)) {
+        toast('Tên đăng nhập 2–32 ký tự, chỉ gồm chữ thường không dấu, số và . _ - (bắt đầu bằng chữ hoặc số).', true);
+        name.focus(); return;
+      }
+      const problem = passwordProblem(pw.value, username);
+      if (problem) { toast(problem, true); pw.focus(); return; }
+      run(b, () => api('/api/v1/users', { method: 'POST', body: { username, role: role.value, password: pw.value } }),
+        `Đã tạo ${username}. Người dùng phải đổi mật khẩu ở lần đăng nhập đầu.`).then(r => { if (r) { VIEWS.users.open = null; VIEWS.users.load(); } });
+    }, 'primary'),
     button('Hủy', () => { VIEWS.users.open = null; VIEWS.users.load(); }));
 }
 function resetForm(username, upd) {
   const pw = el('input', { cls: 'field', type: 'password', placeholder: 'mật khẩu tạm mới, từ 12 ký tự', 'aria-label': 'Mật khẩu tạm mới', autocomplete: 'new-password' });
   setTimeout(() => pw.focus());
   return el('div', { cls: 'inline-form' }, el('span', { cls: 'sub' }, `Mật khẩu tạm cho ${username} (phải đổi khi đăng nhập):`), pw,
-    button('Đặt lại', b => upd(b, username, { password: pw.value }, `Đã đặt lại mật khẩu ${username}.`).then(() => { VIEWS.users.open = null; }), 'primary'),
+    button('Đặt lại', b => {
+      const problem = passwordProblem(pw.value, username);
+      if (problem) { toast(problem, true); pw.focus(); return; }
+      upd(b, username, { password: pw.value }, `Đã đặt lại mật khẩu ${username}.`, () => { VIEWS.users.open = null; });
+    }, 'primary'),
     button('Hủy', () => { VIEWS.users.open = null; VIEWS.users.load(); }));
 }
 
@@ -826,7 +852,8 @@ function alertDrawer(a) {
   const setSt = (b, s) => run(b, () => api('/api/v1/alerts/' + encodeURIComponent(a._id), { method: 'PATCH', body: { status: s, note: note.value } }),
     `Đã chuyển cảnh báo sang “${ALERT_ST[s][0]}”.`).then(r => { if (r) { note.value = ''; delete note.dataset.dirty; refreshNow(); } });
   const te = a.trigger_event || {};
-  const mitre = [g(a, 'rule.mitre.tactic'), (g(a, 'rule.mitre.technique') || []).join(', ')].filter(Boolean).join(': ');
+  // technique có thể là chuỗi (rule YAML viết tay / AI viết `technique: T1059`), không chỉ danh sách
+  const mitre = [g(a, 'rule.mitre.tactic'), [].concat(g(a, 'rule.mitre.technique') || []).join(', ')].filter(Boolean).join(': ');
   const resp = [
     isEndpoint(agent) && ip ? confirmButton(`Chặn IP ${ip}`, `Chặn ${ip} trên ${g(a, 'host.name') || agent}?`, b => sendAction(b, agent, 'block_ip', { ip }, a._id).then(() => refreshNow())) : null,
     isEndpoint(agent) && pid ? confirmButton(`Kill PID ${pid}`, `Kill PID ${pid} và tiến trình con?`, b => sendAction(b, agent, 'kill_process', { pid }, a._id).then(() => refreshNow())) : null,
@@ -848,7 +875,7 @@ function alertDrawer(a) {
   return [
     el('header', {}, sev(a.severity), el('span', { cls: 'sub mono' }, g(a, 'rule.id')), stLabel(ALERT_ST, st), closeX()),
     el('div', { cls: 'body' },
-      el('h2', { id: 'drawer-title', tabindex: '-1' }, g(a, 'rule.name')),
+      el('h2', { id: 'drawer-title', tabindex: '-1' }, g(a, 'rule.name') || g(a, 'rule.id') || 'Cảnh báo'),
       el('p', { cls: 'desc' }, g(a, 'rule.description') || ''),
       facts([
         ['Thời điểm', fmt(a['@timestamp'])], ['Risk', a.risk_score != null ? el('span', { cls: 'num' }, a.risk_score) : null],
@@ -870,7 +897,10 @@ function alertDrawer(a) {
       el('h3', {}, 'Phản ứng'),
       resp.length ? el('div', { cls: 'btns' }, resp) : el('p', { cls: 'sub' }, isEndpoint(agent)
         ? 'Không có IP hoặc PID trong cảnh báo để phản ứng tự động; dùng trang Agent để chặn IP hay kill theo tên.'
-        : 'Cảnh báo đến từ log syslog (firewall, Suricata), không có agent để chạy lệnh trên máy.'),
+        : agent === 'soc-console'
+          ? 'Cảnh báo về đăng nhập SOC console, không có agent trên máy này; chặn IP trên từng máy ở trang Agent.'
+          : agent ? 'Cảnh báo đến từ log syslog (firewall, Suricata), không có agent để chạy lệnh trên máy.'
+            : 'Cảnh báo không gắn với máy có agent nào; chặn IP hay kill tiến trình trên từng máy ở trang Agent.'),
       el('div', { cls: 'btns', style: 'margin-top:8px' }, investigateLinks(a)),
       (a.actions || []).length ? el('ul', { cls: 'items', style: 'margin-top:10px' }, a.actions.map(x => el('li', {},
         el('b', {}, ACT_TYPE[x.type] || x.type), ' ', el('span', { cls: 'mono' }, x.target), ' ', stLabel(ACT_ST, x.status),

@@ -63,10 +63,10 @@ else {
 
 
 def endpoint_agent(alert: dict[str, Any]) -> str | None:
-    """Agent ra lệnh được (Wazuh agent). Log syslog (firewall, Suricata) mang agent.id giả `syslog-<ip>`,
-    không có agent nào để chạy lệnh trên đó."""
+    """Agent ra lệnh được (Wazuh agent). Log syslog (firewall, Suricata) mang agent.id giả `syslog-<ip>`, sự kiện
+    đăng nhập của chính SOC console mang `soc-console` (manager/auth.py): không có agent nào để chạy lệnh trên đó."""
     agent_id = get(alert, "agent.id")
-    return None if not agent_id or str(agent_id).startswith("syslog-") else str(agent_id)
+    return None if not agent_id or str(agent_id).startswith("syslog-") or agent_id == "soc-console" else str(agent_id)
 
 
 def case_entity(alert: dict[str, Any]) -> str:

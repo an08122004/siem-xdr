@@ -143,11 +143,21 @@ def main():
                 check("có case để mở", False, "chưa có case nào")
 
             print("4. Tổng quan: dashboard Grafana nhúng, liên kết sang console")
+            # cookie phiên Grafana cũ (thời Grafana mở ở :3000 có form đăng nhập; cookie không phân biệt cổng) làm frontend
+            # Grafana gọi rotate token -> 401 -> tự tải lại khung mãi (gặp 12/10/2026): gài lại để kiểm tra manager dọn được
+            ctx.add_cookies([{"name": "grafana_session_expiry", "value": "1700000000", "domain": "localhost", "path": "/"}])
+            loads = []
+            page.on("request", lambda r: r.is_navigation_request() and "/grafana/d/" in r.url and loads.append(r.url))
             page.goto(f"{BASE}/#/overview")
             frame = page.frame_locator("#frame-overview iframe")
             frame.locator("text=Tổng event").first.wait_for(timeout=120000)   # Grafana tải lần đầu có thể chậm
             page.wait_for_timeout(4000)
             check("dashboard Tổng quan hiện trong console", frame.locator("text=Alert theo mức độ").count() > 0)
+            n = len(loads)
+            page.wait_for_timeout(8000)
+            check("dashboard nhúng không tự tải lại (cookie phiên Grafana cũ đã bị xóa)",
+                  len(loads) == n and not any(c["name"] == "grafana_session_expiry" for c in ctx.cookies(BASE)),
+                  f"{len(loads) - n} lần tải lại trong 8 giây")
             shot(page, "04-overview")
             # Grafana chỉ vẽ panel khi cuộn tới: cuộn trong khung dashboard tới bảng "Alert mới nhất"
             box = page.locator("#frame-overview iframe").bounding_box()
