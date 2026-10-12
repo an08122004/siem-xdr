@@ -256,6 +256,8 @@ Ghi chú cấu hình: `topic` trong `vector.yaml` phải ghi thẳng `siem.raw`.
 
 ## 3. Phát hiện
 
+Tài liệu đầy đủ về hệ thống rule (cơ chế, danh sách 40 rule, độ phủ, điểm mạnh / yếu): [`RULES.md`](RULES.md).
+
 **Luật** (`server/rules/*.yml`, 40 luật, có gắn MITRE ATT&CK):
 
 | Nhóm | Luật |
