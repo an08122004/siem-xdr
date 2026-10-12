@@ -57,9 +57,20 @@ playbooks:
       - {action: notify}
       - {action: create_case}
 
-  - name: Cảnh báo chung mức critical
+  # Hai playbook chung cuối: rule không có playbook riêng vẫn được thông báo / mở case (kèm quy trình xử lý phù hợp từ
+  # config/case_playbooks.yml). Mỗi alert chỉ thông báo và mở case 1 lần dù khớp nhiều playbook (soar/engine.py).
+  # Trước 11/10/2026 chỉ có "thông báo mức critical": 23/40 rule không bao giờ có case (vd WIN-004 thêm tài khoản vào
+  # nhóm quản trị, WIN-002 xóa nhật ký bảo mật), 11 rule high không được thông báo, PB-04 / PB-05 không bao giờ được dùng.
+  - name: Thông báo mọi cảnh báo từ mức high
     when:
       rule_ids: ["*"]
-      min_severity: critical
+      min_severity: high
     steps:
       - {action: notify}
+
+  - name: Mở case cho mọi cảnh báo từ mức medium
+    when:
+      rule_ids: ["*"]
+      min_severity: medium
+    steps:
+      - {action: create_case}

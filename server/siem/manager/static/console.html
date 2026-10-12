@@ -162,6 +162,10 @@
   .task input { margin-top: 3px; }
   .task.done > span:first-of-type { color: var(--mute); text-decoration: line-through; }
   .appr { font-size: 12px; color: var(--high); white-space: nowrap; }
+  .how { margin: -2px 0 6px 27px; font-size: 12.5px; }
+  .how summary { cursor: pointer; color: var(--mute); width: max-content; }
+  .how > div { white-space: pre-line; color: var(--mute); margin-top: 4px; overflow-wrap: anywhere; }
+  .refs { margin: 0; padding-left: 18px; font-size: 13px; }
   .late { color: var(--critical); font-weight: 600; }
 
   #toasts { position: fixed; right: 18px; bottom: 18px; display: grid; gap: 8px; z-index: 40; max-width: min(440px, 90vw); }
@@ -267,7 +271,7 @@ const ACT_TYPE = { block_ip: 'Chặn IP', unblock_ip: 'Gỡ chặn IP', kill_pro
                    unisolate_host: 'Bỏ cô lập' };
 const SOAR_ST = { queued: 'đã gửi lệnh', skipped: 'bỏ qua', created: 'tạo case mới', updated: 'gom vào case', logged: 'đã ghi log',
                   sent: 'đã gửi', awaiting_approval: 'chờ duyệt', error: 'lỗi', extended: 'gia hạn chặn',
-                  throttled: 'gộp thông báo' };
+                  throttled: 'gộp thông báo', approved: 'đã duyệt', declined: 'đã từ chối' };
 const ACTION_LABEL = { notify: 'Thông báo', create_case: 'Case', block_ip: 'Chặn IP', kill_process: 'Kill', isolate_host: 'Cô lập' };
 const RESPONSE = ['block_ip', 'kill_process', 'isolate_host'];
 const sev = s => el('span', { cls: 'sev ' + (s || '') }, el('i'), SEV[s] || s || '');
@@ -828,6 +832,19 @@ function alertDrawer(a) {
     isEndpoint(agent) && pid ? confirmButton(`Kill PID ${pid}`, `Kill PID ${pid} và tiến trình con?`, b => sendAction(b, agent, 'kill_process', { pid }, a._id).then(() => refreshNow())) : null,
     isEndpoint(agent) && can('lead') ? confirmButton('Cô lập máy', `Cô lập ${g(a, 'host.name') || agent}?`, b => sendAction(b, agent, 'isolate_host', {}, a._id).then(() => refreshNow())) : null,
   ].filter(Boolean);
+  // bước SOAR chờ duyệt: người đủ quyền duyệt (tạo đúng lệnh đó) hoặc từ chối kèm lý do; đã quyết thì hiện ai, lúc nào
+  const decision = r => {
+    if (r.status === 'approved') return el('div', { cls: 'sub' }, `duyệt bởi ${r.approved_by}, ${fmt(r.approved_at)}`);
+    if (r.status === 'declined') return el('div', { cls: 'sub' }, `từ chối bởi ${r.declined_by}, ${fmt(r.declined_at)}: ${r.reason}`);
+    const params = { isolate_host: {}, block_ip: ip ? { ip } : null, kill_process: pid ? { pid } : null }[r.action];
+    if (r.status !== 'awaiting_approval' || !params || !isEndpoint(agent) || !can(r.action === 'isolate_host' ? 'lead' : 'analyst')) return null;
+    const label = ACTION_LABEL[r.action] || r.action;
+    const why = el('input', { cls: 'field', type: 'text', placeholder: 'Lý do không thực hiện', 'aria-label': 'Lý do từ chối', style: 'width:220px' });
+    return el('div', { cls: 'btns', style: 'margin-top:6px' },
+      confirmButton('Duyệt: ' + label, `${label} ${g(a, 'host.name') || agent}?`, b => sendAction(b, agent, r.action, params, a._id).then(() => refreshNow())),
+      why, button('Từ chối', b => run(b, () => api(`/api/v1/alerts/${encodeURIComponent(a._id)}/soar/decline`,
+        { method: 'POST', body: { action: r.action, reason: why.value } }), 'Đã ghi lý do không thực hiện.').then(x => { if (x) refreshNow(); })));
+  };
   return [
     el('header', {}, sev(a.severity), el('span', { cls: 'sub mono' }, g(a, 'rule.id')), stLabel(ALERT_ST, st), closeX()),
     el('div', { cls: 'body' },
@@ -862,7 +879,7 @@ function alertDrawer(a) {
       (g(a, 'soar.results') || []).length ? el('ul', { cls: 'items' }, g(a, 'soar.results').map(r => el('li', {},
         el('b', {}, ACTION_LABEL[r.action] || r.action), `: ${SOAR_ST[r.status] || r.status}`,
         r.target ? el('span', { cls: 'mono' }, ' ' + r.target) : null, r.detail ? el('div', { cls: 'sub' }, r.detail) : null,
-        el('div', { cls: 'sub' }, `playbook ${r.playbook}`))))
+        decision(r), el('div', { cls: 'sub' }, `playbook ${r.playbook}`))))
         : el('p', { cls: 'sub' }, 'Không khớp playbook tự động nào.'),
       el('h3', {}, 'Case'),
       (a.cases || []).length ? el('ul', { cls: 'items' }, a.cases.map(c => el('li', { cls: 'link', tabindex: '0',
@@ -879,12 +896,13 @@ function alertDrawer(a) {
   ];
 }
 
+const openHow = new Set();      // "Cách làm" của task đang mở (case:chỉ số), giữ nguyên khi ngăn chi tiết vẽ lại
 function caseDrawer(c) {
   const tasks = c.tasks || [], done = tasks.filter(t => t.done).length;
   const note = el('textarea', { cls: 'field', placeholder: 'Ghi chú / kết luận (bắt buộc khi đóng case hoặc báo nhầm)' });
   const who = el('input', { cls: 'field', type: 'text', value: c.assignee || '', placeholder: 'tài khoản xử lý', 'aria-label': 'Giao cho', style: 'width:180px' });
   const upd = (b, body, msg) => run(b, () => api('/api/v1/cases/' + encodeURIComponent(c._id), { method: 'PATCH', body }), msg)
-    .then(r => { if (r) { note.value = ''; delete note.dataset.dirty; delete who.dataset.dirty; refreshNow(); } });
+    .then(r => { if (r) { note.value = ''; delete note.dataset.dirty; delete who.dataset.dirty; refreshNow(); } return r; });
   const st = (b, s) => upd(b, { status: s, note: note.value }, `Đã chuyển case sang “${CASE_ST[s][0]}”.`);
   const late = c.status === 'open' && c.sla_due && new Date(c.sla_due).getTime() < Date.now();
   let phase = null;
@@ -892,16 +910,31 @@ function caseDrawer(c) {
   tasks.forEach((t, i) => {
     if (t.phase !== phase) { phase = t.phase; checklist.push(el('div', { cls: 'phase' }, phase)); }
     const cb = el('input', { type: 'checkbox' }); cb.checked = !!t.done;
-    cb.addEventListener('change', () => upd(cb, { task_index: i, task_done: cb.checked }, cb.checked ? 'Đã đánh dấu hoàn thành.' : 'Đã bỏ đánh dấu.'));
+    // task cần duyệt: chỉ người đủ quyền đánh dấu được (API cũng kiểm tra); cần chủ hệ thống đồng ý thì gửi kèm ghi chú
+    const owner = (t.approval || '').includes('chủ hệ thống');
+    if (t.approval_role && !can(t.approval_role)) { cb.disabled = true; cb.title = `Chỉ ${t.approval} (quyền ${t.approval_role} trở lên) đánh dấu được task này`; }
+    cb.addEventListener('change', () => upd(cb, { task_index: i, task_done: cb.checked, ...(owner ? { note: note.value } : {}) },
+      cb.checked ? 'Đã đánh dấu hoàn thành.' : 'Đã bỏ đánh dấu.').then(r => { if (!r) cb.checked = !cb.checked; }));
     checklist.push(el('label', { cls: 'task' + (t.done ? ' done' : '') }, cb, el('span', {}, t.title),
-      t.approval ? el('span', { cls: 'appr' }, 'cần ' + t.approval + ' duyệt') : null,
+      t.approval ? el('span', { cls: 'appr', title: owner ? 'Ghi vào ô ghi chú bên dưới ai (chủ hệ thống) đã đồng ý, rồi mới đánh dấu' : '' },
+        'cần ' + t.approval + ' duyệt') : null,
       t.done ? el('span', { cls: 'sub' }, `${t.done_by}, ${fmt(t.done_at)}`) : null));
+    // "Cách làm" (lệnh, event ID, chỗ xem) nằm NGOÀI label: bấm mở không làm đổi ô đánh dấu
+    if (t.detail) {
+      const key = c._id + ':' + i;
+      const how = el('details', { cls: 'how', open: openHow.has(key) }, el('summary', {}, 'Cách làm'), el('div', {}, t.detail));
+      how.addEventListener('toggle', () => how.open ? openHow.add(key) : openHow.delete(key));
+      checklist.push(how);
+    }
   });
+  const refs = (c.references || []).filter(r => r && r.title);
   return [
     el('header', {}, el('span', { cls: 'prio ' + (c.priority || '') }, c.priority || ''), sev(c.severity), stLabel(CASE_ST, c.status), closeX()),
     el('div', { cls: 'body' },
       el('h2', { id: 'drawer-title', tabindex: '-1' }, c.title),
-      facts([['Playbook', c.playbook ? `${c.playbook.id} ${c.playbook.name}` : null], ['Thực thể', el('span', { cls: 'mono' }, c.entity)],
+      facts([['Playbook', c.playbook ? [`${c.playbook.id} ${c.playbook.name}`,
+               c.playbook.matched_by ? el('span', { cls: 'sub' }, ` (chọn theo ${c.playbook.matched_by})`) : null] : null],
+             ['Thực thể', el('span', { cls: 'mono' }, c.entity)],
              ['Máy', c.host], ['Mở lúc', fmt(c.created_at)],
              ['Hạn triage', c.sla_due ? el('span', { cls: late ? 'late' : '' }, fmt(c.sla_due) + (late ? ', quá hạn' : '')) : null],
              ['Người xử lý', c.assignee || 'chưa giao'], ['Số alert', c.alert_count]]),
@@ -909,6 +942,8 @@ function caseDrawer(c) {
       el('h3', {}, `Checklist xử lý (${done}/${tasks.length})`),
       el('div', { cls: 'progress' }, el('i', { style: `width:${tasks.length ? 100 * done / tasks.length : 0}%` })),
       checklist,
+      refs.length ? [el('h3', {}, 'Tham khảo'), el('ul', { cls: 'refs' }, refs.map(r => el('li', {},
+        /^https?:\/\//.test(r.url || '') ? el('a', { href: r.url, target: '_blank', rel: 'noopener noreferrer' }, r.title) : r.title)))] : null,
       el('h3', {}, 'Xử lý'), note,
       el('div', { cls: 'inline-form', style: 'margin-top:6px' }, who, button('Giao', b => upd(b, { assignee: who.value.trim(), note: note.value }, 'Đã giao case.')),
         button('Lưu ghi chú', b => note.value.trim() ? upd(b, { note: note.value }, 'Đã lưu ghi chú.') : note.focus())),

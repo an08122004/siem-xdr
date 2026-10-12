@@ -265,6 +265,60 @@ def test_case_workflow(env):
     assert env.patch("/api/v1/cases/c1", json={"note": "x"}, headers=H).status_code == 401
 
 
+def test_case_tasks_needing_approval_require_role(env, monkeypatch):
+    """Task "cần Trưởng nhóm IR duyệt" (vd cô lập máy): trước đây analyst L1 vẫn đánh dấu được, nhãn chỉ để hiển thị."""
+    from siem.manager import api
+    monkeypatch.setattr(store, "search", lambda *a, **kw: [])
+    pw_an, pw_ld = activate(env, "an", "analyst"), activate(env, "ld", "lead")
+    tasks = [{"phase": "Ngăn chặn", "title": title, "approval": appr, "done": False} for title, appr in (
+        ("Chặn IP", None), ("Chặn trên firewall biên", "Analyst L1"), ("Cô lập máy", "Trưởng nhóm IR"),
+        ("Cài lại máy", "Trưởng nhóm IR + chủ hệ thống"), ("Việc lạ", "Ban giám đốc"))]
+    es = DocES({"c1": {"id": "c1", "status": "open", "notes": [], "tasks": tasks}})
+    api._state["es"] = es
+    tick = lambda i, done=True, note="": env.patch("/api/v1/cases/c1", headers=H, json={   # noqa: E731
+        "task_index": i, "task_done": done, "note": note}).status_code
+    login(env, "an", pw_an)
+    assert [t["approval_role"] for t in env.get("/api/v1/cases/c1").json()["tasks"]] == [
+        None, "analyst", "lead", "lead", "lead"]                                   # nhãn lạ -> cần lead
+    assert [tick(0), tick(1), tick(2), tick(4)] == [200, 200, 403, 403]
+    login(env, "ld", pw_ld)
+    assert tick(2) == 200 and es.docs["c1"]["tasks"][2]["done_by"] == "ld"
+    assert "duyệt với vai trò lead" in es.docs["c1"]["notes"][-1]["text"]
+    assert tick(3) == 400                                                           # chủ hệ thống: phải ghi ai đồng ý
+    assert tick(3, note="chủ hệ thống A đồng ý qua điện thoại 10:30") == 200
+    login(env, "an", pw_an)
+    assert tick(2, done=False) == 403                                               # không bỏ được quyết định của lead
+
+
+def test_soar_step_awaiting_approval_is_approved_or_declined(env, monkeypatch):
+    """Bước SOAR `approval: true` (cô lập máy) trước đây hiện "chờ duyệt" mãi: giờ ghi ai duyệt (tạo đúng lệnh đó từ
+    alert) hoặc ai từ chối và vì sao."""
+    from siem.manager import api
+    monkeypatch.setattr(store, "list_agents", lambda es: [{"agent_id": "001", "status": "online"}])
+    monkeypatch.setattr(store, "create_action", lambda es, agent, typ, params, **kw: {
+        "id": "act1", "type": typ, "created_at": "2026-10-11T10:00:00+00:00"})
+    pw_an, pw_ld = activate(env, "an", "analyst"), activate(env, "ld", "lead")
+    step = {"playbook": "Diệt tiến trình", "action": "isolate_host", "status": "awaiting_approval"}
+    docs = {k: {"alert": {"id": k, "status": "open"}, "soar": {"results": [dict(step)]}} for k in ("a1", "a2")}
+    api._state["es"] = DocES(docs)
+    login(env, "ld", pw_ld)
+    r = env.post("/api/v1/actions", headers=H, json={"agent_id": "001", "type": "isolate_host", "params": {}, "alert_id": "a1"})
+    assert r.status_code == 200
+    assert {k: docs["a1"]["soar"]["results"][0][k] for k in ("status", "approved_by", "action_id")} == {
+        "status": "approved", "approved_by": "ld", "action_id": "act1"}
+    assert docs["a1"]["alert"]["status"] == "open" and "duyệt bước SOAR" in docs["a1"]["alert"]["history"][-1]["text"]
+    decline = lambda alert, reason: env.post(f"/api/v1/alerts/{alert}/soar/decline", headers=H, json={   # noqa: E731
+        "action": "isolate_host", "reason": reason}).status_code
+    login(env, "an", pw_an)
+    assert decline("a2", "máy chủ production") == 403                              # cô lập: chỉ lead quyết định
+    login(env, "ld", pw_ld)
+    assert decline("a2", "x") == 400 and decline("khong-co", "máy chủ production") == 404
+    assert decline("a2", "máy chủ production, chờ cửa sổ bảo trì") == 200
+    res = docs["a2"]["soar"]["results"][0]
+    assert res["status"] == "declined" and res["declined_by"] == "ld" and "bảo trì" in res["reason"]
+    assert decline("a2", "lần nữa") == 409 and decline("a1", "đã duyệt rồi") == 409   # đã có quyết định
+
+
 # ------------------------------------------------------------------ alert, lệnh phản ứng, liên kết từ Grafana
 class DocES:
     """ES giả: get / update theo id, NotFoundError khi không có, kiểm tra seq_no như ES thật."""

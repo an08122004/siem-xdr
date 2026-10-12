@@ -331,7 +331,9 @@ tài sản (`server/config/assets.yml`, lấy từ `asset.txt`) dùng để tín
 ## 4. SOAR và quản lý case
 
 **Phản ứng tự động** (`server/config/playbooks.yml`): ví dụ AUTH-001 → chặn IP trên **mọi** agent trong 1 giờ, gửi thông báo, tạo case.
-AUTH-002 → chặn 24 giờ, còn cô lập máy thì chờ analyst duyệt (`approval: true`).
+AUTH-002 → chặn 24 giờ, còn cô lập máy thì chờ duyệt (`approval: true`): trong mục *SOAR đã làm* của cảnh báo, người đủ quyền
+(cô lập: `lead`) bấm *Duyệt* (tạo đúng lệnh đó) hoặc *Từ chối* kèm lý do; bước đó chuyển thành *đã duyệt* / *đã từ chối* kèm
+tài khoản và thời điểm, ghi cả vào lịch sử cảnh báo. Tạo lệnh cô lập từ chính cảnh báo đó bằng nút *Cô lập máy* cũng tính là duyệt.
 SOAR tự tạo lệnh gỡ chặn khi hết hạn, bỏ qua IP trong `SOAR_WHITELIST` và không chặn trùng. "Đang chặn" chỉ tính lệnh đang chờ
 agent, lệnh còn hạn, hoặc lệnh thành công trong 10 phút gần đây. Luật iptables trên agent mất khi máy/container khởi động lại, nên
 bản ghi chặn cũ không có hạn không được tin (lỗi E2E 30/9: SOAR bỏ qua kẻ tấn công vì tưởng IP đã bị chặn). Chặn lại cũng an toàn,
@@ -355,22 +357,55 @@ Mỗi agent tối đa `SOAR_MAX_AUTO_KILLS` lệnh kill tự động trong 60 gi
 SOAR không tự kill nữa mà để analyst quyết định; alert vẫn được thông báo và gom case. Mục đích: alert giả hay báo nhầm hàng
 loạt không biến SOAR thành công cụ kill dần mọi tiến trình trên một máy.
 Lệnh (của playbook hoặc analyst tạo trên console) được SOAR gửi xuống agent qua Wazuh API mỗi 2 giây,
-kết quả thật lấy từ log agent gửi về (xem mục 1). Cảnh báo `WZH-*` từ ruleset Wazuh (FIM, rootcheck...) được thông báo và mở case PB-08.
+kết quả thật lấy từ log agent gửi về (xem mục 1). Cảnh báo `WZH-*` từ ruleset Wazuh (FIM, rootcheck...) được thông báo và mở case.
+**Mọi cảnh báo từ mức medium đều có case, từ mức high đều được thông báo** (2 playbook chung cuối `playbooks.yml`); mỗi alert
+chỉ 1 case và 1 thông báo dù khớp nhiều playbook. Trước 11/10/2026 chỉ alert khớp playbook phản ứng riêng mới có case:
+23/40 rule không bao giờ có case (vd WIN-004 thêm tài khoản vào nhóm quản trị, WIN-002 xóa nhật ký bảo mật mức critical), 11 rule
+mức high không được thông báo, nên PB-04 và PB-05 chưa từng được dùng.
 
-**Case playbook** (`server/config/case_playbooks.yml`): khi tạo case, SOAR gắn quy trình xử lý sự cố phù hợp theo `rule.id`.
-Mỗi playbook là checklist task theo 5 giai đoạn của NIST SP 800-61 (Phát hiện & phân tích → Ngăn chặn → Loại bỏ → Khôi phục → Rút kinh nghiệm).
+**Case playbook** (`server/config/case_playbooks.yml`): khi tạo case, SOAR gắn quy trình xử lý sự cố phù hợp. Mỗi playbook là
+checklist task theo 5 giai đoạn của vòng đời NIST SP 800-61r2, bản cũ (Phát hiện & phân tích → Ngăn chặn → Loại bỏ → Khôi
+phục → Rút kinh nghiệm; bước Chuẩn bị là việc làm trước sự cố). NIST đã phát hành Rev. 3 (4/2025) theo mô hình CSF 2.0; hệ
+thống giữ 5 bước của Rev. 2 vì dễ dùng làm checklist. Nội dung lấy từ CERT Société Générale IRM, CISA (phụ lục B của
+Federal Incident Response Playbook, #StopRansomware, CM0050) và Microsoft; nguồn nào đưa vào playbook nào, nguồn nào không và
+vì sao: **[PLAYBOOKS.md](PLAYBOOKS.md)**. Task có `detail` (lệnh, event ID, chỗ xem trên console), hiện thu gọn dưới task
+("Cách làm"); các bước giống nhau ở mọi nguồn (ghi chứng cứ, timeline, phạm vi, nghĩa vụ thông báo, báo cáo, họp rút kinh
+nghiệm) là task chung gắn vào mọi case; mỗi case có mục "Tham khảo" trỏ về nguồn của playbook.
+Chọn playbook theo thứ tự: (1) mã rule; (2) kỹ thuật MITRE ATT&CK của rule, khớp cụ thể nhất thắng (T1098.004 thắng T1098);
+(3) tag của rule (cảnh báo Wazuh mang tag là nhóm rule: `syscheck`, `rootcheck`, `sca`, `virustotal`, `yara`); (4) PB-00.
+Bước 2, 3 để rule do AI viết (`AI-xxx`) và cảnh báo ruleset Wazuh (`WZH-<id>`) cũng nhận đúng quy trình, không rơi hết vào
+PB-00 / PB-08. Ngăn chi tiết case ghi rõ playbook được chọn theo tiêu chí nào.
 
-| Playbook | Áp dụng cho |
-|---|---|
-| PB-01 Dò mật khẩu / tài khoản có thể bị chiếm | AUTH-001..004, WIN-001, WEB-007 |
-| PB-02 Tấn công ứng dụng Web | WEB-*, NET-004 |
-| PB-03 Thực thi mã độc trên endpoint | LNX-*, WIN-005..009, WIN-011..013 |
-| PB-04 Thay đổi tài khoản / đặc quyền | WIN-003, WIN-004, AUTH-005, AUTH-006 |
-| PB-05 Trinh sát / quét mạng | NET-001..003, NET-005 |
-| PB-06 Kết nối tới IOC | TI-001 |
-| PB-07 Xóa dấu vết / nghi ngờ ransomware | WIN-002, WIN-010 |
-| PB-08 Thay đổi file trái phép / rootkit / cấu hình yếu | WZH-* (cảnh báo ruleset Wazuh) |
-| PB-00 Điều tra chung | mọi rule còn lại |
+| Playbook | Mã rule | Kỹ thuật MITRE / tag |
+|---|---|---|
+| PB-01 Dò mật khẩu (chưa đăng nhập được) | AUTH-001, AUTH-003, WIN-001, WEB-007 | T1110 |
+| PB-02 Tấn công ứng dụng Web | WEB-* còn lại | T1190, T1595.002 |
+| PB-03 Thực thi mã độc / hành vi độc hại trên endpoint | LNX-* còn lại, WIN-005, WIN-006, WIN-011, WIN-012 | T1059, T1105, T1218, T1027, T1082; tag `virustotal`, `yara` |
+| PB-04 Thay đổi tài khoản / đặc quyền | WIN-003, WIN-004, AUTH-005, AUTH-006 | T1136, T1098, T1548 |
+| PB-05 Trinh sát / quét mạng | NET-001..003 | T1046, T1595, T1590 |
+| PB-06 Kết nối tới IOC (Threat Intel) | TI-001 | T1071, T1568, T1573 |
+| PB-07 Ransomware / mã hóa dữ liệu | WIN-010 | T1486, T1490 |
+| PB-08 Thay đổi file trái phép / rootkit / cấu hình yếu | (cảnh báo Wazuh) | T1565, T1014; tag `syscheck`, `rootcheck`, `sca` |
+| PB-09 Tài khoản có thể đã bị chiếm / đăng nhập đặc quyền bất thường | AUTH-002, AUTH-004 | T1078 |
+| PB-10 Đánh cắp thông tin đăng nhập (dump LSASS / Mimikatz) | WIN-007 | T1003, T1555, T1552, T1558 |
+| PB-11 Phishing / tài liệu độc hại | WIN-008 | T1566, T1204 |
+| PB-12 Webshell / thực thi mã trên máy chủ web | WEB-008, LNX-002, WZH-100100 | T1505.003 |
+| PB-13 Cài cơ chế duy trì truy cập | LNX-006, WIN-009, WIN-013 | T1053, T1543, T1547, T1546, T1098.004 |
+| PB-14 Đào tiền ảo trái phép | LNX-004 | T1496 |
+| PB-15 Từ chối dịch vụ (DoS / DDoS) | WEB-009 | T1498, T1499 |
+| PB-16 Di chuyển ngang trong mạng nội bộ | NET-005 | T1021, T1570, T1210, T1550 |
+| PB-17 Xóa dấu vết / vô hiệu hóa cơ chế phòng thủ | WIN-002 | T1070, T1562 |
+| PB-18 Hành vi mạng độc hại / cảnh báo IDS | NET-004 | tag `suricata`, `ids` |
+| PB-19 Thay đổi nội dung website (defacement) | WZH-100101 | T1491 |
+| PB-00 Điều tra chung | còn lại | |
+
+PB-09…PB-17 thêm ngày 11/10/2026, tách khỏi các playbook gộp chung trước đó: dò mật khẩu và tài khoản đã bị chiếm (trước cùng
+PB-01), ransomware và xóa nhật ký (PB-07), dump mật khẩu / macro Office / đào tiền ảo / cơ chế duy trì (PB-03), HTTP flood (PB-02),
+quét SMB nội bộ (PB-05), webshell (PB-02, PB-03, PB-08). PB-18, PB-19 thêm ngày 12/10/2026 theo IRM-5, IRM-6: cảnh báo IDS
+(NET-004) trước gắn nhầm vào "Tấn công Web", nội dung web bị sửa (WZH-100101) cần xử lý kiểu deface (trang bảo trì tĩnh, loại
+trừ nội dung bên thứ ba, quét CSDL) khác với webshell. Cùng ngày, mọi playbook được viết chi tiết theo nguồn, vd PB-07 có 10
+mục săn mối đe dọa của CISA và giữ máy bật để thu RAM; PB-10 đặt lại krbtgt hai lần cách nhau ít nhất 10 giờ (CISA CM0050);
+PB-03 có các lệnh kiểm tra Linux của IRM-3 và event log Windows của IRM-2.
 
 - **Ưu tiên và hạn triage (SLA)** theo severity: critical = P1 / 15 phút, high = P2 / 1 giờ, medium = P3 / 8 giờ, low = P4 / 24 giờ.
   Case `open` quá hạn hiện chữ đỏ trên console.
@@ -378,13 +413,23 @@ Mỗi playbook là checklist task theo 5 giai đoạn của NIST SP 800-61 (Phá
 - **Theo dõi trách nhiệm**: mọi thao tác (tick task, giao việc, đổi trạng thái, ghi chú) được ghi vào lịch sử case kèm tài khoản
   thực hiện (lấy từ phiên đăng nhập, không tự khai được) và thời điểm. Lệnh phản ứng thủ công ghi `requested_by`.
   Có khóa lạc quan: hai người sửa cùng lúc thì người sau nhận lỗi 409.
-- Task có nhãn **cần duyệt** chỉ được làm sau khi người có thẩm quyền đồng ý:
+- Task có nhãn **cần duyệt** chỉ người có thẩm quyền mới đánh dấu (hoặc bỏ đánh dấu) được; API kiểm tra theo vai trò của
+  tài khoản, console làm mờ ô đánh dấu với người không đủ quyền. Nhãn không có trong bảng dưới thì cần `lead`. Chủ hệ thống
+  không có tài khoản trên console, nên task cần cả chủ hệ thống phải ghi vào ghi chú ai đã đồng ý, lúc nào. Trước 11/10/2026
+  nhãn chỉ để hiển thị: analyst L1 vẫn đánh dấu được task "cô lập máy, cần Trưởng nhóm IR duyệt".
 
-| Hành động | Ai được quyết định |
-|---|---|
-| Đóng alert false positive, chặn IP thủ công | Analyst L1 |
-| Cô lập máy, khóa tài khoản | Trưởng nhóm IR |
-| Cài lại máy, tắt dịch vụ production | Trưởng nhóm IR + chủ hệ thống |
+| Hành động | Ai được quyết định | Vai trò trên console |
+|---|---|---|
+| Đóng alert false positive, chặn IP thủ công | Analyst L1 | `analyst` trở lên |
+| Cô lập máy, khóa tài khoản | Trưởng nhóm IR | `lead` trở lên |
+| Cài lại máy, tắt dịch vụ production | Trưởng nhóm IR + chủ hệ thống | `lead` trở lên + ghi chú bắt buộc |
+
+**Giới hạn còn lại của phản ứng:**
+- `scope: all` chỉ chặn trên agent đang online lúc có alert; agent offline lúc đó khi online lại không được chặn bổ sung.
+- Trạng thái cô lập máy không được đối soát: luật iptables / Windows Firewall mất khi máy khởi động lại (iptables) hoặc bị
+  gỡ tay, console không biết máy đã hết cô lập. Kiểm tra trực tiếp trên máy: `iptables -S SIEM_ISOLATE_IN` (Linux),
+  `Get-NetFirewallRule -Group siem-xdr-isolate` (Windows); chưa chắc thì cô lập lại (script tạo lại luật từ đầu).
+- Đóng case hoặc đánh dấu alert là báo nhầm không tự gỡ lệnh chặn đã có: gỡ chặn trên tab *Lệnh phản ứng*.
 
 ## 5. AI hỗ trợ viết rule (`server/siem/ai/`)
 
@@ -407,16 +452,16 @@ docker compose exec ai-worker python -m siem.ai --once                          
 
 ```bash
 cd server && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt pytest httpx
-.venv/Scripts/python -m pytest -q      # 168 test: parser, rule, ML, SOAR (gia hạn chặn, gỡ chặn, gom case, thông báo, giới hạn kill), case playbook, API + đăng nhập, Grafana proxy, AI (web + endpoint, log thật, Sigma), Wazuh (kể cả chống giả mạo telemetry), thư viện rule
+.venv/Scripts/python -m pytest -q      # 176 test: parser, rule, ML, SOAR (gia hạn chặn, gỡ chặn, gom case, thông báo, giới hạn kill), case playbook (chọn theo mã rule / MITRE / tag, mọi alert medium có case, task chung, nguồn tham khảo), API + đăng nhập + task cần duyệt, Grafana proxy, AI (web + endpoint, log thật, Sigma), Wazuh (kể cả chống giả mạo telemetry), thư viện rule
 cd .. && docker run --rm -v ./vector:/etc/vector:ro timberio/vector:0.58.0-alpine test /etc/vector/wazuh.yaml /etc/vector/wazuh-tests.yaml
 ```
 **Kiểm thử end-to-end trên stack đang chạy** (cần `--profile demo`): `python tools/e2e_test.py`. Script không dùng tài
 khoản `admin` thật mà tự tạo quản trị viên tạm `e2e-admin`. Nó tấn công thật vào máy demo và kiểm tra cả chuỗi: SQLi → WEB-001 →
-chặn IP qua Wazuh → gỡ chặn; command injection → LNX-002 → kill cả cây tiến trình; webshell → FIM → case PB-08; phân quyền /
-phiên console; Grafana sau manager (cổng 3000 đóng, giả header vô tác dụng, Viewer không sửa được dashboard, Sign out trong
+chặn IP qua Wazuh → gỡ chặn; command injection → LNX-002 → kill cả cây tiến trình; webshell → FIM → case PB-12; phân quyền /
+phiên console (kể cả analyst không đánh dấu được task cần Trưởng nhóm IR duyệt trong case webshell); Grafana sau manager (cổng 3000 đóng, giả header vô tác dụng, Viewer không sửa được dashboard, Sign out trong
 Grafana thoát luôn phiên console) và hồi quy các lỗi đã sửa (10 request trong cùng giây phải thành đủ 10 event; PID 1 của
 demo-web không phải httpd; request có User-Agent giả dòng `siem-proc:` / `siem-xdr:` vẫn là request web, không sinh LNX-002
-hay lệnh kill). Mọi thứ nó tạo ra đều được dọn sau khi chạy. Kèm kiểm tra dashboard *Thư viện rule* đọc đủ rule và cặp so sánh. Lần chạy 11/10/2026: 42/42 đạt, khoảng 80 giây.
+hay lệnh kill). Mọi thứ nó tạo ra đều được dọn sau khi chạy. Kèm kiểm tra dashboard *Thư viện rule* đọc đủ rule và cặp so sánh. Lần chạy 11/10/2026: 44/44 đạt, khoảng 100 giây.
 
 **Kiểm thử giao diện bằng trình duyệt thật** (Microsoft Edge có sẵn trên Windows, không tải thêm trình duyệt):
 `pip install playwright` rồi `python tools/ui_test.py [thư-mục-ảnh]`. Script tự tạo quản trị viên tạm `ui-admin`, đăng nhập qua

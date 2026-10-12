@@ -276,17 +276,117 @@ def test_soar_whitelist_and_approval():
 def test_case_playbook_selection_and_tasks():
     from siem.soar.cases import PHASES, CasePlaybooks
     cp = CasePlaybooks(ROOT / "config" / "case_playbooks.yml")
-    assert cp.select("WIN-010")["id"] == "PB-07"          # playbook cụ thể thắng playbook chung
-    assert cp.select("WEB-001")["id"] == "PB-02"
-    assert cp.select("AUTH-002")["id"] == "PB-01"
-    assert cp.select("KHONG-CO")["id"] == "PB-00"          # mặc định
+    pick = lambda *a: cp.select(*a)[0]["id"]               # noqa: E731
+    assert pick("WIN-010") == "PB-07" and pick("WIN-002") == "PB-17"     # ransomware tách khỏi xóa nhật ký
+    assert pick("WEB-001") == "PB-02" and pick("WEB-009") == "PB-15"     # DoS tách khỏi tấn công web
+    assert pick("LNX-002") == "PB-12" and pick("LNX-001") == "PB-03"     # playbook cụ thể thắng LNX-*
+    assert pick("AUTH-001") == "PB-01" and pick("AUTH-002") == "PB-09"   # dò mật khẩu / đã đăng nhập được
+    assert pick("NET-004") == "PB-18"                                    # cảnh báo IDS (IRM-5), không phải tấn công web
+    assert pick("WZH-100100") == "PB-12" and pick("WZH-100101") == "PB-19"   # file mới (webshell) / nội dung bị sửa
+    assert pick("KHONG-CO") == "PB-00"                                   # mặc định
     f = cp.build("AUTH-002", "critical")
-    assert f["priority"] == "P1" and f["playbook"]["id"] == "PB-01"
+    assert f["priority"] == "P1" and f["playbook"] == {"id": "PB-09", "name": f["playbook"]["name"],
+                                                      "matched_by": "mã rule AUTH-002"}
     assert {t["phase"] for t in f["tasks"]} <= set(PHASES)
     assert any(t["approval"] for t in f["tasks"]) and not any(t["done"] for t in f["tasks"])
-    # mọi rule đều có playbook
+
+
+def test_every_rule_gets_a_specific_case_playbook():
+    """Mỗi rule có quy trình đúng loại sự cố (không rơi vào PB-00 "Điều tra chung"); nhãn duyệt đều có trong bảng
+    phân quyền (api.APPROVAL_ROLES), mã playbook không trùng."""
+    import yaml
+    from siem.manager.api import APPROVAL_ROLES
+    from siem.soar.cases import CasePlaybooks
+    cp = CasePlaybooks(ROOT / "config" / "case_playbooks.yml")
     for r in load_rules(ROOT / "rules"):
-        assert cp.select(r.id), r.id
+        assert cp.select(r.id, r.mitre.get("technique"), r.tags)[0]["id"] != "PB-00", r.id
+    data = yaml.safe_load((ROOT / "config" / "case_playbooks.yml").read_text(encoding="utf-8"))
+    pbs = data["playbooks"]
+    assert len({p["id"] for p in pbs}) == len(pbs)
+    tasks = [t for p in pbs for ph in p["phases"] for t in ph["tasks"]] + [t for c in data["common"] for t in c["tasks"]]
+    labels = {t.get("approval") for t in tasks if isinstance(t, dict)} - {None}
+    assert labels <= set(APPROVAL_ROLES), labels - set(APPROVAL_ROLES)
+
+
+def test_case_playbook_detail_references_and_common_tasks():
+    """Playbook chi tiết theo nguồn (CERT SG IRM, CISA, Microsoft...): mỗi task có `detail` (cách làm) nếu cần, mỗi
+    playbook có nguồn tham khảo; task chung (ghi chứng cứ, timeline, báo cáo...) gắn vào mọi case, đúng giai đoạn,
+    đúng vị trí; case nào cũng đủ 5 giai đoạn, tiêu đề task không trùng trong một case."""
+    from siem.soar.cases import PHASES, CasePlaybooks
+    cp = CasePlaybooks(ROOT / "config" / "case_playbooks.yml")
+    first = {c["phase"]: c["tasks"][0]["title"] for c in cp.common if c.get("position") == "first"}
+    last = {c["phase"]: c["tasks"][-1]["title"] for c in cp.common if c.get("position", "last") == "last"}
+    for pb in cp.playbooks:
+        rule = str((pb.get("match") or ["KHONG-CO"])[0]).replace("*", "001")    # WEB-* -> WEB-001, * -> 001
+        f = cp.build(rule, "high", tags=pb.get("tags", []))
+        assert f["playbook"]["id"] == pb["id"], pb["id"]
+        assert f["references"] and all(r["url"].startswith("https://") for r in f["references"]), pb["id"]
+        phases = [t["phase"] for t in f["tasks"]]
+        assert phases == sorted(phases, key=PHASES.index) and set(phases) == set(PHASES), pb["id"]   # đúng thứ tự, đủ 5
+        titles = [t["title"] for t in f["tasks"]]
+        assert len(titles) == len(set(titles)), (pb["id"], [t for t in titles if titles.count(t) > 1])
+        by_phase = {ph: [t["title"] for t in f["tasks"] if t["phase"] == ph] for ph in PHASES}
+        assert all(by_phase[ph][0] == title for ph, title in first.items()), pb["id"]
+        assert all(by_phase[ph][-1] == title for ph, title in last.items()), pb["id"]
+    ransom = cp.build("WIN-010", "critical")
+    assert len(ransom["tasks"]) >= 40 and sum(bool(t["detail"]) for t in ransom["tasks"]) >= 35
+    assert any("vssadmin delete shadows" in (t["detail"] or "") for t in ransom["tasks"])
+    krbtgt = next(t for t in cp.build("WIN-007", "critical")["tasks"] if "krbtgt" in t["title"])
+    assert "10 giờ" in krbtgt["detail"] and krbtgt["approval"] == "Trưởng nhóm IR"   # CISA CM0050
+
+
+def test_case_playbook_config_rejects_bad_common(tmp_path):
+    from siem.soar.cases import CasePlaybooks
+    p = tmp_path / "pb.yml"
+    p.write_text("common:\n  - {phase: Chuẩn bị, tasks: [x]}\nplaybooks: []\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="common"):
+        CasePlaybooks(p)
+
+
+def test_case_playbook_by_technique_then_tag():
+    """Rule không biết trước mã (AI viết: AI-xxx, ruleset Wazuh: WZH-<id>) chọn playbook theo kỹ thuật MITRE rồi tag;
+    trước đây chỉ theo mã rule nên rơi hết vào PB-00 / PB-08."""
+    from siem.soar.cases import CasePlaybooks
+    cp = CasePlaybooks(ROOT / "config" / "case_playbooks.yml")
+    assert cp.select("AI-201", ["T1003.001"]) [0]["id"] == "PB-10"      # T1003 khớp kỹ thuật con T1003.001
+    assert cp.select("AI-202", ["T1098.004"])[0]["id"] == "PB-13"       # cụ thể nhất thắng: T1098.004 (PB-13) > T1098 (PB-04)
+    assert cp.select("AI-203", ["T1098"])[0]["id"] == "PB-04"
+    assert cp.select("WZH-87105", [], ["wazuh", "virustotal"]) == (cp.select("LNX-001")[0], "tag virustotal")
+    assert cp.select("WZH-510", [], ["wazuh", "rootcheck"])[0]["id"] == "PB-08"
+    assert cp.select("WZH-100100", ["T1505.003"], ["syscheck"])[0]["id"] == "PB-12"   # mã rule trước kỹ thuật / tag
+    assert cp.select("AI-204", ["T9999"], ["x"])[1] == "mặc định"
+
+
+def test_case_playbook_config_rejects_bad_technique(tmp_path):
+    from siem.soar.cases import CasePlaybooks
+    p = tmp_path / "pb.yml"
+    p.write_text("playbooks:\n  - {id: PB-X, name: x, techniques: [T10], phases: []}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="kỹ thuật MITRE"):
+        CasePlaybooks(p)
+
+
+def test_soar_opens_case_for_every_medium_alert():
+    """Trước 11/10/2026 chỉ alert khớp playbook phản ứng riêng mới có case: 23/40 rule (vd WIN-004 thêm vào nhóm quản
+    trị, WIN-002 xóa nhật ký mức critical) không bao giờ có case, PB-04 / PB-05 không bao giờ được dùng. Giờ mọi alert
+    từ medium có đúng 1 case (đúng case playbook), từ high có đúng 1 thông báo."""
+    from siem.detection.rules import SEVERITY_SCORE
+    from siem.soar.cases import CasePlaybooks
+    from siem.soar.engine import Notifier, Soar, load_playbooks
+    cp = CasePlaybooks(ROOT / "config" / "case_playbooks.yml")
+    for r in load_rules(ROOT / "rules"):
+        es = FakeES()
+        soar = Soar(es, load_playbooks(ROOT / "config" / "playbooks.yml"), whitelist=[], notifier=Notifier(),
+                    case_playbooks=cp)
+        res = soar.handle({"alert": {"id": f"a-{r.id}", "source": "rule"}, "severity": r.severity,
+                           "severity_score": SEVERITY_SCORE[r.severity], "agent": {"id": "001"}, "message": "x",
+                           "source": {"ip": "203.0.113.7"}, "process": {"pid": 4242, "name": "sh"},
+                           "rule": {"id": r.id, "name": r.title, "tags": r.tags, "mitre": r.mitre}})
+        cases = list(es.docs.get("siem-cases", {}).values())
+        notified = [x for x in res if x["action"] == "notify" and x["status"] != "skipped"]
+        medium = SEVERITY_SCORE[r.severity] >= SEVERITY_SCORE["medium"]
+        assert len(cases) == (1 if medium else 0), r.id
+        assert not cases or cases[0]["playbook"]["id"] == cp.select(r.id, r.mitre.get("technique"), r.tags)[0]["id"]
+        assert len(notified) == (1 if SEVERITY_SCORE[r.severity] >= SEVERITY_SCORE["high"] else 0), r.id
 
 
 def test_soar_case_gets_playbook():
@@ -299,5 +399,5 @@ def test_soar_case_gets_playbook():
              "severity_score": 4, "source": {"ip": "10.9.9.9"}, "agent": {"id": "S001-Web-01"}, "count": 6, "message": "x"}
     soar.handle(alert)
     case = next(iter(es.docs["siem-cases"].values()))
-    assert case["playbook"]["id"] == "PB-01" and case["priority"] == "P1" and case["sla_due"]
+    assert case["playbook"]["id"] == "PB-09" and case["priority"] == "P1" and case["sla_due"]
     assert len(case["tasks"]) >= 8 and case["status"] == "open"

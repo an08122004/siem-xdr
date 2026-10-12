@@ -203,9 +203,14 @@ sh("exec", "-T", "demo-web", "sh", "-c", "echo '<?php system($_GET[c]); ?>' > /u
 a = wait(lambda: alert(admin, "WZH-100100", lambda x: "e2e-shell.php" in str(x.get("file", {}).get("path"))), timeout=120)
 check("fim", "alert WZH-100100 (file mới trong thư mục web)", bool(a),
       f"{a['severity']}, MITRE {a['rule']['mitre']['technique']}, sau {time.time() - t0:.0f}s" if a else "")
+case = None
 if a:
     case = wait(lambda: next((c for c in admin.get("/api/v1/cases?size=100") if a["alert"]["id"] in (c.get("alert_ids") or [])), None))
-    check("fim", "SOAR mở case theo PB-08", bool(case) and case["playbook"]["id"] == "PB-08",
+    # case mới mở trong lần chạy này phải theo PB-12 (webshell); case cùng rule + máy còn mở trong 24h (lần chạy
+    # trước) thì alert được gom vào đó, giữ playbook lúc case được tạo
+    fresh = bool(case) and case["created_at"] >= START
+    check("fim", "SOAR mở case theo PB-12 (webshell)" if fresh or not case else "SOAR gom vào case đang mở của lần chạy trước",
+          bool(case) and (case["playbook"]["id"] == "PB-12" or not fresh),
           f"{case['playbook']['id']} {case['priority']}, {len(case['tasks'])} task" if case else "")
 sh("exec", "-T", "demo-web", "rm", "-f", "/usr/local/apache2/htdocs/e2e-shell.php")
 d = wait(lambda: alert(admin, "WZH-553"), timeout=120)
@@ -220,6 +225,15 @@ check("console", "analyst quản lý tài khoản → 403", an.call("GET", "/api
 check("console", "thiếu header chống CSRF → 403",
       an.call("POST", "/api/v1/actions", {"agent_id": "001", "type": "block_ip", "params": {"ip": "198.51.100.9"}},
               headers={"Content-Type": "application/json"})[0] == 403)
+# task "cô lập máy, cần Trưởng nhóm IR duyệt" của case webshell ở mục 3: trước 11/10 analyst L1 vẫn đánh dấu được
+appr = next((i for i, t in enumerate((case or {}).get("tasks") or []) if t.get("approval") == "Trưởng nhóm IR"), None)
+if appr is not None:
+    path = f"/api/v1/cases/{case['_id']}"
+    st, body = an.call("PATCH", path, {"task_index": appr, "task_done": True})
+    check("console", "analyst đánh dấu task cần Trưởng nhóm IR duyệt → 403", st == 403, (body or {}).get("detail", ""))
+    ok = (admin.call("PATCH", path, {"task_index": appr, "task_done": True})[0] == 200
+          and admin.call("PATCH", path, {"task_index": appr, "task_done": False})[0] == 200)
+    check("console", "quản trị đánh dấu được task đó (rồi bỏ đánh dấu)", ok)
 an.call("POST", "/api/v1/auth/logout")
 check("console", "sau đăng xuất → 401", an.call("GET", "/api/v1/stats")[0] == 401)
 

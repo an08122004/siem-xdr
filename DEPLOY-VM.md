@@ -314,9 +314,9 @@ Trên attacker cài công cụ: `sudo apt-get install -y curl sshpass`. Sau mỗ
 |---|---|---|
 | 1 | `curl "http://192.168.56.20/?id=1%20union%20select%201,2"` | Alert **WEB-001** → SOAR chặn IP attacker trên Web-01 trong 30 phút (lệnh *Thành công*), `curl` lần sau treo; case **PB-02**. Gỡ chặn từ console. |
 | 2 | `for i in $(seq 1 8); do sshpass -p sai ssh -o StrictHostKeyChecking=no test@192.168.56.21 true; done` | ≥ 5 lần sai trong 60 giây → **AUTH-001** → chặn IP attacker trên **mọi** agent online trong 1 giờ; case **PB-01**. |
-| 3 | (cần CGI ở mục 3.4) `curl "http://192.168.56.20/cgi-bin/ping.cgi?host=127.0.0.1%3Bsleep%2015"` | **LNX-002** → SOAR kill cả cây tiến trình, request kết thúc trước 15 giây. |
-| 4 | Trên Web-01: `echo '<?php system($_GET["c"]); ?>' \| sudo tee /var/www/html/shell.php`, sau đó `sudo rm /var/www/html/shell.php` | **WZH-100100** (file mới trong thư mục web) → case **PB-08**; xóa file → WZH-553. |
-| 5 | Trên PC-01: `powershell -nop -w hidden -c "Start-Sleep 60"` | **WIN-006** → SOAR kill tiến trình PowerShell đó. |
+| 3 | (cần CGI ở mục 3.4) `curl "http://192.168.56.20/cgi-bin/ping.cgi?host=127.0.0.1%3Bsleep%2015"` | **LNX-002** → SOAR kill cả cây tiến trình, request kết thúc trước 15 giây; case **PB-12** (webshell / thực thi mã trên web server). |
+| 4 | Trên Web-01: `echo '<?php system($_GET["c"]); ?>' \| sudo tee /var/www/html/shell.php`, sau đó `sudo rm /var/www/html/shell.php` | **WZH-100100** (file mới trong thư mục web) → case **PB-12**; xóa file → WZH-553 → case **PB-08** (nhóm `syscheck`). |
+| 5 | Trên PC-01: `powershell -nop -w hidden -c "Start-Sleep 60"` | **WIN-006** → SOAR kill tiến trình PowerShell đó; case **PB-03**. |
 | 6 | Console (tài khoản `lead`): *Cô lập máy* Ubuntu-01 | Attacker không ping / SSH được Ubuntu-01, agent vẫn *Active*; *Bỏ cô lập* chạy được. |
 
 Kiểm tra đúng cách chống giả mạo (đã sửa 11/10/2026): request có User-Agent giả dòng telemetry phải được xử lý như request

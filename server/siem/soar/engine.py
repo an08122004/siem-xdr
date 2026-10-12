@@ -153,7 +153,8 @@ class Soar:
             return {"status": "error", "detail": f"action không hỗ trợ: {action}"}
 
         if step.get("approval"):
-            return {"status": "awaiting_approval", "detail": "cần analyst duyệt trên console"}
+            who = "lead (Trưởng nhóm IR)" if action == "isolate_host" else "analyst"     # cùng quyền với tự tạo lệnh đó
+            return {"status": "awaiting_approval", "detail": f"cần {who} duyệt hoặc từ chối trên console"}
         if not self.auto_response:
             return {"status": "skipped", "detail": "SOAR_AUTO_RESPONSE=false"}
 
@@ -276,13 +277,17 @@ class Soar:
                 "params": {"id": alert_id, "now": store.now_iso(), "max": CASE_MAX_ALERT_IDS}})
             return {"status": "updated", "case_id": case["_id"]}
         case_id = store.new_id()
+        # kỹ thuật MITRE + tag: chọn playbook cho rule không biết trước mã (rule AI viết, cảnh báo ruleset Wazuh)
+        techniques = get(alert, "rule.mitre.technique") or []
         self.es.index(index=settings.IDX_CASES, id=case_id, refresh="wait_for", document={
             "@timestamp": store.now_iso(), "created_at": store.now_iso(), "updated_at": store.now_iso(),
             "id": case_id, "title": f"{get(alert, 'rule.name')} — {entity}", "rule_id": get(alert, "rule.id"),
             "entity": entity, "severity": alert.get("severity"), "status": "open",
             "alert_ids": [alert_id], "alert_count": 1, "assignee": None,
             "host": get(alert, "host.name") or get(alert, "agent.id"), "notes": [],
-            **self.case_playbooks.build(str(get(alert, "rule.id", "")), alert.get("severity", "medium")),
+            **self.case_playbooks.build(str(get(alert, "rule.id", "")), alert.get("severity", "medium"),
+                                        techniques=[techniques] if isinstance(techniques, str) else techniques,
+                                        tags=get(alert, "rule.tags") or []),
         })
         return {"status": "created", "case_id": case_id}
 

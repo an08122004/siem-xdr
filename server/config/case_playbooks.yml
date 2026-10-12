@@ -1,8 +1,24 @@
 # Case playbook — quy trình XỬ LÝ SỰ CỐ cho analyst (khác với playbooks.yml là phản ứng TỰ ĐỘNG).
-# Khi SOAR tạo case, playbook đầu tiên có `match` khớp rule.id của alert sẽ được gắn vào case,
-# kèm checklist task theo 5 giai đoạn của NIST SP 800-61. Thứ tự quan trọng: playbook cụ thể đặt trước.
+# Khi SOAR tạo case, playbook phù hợp được gắn vào case, kèm checklist task theo 5 giai đoạn của vòng đời NIST
+# SP 800-61r2 (bản cũ): Phát hiện & phân tích → Ngăn chặn → Loại bỏ → Khôi phục → Rút kinh nghiệm.
+# Nội dung dựa trên các nguồn trong `references` của từng playbook (đánh giá nguồn và cách chuyển đổi: PLAYBOOKS.md).
+# Nguồn 6 bước (CERT SG IRM, SANS PICERL) có thêm bước "Chuẩn bị": đó là việc làm TRƯỚC sự cố (README, DEPLOY-VM.md),
+# không nằm trong checklist của case; Identification → Phát hiện & phân tích, Containment → Ngăn chặn,
+# Remediation → Loại bỏ, Recovery → Khôi phục, Lessons learned → Rút kinh nghiệm.
 #
-# `approval` trên task: hành động cần người có thẩm quyền quyết định (xem bảng phân quyền trong README).
+# Chọn playbook (server/siem/soar/cases.py), theo thứ tự:
+#   1. `match`: mã rule (wildcard) — playbook ĐẦU TIÊN trong file khớp, nên playbook cụ thể đặt trước playbook bao trùm
+#      (vd PB-12 có LNX-002 phải đứng trước PB-03 có LNX-*). Mẫu "*" của PB-00 chỉ dùng ở bước 4.
+#   2. `techniques`: kỹ thuật MITRE ATT&CK của rule, khớp cụ thể nhất thắng (T1098.004 thắng T1098; T1003 khớp T1003.001)
+#   3. `tags`: tag của rule (cảnh báo ruleset Wazuh mang tag là nhóm rule: syscheck, rootcheck, sca, virustotal, yara...)
+#   4. PB-00 (match "*")
+# Bước 2, 3 cho rule không biết trước mã: rule do AI viết (AI-xxx), cảnh báo ruleset Wazuh (WZH-<id>).
+#
+# Task: `title` (ngắn), `detail` (cách làm cụ thể: lệnh, event ID, chỗ xem trên console; hiện thu gọn dưới task),
+# `approval` (hành động cần người có thẩm quyền; API chỉ cho tài khoản đủ quyền đánh dấu, README mục 4):
+#   Analyst L1 -> analyst | Trưởng nhóm IR -> lead | Trưởng nhóm IR + chủ hệ thống -> lead + ghi chú ai đã đồng ý
+# `common`: task chung gắn vào MỌI playbook (đầu hoặc cuối giai đoạn) — các bước giống nhau ở mọi nguồn.
+# Tiêu đề luôn đặt trong dấu nháy kép; `detail` dùng khối `|-` (giữ xuống dòng).
 
 # Mức ưu tiên và thời hạn triage (phút) theo severity của alert
 priority:
@@ -11,215 +27,1106 @@ priority:
   medium:   {level: P3, sla_minutes: 480}
   low:      {level: P4, sla_minutes: 1440}
 
+common:
+  - phase: Phát hiện & phân tích
+    position: first
+    tasks:
+      - title: "Nhận case - giao người xử lý chính, xác nhận mức độ và ưu tiên"
+        detail: |-
+          Bấm Giao trên case: người xử lý chính chịu trách nhiệm tới khi đóng case.
+          Đối chiếu ưu tiên P1-P4 và hạn triage với tác động thật: tài sản bị ảnh hưởng, mức quan trọng (server/config/assets.yml), số máy / tài khoản liên quan.
+          Nghi là sự cố lớn (nhiều máy, tài khoản đặc quyền, dữ liệu nhạy cảm) thì báo ngay Trưởng nhóm IR để lập nhóm xử lý khủng hoảng (CISA phụ lục B 1a-1b, IRM-18).
+      - title: "Đối chiếu lịch kiểm thử xâm nhập / red team / bảo trì trước khi kết luận"
+        detail: |-
+          Hỏi người phụ trách kiểm thử (white team) có đợt pentest, red team, quét lỗ hổng hay bảo trì nào đang chạy không, kèm IP, tài khoản, khung giờ. Không báo cho chính người đang bị nghi (IRM-20).
+          Đúng là hoạt động được phép: ghi ai xác nhận vào ghi chú, đóng case với trạng thái Báo nhầm.
+  - phase: Phát hiện & phân tích
+    position: last
+    tasks:
+      - title: "Ghi lại mọi chứng cứ đã thu: cái gì, lúc nào, ai thu, thu bằng cách nào"
+        detail: |-
+          Mỗi chứng cứ (ảnh bộ nhớ, ảnh đĩa, file, log xuất ra, ảnh chụp màn hình) ghi vào ghi chú của case:
+          tên + hash SHA-256 (sha256sum / Get-FileHash), thời điểm thu (UTC), người thu, công cụ / lệnh dùng, nơi lưu.
+          Giữ bản gốc chỉ đọc, phân tích trên bản sao (CISA phụ lục B 3a-3b).
+      - title: "Lập timeline sự cố (giờ UTC) và cập nhật trong suốt quá trình xử lý"
+        detail: |-
+          Mỗi mốc ghi: thời điểm UTC, sự kiện, máy / tài khoản, nguồn dữ liệu (alert, event gốc, log).
+          Bắt đầu từ event SỚM NHẤT liên quan, không chỉ từ lúc có alert: dùng Điều tra thực thể trên console với khoảng 24 giờ - 7 ngày trước alert (CISA 4e-4f).
+      - title: "Xác định phạm vi - mọi máy, tài khoản, dịch vụ liên quan; cập nhật khi có phát hiện mới"
+        detail: |-
+          Tra từng IOC (IP, domain, hash, tài khoản, tên tiến trình) trên Điều tra thực thể để tìm máy / tài khoản khác.
+          Thêm IOC vào config/intel (bad_ips.txt, bad_domains.txt, bad_hashes.txt, tự nạp lại) để hệ thống bắt ở nơi khác.
+          Bước này xong khi (CISA 4d): đã xác minh sự cố, biết phạm vi, biết cách kẻ tấn công duy trì truy cập, đánh giá được tác động, mọi người cùng nắm một bức tranh chung.
+      - title: "Xác định nghĩa vụ báo cáo / thông báo (nội bộ, cơ quan điều phối, dữ liệu cá nhân)"
+        detail: |-
+          Nội bộ: Trưởng nhóm IR, CISO, lãnh đạo, chủ hệ thống bị ảnh hưởng.
+          Bên ngoài (tùy loại và mức độ, xác nhận với bộ phận pháp chế, kiểm tra văn bản còn hiệu lực):
+          - báo cáo sự cố an toàn thông tin mạng cho cơ quan điều phối theo Thông tư 20/2017/TT-BTTTT;
+          - lộ / mất dữ liệu cá nhân: thông báo theo Luật Bảo vệ dữ liệu cá nhân 91/2025/QH15 (Điều 23) và Nghị định 356/2025/NĐ-CP (có thời hạn thông báo, vd 72 giờ với một số loại dữ liệu);
+          - có dấu hiệu tội phạm: cơ quan công an.
+  - phase: Ngăn chặn
+    position: first
+    tasks:
+      - title: "Chọn cách ngăn chặn - cân nhắc giữ chứng cứ, tính sẵn sàng của dịch vụ, thời gian ngăn chặn"
+        detail: |-
+          Trước khi cô lập / tắt máy: đã thu bộ nhớ và chứng cứ dễ mất chưa?
+          Máy có phải hệ thống nghiệp vụ không thể dừng không (hỏi chủ hệ thống)?
+          Đã nắm hết các điểm xâm nhập chưa? Ngăn chặn từng phần làm kẻ tấn công biết mình bị phát hiện và đổi cách;
+          nếu chưa nắm hết, kín đáo theo dõi thêm rồi ngăn chặn đồng loạt (IRM-2, IRM-18, CISA 7a).
+  - phase: Ngăn chặn
+    position: last
+    tasks:
+      - title: "Theo dõi phản ứng của kẻ tấn công sau khi ngăn chặn"
+        detail: |-
+          Vài giờ sau ngăn chặn, theo dõi alert mới của cùng thực thể / IOC (tab Cảnh báo, lọc theo IP / máy / tài khoản).
+          Có dấu hiệu xâm nhập mới thì quay lại Phát hiện & phân tích để mở rộng phạm vi (CISA 7k, 7m).
+  - phase: Loại bỏ
+    position: first
+    tasks:
+      - title: "Chỉ loại bỏ khi chắc đã khoanh vùng xong toàn bộ phạm vi"
+        detail: |-
+          Loại bỏ khi kẻ tấn công còn đường khác vào lại sẽ khiến chúng đổi cách hoặc phá hoại để trả đũa (IRM-2/3/7).
+          Lập kế hoạch loại bỏ đồng loạt, tính đến việc kẻ tấn công thường có nhiều cơ chế duy trì (CISA 8a, 8h).
+  - phase: Khôi phục
+    position: last
+    tasks:
+      - title: "Khôi phục từng bước, có theo dõi; xác nhận sạch trước khi đưa lại vào hoạt động"
+        detail: |-
+          Đưa từng máy / dịch vụ trở lại sau khi quét lại (Wazuh rootcheck, antivirus) và kiểm tra chức năng.
+          Gỡ các thay đổi tạm thời làm trong lúc ứng cứu (luật chặn, tài khoản tạm, trang bảo trì) khi không còn cần.
+          Theo dõi tăng cường alert của máy / tài khoản trong thời gian sau khôi phục (CISA 9b, 9g).
+  - phase: Rút kinh nghiệm
+    position: last
+    tasks:
+      - title: "Viết báo cáo sau sự cố"
+        detail: |-
+          Gồm: cách phát hiện ban đầu, nguyên nhân gốc / đường xâm nhập, timeline các mốc quan trọng, phạm vi và tác động, chi phí, việc làm tốt, việc chưa tốt, danh sách IOC.
+          Trả lời được: Ai, Cái gì, Ở đâu, Vì sao, Như thế nào (IRM mục Lessons learned, CISA 10f).
+      - title: "Họp rút kinh nghiệm và giao việc cải thiện có người chịu trách nhiệm"
+        detail: |-
+          Quy trình có được làm đúng và đủ không? Vai trò, quyền quyết định có rõ không?
+          Thiếu log / công cụ / rule nào (điểm mù)? Dấu hiệu nào nên theo dõi để phát hiện sớm hơn?
+          Cần sửa playbook / rule / ngưỡng nào? Mỗi việc cải thiện ghi người làm và hạn hoàn thành (CISA 10i-10r).
+      - title: "Đưa IOC và cách phát hiện mới vào hệ thống"
+        detail: |-
+          IOC vào config/intel (tự nạp lại). Hành vi chưa có rule bắt: viết rule trong server/rules hoặc để AI đề xuất (tab Đề xuất AI). Báo nhầm lặp lại: đề xuất ngoại lệ thay vì tắt rule (CISA 10b-10c).
+          
 playbooks:
   - id: PB-07
-    name: Xóa dấu vết / nghi ngờ Ransomware
-    match: [WIN-002, WIN-010]
+    name: Ransomware / mã hóa dữ liệu
+    match: [WIN-010]
+    techniques: [T1486, T1490]
+    references:
+      - {title: "CERT Société Générale - IRM-17 Ransomware", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-17-Ransomware.pdf"}
+      - {title: "CERT Société Générale - IRM-18 Large scale compromise", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-18-Large_scale_compromise.pdf"}
+      - {title: "CISA - #StopRansomware Guide, Ransomware Response Checklist", url: "https://www.cisa.gov/stopransomware/ransomware-guide"}
     phases:
       - name: Phát hiện & phân tích
         tasks:
-          - Xác định máy, tài khoản thực hiện và thời điểm (event gốc trong alert)
-          - Kiểm tra các máy khác có cùng hành vi trong 24h (Grafana / Elasticsearch theo host.name, user.name)
-          - Kiểm tra dấu hiệu mã hóa file hàng loạt, file ghi chú đòi tiền chuộc
+          - title: "Xác nhận dấu hiệu ransomware"
+            detail: |-
+              Ghi chú đòi tiền chuộc trên màn hình / trong thư mục; file đổi sang đuôi lạ; FIM báo hàng trăm file bị sửa trong vài phút; người dùng báo không mở được file trên máy hoặc ổ chia sẻ.
+              Lệnh phá bản sao lưu thường đi kèm: vssadmin delete shadows, wmic shadowcopy delete, bcdedit /set {default} recoveryenabled no, wbadmin delete catalog, fsutil usn deletejournal (IRM-17, CISA).
+          - title: "Lập danh sách máy và ổ chia sẻ đang bị mã hóa"
+            detail: |-
+              Điều tra thực thể theo tài khoản và tiến trình trong alert; tìm WIN-010, FIM thay đổi dồn dập ở máy khác.
+              Song song với việc này, cô lập ngay các máy đã xác nhận (giai đoạn Ngăn chặn) - ransomware cần quyết định nhanh hơn các sự cố khác (IRM-17).
+          - title: "Xếp thứ tự khôi phục theo danh sách tài sản quan trọng"
+            detail: |-
+              Dùng mức quan trọng trong server/config/assets.yml: hệ thống quan trọng và các thành phần nó phụ thuộc (AD, DNS, CSDL) trước; ghi lại máy chưa bị ảnh hưởng để không tốn công (CISA bước 3).
+          - title: "Tìm mã độc mồi và dấu hiệu xâm nhập TỪ TRƯỚC khi mã hóa"
+            detail: |-
+              Ransomware thường là bước cuối. Xem alert / log 7-30 ngày trước trên các máy, tài khoản liên quan:
+              loader (Emotet, Qakbot, IcedID...), Cobalt Strike, đăng nhập lạ. Phải tìm ra trước khi khôi phục từ backup, không thì khôi phục xong lại bị mã hóa (CISA bước 4).
+          - title: "Săn mối đe dọa theo checklist của CISA"
+            detail: |-
+              a. Tài khoản AD mới / được nâng quyền, hoạt động của Domain Admins (4720, 4728, 4732, 4756, 4672).
+              b. Đăng nhập VPN / RDP bất thường (4624 Logon Type 10, ngoài giờ, IP lạ; RDP 1149).
+              c. Thay đổi làm hỏng backup / shadow copy / cấu hình khởi động (bcdedit, fsutil, vssadmin, wbadmin, wmic).
+              d. Dấu hiệu Cobalt Strike, thường giả tên tiến trình hợp lệ (rundll32 không tham số, named pipe lạ).
+              e. Phần mềm điều khiển từ xa không được phép (AnyDesk, TeamViewer, ScreenConnect, Atera...).
+              f. PowerShell / PsExec bất thường (4104; service PSEXESVC, 7045).
+              g. Liệt kê AD, dump LSASS / NTDS (WIN-007, ntdsutil ifm) - xem PB-10.
+              h. Máy trạm kết nối trực tiếp với nhau (SMB 445, RDP 3389) - xem PB-16.
+              i. Dữ liệu bị lấy ra ngoài: lượng dữ liệu ra lớn bất thường, rclone, WinSCP, MEGAsync, công cụ tunnel.
+              j. Service, scheduled task, phần mềm mới không được phép (7045, 4698) - xem PB-13.
+          - title: "Tìm đường xâm nhập ban đầu và điểm trung chuyển - ưu tiên số một"
+            detail: |-
+              RDP / VPN lộ ra Internet hoặc không có MFA (NET-003, AUTH-001/002), phishing (PB-11), lỗ hổng dịch vụ công khai (WEB-*), tài khoản bị chiếm. Biết đường vào mới quyết định đúng các bước sau (IRM-17, IRM-18).
+          - title: "Xác định họ ransomware / nhóm tấn công"
+            detail: |-
+              Từ ghi chú tiền chuộc, đuôi file, mẫu file mã hóa: ID Ransomware (id-ransomware.malwarehunterteam.com).
+              Biết nhóm tấn công thì tra được TTP đã biết của nhóm để săn tiếp (IRM-17).
       - name: Ngăn chặn
         tasks:
-          - {title: Cô lập ngay máy bị ảnh hưởng (isolate_host trên console), approval: Trưởng nhóm IR}
-          - {title: Vô hiệu hóa tài khoản liên quan, approval: Trưởng nhóm IR}
-          - Ngắt các ổ chia sẻ mạng đang được máy này kết nối
+          - title: "Cô lập ngay máy bị mã hóa, giữ máy BẬT để thu bộ nhớ"
+            approval: Trưởng nhóm IR
+            detail: |-
+              isolate_host trên console (agent vẫn giữ kết nối tới wazuh-manager). Nhiều máy / cả dải: ngắt ở switch / VLAN.
+              Chỉ tắt máy khi không thể ngắt mạng - tắt máy làm mất chứng cứ trong RAM (CISA bước 1-2, IRM-17).
+          - title: "Phối hợp qua kênh ngoài mạng (điện thoại), không qua email / chat nội bộ"
+            detail: |-
+              Kẻ tấn công có thể đang đọc email / chat của tổ chức; biết mình bị phát hiện, chúng có thể mã hóa nhanh hơn (CISA bước 1).
+          - title: "Ngắt ổ chia sẻ mạng nếu chưa cô lập được máy; tìm máy đang ghi file trên file server"
+            detail: |-
+              Trên máy: net use X: /delete. Trên file server: tạm ngừng chia sẻ; xem phiên đang mở và file đang ghi (Get-SmbSession, Get-SmbOpenFile hoặc openfiles /query), log SMB / RDP, bắt gói để tìm IP đang ghi file (IRM-17, CISA bước 13).
+          - title: "Vô hiệu hóa tài khoản bị chiếm và tài khoản do kẻ tấn công tạo"
+            approval: Trưởng nhóm IR
+          - title: "Chặn C2 và mọi IP / domain của kẻ tấn công"
+            detail: |-
+              Chặn IP trên mọi agent (console, hoặc SOAR với scope all), thêm vào config/intel; chặn chiều ra trên firewall biên; DNS sinkhole cho domain (IRM-17).
+          - title: "Chặn các đường vào còn mở: VPN, RDP, máy chủ truy cập từ xa, SSO, tài nguyên cloud công khai"
+            detail: |-
+              Theo CISA bước 13. Đổi mật khẩu / tạm khóa tài khoản truy cập từ xa có liên quan.
+          - title: "Bảo vệ hệ thống backup"
+            detail: |-
+              Tách hệ thống backup khỏi mạng, đổi mật khẩu quản trị backup, xác nhận còn bản backup offline / không sửa được chưa bị chạm tới (nguyên tắc 3-2-1: 3 bản, 2 loại phương tiện, 1 bản ở nơi khác - IRM-17).
+          - title: "Gửi mẫu chưa bị phát hiện cho hãng antivirus / sandbox nội bộ; gửi URL, domain, IP chưa phân loại"
+            detail: |-
+              Gửi dạng file zip có mật khẩu. Không tải mẫu có chứa dữ liệu nội bộ lên dịch vụ công khai (IRM-17).
+          - title: "Không tự liên hệ hay trả tiền cho kẻ tấn công"
+            detail: |-
+              Mọi quyết định thuộc lãnh đạo và bộ phận pháp chế. CISA khuyến cáo không trả: trả tiền không bảo đảm có khóa giải mã, hệ thống sạch, hay dữ liệu không bị công bố.
+          - title: "Truyền thông nội bộ / ra ngoài theo kịch bản đã chuẩn bị"
+            detail: |-
+              Thống nhất nội dung với bộ phận truyền thông; cập nhật đều cho lãnh đạo (IRM-17, CISA bước 7).
+          - title: "Theo dõi trang công bố dữ liệu của nhóm ransomware"
+            detail: |-
+              Nhiều nhóm vừa mã hóa vừa lấy dữ liệu để tống tiền kép; theo dõi để biết dữ liệu nào bị công bố (IRM-17).
       - name: Loại bỏ
         tasks:
-          - Thu thập chứng cứ (bộ nhớ, log còn lại) TRƯỚC khi can thiệp
-          - Xác định mẫu mã độc và cách xâm nhập ban đầu
+          - title: "Thu chứng cứ trước khi can thiệp"
+            detail: |-
+              Ảnh bộ nhớ và ảnh đĩa / triage image (KAPE, DFIR-ORC) của vài máy bị ảnh hưởng tiêu biểu, ghi chú tiền chuộc, vài file bị mã hóa mẫu, log liên quan, mẫu mã độc mồi, IOC (CISA bước 9).
+          - title: "Tra công cụ giải mã và hướng dẫn gỡ của đúng họ ransomware"
+            detail: |-
+              No More Ransom (nomoreransom.org), hướng dẫn của hãng bảo mật uy tín; hỏi cơ quan chức năng về công cụ giải mã. Dừng / gỡ binary ransomware, xóa khóa registry và file liên quan (CISA bước 10-11).
+          - title: "Gỡ đường xâm nhập ban đầu, công cụ di chuyển ngang, tài khoản do kẻ tấn công tạo"
+            detail: |-
+              Theo IRM-17 / IRM-18: đóng đường vào ban đầu, xóa binary dùng để lan trong mạng, xóa tài khoản lạ.
+          - title: "Tìm cơ chế duy trì từ ngoài vào và từ trong ra"
+            detail: |-
+              Ngoài vào: tài khoản lạ, backdoor trên thiết bị biên, lỗ hổng bị khai thác.
+              Trong ra: implant, công cụ có sẵn của hệ điều hành bị lạm dụng (LOLBins), công cụ điều khiển từ xa, script PowerShell, scheduled task / service - xem PB-13 (CISA bước 14).
+          - title: "Hoàn tác thay đổi cấu hình của kẻ tấn công và gia cố hệ thống, mạng"
+            detail: |-
+              GPO bị sửa, Defender / AV bị tắt, quy tắc firewall mở thêm, chính sách audit (IRM-17, IRM-18).
       - name: Khôi phục
         tasks:
-          - {title: Cài lại máy từ bản sạch và khôi phục dữ liệu từ backup đã kiểm tra, approval: Trưởng nhóm IR + chủ hệ thống}
-          - Đổi toàn bộ mật khẩu từng dùng trên máy
-          - Theo dõi tăng cường máy và tài khoản trong 14 ngày
+          - title: "Dựng lại máy theo thứ tự ưu tiên từ image chuẩn"
+            approval: Trưởng nhóm IR + chủ hệ thống
+            detail: |-
+              Dùng image chuẩn đã vá; cài lại hoàn toàn thay vì cố làm sạch (CISA bước 15, IRM-17).
+          - title: "Chỉ khôi phục dữ liệu từ backup offline đã xác nhận sạch, vào môi trường đã sạch"
+            detail: |-
+              Kiểm tra backup không nhiễm trước khi khôi phục; chỉ cho máy đã xác nhận sạch vào môi trường khôi phục để không bị nhiễm lại (IRM-17, CISA bước 18).
+          - title: "Đặt lại mật khẩu tài khoản bị ảnh hưởng, ưu tiên quản trị và tài khoản dịch vụ"
+            detail: |-
+              Quản trị domain / NTDS có thể đã lộ: đặt lại krbtgt theo PB-10 (CISA bước 16, IRM-17).
+          - title: "Cập nhật chữ ký antivirus / chặn hash binary độc; quét lại trước khi nối mạng"
+            detail: |-
+              Thêm hash vào config/intel/bad_hashes.txt; bảo đảm không còn binary độc trên máy trước khi nối lại (IRM-17).
+          - title: "Nối mạng lại từng vùng theo thứ tự, có phê duyệt"
+            approval: Trưởng nhóm IR
+            detail: |-
+              Thứ tự: xác nhận lưu lượng bình thường → mở lại luồng từng bị dùng để lây → nối các vùng con → nối mạng nội bộ → nối Internet. Mỗi bước có theo dõi; có thể lọc theo vùng địa lý trên firewall (IRM-18).
+          - title: "Người có thẩm quyền tuyên bố kết thúc sự cố theo tiêu chí đã định"
+            detail: |-
+              Tiêu chí ví dụ: không còn hoạt động của kẻ tấn công trong 14 ngày, mọi máy đã dựng lại, mật khẩu đã đổi (CISA bước 17).
+          - title: "Theo dõi tăng cường 14 ngày và tiếp tục theo dõi trang công bố dữ liệu"
       - name: Rút kinh nghiệm
         tasks:
-          - Viết báo cáo sau sự cố (timeline, phạm vi, nguyên nhân gốc)
-          - Kiểm tra lại chính sách backup và quyền ghi ổ chia sẻ
+          - title: "Rà lại chính sách backup, quyền ghi ổ chia sẻ, RDP từ Internet, MFA cho truy cập từ xa"
+            detail: |-
+              Backup 3-2-1 có ít nhất 1 bản offline / không sửa được và đã thử khôi phục; ổ chia sẻ chỉ cấp quyền ghi khi cần; không mở RDP ra Internet; MFA cho VPN và tài khoản quản trị (IRM-17 phần Chuẩn bị).
+          - title: "Chia sẻ IOC và bài học với đơn vị điều phối / cộng đồng ngành"
+            detail: |-
+              Theo CISA bước 20.
+              
+  - id: PB-17
+    name: Xóa dấu vết / vô hiệu hóa cơ chế phòng thủ
+    match: [WIN-002]
+    techniques: [T1070, T1562]
+    references:
+      - {title: "CERT Société Générale - IRM-2 Windows Intrusion Detection", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-2-WindowsIntrusion.pdf"}
+      - {title: "MITRE ATT&CK T1070 Indicator Removal", url: "https://attack.mitre.org/techniques/T1070/"}
+      - {title: "MITRE ATT&CK T1562 Impair Defenses", url: "https://attack.mitre.org/techniques/T1562/"}
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - title: "Xác định ai xóa nhật ký / tắt bảo vệ, trên máy nào, lúc nào"
+            detail: |-
+              Security 1102 (nhật ký bảo mật bị xóa, có tài khoản thực hiện), System 104 (nhật ký khác bị xóa).
+              Defender 5001 (tắt bảo vệ thời gian thực), 5007 (đổi cấu hình).
+              Tiến trình thực hiện (Sysmon 1 / 4688): wevtutil cl, Clear-EventLog, Set-MpPreference -DisableRealtimeMonitoring.
+          - title: "Đối chiếu bảo trì - xóa nhật ký bảo mật hầu như không có trong vận hành bình thường"
+          - title: "Dựng lại hoạt động TRƯỚC thời điểm xóa bằng log đã về SIEM"
+            detail: |-
+              Log đã chuyển về siem-events-* không bị xóa theo. Điều tra thực thể theo máy và tài khoản, 24 giờ - 7 ngày trước event 1102: kẻ tấn công muốn che việc gì?
+          - title: "Tìm dấu hiệu đi kèm"
+            detail: |-
+              Xóa shadow copy (WIN-010 → PB-07), dump mật khẩu (WIN-007 → PB-10), tạo tài khoản / thêm vào nhóm quản trị (WIN-003/004 → PB-04), service / scheduled task mới (7045, 4698 → PB-13), PowerShell (4104).
+          - title: "Tài khoản thực hiện có đăng nhập bất thường trước đó không (xem PB-09)"
+      - name: Ngăn chặn
+        tasks:
+          - title: "Cô lập máy nếu không phải thao tác quản trị hợp lệ"
+            approval: Trưởng nhóm IR
+          - title: "Vô hiệu hóa tài khoản đã thực hiện"
+            approval: Trưởng nhóm IR
+      - name: Loại bỏ
+        tasks:
+          - title: "Bật lại nhật ký, Defender, chính sách audit bị tắt"
+            detail: |-
+              Kiểm tra: auditpol /get /category:*, Get-MpComputerStatus (RealTimeProtectionEnabled), GPO liên quan.
+          - title: "Xử lý hoạt động bị che giấu theo playbook tương ứng (PB-03, PB-10, PB-13)"
+      - name: Khôi phục
+        tasks:
+          - title: "Bảo đảm nhật ký được chuyển ngay về SIEM để không còn bị xóa trắng tại chỗ"
+          - title: "Theo dõi tăng cường máy trong 7 ngày"
+      - name: Rút kinh nghiệm
+        tasks:
+          - title: "Giới hạn quyền xóa nhật ký; tăng dung lượng Security log; cảnh báo khi dịch vụ log / Defender bị tắt"
+
+  - id: PB-09
+    name: Tài khoản có thể đã bị chiếm / đăng nhập đặc quyền bất thường
+    match: [AUTH-002, AUTH-004]
+    techniques: [T1078]
+    references:
+      - {title: "Microsoft - Password spray investigation (phần account compromise)", url: "https://learn.microsoft.com/en-us/security/operations/incident-response-playbook-password-spray"}
+      - {title: "CERT Société Générale - IRM-3 Unix/Linux Intrusion Detection", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-3-UnixLinuxIntrusionDetection.pdf"}
+      - {title: "MITRE ATT&CK T1078 Valid Accounts", url: "https://attack.mitre.org/techniques/T1078/"}
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - title: "Xác định tài khoản, IP nguồn, thời điểm, hình thức đăng nhập"
+            detail: |-
+              Linux: /var/log/auth.log dòng "Accepted password|publickey for <user> from <ip>"; last -i <user>; lastb (thất bại).
+              Windows: 4624 (Logon Type 3 mạng, 10 RDP; trường IpAddress), 4648 (đăng nhập bằng thông tin chỉ định), 4672 (được cấp quyền đặc biệt).
+          - title: "Xác nhận với chủ tài khoản qua kênh khác (điện thoại), không qua email của chính tài khoản đó"
+          - title: "Đối chiếu lịch sử đăng nhập: IP, nhà mạng / quốc gia, thiết bị, giờ giấc có từng xuất hiện không"
+            detail: |-
+              Chưa từng thấy thì đánh dấu tài khoản và điều tra toàn bộ hoạt động của nó (Microsoft).
+          - title: "Rà mọi lệnh và hoạt động của phiên sau khi đăng nhập"
+            detail: |-
+              Linux: ~/.bash_history, /root/.bash_history, lệnh sudo (grep sudo /var/log/auth.log), tiến trình (siem-procs / auditd). Windows: 4688 / Sysmon 1, PowerShell 4104 trong phiên. Điều tra thực thể theo tài khoản + máy.
+          - title: "Tìm tài khoản khác bị dò từ cùng IP / cùng thời gian và người dùng chung mật khẩu"
+            detail: |-
+              Kiểm tra tài khoản cùng phòng / được ủy quyền có dùng cùng mật khẩu không (Microsoft).
+          - title: "Xác định tài khoản truy cập được tới đâu để biết phạm vi"
+            detail: |-
+              Máy chủ, CSDL, ổ chia sẻ, quyền quản trị, khóa SSH lưu trên máy. Có dấu hiệu lấy dữ liệu: xem bước thông báo ở cuối giai đoạn này (Microsoft).
+      - name: Ngăn chặn
+        tasks:
+          - title: "Khóa tài khoản và ngắt mọi phiên đang mở"
+            approval: Trưởng nhóm IR
+            detail: |-
+              Linux: passwd -l <user>; pkill -KILL -u <user>; tạm đổi shell sang /usr/sbin/nologin nếu cần.
+              Windows / AD: vô hiệu hóa tài khoản, đăng xuất phiên RDP (query user, logoff <id>).
+          - title: "Xác nhận IP nguồn đã bị chặn (SOAR chặn 24 giờ với AUTH-002)"
+            detail: |-
+              Kẻ tấn công dùng VPN / proxy đổi IP liên tục thì chặn IP không đủ; khóa tài khoản mới là biện pháp chính (Microsoft).
+          - title: "Cô lập máy nếu phiên đã chạy lệnh đáng ngờ"
+            approval: Trưởng nhóm IR
+      - name: Loại bỏ
+        tasks:
+          - title: "Rà cơ chế duy trì kẻ tấn công có thể đã cài"
+            detail: |-
+              ~/.ssh/authorized_keys của mọi user, crontab, tài khoản mới hoặc có UID 0 (awk -F: '$3==0' /etc/passwd), /etc/sudoers và /etc/sudoers.d, service mới, ~/.bashrc / /etc/profile.d. Windows: xem PB-13.
+          - title: "Thu hồi khóa SSH, token, phiên web của tài khoản"
+      - name: Khôi phục
+        tasks:
+          - title: "Đặt lại mật khẩu (mới, không dùng lại), bật MFA; mở khóa sau khi chủ tài khoản xác nhận"
+          - title: "Tắt đăng nhập SSH bằng mật khẩu và đăng nhập trực tiếp bằng root"
+            detail: |-
+              /etc/ssh/sshd_config: PasswordAuthentication no, PermitRootLogin no; kiểm tra sshd -t rồi systemctl reload ssh.
+      - name: Rút kinh nghiệm
+        tasks:
+          - title: "Kiểm tra mật khẩu bị đoán có nằm trong danh sách mật khẩu yếu / đã lộ; áp danh sách mật khẩu cấm"
+          - title: "Đăng nhập root hợp lệ (AUTH-004): ghi lý do vào kết luận, đề xuất dùng sudo thay root"
 
   - id: PB-01
-    name: Tấn công dò mật khẩu / tài khoản có thể bị chiếm
-    match: [AUTH-001, AUTH-002, AUTH-003, AUTH-004, WIN-001, WEB-007]
+    name: Tấn công dò mật khẩu / password spraying (chưa đăng nhập được)
+    match: [AUTH-001, AUTH-003, WIN-001, WEB-007]
+    techniques: [T1110]
+    references:
+      - {title: "Microsoft - Password spray investigation", url: "https://learn.microsoft.com/en-us/security/operations/incident-response-playbook-password-spray"}
+      - {title: "MITRE ATT&CK T1110 Brute Force", url: "https://attack.mitre.org/techniques/T1110/"}
     phases:
       - name: Phát hiện & phân tích
         tasks:
-          - Xác định IP nguồn, tài khoản bị nhắm tới, số lần thử
-          - Kiểm tra IP này có đăng nhập THÀNH CÔNG sau chuỗi thất bại không (rule AUTH-002)
-          - Đối chiếu hoạt động đã biết (quét lỗ hổng định kỳ, admin quên mật khẩu)
-          - Tra IP trên nguồn threat intel (nội bộ / AbuseIPDB)
+          - title: "Phân loại: dò nhiều mật khẩu trên một tài khoản (brute force) hay ít mật khẩu trên nhiều tài khoản (spraying)"
+            detail: |-
+              AUTH-001 / WIN-001: brute force; AUTH-003: spraying. Spraying chậm có thể không vượt ngưỡng rule; dấu hiệu:
+              nhiều tài khoản bị thử theo thứ tự danh bạ, cùng user-agent / dải IP, khoảng cách giữa các lần thử đều đặn (Microsoft, phần low and slow).
+          - title: "Xác định thời điểm bắt đầu, các IP nguồn (có thể nhiều IP), dịch vụ và tài khoản bị nhắm"
+            detail: |-
+              Linux: grep "Failed password" /var/log/auth.log (đếm theo IP: awk '{print $(NF-3)}' | sort | uniq -c | sort -rn).
+              Windows: 4625 (Status / SubStatus 0xC000006A sai mật khẩu, 0xC0000064 tài khoản không tồn tại).
+              Form web (WEB-007): access log, POST tới đường dẫn đăng nhập, mã 200 / 302 / 401.
+          - title: "Lọc các lần đăng nhập THÀNH CÔNG từ các IP tấn công trong khoảng thời gian đó"
+            detail: |-
+              Thứ tự ưu tiên (Microsoft): thành công từ IP tấn công > đúng mật khẩu nhưng bị chặn ở MFA > thất bại > thành công từ IP lạ khác. Có lần thành công: chuyển xử lý theo PB-09.
+              Linux: grep "Accepted" /var/log/auth.log | grep <ip>; Windows: 4624 cùng IpAddress.
+          - title: "Đối chiếu hoạt động đã biết"
+            detail: |-
+              Quét lỗ hổng định kỳ, người dùng quên mật khẩu, ứng dụng / service / thiết bị còn lưu mật khẩu cũ và tự đăng nhập lại liên tục.
+          - title: "Tra IP trên nguồn threat intel"
+            detail: |-
+              AbuseIPDB, VirusTotal, ipinfo.io (vị trí, nhà mạng); IP đã có trong config/intel/bad_ips.txt chưa (Microsoft).
       - name: Ngăn chặn
         tasks:
-          - Xác nhận SOAR đã chặn IP (tab Response actions); chưa chặn thì chặn thủ công
-          - {title: Chặn vĩnh viễn trên firewall biên nếu IP từ Internet, approval: Analyst L1}
-          - {title: Nếu đã đăng nhập thành công - khóa tài khoản và cô lập máy, approval: Trưởng nhóm IR}
-      - name: Loại bỏ
-        tasks:
-          - Nếu tài khoản bị chiếm - rà ~/.ssh/authorized_keys, crontab, user mới, service mới trên máy
-          - Rà các phiên đăng nhập còn mở của tài khoản
+          - title: "Xác nhận SOAR đã chặn IP (tab Lệnh phản ứng); chặn thủ công các IP còn lại"
+          - title: "Chặn trên firewall biên nếu IP từ Internet"
+            approval: Analyst L1
+          - title: "Spraying: buộc đổi mật khẩu tài khoản bị thử mà dùng mật khẩu yếu; theo dõi IP mới"
+            detail: |-
+              Kẻ tấn công hay đổi IP khi bị chặn; theo dõi AUTH-003 / AUTH-001 từ IP khác trong vài giờ sau (Microsoft).
       - name: Khôi phục
         tasks:
-          - Đổi mật khẩu tài khoản bị nhắm tới
-          - Tắt đăng nhập SSH bằng mật khẩu, bật khóa công khai / MFA cho RDP
+          - title: "Mở khóa tài khoản người dùng thật bị khóa do kẻ tấn công thử sai"
+          - title: "Bật MFA / khóa công khai, giới hạn số lần đăng nhập sai"
+            detail: |-
+              SSH: PasswordAuthentication no hoặc fail2ban (jail sshd). Windows: Account lockout threshold trong chính sách.
+              Form web: rate limit + captcha sau vài lần sai.
       - name: Rút kinh nghiệm
         tasks:
-          - Ghi kết luận vào case; nếu là false positive thì đề xuất tinh chỉnh ngưỡng rule
+          - title: "Đưa dịch vụ đăng nhập ra sau VPN nếu không cần mở ra Internet"
+          - title: "Gắn nhãn IP tấn công (config/intel/bad_ips.txt) để lần sau được cảnh báo ngay"
+          - title: "Báo nhầm: đề xuất tinh chỉnh ngưỡng rule"
+
+  - id: PB-19
+    name: Thay đổi giao diện / nội dung website (defacement)
+    match: [WZH-100101]
+    techniques: [T1491]
+    references:
+      - {title: "CERT Société Générale - IRM-6 Website Defacement", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-6-Website-Defacement.pdf"}
+      - {title: "MITRE ATT&CK T1491 Defacement", url: "https://attack.mitre.org/techniques/T1491/"}
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - title: "Xác nhận nội dung bị sửa và kiểu sửa"
+            detail: |-
+              Diff nội dung trong event FIM (Wazuh report_changes): dòng chữ kiểu "hacked by", iframe / script được chèn, chuyển hướng sang trang khác. Kiểm tra thời gian sửa, hash so với bản build (IRM-6).
+          - title: "Loại trừ nội dung từ bên thứ ba (banner quảng cáo, nguồn nội dung nhúng, CDN)"
+            detail: |-
+              Kiểm tra các liên kết trong mã nguồn trang (src, meta, css, script); vấn đề có thể nằm ngoài máy chủ của mình (IRM-6).
+          - title: "Quét CSDL tìm nội dung độc được chèn (bài viết, cấu hình CMS)"
+          - title: "Kiểm tra có webshell / file mới đi kèm (WZH-100100 cùng thời điểm → PB-12)"
+          - title: "Tìm cách nội dung bị sửa"
+            detail: |-
+              Tài khoản quản trị CMS (log đăng nhập CMS), upload, FTP / SSH (auth.log), lỗ hổng plugin CMS, thư mục public cho phép ghi, SQL injection (WEB-001 trước đó), truy cập vật lý (IRM-6).
+      - name: Ngăn chặn
+        tasks:
+          - title: "Sao lưu toàn bộ dữ liệu web server làm chứng cứ (ảnh đĩa nếu được)"
+            detail: |-
+              Ảnh đĩa giúp khôi phục cả nội dung đã bị xóa (IRM-6).
+          - title: "Chuyển sang trang bảo trì tĩnh / máy chủ dự phòng"
+            approval: Trưởng nhóm IR + chủ hệ thống
+            detail: |-
+              Trang HTML tĩnh không chạy mã nên không bị khai thác lại qua cùng lỗ hổng (IRM-6).
+          - title: "Kiểm tra lỗ hổng có ở dịch vụ khác trên máy / các máy chủ khác cùng ứng dụng"
+          - title: "Khóa tài khoản quản trị CMS nghi bị dùng; bỏ quyền ghi của thư mục public"
+      - name: Loại bỏ
+        tasks:
+          - title: "Thay toàn bộ nội dung bị sửa bằng bản sạch từ backup; vá lỗ hổng đã bị lợi dụng"
+      - name: Khôi phục
+        tasks:
+          - title: "Đổi mật khẩu người dùng website nếu có dấu hiệu lộ (có thể cần thông báo người dùng)"
+          - title: "Đưa web server chính trở lại nếu đã dùng máy chủ dự phòng; theo dõi chặt log và alert"
+      - name: Rút kinh nghiệm
+        tasks:
+          - title: "Thông báo công khai nếu sự việc đã bị nhiều người biết"
+          - title: "Báo lỗ hổng chưa công bố cho nhà phát triển ứng dụng; kiểm tra website định kỳ (hằng tháng)"
+
+  - id: PB-12
+    name: Webshell / thực thi mã trên máy chủ web
+    match: [WEB-008, LNX-002, WZH-100100]
+    techniques: [T1505.003]
+    references:
+      - {title: "CERT Société Générale - IRM-6 Website Defacement (phần điều tra web server)", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-6-Website-Defacement.pdf"}
+      - {title: "CERT Société Générale - IRM-3 Unix/Linux Intrusion Detection", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-3-UnixLinuxIntrusionDetection.pdf"}
+      - {title: "MITRE ATT&CK T1505.003 Web Shell", url: "https://attack.mitre.org/techniques/T1505/003/"}
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - title: "Xác định file webshell hoặc tiến trình shell do web server sinh ra"
+            detail: |-
+              FIM (WZH-100100): file.path, thời điểm, nội dung trong event. LNX-002: process.parent.name (apache2, httpd, nginx, php-fpm), process.command_line. WEB-008: URL gọi tới webshell.
+          - title: "Tra access log: IP nào gọi file, lệnh / tham số đã gửi, request tải file lên ban đầu"
+            detail: |-
+              grep "<tên file>" /var/log/apache2/access.log; grep -E "POST .*(upload|import)" /var/log/apache2/access.log;
+              với IP tìm được: grep "^<ip> " /var/log/apache2/access.log.
+          - title: "Xác định lỗ hổng bị lợi dụng (form upload, RCE, LFI, plugin CMS)"
+          - title: "Kiểm tra tiến trình con và kết nối ra ngoài của tài khoản chạy web server"
+            detail: |-
+              ps -u www-data -f; ss -tunap | grep -v 127.0.0.1; lsof -u www-data -i. Thêm các kiểm tra Linux của PB-03.
+          - title: "Tìm webshell khác và file lạ"
+            detail: |-
+              find /var/www -type f -newermt "<thời điểm trước sự cố>" -ls
+              grep -rlE "eval\(|assert\(|base64_decode\(|system\(|shell_exec\(|passthru\(|proc_open\(" /var/www --include=*.php
+              So hash toàn bộ web root với bản build gốc.
+      - name: Ngăn chặn
+        tasks:
+          - title: "Xác nhận IP tấn công đã bị chặn và SOAR đã kill shell (tab Lệnh phản ứng)"
+          - title: "Cô lập web server, giữ nguyên trạng thái để thu chứng cứ"
+            approval: Trưởng nhóm IR
+          - title: "Đưa ứng dụng vào chế độ bảo trì / trang tĩnh nếu vẫn đang bị khai thác"
+            approval: Trưởng nhóm IR + chủ hệ thống
+          - title: "Kiểm tra lỗ hổng có ở máy chủ khác chạy cùng ứng dụng không"
+      - name: Loại bỏ
+        tasks:
+          - title: "Sao lưu webshell và log làm chứng cứ, rồi xóa webshell và mọi file lạ"
+          - title: "Vá lỗ hổng; cấm thực thi script trong thư mục upload"
+            detail: |-
+              Cập nhật CMS / plugin, sửa mã. Apache: trong <Directory> của thư mục upload đặt <FilesMatch "\.ph(p[0-9]?|tml)$"> Require all denied </FilesMatch>. nginx: location ~* /uploads/.*\.php$ { deny all; }
+      - name: Khôi phục
+        tasks:
+          - title: "Triển khai lại ứng dụng từ bản build sạch"
+          - title: "Đổi mật khẩu CSDL, API key, secret mà ứng dụng dùng (coi như đã lộ)"
+          - title: "Theo dõi FIM thư mục web và LNX-002 trong 14 ngày"
+      - name: Rút kinh nghiệm
+        tasks:
+          - title: "Bổ sung kiểm thử bảo mật cho chức năng bị khai thác; thêm FIM cho thư mục web còn thiếu"
+          - title: "Báo lỗ hổng chưa công bố cho nhà phát triển ứng dụng"
+
+  - id: PB-15
+    name: Từ chối dịch vụ (DoS / DDoS)
+    match: [WEB-009]
+    techniques: [T1498, T1499]
+    references:
+      - {title: "CERT Société Générale - IRM-4 DDoS", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-4-DDOS.pdf"}
+      - {title: "MITRE ATT&CK T1499 Endpoint Denial of Service", url: "https://attack.mitre.org/techniques/T1499/"}
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - title: "Xác định dịch vụ bị ảnh hưởng và thành phần là điểm nghẽn"
+            detail: |-
+              Web server: CPU / RAM, số kết nối (ss -s; ss -tan state syn-recv | wc -l). Đường truyền: băng thông.
+              Ứng dụng: endpoint nặng (tìm kiếm, xuất báo cáo, đăng nhập).
+          - title: "Phân biệt lưu lượng tấn công với lưu lượng thật"
+            detail: |-
+              IP nhiều request nhất: awk '{print $1}' /var/log/apache2/access.log | sort | uniq -c | sort -rn | head -20
+              Xem URL, user-agent, AS / quốc gia, cổng, cờ giao thức. Bắt mẫu: tcpdump -nn -i <if> -c 10000 -w ddos.pcap
+              Nếu được, viết signature IDS để tách lưu lượng xấu (IRM-4).
+          - title: "Xác định mình là mục tiêu hay nạn nhân phụ"
+          - title: "Coi chừng màn khói: kiểm tra tấn công khác cùng lúc (WEB-*, AUTH-*)"
+          - title: "Kiểm tra có thư tống tiền trước đó / lời nhận trách nhiệm trên mạng xã hội"
+            detail: |-
+              Tìm trong email theo từ khóa; kẻ tấn công hay gửi tới địa chỉ trong whois của tên miền (IRM-4).
+          - title: "Báo lãnh đạo, pháp chế; liên hệ nhà mạng / dịch vụ chống DDoS với thông tin cụ thể"
+            detail: |-
+              Cung cấp: dải mạng bị nhắm, IP nguồn, giao thức, thời điểm (IRM-4).
+      - name: Ngăn chặn
+        tasks:
+          - title: "Xác nhận SOAR đã chặn các IP nguồn chính; ít IP thì chặn thêm thủ công"
+          - title: "Tạm tắt chức năng là điểm nghẽn"
+          - title: "Giới hạn tốc độ / chặn càng gần biên mạng càng tốt"
+            detail: |-
+              Router / firewall / load balancer / WAF trước, máy chủ sau. Apache: mod_reqtimeout, mod_evasive.
+              nginx: limit_req, limit_conn. SYN flood: sysctl -w net.ipv4.tcp_syncookies=1 (IRM-4).
+          - title: "Chuyển lưu lượng qua dịch vụ lọc / CDN, hoặc đổi IP / chuyển site dự phòng qua DNS"
+            approval: Trưởng nhóm IR + chủ hệ thống
+            detail: |-
+              Cần TTL DNS thấp (vd 600 giây) đã đặt từ trước để chuyển nhanh (IRM-4).
+          - title: "Mở kênh liên lạc dự phòng với người dùng / khách hàng"
+          - title: "Bị tống tiền: kéo dài thời gian, không trả tiền; báo pháp chế"
+      - name: Loại bỏ
+        tasks:
+          - title: "Phối hợp nhà mạng / nhà cung cấp chống DDoS áp biện pháp lọc"
+            detail: |-
+              Lọc ở cấp nhà mạng, scrubbing / sinkhole / clean-pipe, blackhole routing (IRM-4).
+          - title: "Tối ưu / cache các endpoint bị lạm dụng"
+      - name: Khôi phục
+        tasks:
+          - title: "Xác nhận dịch vụ truy cập lại được và hiệu năng về mức bình thường"
+          - title: "Gỡ dần biện pháp tạm, chuyển lưu lượng về đường chính, khởi động lại dịch vụ đã dừng - phối hợp đội mạng"
+      - name: Rút kinh nghiệm
+        tasks:
+          - title: "Ghi thời gian gián đoạn và ảnh hưởng người dùng; cập nhật ngưỡng rule WEB-009"
+          - title: "Chuẩn bị trước cho lần sau"
+            detail: |-
+              Thỏa thuận chống DDoS với nhà mạng (hỗ trợ 24/7), danh sách IP đối tác cần ưu tiên, TTL DNS thấp, WAF, kịch bản truyền thông (IRM-4 phần Chuẩn bị).
+              
+  - id: PB-18
+    name: Hành vi mạng độc hại / cảnh báo IDS
+    match: [NET-004]
+    tags: [suricata, ids]
+    references:
+      - {title: "CERT Société Générale - IRM-5 Malicious Network Behaviour", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-5-MaliciousNetworkBehaviour.pdf"}
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - title: "Đọc cảnh báo IDS: signature, SID, nhóm, mức độ, payload"
+            detail: |-
+              Event gốc Suricata (eve.json): alert.signature, alert.signature_id, alert.category, src / dest ip + port, app_proto, http.hostname / url. Tra SID trên bộ rule (vd Emerging Threats) để biết rule bắt gì.
+          - title: "Xác định đặc điểm kỹ thuật của lưu lượng"
+            detail: |-
+              IP nguồn, cổng, giao thức, máy / dịch vụ đích, exploit dùng, tài khoản đăng nhập từ xa (IRM-5).
+          - title: "Máy đích có chạy dịch vụ / phiên bản bị nhắm tới không; khai thác có thành công không"
+            detail: |-
+              Xem phản hồi của dịch vụ, log dịch vụ đích, tiến trình / file mới trên máy đích ngay sau đó.
+          - title: "Bắt gói tin để phân tích nếu lưu lượng còn tiếp diễn"
+            detail: |-
+              tcpdump -nn -i <if> host <ip> -w capture.pcap, hoặc port mirroring trên switch (IRM-5).
+          - title: "Đối chiếu rủi ro nghiệp vụ để ưu tiên phân tích / ngăn chặn"
+          - title: "Có máy bị xâm nhập: xử lý theo PB-03 (Linux / Windows)"
+      - name: Ngăn chặn
+        tasks:
+          - title: "Chặn nguồn tấn công (block_ip), ngắt kết nối / tiến trình không mong muốn"
+          - title: "Cô lập máy nguồn hoặc máy bị ảnh hưởng"
+            approval: Trưởng nhóm IR
+          - title: "Chặn điểm đến đầu ra (egress) đáng ngờ trên firewall / proxy"
+          - title: "Bật log chi tiết trên vùng bị nhắm, lưu về máy chủ an toàn"
+          - title: "Áp biện pháp tạm cho luồng nghiệp vụ quan trọng (MFA, lọc theo vùng địa lý) - thống nhất với chủ nghiệp vụ"
+      - name: Loại bỏ
+        tasks:
+          - title: "Chặn mọi kênh liên lạc của kẻ tấn công ở mọi biên mạng"
+          - title: "Nguồn là người trong nội bộ: báo quản lý, nhân sự, pháp chế; bên ngoài: cân nhắc báo cơ quan chức năng"
+          - title: "Thử biện pháp khắc phục trước, chỉ áp dụng khi IT và nghiệp vụ cùng đồng ý"
+      - name: Khôi phục
+        tasks:
+          - title: "Xác nhận lưu lượng trở lại bình thường; mở lại từng bước các vùng đã cô lập"
+      - name: Rút kinh nghiệm
+        tasks:
+          - title: "Viết / tinh chỉnh signature IDS và rule SIEM cho hành vi này"
 
   - id: PB-02
     name: Tấn công ứng dụng Web
-    match: ["WEB-*", NET-004]
+    match: ["WEB-*"]
+    techniques: [T1190, T1595.002]
+    references:
+      - {title: "CERT Société Générale - IRM-6 Website Defacement (phần điều tra web server)", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-6-Website-Defacement.pdf"}
+      - {title: "MITRE ATT&CK T1190 Exploit Public-Facing Application", url: "https://attack.mitre.org/techniques/T1190/"}
     phases:
       - name: Phát hiện & phân tích
         tasks:
-          - Xem URL, tham số, user-agent trong event gốc; xác định lỗ hổng bị nhắm tới
-          - Kiểm tra mã phản hồi HTTP - tấn công có thành công (2xx) hay bị từ chối (4xx)
-          - Tìm các request khác từ cùng IP trong 24h
-          - Kiểm tra web server có sinh tiến trình lạ ngay sau đó không (rule LNX-002)
+          - title: "Xem URL, tham số, user-agent trong event gốc; xác định lỗ hổng bị nhắm tới"
+            detail: |-
+              SQLi: union select, ' or 1=1, sleep(, benchmark(. XSS: <script, onerror=, javascript:.
+              Path traversal / LFI: ../, /etc/passwd, php://filter. Command injection: ; | && `...` $(...).
+              Công cụ quét: user-agent sqlmap, Nikto, Nuclei, WPScan, dirbuster.
+          - title: "Xác định tấn công có thành công không"
+            detail: |-
+              Mã 2xx / 500 kèm kích thước phản hồi lớn bất thường; SQLi dạng thời gian: thời gian phản hồi kéo dài;
+              lỗi SQL trong error.log; ngay sau đó có request tới file mới (webshell → PB-12) hay shell (LNX-002 → PB-12).
+          - title: "Tìm các request khác từ cùng IP trong 24 giờ - 7 ngày"
+            detail: |-
+              Điều tra thực thể theo IP; grep "^<ip> " /var/log/apache2/access.log | less
+          - title: "SQLi thành công: xác định bảng / dữ liệu có thể đã bị lấy"
+            detail: |-
+              Xem câu truy vấn trong tham số, log truy vấn CSDL (nếu bật), lượng dữ liệu phản hồi. Lộ dữ liệu cá nhân:
+              xem bước nghĩa vụ thông báo.
       - name: Ngăn chặn
         tasks:
-          - Xác nhận IP nguồn đã bị chặn
-          - {title: Nếu có dấu hiệu thực thi mã - cô lập web server, approval: Trưởng nhóm IR}
-          - Bật chặn tạm trên WAF / reverse proxy cho mẫu request này
+          - title: "Xác nhận IP nguồn đã bị chặn"
+          - title: "Có dấu hiệu thực thi mã - cô lập web server"
+            approval: Trưởng nhóm IR
+          - title: "Chặn tạm trên WAF / reverse proxy cho mẫu request này (vá ảo)"
       - name: Loại bỏ
         tasks:
-          - Tìm và xóa file lạ trong thư mục upload / web root
-          - Vá lỗ hổng trong mã nguồn hoặc cập nhật phiên bản ứng dụng
+          - title: "Tìm và xóa file lạ trong thư mục upload / web root"
+          - title: "Vá lỗ hổng trong mã nguồn hoặc cập nhật phiên bản ứng dụng"
+            detail: |-
+              SQLi: dùng câu truy vấn tham số hóa; XSS: mã hóa đầu ra; LFI: danh sách file được phép; command injection:
+              không ghép chuỗi vào lệnh shell.
       - name: Khôi phục
         tasks:
-          - Triển khai lại ứng dụng từ bản build sạch
-          - Đổi thông tin kết nối CSDL và secret mà ứng dụng dùng nếu nghi bị lộ
+          - title: "Triển khai lại ứng dụng từ bản build sạch nếu đã bị khai thác"
+          - title: "Đổi thông tin kết nối CSDL và secret của ứng dụng nếu nghi bị lộ"
       - name: Rút kinh nghiệm
         tasks:
-          - Bổ sung kiểm thử bảo mật cho chức năng bị tấn công
+          - title: "Bổ sung kiểm thử bảo mật cho chức năng bị tấn công; tài khoản CSDL của ứng dụng chỉ có quyền tối thiểu"
+
+  - id: PB-14
+    name: Đào tiền ảo trái phép (cryptojacking)
+    match: [LNX-004]
+    techniques: [T1496]
+    references:
+      - {title: "CERT Société Générale - IRM-3 Unix/Linux Intrusion Detection", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-3-UnixLinuxIntrusionDetection.pdf"}
+      - {title: "CERT Société Générale - IRM-7 Windows Malware Detection", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-7-WindowsMalwareDetection.pdf"}
+      - {title: "MITRE ATT&CK T1496 Resource Hijacking", url: "https://attack.mitre.org/techniques/T1496/"}
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - title: "Xác định tiến trình đào: tên, đường dẫn, dòng lệnh (pool, ví), tài khoản chạy, mức CPU"
+            detail: |-
+              ps -eo pid,user,%cpu,cmd --sort=-%cpu | head
+              ls -l /proc/<pid>/exe; tr '\0' ' ' < /proc/<pid>/cmdline; ss -tnp | grep "pid=<pid>"
+              Dòng lệnh thường có stratum+tcp://, --donate-level, địa chỉ ví.
+          - title: "Kiểm tra tiến trình bị ẩn (rootkit) và file đã xóa nhưng vẫn đang chạy"
+            detail: |-
+              So danh sách ps với thư mục /proc; lsof +L1; cat /etc/ld.so.preload (kinsing, libprocesshider);
+              rkhunter --check; kết quả rootcheck của Wazuh.
+          - title: "Tìm đường vào"
+            detail: |-
+              Docker API mở cổng 2375, Redis không mật khẩu, SSH mật khẩu yếu (AUTH-001/002), lỗ hổng web (WEB-*), container / image lạ (docker ps -a; docker images).
+          - title: "Tìm máy khác có cùng tiến trình hoặc kết nối tới cùng pool (Điều tra thực thể)"
+      - name: Ngăn chặn
+        tasks:
+          - title: "Xác nhận SOAR đã kill tiến trình; chặn domain / IP của pool đào ở chiều ra"
+          - title: "Cô lập máy nếu tiến trình tự khởi động lại"
+            approval: Trưởng nhóm IR
+      - name: Loại bỏ
+        tasks:
+          - title: "Gỡ cơ chế duy trì hay gặp của miner"
+            detail: |-
+              crontab -l -u <user> với mọi user; ls -la /etc/cron.* /var/spool/cron/crontabs
+              systemctl list-unit-files --state=enabled; systemctl list-timers --all
+              /etc/ld.so.preload; /etc/rc.local; ~/.ssh/authorized_keys
+              ls -la /tmp /var/tmp /dev/shm (file ẩn tên bắt đầu bằng dấu chấm)
+              File bị khóa không xóa được: lsattr rồi chattr -i <file>.
+          - title: "Xóa container / image lạ; đóng dịch vụ đã bị lợi dụng"
+      - name: Khôi phục
+        tasks:
+          - title: "Cài lại máy nếu không chắc đã loại bỏ hết"
+            approval: Trưởng nhóm IR + chủ hệ thống
+          - title: "Đổi mật khẩu, khóa SSH, khóa truy cập cloud có trên máy"
+      - name: Rút kinh nghiệm
+        tasks:
+          - title: "Thêm hash / domain pool vào config/intel; cảnh báo khi CPU cao kéo dài"
+
+  - id: PB-13
+    name: Cài cơ chế duy trì truy cập (persistence)
+    match: [LNX-006, WIN-009, WIN-013]
+    techniques: [T1053, T1543, T1547, T1546, T1098.004]
+    references:
+      - {title: "CERT Société Générale - IRM-2 Windows Intrusion Detection", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-2-WindowsIntrusion.pdf"}
+      - {title: "CERT Société Générale - IRM-3 Unix/Linux Intrusion Detection", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-3-UnixLinuxIntrusionDetection.pdf"}
+      - {title: "MITRE ATT&CK TA0003 Persistence", url: "https://attack.mitre.org/tactics/TA0003/"}
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - title: "Xác định thành phần duy trì và lệnh / file nó chạy"
+            detail: |-
+              Windows (IRM-2): scheduled task (4698, 4702), service mới / bị thay (7045, 4697), khóa Run / RunOnce (Sysmon 13), thư mục Startup, WMI event subscription, DLL search order hijacking, thư viện hệ thống bị thay, GPO cục bộ, add-in Office, BIOS / UEFI / MBR. Xem nhanh bằng Autoruns (Sysinternals).
+              Linux (IRM-3): crontab của root và mọi user, /etc/crontab, /etc/cron.*, systemd service / timer, ~/.bashrc, /etc/profile.d, ~/.ssh/authorized_keys, /etc/rc.local, /etc/ld.so.preload.
+          - title: "Ai tạo, lúc nào, từ tiến trình nào; có thay đổi đã được duyệt (cài phần mềm, ticket) không"
+          - title: "Phân tích file được chạy"
+            detail: |-
+              Hash, chữ ký số, đường dẫn (Temp, AppData, ProgramData, /tmp, /dev/shm là đáng ngờ), tra threat intel.
+          - title: "Tìm cơ chế duy trì khác trên cùng máy - kẻ tấn công thường cài nhiều cái"
+      - name: Ngăn chặn
+        tasks:
+          - title: "Vô hiệu hóa (chưa xóa) service / task / cron để giữ chứng cứ"
+            detail: |-
+              Windows: schtasks /Change /TN <tên> /DISABLE; sc config <tên> start= disabled.
+              Linux: systemctl disable --now <unit>; comment dòng cron.
+          - title: "Cô lập máy nếu file được chạy là mã độc"
+            approval: Trưởng nhóm IR
+      - name: Loại bỏ
+        tasks:
+          - title: "Thu thập chứng cứ rồi xóa thành phần duy trì và file nó chạy"
+          - title: "Tìm đường xâm nhập ban đầu (PB-09 nếu do tài khoản bị chiếm, PB-12 nếu qua web)"
+      - name: Khôi phục
+        tasks:
+          - title: "Đổi mật khẩu tài khoản đã tạo thành phần duy trì; theo dõi việc tạo service / task / cron mới trong 7 ngày"
+      - name: Rút kinh nghiệm
+        tasks:
+          - title: "Thêm vị trí duy trì còn thiếu vào FIM (wazuh/manager/agent.conf)"
+
+  - id: PB-10
+    name: Đánh cắp thông tin đăng nhập (dump LSASS / Mimikatz / NTDS)
+    match: [WIN-007]
+    techniques: [T1003, T1555, T1552, T1558]
+    references:
+      - {title: "CISA Eviction Strategies - CM0050 Reset KRBTGT Password Twice", url: "https://www.cisa.gov/eviction-strategies-tool/info-countermeasures/CM0050"}
+      - {title: "Microsoft - AD Forest Recovery: Reset the krbtgt password", url: "https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/forest-recovery-guide/ad-forest-recovery-reset-the-krbtgt-password"}
+      - {title: "CERT Société Générale - IRM-2 Windows Intrusion Detection", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-2-WindowsIntrusion.pdf"}
+      - {title: "MITRE ATT&CK T1003 OS Credential Dumping", url: "https://attack.mitre.org/techniques/T1003/"}
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - title: "Xác định công cụ / kỹ thuật, tài khoản và máy thực hiện"
+            detail: |-
+              Sysmon 10 (ProcessAccess): TargetImage lsass.exe, GrantedAccess 0x1010 / 0x1410 / 0x1fffff.
+              Dòng lệnh: sekurlsa::, procdump -ma lsass, rundll32 comsvcs.dll MiniDump, tạo dump từ Task Manager.
+              File .dmp mới (Sysmon 11).
+          - title: "Kiểm tra có lấy cả CSDL Active Directory (NTDS.dit) / DCSync không"
+            detail: |-
+              ntdsutil "ac i ntds" "ifm"; vssadmin create shadow rồi chép ntds.dit.
+              DCSync: event 4662 trên DC với quyền DS-Replication-Get-Changes-All (GUID 1131f6ad-9c07-11d1-f79f-00c04fc2dcd2) từ tài khoản không phải DC.
+          - title: "Liệt kê tài khoản từng đăng nhập trên máy - coi như mật khẩu / hash đã lộ"
+            detail: |-
+              4624 trên máy (Logon Type 2, 10, 11 để lại thông tin đăng nhập trong bộ nhớ), phiên RDP, tài khoản dịch vụ chạy service trên máy. Ưu tiên quản trị domain, tài khoản dịch vụ.
+          - title: "Tìm dấu hiệu đã dùng thông tin đánh cắp"
+            detail: |-
+              4624 Logon Type 3 / 10 từ máy này sang máy khác; 4648; pass-the-hash (4624 Logon Type 9, NTLM từ máy lạ);
+              Kerberoasting: 4769 hàng loạt với mã hóa RC4 (0x17).
+      - name: Ngăn chặn
+        tasks:
+          - title: "Cô lập máy ngay"
+            approval: Trưởng nhóm IR
+          - title: "Khóa / đổi mật khẩu các tài khoản đặc quyền đã đăng nhập trên máy"
+            approval: Trưởng nhóm IR
+      - name: Loại bỏ
+        tasks:
+          - title: "Thu bộ nhớ và file dump (nếu còn) làm chứng cứ, sau đó xóa file dump khỏi máy"
+          - title: "Xử lý công cụ / mã độc theo PB-03, cơ chế duy trì theo PB-13"
+      - name: Khôi phục
+        tasks:
+          - title: "Đặt lại mật khẩu krbtgt hai lần nếu nghi lộ quản trị domain / NTDS"
+            approval: Trưởng nhóm IR
+            detail: |-
+              Theo CISA CM0050 và hướng dẫn forest recovery của Microsoft:
+              1. Kiểm tra đồng bộ AD ổn định trước (repadmin /replsummary).
+              2. Đổi lần 1 bằng script New-KrbtgtKeys.ps1 của Microsoft hoặc Active Directory Users and Computers.
+              3. Đợi đồng bộ xong và ít nhất 10 giờ (lâu hơn thời hạn tối đa của vé Kerberos nếu đã đổi chính sách), rồi đổi lần 2 - krbtgt giữ 2 mật khẩu gần nhất nên phải đổi 2 lần mới vô hiệu được Golden Ticket.
+              4. RODC có tài khoản krbtgt riêng, làm riêng.
+              Ảnh hưởng: vé Kerberos cũ bị vô hiệu, ứng dụng dùng AD có thể cần khởi động lại; client không phải Windows có thể lỗi tới khi vé cũ hết hạn; krbtgt chưa từng đổi có thể còn dùng mã hóa DES / RC4 gây lỗi đồng bộ.
+          - title: "Đổi mật khẩu tài khoản dịch vụ và quản trị liên quan"
+          - title: "Cài lại máy từ bản sạch"
+            approval: Trưởng nhóm IR + chủ hệ thống
+      - name: Rút kinh nghiệm
+        tasks:
+          - title: "Bật Credential Guard / LSA Protection (RunAsPPL); không cho quản trị domain đăng nhập máy trạm; dùng LAPS cho admin cục bộ"
+
+  - id: PB-11
+    name: Phishing / tài liệu độc hại
+    match: [WIN-008]
+    techniques: [T1566, T1204]
+    references:
+      - {title: "CERT Société Générale - IRM-16 Phishing", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-16-Phishing.pdf"}
+      - {title: "Microsoft - Phishing investigation", url: "https://learn.microsoft.com/en-us/security/operations/incident-response-playbook-phishing"}
+      - {title: "MITRE ATT&CK T1566 Phishing", url: "https://attack.mitre.org/techniques/T1566/"}
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - title: "Xác định tài liệu / email gốc, người đã mở và thời điểm"
+            detail: |-
+              Tên file, hash, nguồn (email, web, USB). Sysmon 1 / 4688: WINWORD.EXE / EXCEL.EXE / POWERPNT.EXE là cha của powershell, cmd, mshta, wscript, cscript, rundll32, regsvr32.
+          - title: "Phân tích header email để tìm nguồn thật của người gửi"
+            detail: |-
+              Received (đọc từ dưới lên để tìm máy gửi đầu tiên), Return-Path, Message-ID, Authentication-Results (spf / dkim / dmarc pass hay fail), IP gốc (tra blocklist, vị trí). Dùng trình phân tích header như
+              MXToolbox hoặc Microsoft Message Header Analyzer (Microsoft).
+          - title: "Phân loại chiến dịch: lấy mật khẩu hay phát tán mã độc; nhắm cụ thể hay đại trà"
+          - title: "Lập danh sách người nhận; ai đã mở email, bấm link, mở tệp, nhập mật khẩu"
+            detail: |-
+              Tìm theo người gửi, tiêu đề, hash tệp đính kèm trên mail server / mail gateway (Microsoft checklist).
+          - title: "Phân tích tệp đính kèm / link trong sandbox, trích IOC"
+            detail: |-
+              Không mở trên máy thật. Tra link, domain trên dịch vụ threat intel (VirusTotal, URL reputation) (IRM-16).
+          - title: "Lưu bản sao có dấu thời gian của trang phishing (mọi trang của kịch bản) và chụp màn hình"
+          - title: "Người đã nhập mật khẩu: kiểm tra hộp thư bị chiếm"
+            detail: |-
+              Quy tắc chuyển tiếp ra ngoài, quy tắc hộp thư mới hoặc vừa bị xóa, quyền ủy quyền hộp thư (Microsoft).
+          - title: "Kiểm tra đăng nhập của tài khoản sau thời điểm bấm link (PB-09)"
+      - name: Ngăn chặn
+        tasks:
+          - title: "Cô lập máy người dùng nếu tiến trình con đã chạy"
+            approval: Trưởng nhóm IR
+          - title: "Chặn IOC mạng (domain, URL, IP) trên DNS, firewall, proxy; DNS sinkhole"
+          - title: "Chặn chiến dịch trên mail gateway theo người gửi / tiêu đề; xóa email khỏi hộp thư mọi người nhận"
+          - title: "Cảnh báo người dùng nội bộ về chiến dịch đang diễn ra"
+      - name: Loại bỏ
+        tasks:
+          - title: "Đổi / tạm khóa mật khẩu tài khoản đã nhập thông tin"
+          - title: "Xử lý payload đã chạy theo PB-03, cơ chế duy trì theo PB-13"
+          - title: "Chiến dịch nhắm cụ thể: cân nhắc báo cơ quan chức năng / CERT"
+      - name: Khôi phục
+        tasks:
+          - title: "Yêu cầu gỡ trang phishing (nhà cung cấp hosting, nhà đăng ký tên miền); tiếp tục theo dõi URL"
+            detail: |-
+              Trang phishing có thể xuất hiện lại sau vài giờ, nhất là khi còn đường chuyển hướng chưa bị gỡ (IRM-16).
+          - title: "Liên hệ những người nhận khác xác nhận chưa mở tài liệu / chưa nhập thông tin"
+          - title: "Gỡ trang cảnh báo nội bộ khi chiến dịch đã kết thúc"
+      - name: Rút kinh nghiệm
+        tasks:
+          - title: "Chặn macro trong tài liệu tải từ Internet; SPF / DKIM / DMARC cho tên miền; nút báo cáo phishing; diễn tập định kỳ"
 
   - id: PB-03
     name: Thực thi mã độc / hành vi độc hại trên endpoint
-    match: ["LNX-*", WIN-005, WIN-006, WIN-007, WIN-008, WIN-009, WIN-011, WIN-012, WIN-013]
+    match: ["LNX-*", WIN-005, WIN-006, WIN-011, WIN-012]
+    techniques: [T1059, T1105, T1218, T1027, T1082]
+    tags: [virustotal, yara]
+    references:
+      - {title: "CERT Société Générale - IRM-7 Windows Malware Detection", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-7-WindowsMalwareDetection.pdf"}
+      - {title: "CERT Société Générale - IRM-2 Windows Intrusion Detection", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-2-WindowsIntrusion.pdf"}
+      - {title: "CERT Société Générale - IRM-3 Unix/Linux Intrusion Detection", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-3-UnixLinuxIntrusionDetection.pdf"}
     phases:
       - name: Phát hiện & phân tích
         tasks:
-          - Xem cây tiến trình (process.parent, command_line) và tài khoản chạy
-          - Kiểm tra kết nối mạng và file mới quanh thời điểm cảnh báo
-          - Xác nhận SOAR đã kill tiến trình (tab Response actions)
+          - title: "Xác định họ mã độc và mức độ"
+            detail: |-
+              Phần mềm không mong muốn / miner: điều tra nhanh. Stealer, dropper, ransomware: phân tích sâu, có thể chuyển sang PB-07 / PB-10 / PB-16 (IRM-7).
+          - title: "Thu bộ nhớ (RAM) TRƯỚC mọi thao tác khác"
+            detail: |-
+              Windows: WinPmem, DumpIt, FTK Imager chạy từ ổ ngoài. Linux: AVML hoặc LiME.
+              Sau đó lấy triage image (KAPE, DFIR-ORC; Linux: UAC) hoặc ảnh đĩa (dd, FTK Imager). Có thể cần quyền admin hoặc thiết bị chống ghi (IRM-2, IRM-7).
+          - title: "Xem cây tiến trình, dòng lệnh, tài khoản chạy"
+            detail: |-
+              Windows: Sysmon 1 / 4688 (ParentImage, CommandLine). Linux: event của siem-procs / auditd.
+              Điều tra thực thể theo máy quanh thời điểm cảnh báo.
+          - title: "Phân tích bộ nhớ"
+            detail: |-
+              Tìm tiến trình lạ, DLL / handle, kết nối mạng, code injection, rootkit; dump tiến trình đáng ngờ (IRM-2).
+              Volatility 3: windows.pslist, windows.malfind, windows.netscan; linux.pslist.
+          - title: "Kiểm tra kết nối mạng và file mới quanh thời điểm cảnh báo"
+            detail: |-
+              Windows: Sysmon 3 (kết nối), 11 (tạo file), 22 (truy vấn DNS).
+              Linux: ss -tunap; lsof -i; find / -xdev -newermt "<thời điểm>" -type f 2>/dev/null
+          - title: "Windows: kiểm tra event log"
+            detail: |-
+              Scheduled task (4698), đăng nhập ngoài giờ (4624), tài khoản cục bộ lạ (4720), service lạ (7045), nhật ký bị xóa (1102), RDP (1149; 21 / 24 / 25), PowerShell (4104), SMB (IRM-2).
+          - title: "Linux: kiểm tra tài khoản, file, tiến trình, mạng, cron, log, kernel bất thường"
+            detail: |-
+              Tài khoản UID 0: awk -F: '$3==0' /etc/passwd; file mồ côi: find / -nouser -o -nogroup 2>/dev/null
+              SUID: find / -perm -4000 -type f 2>/dev/null; tên lạ: find / -name ". *" -o -name ".. *" 2>/dev/null
+              File đã xóa còn mở: lsof +L1; card mạng promiscuous: ip link | grep PROMISC
+              Cron: crontab -u root -l; ls -la /etc/cron.*; log: /var/log/auth.log, ~/.bash_history
+              Kernel: dmesg; lsmod; rkhunter. Toàn vẹn gói: debsums -ac (Debian / Ubuntu) hoặc rpm -Va - làm SAU CÙNG vì thao tác này đổi thời gian truy cập file (IRM-3).
+          - title: "Xác nhận SOAR đã kill tiến trình (tab Lệnh phản ứng)"
+          - title: "Tra hash mẫu trên threat intel; gửi mẫu cho CERT / hãng antivirus dạng zip có mật khẩu"
+            detail: |-
+              Không tải mẫu có chứa dữ liệu nội bộ lên dịch vụ công khai (IRM-7).
+          - title: "Liên quan tài nguyên nhạy cảm / nhiều máy: báo Trưởng nhóm IR lập nhóm xử lý khủng hoảng"
       - name: Ngăn chặn
         tasks:
-          - {title: Cô lập máy khỏi mạng, giữ nguyên trạng thái để thu chứng cứ, approval: Trưởng nhóm IR}
-          - Chặn IP / domain đích mà tiến trình kết nối tới
+          - title: "Cô lập máy khỏi mạng, giữ nguyên trạng thái để thu chứng cứ"
+            approval: Trưởng nhóm IR
+            detail: |-
+              Máy quan trọng không thể ngắt: sao lưu dữ liệu quan trọng trước - kẻ tấn công có thể xóa file khi biết đang bị điều tra. Máy không quan trọng: ngắt điện thay vì tắt máy bình thường để giữ trạng thái đĩa (IRM-2, IRM-7).
+          - title: "Chặn IP / domain đích (C2) mà tiến trình kết nối tới"
+          - title: "Kiểm tra ổ chia sẻ / thư mục dùng chung xem mã độc có lây qua đó không"
+          - title: "Tìm cách mã độc vào máy; vá ngay nếu do lỗ hổng đã biết"
+            detail: |-
+              Không tìm thấy dấu vết kỹ thuật: cân nhắc truy cập vật lý hoặc người trong nội bộ (IRM-2).
       - name: Loại bỏ
         tasks:
-          - Thu thập chứng cứ (bộ nhớ, file nghi ngờ, hash) trước khi xóa
-          - Gỡ cơ chế duy trì (service, scheduled task, cron, registry Run key)
+          - title: "Thu chứng cứ (bộ nhớ, file nghi ngờ, hash) trước khi xóa"
+          - title: "Gỡ binary, khóa registry, cơ chế duy trì (PB-13); tham khảo hướng dẫn gỡ của hãng antivirus"
+          - title: "Tạm khóa các tài khoản liên quan đến sự cố"
       - name: Khôi phục
         tasks:
-          - {title: Cài lại máy từ bản sạch nếu không chắc đã loại bỏ hết, approval: Trưởng nhóm IR + chủ hệ thống}
-          - Đổi mọi thông tin đăng nhập từng có trên máy
+          - title: "Cài lại máy từ bản sạch và vá đầy đủ"
+            approval: Trưởng nhóm IR + chủ hệ thống
+            detail: |-
+              Máy đã bị xâm nhập thì cài lại là cách tốt nhất, dù đã biết rõ kẻ tấn công làm gì (IRM-2, IRM-3).
+          - title: "Nếu không cài lại: khôi phục file hệ thống bị sửa, đổi mọi mật khẩu, quét lại đầy đủ"
+            detail: |-
+              Khởi động lại sau khi xóa file độc, quét antivirus / Wazuh rootcheck toàn bộ đĩa và bộ nhớ, xác nhận máy không còn hành vi lạ (IRM-7). Linux: thay các binary có thể bị sửa (vd /bin/su), gói bị sửa (IRM-3).
+          - title: "Người dùng là nguồn lây: nhắc nhở / đào tạo"
       - name: Rút kinh nghiệm
         tasks:
-          - Thêm hash / IOC mới vào config/intel để phát hiện ở máy khác
+          - title: "Thêm hash / IOC mới vào config/intel; bổ sung telemetry còn thiếu (Sysmon, auditd / siem-procs)"
 
   - id: PB-04
     name: Thay đổi tài khoản và đặc quyền trái phép
     match: [WIN-003, WIN-004, AUTH-005, AUTH-006]
+    techniques: [T1136, T1098, T1548]
+    references:
+      - {title: "CERT Société Générale - IRM-12 Insider Abuse", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-12-InsiderAbuse.pdf"}
+      - {title: "MITRE ATT&CK T1136 Create Account", url: "https://attack.mitre.org/techniques/T1136/"}
+      - {title: "MITRE ATT&CK T1098 Account Manipulation", url: "https://attack.mitre.org/techniques/T1098/"}
     phases:
       - name: Phát hiện & phân tích
         tasks:
-          - Ai tạo / cấp quyền, cho tài khoản nào, lúc nào
-          - Đối chiếu với yêu cầu thay đổi đã được duyệt (ticket)
+          - title: "Ai tạo / cấp quyền, cho tài khoản nào, lúc nào"
+            detail: |-
+              Windows: 4720 (tạo), 4722 (bật), 4738 (sửa), 4728 / 4732 / 4756 (thêm vào nhóm global / local / universal), 4672. Linux: auth.log (useradd, usermod, groupadd, sudo), /etc/group, /etc/sudoers.d.
+          - title: "Đối chiếu với yêu cầu thay đổi đã được duyệt (ticket)"
+          - title: "Tài khoản thực hiện có đăng nhập bất thường trước đó không (xem PB-09)"
+          - title: "Nghi người trong nội bộ cố ý: CHƯA can thiệp kỹ thuật, báo Trưởng nhóm IR / CISO"
+            detail: |-
+              Cần yêu cầu bằng văn bản của người có thẩm quyền và tư vấn pháp chế trước mọi thao tác điều tra; quản lý trực tiếp, đồng nghiệp thường là người nhận ra đầu tiên (IRM-12).
       - name: Ngăn chặn
         tasks:
-          - {title: Vô hiệu hóa tài khoản mới hoặc gỡ khỏi nhóm quản trị nếu không có yêu cầu hợp lệ, approval: Trưởng nhóm IR}
+          - title: "Vô hiệu hóa tài khoản mới hoặc gỡ khỏi nhóm quản trị nếu không có yêu cầu hợp lệ"
+            approval: Trưởng nhóm IR
+          - title: "Người trong nội bộ cố ý: hạ quyền, tạm khóa mọi quyền truy cập, thu thiết bị - phối hợp nhân sự, pháp chế"
+            approval: Trưởng nhóm IR
+            detail: |-
+              Gồm tài khoản ứng dụng, tài khoản hệ thống, khóa, VPN, token, thẻ ra vào. Đã xác nhận hành vi gian lận: không làm thêm thao tác kỹ thuật, giao chứng cứ cho pháp chế / cơ quan chức năng (IRM-12).
       - name: Loại bỏ
         tasks:
-          - Rà các thay đổi khác do tài khoản thực hiện thay đổi làm trong 7 ngày
+          - title: "Rà mọi thay đổi do tài khoản thực hiện trong 7 ngày; rà script / chương trình / tác vụ quản trị người đó tạo"
       - name: Khôi phục
         tasks:
-          - Đổi mật khẩu tài khoản đã thực hiện thay đổi
+          - title: "Đổi mật khẩu tài khoản đã thực hiện thay đổi; hoàn tác thao tác gian lận (nếu có)"
       - name: Rút kinh nghiệm
         tasks:
-          - Cập nhật danh sách tài khoản đặc quyền được phép
+          - title: "Cập nhật danh sách tài khoản đặc quyền được phép; cải tiến quy trình cấp quyền"
+
+  - id: PB-16
+    name: Di chuyển ngang / lây lan trong mạng nội bộ (lateral movement, worm)
+    match: [NET-005]
+    techniques: [T1021, T1570, T1210, T1550]
+    references:
+      - {title: "CERT Société Générale - IRM-1 Worm Infection", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-1-WormInfection.pdf"}
+      - {title: "CERT Société Générale - IRM-18 Large scale compromise", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-18-Large_scale_compromise.pdf"}
+      - {title: "MITRE ATT&CK TA0008 Lateral Movement", url: "https://attack.mitre.org/tactics/TA0008/"}
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - title: "Xác định máy nguồn nội bộ, các máy đích, giao thức"
+            detail: |-
+              NET-005 (SMB 445), RDP 3389, WinRM 5985 / 5986, SSH 22; log firewall / Suricata.
+          - title: "Tìm dấu hiệu lây lan diện rộng (sâu mạng)"
+            detail: |-
+              Nhiều tài khoản bị khóa cùng lúc, lưu lượng / tải tăng đột biến, lượng email gửi ra lớn, nhiều cuộc gọi hỗ trợ, cảnh báo antivirus / IDS trên nhiều máy (IRM-1).
+          - title: "Máy nguồn có phải máy quét lỗ hổng / máy quản trị được phép không"
+          - title: "Kiểm tra máy nguồn: tiến trình tạo kết nối, tài khoản dùng (PB-03, PB-10)"
+          - title: "Máy đích nào đã bị đăng nhập / thực thi từ máy nguồn"
+            detail: |-
+              4624 Logon Type 3 từ IP máy nguồn; service PSEXESVC (7045); scheduled task tạo từ xa (4698);
+              WMI (Sysmon 1 có cha là WmiPrvSE.exe).
+          - title: "Xác định ranh giới vùng nhiễm và tác động nghiệp vụ; báo CISO, lập nhóm xử lý khủng hoảng nếu cần"
+      - name: Ngăn chặn
+        tasks:
+          - title: "Cô lập máy nguồn"
+            approval: Trưởng nhóm IR
+          - title: "Khóa tài khoản được dùng để di chuyển ngang"
+            approval: Trưởng nhóm IR
+          - title: "Cô lập vùng nhiễm; luồng nghiệp vụ không thể ngắt chỉ mở khi chắc không phải đường lây"
+          - title: "Vô hiệu đường lây: vá lỗ hổng, chặn SMB / RDP giữa các máy trạm, GPO"
+          - title: "Lặp lại cho từng vùng con tới khi ngừng lây; theo dõi mức lây lan"
+          - title: "Không cho laptop, USB, thiết bị di động thành đường lây"
+      - name: Loại bỏ
+        tasks:
+          - title: "Xác định cách gỡ, thử trước rồi mới triển khai rộng"
+            detail: |-
+              Triển khai qua EDR, GPO, chữ ký antivirus hoặc thủ công. Một số sâu mạng chặn chính công cụ triển khai, khi đó phải tìm cách khác (IRM-1).
+          - title: "Xử lý từng máy đích đã bị truy cập theo PB-03 / PB-13"
+      - name: Khôi phục
+        tasks:
+          - title: "Nối lại mạng theo thứ tự, có phê duyệt"
+            approval: Trưởng nhóm IR
+            detail: |-
+              Mở lại luồng từng là đường lây → nối các vùng con → nối laptop → nối mạng nội bộ → nối Internet; mỗi bước có theo dõi (IRM-1).
+          - title: "Đổi mật khẩu tài khoản bị dùng; theo dõi kết nối nội bộ bất thường trong 14 ngày"
+      - name: Rút kinh nghiệm
+        tasks:
+          - title: "Phân đoạn mạng; chỉ cho quản trị từ xa từ máy quản trị chỉ định; thêm máy quét được phép vào SOAR_WHITELIST"
 
   - id: PB-05
     name: Trinh sát / quét mạng
-    match: [NET-001, NET-002, NET-003, NET-005]
+    match: [NET-001, NET-002, NET-003]
+    techniques: [T1046, T1595, T1590]
+    references:
+      - {title: "CERT Société Générale - IRM-5 Malicious Network Behaviour", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-5-MaliciousNetworkBehaviour.pdf"}
+      - {title: "MITRE ATT&CK TA0043 Reconnaissance", url: "https://attack.mitre.org/tactics/TA0043/"}
     phases:
       - name: Phát hiện & phân tích
         tasks:
-          - Nguồn quét là trong hay ngoài mạng? Có phải máy quét lỗ hổng được phép?
-          - Nếu nguồn nội bộ - coi máy nguồn là có thể đã bị xâm nhập (xem PB-03)
-          - Kiểm tra cổng / dịch vụ bị quét có đang mở ra ngoài không cần thiết
+          - title: "Xác định kiểu quét, nguồn và đích"
+            detail: |-
+              NET-001: quét nhiều cổng; NET-002: nhiều kết nối bị firewall chặn; NET-003: kết nối từ Internet tới dịch vụ quản trị (SSH, RDP, SMB, CSDL).
+          - title: "Nguồn trong mạng nội bộ: coi máy nguồn là có thể đã bị xâm nhập (PB-16)"
+          - title: "Cổng / dịch vụ bị quét có đang mở ra ngoài không cần thiết"
+          - title: "Quét có được tiếp nối bằng khai thác không (WEB-*, AUTH-*, NET-004 cùng IP)"
       - name: Ngăn chặn
         tasks:
-          - Chặn IP nguồn trên firewall nếu từ Internet
+          - title: "Chặn IP nguồn trên firewall nếu từ Internet"
       - name: Loại bỏ
         tasks:
-          - Đóng các dịch vụ quản trị lộ ra Internet (SSH/RDP/SMB/DB)
+          - title: "Đóng các dịch vụ quản trị lộ ra Internet (SSH / RDP / SMB / CSDL)"
       - name: Khôi phục
         tasks:
-          - Xác nhận lại cấu hình firewall
+          - title: "Xác nhận lại cấu hình firewall"
       - name: Rút kinh nghiệm
         tasks:
-          - Thêm máy quét được phép vào SOAR_WHITELIST để tránh báo nhầm
+          - title: "Thêm máy quét được phép vào SOAR_WHITELIST để tránh báo nhầm"
 
   - id: PB-06
     name: Kết nối tới IOC đã biết (Threat Intel)
     match: [TI-001]
+    techniques: [T1071, T1568, T1573]
+    references:
+      - {title: "CERT Société Générale - IRM-5 Malicious Network Behaviour", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-5-MaliciousNetworkBehaviour.pdf"}
+      - {title: "MITRE ATT&CK TA0011 Command and Control", url: "https://attack.mitre.org/tactics/TA0011/"}
     phases:
       - name: Phát hiện & phân tích
         tasks:
-          - IOC là IP, domain hay hash? Nguồn intel nào, độ tin cậy?
-          - Máy nào trong mạng đã liên lạc với IOC, hướng kết nối (vào / ra)
+          - title: "IOC là IP, domain hay hash; nguồn intel, độ tin cậy, ngày cập nhật"
+            detail: |-
+              IP dùng chung (CDN, cloud) dễ báo nhầm; IOC cũ có thể đã được thu hồi.
+          - title: "Máy nào đã liên lạc với IOC, hướng kết nối, lần đầu / lần cuối, lượng dữ liệu"
+            detail: |-
+              Điều tra thực thể theo IOC; DNS (Sysmon 22), firewall, proxy.
+          - title: "Tiến trình nào tạo kết nối"
+            detail: |-
+              Windows: Sysmon 3. Linux: ss -tnp; lsof -i.
       - name: Ngăn chặn
         tasks:
-          - Xác nhận IOC đã bị chặn trên mọi agent
-          - {title: Nếu có kết nối RA ngoài tới C2 - cô lập máy, approval: Trưởng nhóm IR}
+          - title: "Xác nhận IOC đã bị chặn trên mọi agent; chặn chiều ra trên firewall biên"
+          - title: "Có kết nối RA ngoài tới C2 - cô lập máy"
+            approval: Trưởng nhóm IR
       - name: Loại bỏ
         tasks:
-          - Tìm tiến trình tạo kết nối và xử lý theo PB-03
+          - title: "Tìm tiến trình tạo kết nối và xử lý theo PB-03"
       - name: Khôi phục
         tasks:
-          - Theo dõi tăng cường máy liên quan 7 ngày
+          - title: "Theo dõi tăng cường máy liên quan trong 7 ngày"
       - name: Rút kinh nghiệm
         tasks:
-          - Cập nhật feed threat intel
+          - title: "Cập nhật feed threat intel; đặt hạn cho IOC để tránh báo nhầm khi IP đổi chủ"
 
   - id: PB-08
     name: Thay đổi file trái phép / rootkit / cấu hình yếu (Wazuh FIM, rootcheck, SCA)
-    match: ["WZH-*"]
+    tags: [syscheck, rootcheck, sca]
+    techniques: [T1565, T1014]
+    references:
+      - {title: "CERT Société Générale - IRM-3 Unix/Linux Intrusion Detection (phần file hash)", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-3-UnixLinuxIntrusionDetection.pdf"}
+      - {title: "CERT Société Générale - IRM-21 Critical Vulnerability Prioritization (phần SCA)", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-21-Critical_Vulnerability_Prioritization.pdf"}
     phases:
       - name: Phát hiện & phân tích
         tasks:
-          - Xem file / khóa registry bị đổi, thời điểm, người và tiến trình sửa (file.path, user.name, process.name)
-          - Đối chiếu lịch bảo trì / cập nhật phần mềm - thay đổi có được phép không?
-          - Với file web (/var/www, htdocs, cgi-bin) - kiểm tra có phải webshell (nội dung diff trong event gốc)
+          - title: "Xem file / khóa registry bị đổi, ai / tiến trình nào sửa"
+            detail: |-
+              Event syscheck: file.path, nội dung thay đổi (report_changes), hash trước / sau, người sửa và tiến trình (chế độ whodata).
+          - title: "Đối chiếu lịch bảo trì / cập nhật phần mềm có trùng thời điểm không"
+            detail: |-
+              /var/log/apt/history.log, /var/log/dpkg.log; Windows Update.
+          - title: "File trong thư mục web: webshell → PB-12, nội dung bị sửa → PB-19"
+          - title: "Rootcheck: kiểm tra rootkit / trojan"
+            detail: |-
+              Kiểm tra toàn vẹn gói (debsums -ac / rpm -Va), rkhunter; so ps với /proc, so cổng đang nghe với netstat / ss (IRM-3).
+          - title: "SCA: xếp ưu tiên mục không đạt theo mức nghiêm trọng, khả năng bị khai thác và mức quan trọng tài sản"
+            detail: |-
+              Có thể dùng điểm CVSS / EPSS với lỗ hổng liên quan; mục ảnh hưởng tài sản quan trọng (assets.yml) xử lý trước (IRM-21).
       - name: Ngăn chặn
         tasks:
-          - {title: Nếu là webshell / backdoor - cô lập máy (isolate_host trên console), approval: Trưởng nhóm IR}
-          - Chặn IP đã tải file lên (tra access log quanh thời điểm thay đổi)
+          - title: "Nếu là backdoor / rootkit - cô lập máy (isolate_host trên console)"
+            approval: Trưởng nhóm IR
+          - title: "Chặn IP đã đưa file lên (tra access log, log đăng nhập quanh thời điểm thay đổi)"
       - name: Loại bỏ
         tasks:
-          - Khôi phục file từ bản sao lưu sạch, xóa file lạ
-          - Rootcheck / SCA - sửa cấu hình theo khuyến nghị trong event (sca.check.title)
+          - title: "Khôi phục file từ bản sao lưu sạch, xóa file lạ; rootkit thì cài lại máy (PB-03)"
+          - title: "SCA: sửa cấu hình theo khuyến nghị trong event; thử trước, có phương án hoàn tác"
+            detail: |-
+              Sao lưu cấu hình trước khi đổi, thử trên môi trường thử nếu có (IRM-21).
       - name: Khôi phục
         tasks:
-          - Theo dõi FIM trên máy này 7 ngày
+          - title: "Theo dõi FIM trên máy này trong 7 ngày"
       - name: Rút kinh nghiệm
         tasks:
-          - Thêm thư mục quan trọng còn thiếu vào FIM (wazuh/manager/agent.conf)
+          - title: "Thêm thư mục quan trọng còn thiếu vào FIM (wazuh/manager/agent.conf); đặt hạn xử lý mục SCA theo mức độ"
 
   - id: PB-00
     name: Điều tra chung
     match: ["*"]
+    references:
+      - {title: "CISA - Federal Government Cybersecurity Incident & Vulnerability Response Playbooks (phụ lục B)", url: "https://www.cisa.gov/sites/default/files/2024-08/Federal_Government_Cybersecurity_Incident_and_Vulnerability_Response_Playbooks_508C.pdf"}
     phases:
       - name: Phát hiện & phân tích
         tasks:
-          - Đọc rule, event gốc, thực thể liên quan (IP, user, host)
-          - Tra hoạt động 24h quanh thời điểm cảnh báo
-          - Kết luận thật / giả; chưa chắc thì escalate
+          - title: "Đọc rule, event gốc, thực thể liên quan (IP, tài khoản, máy)"
+          - title: "Hiểu kỹ thuật và bối cảnh; đặt giả thuyết kẻ tấn công muốn truy cập / đạt được gì"
+          - title: "Tìm sai lệch so với hoạt động bình thường, chú ý việc dùng tài khoản hợp lệ và công cụ có sẵn của hệ điều hành"
+          - title: "Phân tích theo các chiến thuật MITRE ATT&CK"
+            detail: |-
+              Truy cập ban đầu (TA0001), C2 (TA0011, PB-06), thực thi (TA0002, PB-03), duy trì (TA0003, PB-13), di chuyển ngang (TA0008, PB-16), đánh cắp thông tin đăng nhập (TA0006, PB-10), lấy dữ liệu ra (TA0010) (CISA 4r-4y). Khớp chiến thuật nào thì dùng thêm task của playbook tương ứng.
+          - title: "Tìm nguyên nhân gốc và điều kiện cho phép kẻ tấn công hoạt động"
+          - title: "Kết luận thật / giả; chưa chắc thì escalate lên Trưởng nhóm IR"
       - name: Ngăn chặn
         tasks:
-          - Chọn hành động phản ứng phù hợp trên console nếu là sự cố thật
+          - title: "Chọn hành động phản ứng phù hợp trên console (chặn IP, kill, cô lập)"
+          - title: "Đổi mật khẩu quản trị, xoay khóa / secret của ứng dụng nếu nghi bị lộ"
+      - name: Loại bỏ
+        tasks:
+          - title: "Gỡ dấu vết của kẻ tấn công; dựng lại từ nguồn sạch nếu cần; quét lại"
+      - name: Khôi phục
+        tasks:
+          - title: "Đổi mật khẩu tài khoản bị ảnh hưởng, bật MFA, cài bản vá"
       - name: Rút kinh nghiệm
         tasks:
-          - Ghi kết luận vào case
+          - title: "Loại sự cố lặp lại mà chưa có playbook riêng: đề xuất viết playbook mới"

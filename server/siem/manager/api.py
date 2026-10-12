@@ -8,6 +8,8 @@ thao tác (case, lệnh, duyệt AI) lấy từ phiên, không tự khai.
   GET  /api/v1/agents | /alerts | /actions | /cases | /stats | /ai/...     mọi tài khoản
   PATCH /api/v1/alerts/{id}, /cases/{id}; POST /api/v1/actions; duyệt AI   analyst trở lên
   POST /api/v1/actions (isolate_host / unisolate_host)                     lead trở lên
+  POST /api/v1/alerts/{id}/soar/decline (từ chối bước SOAR chờ duyệt)      analyst trở lên (cô lập: lead)
+  PATCH /api/v1/cases/{id} với task cần duyệt                              theo nhãn approval của task
   /api/v1/users                                                            admin
   GET  /                                                                   SOC console (HTML)
 
@@ -225,6 +227,33 @@ def validate_action(body: NewAction) -> None:
         raise HTTPException(400, f"không có agent {body.agent_id}")
 
 
+def decide_soar_step(alert_id: str, action: str, changes: dict[str, Any], note: dict[str, Any]) -> bool:
+    """Bước `action` của SOAR đang chờ duyệt trên alert (playbook có `approval: true`) -> ghi quyết định: đã duyệt / từ
+    chối, ai, lúc nào. Trước đây bước này hiện "chờ duyệt" mãi, không biết đã có ai quyết định chưa. False: không có
+    bước nào đang chờ."""
+    for _ in range(3):
+        try:
+            cur = es().get(index=settings.IDX_ALERTS, id=alert_id)
+        except NotFoundError:
+            return False
+        src = cur["_source"]
+        results = (src.get("soar") or {}).get("results") or []
+        waiting = [r for r in results if r.get("action") == action and r.get("status") == "awaiting_approval"]
+        if not waiting:
+            return False
+        for r in waiting:
+            r.update(changes)
+        history = ((src.get("alert") or {}).get("history") or []) + [note]
+        try:
+            es().update(index=settings.IDX_ALERTS, id=alert_id, refresh="wait_for",
+                        if_seq_no=cur["_seq_no"], if_primary_term=cur["_primary_term"],
+                        doc={"soar": {"results": results}, "alert": {"history": history[-100:]}})
+            return True
+        except ConflictError:
+            continue                                # SOAR / người khác vừa sửa alert: đọc lại
+    return False
+
+
 @app.post("/api/v1/actions")
 def create_action(body: NewAction, s: Session = Depends(analyst)) -> dict[str, Any]:
     if body.type in ("isolate_host", "unisolate_host") and ROLES[s.role] < ROLES["lead"]:
@@ -232,8 +261,39 @@ def create_action(body: NewAction, s: Session = Depends(analyst)) -> dict[str, A
     if body.type not in store.ACTION_TYPES:
         raise HTTPException(400, f"loại lệnh không hỗ trợ: {body.type}")
     validate_action(body)
-    return store.create_action(es(), body.agent_id, body.type, body.params, alert_id=body.alert_id,
-                               source="manual", requested_by=s.username)
+    a = store.create_action(es(), body.agent_id, body.type, body.params, alert_id=body.alert_id,
+                            source="manual", requested_by=s.username)
+    if body.alert_id:                               # tạo đúng lệnh SOAR đang chờ duyệt = duyệt bước đó
+        try:
+            decide_soar_step(body.alert_id, body.type, {"status": "approved", "approved_by": s.username,
+                                                        "approved_at": a["created_at"], "action_id": a["id"]},
+                             {"at": a["created_at"], "by": s.username, "text": f"duyệt bước SOAR {body.type} (lệnh {a['id']})"})
+        except Exception as e:  # noqa: BLE001 - lệnh đã tạo; ghi quyết định lỗi không được làm hỏng thao tác
+            log.warning("không ghi được quyết định duyệt trên alert %s: %s", body.alert_id, e)
+    return a
+
+
+class SoarDecline(BaseModel):
+    action: str = Field(pattern=r"^(block_ip|kill_process|isolate_host)$")
+    reason: str = Field("", max_length=2000)
+
+
+@app.post("/api/v1/alerts/{alert_id}/soar/decline")
+def decline_soar_step(alert_id: str, body: SoarDecline, s: Session = Depends(analyst)) -> dict[str, Any]:
+    """Không thực hiện bước SOAR đang chờ duyệt, ghi ai quyết định và vì sao. Cần cùng quyền với việc tự tạo lệnh đó
+    (cô lập máy: lead)."""
+    if body.action == "isolate_host" and ROLES[s.role] < ROLES["lead"]:
+        raise HTTPException(403, "quyết định cô lập máy cần quyền lead (Trưởng nhóm IR)")
+    reason = body.reason.strip()
+    if len(reason) < 3:
+        raise HTTPException(400, "từ chối phải ghi lý do")
+    _get(settings.IDX_ALERTS, alert_id, "alert")
+    now = store.now_iso()
+    if not decide_soar_step(alert_id, body.action,
+                            {"status": "declined", "declined_by": s.username, "declined_at": now, "reason": reason},
+                            {"at": now, "by": s.username, "text": f"từ chối bước SOAR {body.action}: {reason}"}):
+        raise HTTPException(409, "không có bước SOAR nào đang chờ duyệt (đã có người duyệt / từ chối?)")
+    return {"ok": True, "status": "declined"}
 
 
 @app.get("/api/v1/cases", dependencies=[Depends(current_user)])
@@ -251,6 +311,14 @@ def cases(status: str | None = None, q: str | None = None, alert_id: str | None 
 
 
 CASE_STATUSES = r"^(open|in_progress|contained|closed|false_positive)$"
+# Ai được đánh dấu task cần duyệt (nhãn `approval` trong config/case_playbooks.yml, bảng phân quyền ở README mục 4).
+# Nhãn lạ (vd playbook tự viết) cần lead. Chủ hệ thống không có tài khoản trên console: ai đồng ý thì ghi vào note.
+APPROVAL_ROLES = {"Analyst L1": "analyst", "Trưởng nhóm IR": "lead", "Trưởng nhóm IR + chủ hệ thống": "lead"}
+OWNER_APPROVAL = "chủ hệ thống"
+
+
+def approval_role(task: dict[str, Any]) -> str | None:
+    return APPROVAL_ROLES.get(task["approval"], "lead") if task.get("approval") else None
 
 
 class CaseUpdate(BaseModel):
@@ -270,6 +338,8 @@ def get_case(case_id: str) -> dict[str, Any]:
                        "rule": {k: (a.get("rule") or {}).get(k) for k in ("id", "name")},
                        "status": (a.get("alert") or {}).get("status")}
                       for a in store.search(es(), settings.IDX_ALERTS, {"terms": {"alert.id": ids}}, size=50)] if ids else []
+    for t in case.get("tasks") or []:
+        t["approval_role"] = approval_role(t)          # console khóa ô đánh dấu nếu tài khoản không đủ quyền
     return case
 
 
@@ -296,10 +366,18 @@ def update_case(case_id: str, body: CaseUpdate, s: Session = Depends(analyst)) -
         if body.task_index >= len(tasks):
             raise HTTPException(400, "task_index vượt quá số task")
         t = tasks[body.task_index]
+        # task cần duyệt: chỉ người có thẩm quyền được đánh dấu / bỏ đánh dấu (trước đây analyst L1 tick được cả task
+        # "cô lập máy, cần Trưởng nhóm IR duyệt": nhãn chỉ để hiển thị)
+        need = approval_role(t)
+        if need and ROLES[s.role] < ROLES[need]:
+            raise HTTPException(403, f"task này cần {t['approval']} duyệt (quyền {need} trở lên)")
+        if body.task_done and need and OWNER_APPROVAL in t["approval"] and not body.note.strip():
+            raise HTTPException(400, "task cần chủ hệ thống đồng ý: ghi vào note ai đã đồng ý và lúc nào")
         t.update(done=body.task_done, done_by=who if body.task_done else None,
                  done_at=now if body.task_done else None)
         changes["tasks"] = tasks
-        history.append(f"{'hoàn thành' if body.task_done else 'bỏ đánh dấu'} task [{t['phase']}] {t['title']}")
+        history.append(f"{'hoàn thành' if body.task_done else 'bỏ đánh dấu'} task [{t['phase']}] {t['title']}"
+                       + (f" (duyệt với vai trò {s.role}, task cần {t['approval']})" if need and body.task_done else ""))
     if body.note.strip():
         history.append(f"ghi chú: {body.note.strip()}")
     if not history:
