@@ -141,8 +141,17 @@ Kết quả được ghi vào `active-responses.log`, agent gửi dòng đó v�
 
 ## 2. Backend
 
-Dựng trên máy ảo (một VM backend và các VM endpoint cài agent): xem **[DEPLOY-VM.md](DEPLOY-VM.md)**.
+**Máy chủ Ubuntu / Debian: cài bằng một lệnh** (mô hình lab trên máy ảo và cài agent: **[DEPLOY-VM.md](DEPLOY-VM.md)**):
+```bash
+sudo ./install.sh                                   # trên máy chủ, trong thư mục mã nguồn
+powershell -ExecutionPolicy Bypass -File .\tools\deploy-vm.ps1 <user>@<IP máy chủ>   # hoặc từ máy Windows
+```
+Script tự cài Docker, đặt tham số kernel, phát hiện IP, sinh bí mật, viết `.env`, khởi động, chờ hệ thống sẵn sàng, xuất CA,
+rồi in địa chỉ console, mật khẩu `admin` tạm và lệnh cài agent đã điền sẵn IP / mật khẩu enroll. Chạy lại an toàn;
+`sudo ./install.sh status | info | --update | --demo | --ai`. Trên Linux, thư mục `secrets/` để quyền 700 và từng file 644:
+container chạy bằng user riêng (uid 10001, Grafana 472) phải đọc được file bí mật qua bind mount.
 
+**Máy Windows (Docker Desktop, môi trường phát triển):**
 ```bash
 python tools/init_secrets.py   # sinh mật khẩu/key ngẫu nhiên vào secrets/ (chỉ lần đầu)
 cp .env.example .env           # cấu hình không bí mật
