@@ -67,6 +67,9 @@ mkdir -p "$CERTS/bootstrap"
 install -m 600 -o 1000 -g 0 "$S/elastic_password" "$CERTS/bootstrap/elastic_password"
 chown 1000:0 "$CERTS/bootstrap"; chmod 700 "$CERTS/bootstrap"
 
+# Volume snapshot: Docker tạo thư mục của root, Elasticsearch (uid 1000) không ghi được -> repository lỗi
+if [ -d /snapshots ]; then chown 1000:0 /snapshots; chmod 750 /snapshots; fi
+
 echo "[setup] chứng chỉ sẵn sàng"
 fi
 [ "$MODE" = "certs" ] && exit 0
@@ -109,7 +112,7 @@ role siem_manager  "{$META, \"indices\": [
 role siem_analyzer "{$META, \"indices\": [
   {\"names\": [\"siem-events-*\", \"siem-alerts\"], \"privileges\": [\"create_index\", \"create_doc\", \"write\", \"auto_configure\", \"view_index_metadata\"]}]}"
 # siem-sources: trạng thái từng nguồn log (soar/health.py); siem-intel: vòng đời IOC + dò ngược (soar/retrohunt.py)
-role siem_soar     "{$META, \"indices\": [
+role siem_soar     "{\"cluster\": [\"monitor\", \"manage_index_templates\", \"read_slm\"], \"indices\": [
   {\"names\": [\"siem-alerts\"], \"privileges\": [\"read\", \"write\", \"view_index_metadata\"]},
   {\"names\": [\"siem-actions\", \"siem-cases\", \"siem-agents\", \"siem-sources\", \"siem-intel\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]},
   {\"names\": [\"siem-events-*\"], \"privileges\": [\"read\", \"view_index_metadata\"]}]}"
@@ -133,4 +136,17 @@ api PUT "/_ilm/policy/siem-events" "{\"policy\": {\"phases\": {\"hot\": {\"actio
   \"delete\": {\"min_age\": \"${DAYS}d\", \"actions\": {\"delete\": {}}}}}}"
 api PUT "/siem-events-*/_settings?allow_no_indices=true" '{"index.lifecycle.name": "siem-events"}'
 echo "[setup] event giữ ${DAYS} ngày (ILM policy siem-events)"
+
+# Sao lưu: snapshot hằng ngày bằng SLM vào repository fs (volume essnapshots). Alert, case, lệnh phản ứng, tài khoản
+# console, đề xuất AI và event còn trong hạn ILM. SOAR báo HLT-007 khi bản sao lưu thành công gần nhất quá cũ
+# (soar/health.py); thử khôi phục: python tools/es_snapshot.py verify (SOC-OPERATIONS.md mục 5).
+SNAP_DAYS=${SNAPSHOT_RETENTION_DAYS:-30}
+case "$SNAP_DAYS" in ''|*[!0-9]*) echo "[setup] SNAPSHOT_RETENTION_DAYS phải là số ngày"; exit 1 ;; esac
+api PUT "/_snapshot/siem-backup" '{"type": "fs", "settings": {"location": "/usr/share/elasticsearch/snapshots", "compress": true}}'
+api PUT "/_slm/policy/daily-snapshots" "{\"schedule\": \"${SNAPSHOT_SCHEDULE:-0 30 18 * * ?}\",
+  \"name\": \"<siem-snap-{now/d}>\", \"repository\": \"siem-backup\",
+  \"config\": {\"indices\": [\"siem-*\", \"console-users\", \"ai-*\"], \"include_global_state\": false,
+               \"ignore_unavailable\": true},
+  \"retention\": {\"expire_after\": \"${SNAP_DAYS}d\", \"min_count\": 3, \"max_count\": 100}}"
+echo "[setup] snapshot hằng ngày (SLM daily-snapshots, lịch '${SNAPSHOT_SCHEDULE:-0 30 18 * * ?}' UTC), giữ ${SNAP_DAYS} ngày"
 echo "[setup] hoàn tất"

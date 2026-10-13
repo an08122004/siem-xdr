@@ -190,3 +190,31 @@ def test_health_kafka_lag_and_elasticsearch(hm):
     lag["siem-analyzer"] = 0
     m.check_kafka()
     assert ("HLT-005", "siem-analyzer") not in m.open
+
+
+def test_health_snapshot_policy(hm):
+    class SLM:
+        def __init__(self, pol):
+            self.pol = pol
+
+        def get_lifecycle(self, policy_id):
+            if self.pol is None:
+                raise RuntimeError("404 resource_not_found_exception")
+            return {policy_id: self.pol}
+    ms = lambda h: (NOW - timedelta(hours=h)).timestamp() * 1000                  # noqa: E731
+    es = HES()
+    m = hm(es)
+    es.slm = SLM(None)
+    m.check_snapshots()                                                          # chưa có chính sách
+    es.slm = SLM({"last_success": {"time": ms(48)}, "modified_date_millis": ms(24 * 10)})
+    m.open.clear()
+    m.check_snapshots()                                                          # bản gần nhất 48 giờ trước
+    es.slm = SLM({"last_success": {"time": ms(30)}, "last_failure": {"time": ms(5), "details": "disk full"}})
+    m.open.clear()
+    m.check_snapshots()
+    got = [(a["severity"], a["rule"]["description"]) for a in m.emitted if a["rule"]["id"] == "HLT-007"]
+    assert [s for s, _ in got] == ["medium", "high", "high"]
+    assert "chưa có chính sách" in got[0][1] and "36 giờ" in got[1][1] and "disk full" in got[2][1]
+    es.slm = SLM({"last_success": {"time": ms(2)}, "last_failure": {"time": ms(30)}})
+    m.check_snapshots()
+    assert ("HLT-007", "daily-snapshots") not in m.open                           # đã có bản mới: hồi phục

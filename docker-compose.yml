@@ -45,6 +45,7 @@ services:
     volumes:
       - certs:/usr/share/elasticsearch/config/certs
       - ./security:/security:ro
+      - essnapshots:/snapshots                       # chỉ để cấp quyền thư mục cho uid elasticsearch (1000)
     secrets: [elastic_password]
     networks: [soc]
 
@@ -54,6 +55,9 @@ services:
     command: ["bash", "/security/setup.sh", "users"]
     environment:
       EVENTS_RETENTION_DAYS: ${EVENTS_RETENTION_DAYS:-30}   # index event cũ hơn N ngày bị ILM xóa
+      # snapshot hằng ngày (SLM) vào volume essnapshots: giờ chạy theo cron UTC (18:30 UTC = 01:30 giờ VN), giữ N ngày
+      SNAPSHOT_SCHEDULE: "${SNAPSHOT_SCHEDULE:-0 30 18 * * ?}"
+      SNAPSHOT_RETENTION_DAYS: ${SNAPSHOT_RETENTION_DAYS:-30}
     depends_on:
       elasticsearch: {condition: service_healthy}
     volumes:
@@ -123,10 +127,14 @@ services:
       xpack.security.transport.ssl.key: certs/elasticsearch/elasticsearch.key
       xpack.security.transport.ssl.certificate: certs/elasticsearch/elasticsearch.crt
       xpack.security.transport.ssl.certificate_authorities: certs/ca/ca.crt
+      path.repo: /usr/share/elasticsearch/snapshots           # repository snapshot kiểu fs (security/setup.sh)
     ports: ["127.0.0.1:9200:9200"]
     volumes:
       - certs:/usr/share/elasticsearch/config/certs:ro
       - esdata:/usr/share/elasticsearch/data
+      # Snapshot hằng ngày. Triển khai thật: gắn thư mục này vào ổ / NAS / object storage khác máy chạy ES (mất máy là mất
+      # cả dữ liệu lẫn bản sao lưu nếu để cùng ổ); xem SOC-OPERATIONS.md mục 5 và tools/es_snapshot.py
+      - essnapshots:/usr/share/elasticsearch/snapshots
     healthcheck:
       test: ["CMD-SHELL", "curl -s --cacert config/certs/ca/ca.crt https://localhost:9200 | grep -q 'missing authentication credentials'"]
       interval: 10s
@@ -413,6 +421,7 @@ volumes:
   wazuh_wodles:
   demo_wazuh_etc:
   esdata:
+  essnapshots:
   grafanadata:
   mldata:
   ollama:

@@ -309,6 +309,7 @@ async function api(path, { method = 'GET', body, auto = false } = {}) {
     if (Array.isArray(msg)) msg = 'Dữ liệu không hợp lệ: ' + msg.map(d => (d.loc || []).slice(-1)[0] + ' ' + d.msg).join('; ');
     msg = msg || text || `Lỗi ${r.status}`;
     if (r.status === 403 && /đổi mật khẩu/.test(msg)) toLogin('', true);
+    if (r.status === 403 && /xác thực 2 lớp/.test(msg)) location.replace('/login?mfa=1&next=' + encodeURIComponent(location.pathname + location.hash));
     throw new ApiError(String(msg), r.status);
   }
   return data;
@@ -791,7 +792,7 @@ VIEWS.users = {
     paint('users', { rows, open: this.open }, () => [
       this.open === '+new' ? newUserForm() : null,
       el('p', { cls: 'sub', style: 'margin:12px 20px 4px;max-width:110ch' }, 'Analyst (Tier 1) xử lý cảnh báo, case, chặn IP, kill tiến trình. Trưởng nhóm IR (Tier 2) làm thêm cô lập máy, đổi ưu tiên case, duyệt task của Trưởng nhóm IR. Threat Hunter (Tier 3) như Tier 2 và ghi nhật ký threat hunting. Detection Engineer duyệt rule, đề xuất AI, bật chính thức rule chạy bóng, nhưng không xử lý cảnh báo (người xử lý cảnh báo không tự duyệt rule mình dùng). SOC Manager như Tier 2, thêm tuyên bố sự cố lớn. Quản trị nền tảng có mọi quyền và quản lý tài khoản. Grafana: analyst chỉ xem, quản trị là Admin, các vai trò khác sửa được dashboard.'),
-      el('table', { cls: 'list' }, head(['Tài khoản', 'Vai trò', 'Trạng thái', 'Đăng nhập gần nhất', '']),
+      el('table', { cls: 'list' }, head(['Tài khoản', 'Vai trò', 'Trạng thái', 'Xác thực 2 lớp', 'Đăng nhập gần nhất', '']),
         el('tbody', {}, rows.map(u => [el('tr', {},
           el('td', {}, el('span', { cls: 'title' }, u.username), u.username === ME.username ? el('span', { cls: 'sub' }, ' (bạn)') : null),
           el('td', {}, u.username === ME.username ? (ROLE_LABEL[u.role] || u.role) : (() => {
@@ -801,13 +802,16 @@ VIEWS.users = {
             return s; })()),
           el('td', {}, el('span', { cls: 'st ' + (u.disabled ? 'bad' : (u.must_change ? 'work' : 'done')) },
             u.disabled ? 'Đã khóa' : (u.must_change ? 'Chờ đổi mật khẩu' : 'Hoạt động'))),
+          el('td', {}, u.mfa_enabled ? el('span', { cls: 'st done' }, 'Đã bật') : el('span', { cls: 'sub' }, 'chưa bật')),
           el('td', {}, u.last_login ? when(u.last_login) : el('span', { cls: 'sub' }, 'chưa đăng nhập')),
           el('td', {}, el('div', { cls: 'btns' },
             button('Đặt lại mật khẩu', () => { this.open = this.open === u.username ? null : u.username; this.load(); }),
+            u.mfa_enabled && u.username !== ME.username ? confirmButton('Đặt lại MFA', `Xóa MFA của ${u.username}?`,
+              b => upd(b, u.username, { mfa_reset: true }, `Đã đặt lại xác thực 2 lớp của ${u.username}; người dùng bật lại ở lần đăng nhập sau.`)) : null,
             u.username === ME.username ? null : (u.disabled
               ? button('Mở khóa', b => upd(b, u.username, { disabled: false }, `Đã mở khóa ${u.username}.`))
               : confirmButton('Khóa', `Khóa ${u.username}?`, b => upd(b, u.username, { disabled: true }, `Đã khóa ${u.username}, mọi phiên của tài khoản này bị đăng xuất.`)))))),
-          this.open === u.username ? el('tr', {}, el('td', { colspan: '5' }, resetForm(u.username, upd))) : null])))]);
+          this.open === u.username ? el('tr', {}, el('td', { colspan: '6' }, resetForm(u.username, upd))) : null])))]);
   },
 };
 // cùng chính sách với máy chủ (manager/auth.py: USERNAME_PATTERN, password_problem) -> báo lỗi tiếng Việt ngay tại chỗ
@@ -1156,6 +1160,8 @@ function showMe() {
   $('#me').replaceChildren(el('b', {}, ME.username), el('span', { cls: 'role' }, ME.role_label || ROLE_LABEL[ME.role] || ME.role),
     el('div', { cls: 'links' },
       el('button', { type: 'button', cls: 'linkbtn', onClick: () => location.assign('/login?change=1&next=' + encodeURIComponent('/' + location.hash)) }, 'Đổi mật khẩu'),
+      ME.mfa_enabled ? null : el('button', { type: 'button', cls: 'linkbtn', title: 'Mã 6 số trên điện thoại, ngoài mật khẩu',
+        onClick: () => location.assign('/login?mfa=1&next=' + encodeURIComponent('/' + location.hash)) }, 'Bật 2 lớp'),
       el('button', { type: 'button', cls: 'linkbtn', onClick: async () => {
         LEAVING = true; ME = null;                     // dừng tự làm mới
         try { await api('/api/v1/auth/logout', { method: 'POST' }); } catch (e) {}

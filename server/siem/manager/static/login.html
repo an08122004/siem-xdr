@@ -121,8 +121,34 @@
         <button type="button" class="reveal" aria-controls="p" aria-pressed="false">Hiện</button>
       </div>
       <p class="caps" data-caps hidden>Caps Lock đang bật</p>
+      <div id="otpWrap" hidden>
+        <label for="otp">Mã xác thực</label>
+        <input id="otp" name="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="8" spellcheck="false"
+               aria-describedby="otpHint">
+        <p class="caps" id="otpHint" style="color:var(--mute)">6 số đang hiện trong ứng dụng xác thực trên điện thoại.</p>
+      </div>
       <p class="error" id="err" role="alert"></p>
       <button type="submit" class="primary" id="loginBtn">Đăng nhập</button>
+    </form>
+  </section>
+
+  <!-- Bước 3: bật xác thực 2 lớp (TOTP) -->
+  <section id="mfaView" hidden aria-labelledby="mfaTitle">
+    <h1 id="mfaTitle">Bật xác thực 2 lớp</h1>
+    <p class="lead" id="mfaLead"></p>
+    <ol class="lead" style="padding-left:18px;display:grid;gap:6px">
+      <li>Mở ứng dụng xác thực trên điện thoại (Google Authenticator, Microsoft Authenticator...), chọn thêm tài khoản bằng
+        <b>khóa thiết lập</b>.</li>
+      <li>Nhập khóa: <code id="mfaSecret" class="clock" style="font-size:16px;letter-spacing:.06em;word-break:break-all"></code>
+        (loại: theo thời gian). Trên điện thoại có thể <a id="mfaLink" href="#" style="color:var(--low)">mở thẳng bằng ứng dụng</a>.</li>
+      <li>Nhập mã 6 số ứng dụng đang hiện.</li>
+    </ol>
+    <form id="mfaForm" novalidate>
+      <label for="mfaCode">Mã xác thực</label>
+      <input id="mfaCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" spellcheck="false">
+      <p class="error" id="mfaErr" role="alert"></p>
+      <button type="submit" class="primary" id="mfaBtn">Bật xác thực 2 lớp</button>
+      <a href="/" class="quiet" id="mfaLater" hidden>Để sau</a>
     </form>
   </section>
 
@@ -163,7 +189,7 @@
     <p>Một tài khoản dùng cho cả SOC console và Grafana.</p>
     <p id="ruleSession">Phiên hết hạn sau 30 phút không thao tác, tối đa 8 giờ.</p>
     <p id="ruleLock">Nhập sai mật khẩu 5 lần sẽ bị khóa 15 phút.</p>
-    <p>Quên mật khẩu thì nhờ quản trị viên đặt lại.</p>
+    <p>Quên mật khẩu hoặc mất điện thoại có ứng dụng xác thực thì nhờ quản trị viên đặt lại.</p>
   </footer>
 </main>
 
@@ -192,7 +218,44 @@ async function call(path, body) {
 function show(view) {
   $('#loginView').hidden = view !== 'login';
   $('#pwView').hidden = view !== 'pw';
-  (view === 'login' ? ($('#u').value ? $('#p') : $('#u')) : ($('#curWrap').hidden ? $('#pn') : $('#pc'))).focus();
+  $('#mfaView').hidden = view !== 'mfa';
+  (view === 'mfa' ? $('#mfaCode') : view === 'login' ? ($('#u').value ? $('#p') : $('#u'))
+    : ($('#curWrap').hidden ? $('#pn') : $('#pc'))).focus();
+}
+// detail của API: chuỗi, hoặc {message, mfa} khi hỏi / sai mã xác thực 2 lớp
+const detailText = d => (d && typeof d.detail === 'object' && d.detail) ? d.detail.message : d && d.detail;
+
+// ---------- xác thực 2 lớp
+async function openMfa(required) {
+  $('#mfaLead').textContent = required
+    ? 'Vai trò của bạn bắt buộc xác thực 2 lớp: ngoài mật khẩu, mỗi lần đăng nhập cần mã 6 số đổi sau mỗi 30 giây.'
+    : 'Ngoài mật khẩu, mỗi lần đăng nhập sẽ cần mã 6 số đổi sau mỗi 30 giây. Lộ mật khẩu cũng không đăng nhập được.';
+  $('#mfaLater').hidden = required; $('#mfaLater').href = NEXT;
+  $('#mfaErr').textContent = ''; $('#mfaCode').value = '';
+  const { status, data } = await call('/api/v1/auth/mfa/setup', {});
+  if (status === 409) { location.replace(NEXT); return; }            // đã bật từ trước
+  if (status !== 200) { showLogin(); return; }
+  $('#mfaSecret').textContent = data.secret.replace(/(.{4})/g, '$1 ').trim();
+  $('#mfaLink').href = data.otpauth_uri;
+  show('mfa');
+}
+$('#mfaForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const code = $('#mfaCode').value.replace(/\D/g, '');
+  if (code.length !== 6) { $('#mfaErr').textContent = 'Nhập đủ 6 số.'; $('#mfaCode').focus(); return; }
+  const btn = $('#mfaBtn'); btn.disabled = true; $('#mfaErr').textContent = '';
+  try {
+    const { status, data } = await call('/api/v1/auth/mfa/enable', { code });
+    if (status === 200) { location.replace(NEXT); return; }
+    if (status === 401) { showLogin(); return; }
+    $('#mfaErr').textContent = sentence(detailText(data)) || `Lỗi ${status}.`; $('#mfaCode').select();
+  } catch (err) { $('#mfaErr').textContent = 'Không kết nối được tới manager. Thử lại.'; }
+  finally { btn.disabled = false; }
+});
+// đăng nhập / đổi mật khẩu xong: vai trò bắt buộc MFA mà chưa bật thì bật ngay, không vào console
+async function afterLogin() {
+  try { const { status, data } = await call('/api/v1/auth/me'); if (status === 200 && data.must_mfa) { openMfa(true); return; } } catch (e) {}
+  location.replace(NEXT);
 }
 
 function alarm() {
@@ -222,20 +285,29 @@ function lockout(minutes) {
 
 $('#loginForm').addEventListener('submit', async e => {
   e.preventDefault();
-  const u = $('#u').value.trim(), p = $('#p').value;
+  const u = $('#u').value.trim(), p = $('#p').value, otp = $('#otpWrap').hidden ? undefined : $('#otp').value.replace(/\D/g, '');
   $('#u').setAttribute('aria-invalid', !u); $('#p').setAttribute('aria-invalid', !p);
   if (!u || !p) { $('#err').textContent = !u ? 'Nhập tên đăng nhập.' : 'Nhập mật khẩu.'; (!u ? $('#u') : $('#p')).focus(); return; }
   const btn = $('#loginBtn'); btn.disabled = true; btn.textContent = 'Đang kiểm tra…'; $('#err').textContent = '';
   try {
-    const { status, data } = await call('/api/v1/auth/login', { username: u, password: p });
+    const { status, data } = await call('/api/v1/auth/login', { username: u, password: p, otp });
     if (status === 200) {
       USER = data.username;
       if (data.must_change) { CURRENT = p; openPassword(true); return; }
+      if (data.must_mfa) { openMfa(true); return; }
       location.replace(NEXT); return;
     }
-    alarm(); $('#p').value = ''; $('#p').focus();
-    if (status === 429) { const m = /(\d+)\s*phút/.exec(data && data.detail); lockout(m ? +m[1] : POLICY.lock_minutes); return; }
-    $('#err').textContent = status === 401 ? 'Sai tên đăng nhập hoặc mật khẩu.' : sentence(data && data.detail) || `Lỗi ${status}.`;
+    const mfa = data && data.detail && data.detail.mfa;
+    if (mfa === 'required') {                                  // mật khẩu đúng: hỏi tiếp mã 6 số
+      $('#otpWrap').hidden = false; $('#otp').value = ''; $('#otp').focus();
+      $('#err').textContent = ''; return;
+    }
+    alarm();
+    if (mfa === 'invalid') { $('#otp').value = ''; $('#otp').focus(); }
+    else { $('#p').value = ''; $('#p').focus(); }
+    if (status === 429) { const m = /(\d+)\s*phút/.exec(detailText(data)); lockout(m ? +m[1] : POLICY.lock_minutes); return; }
+    $('#err').textContent = mfa === 'invalid' ? 'Mã xác thực không đúng hoặc đã dùng. Chờ mã mới rồi nhập lại.'
+      : status === 401 ? 'Sai tên đăng nhập hoặc mật khẩu.' : sentence(detailText(data)) || `Lỗi ${status}.`;
   } catch (err) {
     $('#err').textContent = 'Không kết nối được tới manager. Kiểm tra dịch vụ đang chạy rồi thử lại.';
   } finally {
@@ -280,7 +352,7 @@ $('#pwForm').addEventListener('submit', async e => {
   const btn = $('#pwBtn'); btn.disabled = true; btn.textContent = 'Đang lưu…'; $('#pwErr').textContent = '';
   try {
     const { status, data } = await call('/api/v1/auth/password', { current, new: $('#pn').value });
-    if (status === 200) { CURRENT = ''; location.replace(NEXT); return; }
+    if (status === 200) { CURRENT = ''; afterLogin(); return; }
     if (status === 401) { showLogin(); return; }
     $('#pwErr').textContent = sentence(data && data.detail) || `Lỗi ${status}.`;
     if (status === 400 && /hiện tại/.test(data && data.detail)) { $('#curWrap').hidden = false; $('#pc').focus(); }
@@ -315,7 +387,9 @@ document.querySelectorAll('input[type=password]').forEach(inp => ['keydown', 'ke
     if (status === 200) {
       USER = data.username;
       if (data.must_change) { openPassword(true); return; }
+      if (data.must_mfa) { openMfa(true); return; }
       if (params.get('change')) { openPassword(false); return; }
+      if (params.get('mfa') && !data.mfa_enabled) { openMfa(false); return; }
       location.replace(NEXT); return;
     }
   } catch (e) {}

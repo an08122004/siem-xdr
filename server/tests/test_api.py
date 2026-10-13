@@ -692,3 +692,62 @@ def test_promote_shadow_rule_needs_detection_engineer(env, monkeypatch):
     login(env, "de", pw)
     assert env.post("/api/v1/rules/AI-077/promote", json={}, headers=H).json() == {"rule_id": "AI-077", "by": "de"}
     assert env.get("/api/v1/rules/KHONG-CO/shadow").status_code == 404
+
+
+# ------------------------------------------------------------------ xác thực 2 lớp (TOTP)
+def test_totp_matches_rfc6238_vector():
+    import base64
+    from siem.manager import auth
+    secret = base64.b32encode(b"12345678901234567890").decode()       # khóa mẫu của RFC 6238 phụ lục B (SHA-1)
+    assert auth.totp_at(secret, 59 // 30) == "287082"                     # T = 59 giây: 94287082 (8 số) -> 6 số cuối
+    assert auth.totp_at(secret, 1111111109 // 30) == "081804"            # 07081804
+
+
+def _code(env, secret, offset=0):
+    from siem.manager import auth
+    return auth.totp_at(secret, int(env.clock.now // auth.TOTP_STEP) + offset)
+
+
+def test_mfa_enroll_login_and_replay(env):
+    pw = activate(env, "an", "analyst")
+    login(env, "an", pw)
+    r = env.post("/api/v1/auth/mfa/setup", json={}, headers=H)
+    secret = r.json()["secret"]
+    assert r.status_code == 200 and r.json()["otpauth_uri"].startswith("otpauth://totp/SOC%20Platform:an?secret=")
+    assert env.post("/api/v1/auth/mfa/enable", json={"code": "000000"}, headers=H).status_code == 400
+    r = env.post("/api/v1/auth/mfa/enable", json={"code": _code(env, secret)}, headers=H)
+    assert r.status_code == 200 and r.json()["mfa_enabled"] is True
+    listed = [u for u in (admin_login(env) or env.get("/api/v1/users").json()) if u["username"] == "an"][0]
+    assert listed["mfa_enabled"] is True and "mfa" not in listed and secret not in str(listed)   # không lộ khóa
+    env.clock.now += 90                                                   # bước thời gian mới
+    r = login(env, "an", pw)
+    assert r.status_code == 401 and r.json()["detail"]["mfa"] == "required"       # mật khẩu đúng: hỏi mã
+    r = env.post("/api/v1/auth/login", json={"username": "an", "password": pw, "otp": "123456"}, headers=H)
+    assert r.status_code == 401 and r.json()["detail"]["mfa"] == "invalid"
+    assert env.audit[-1][3].get("reason") == "bad_otp"
+    code = _code(env, secret)
+    assert env.post("/api/v1/auth/login", json={"username": "an", "password": pw, "otp": code}, headers=H).status_code == 200
+    r = env.post("/api/v1/auth/login", json={"username": "an", "password": pw, "otp": code}, headers=H)
+    assert r.status_code == 401                                           # cùng mã dùng lại: từ chối
+    assert env.post("/api/v1/auth/login", json={"username": "an", "password": "sai-mat-khau", "otp": code},
+                    headers=H).json()["detail"] == "sai tên đăng nhập hoặc mật khẩu"
+
+
+def test_mfa_required_role_and_admin_reset(env, monkeypatch):
+    monkeypatch.setattr(settings, "CONSOLE_MFA_REQUIRED_ROLES", {"lead"})
+    pw = activate(env, "ld", "lead")
+    me = login(env, "ld", pw).json()
+    assert me["must_mfa"] is True and me["mfa_required"] is True
+    r = env.get("/api/v1/stats")
+    assert r.status_code == 403 and "xác thực 2 lớp" in r.json()["detail"]
+    r = env.get("/", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login?mfa=1&next=%2F"
+    secret = env.post("/api/v1/auth/mfa/setup", json={}, headers=H).json()["secret"]
+    assert env.post("/api/v1/auth/mfa/enable", json={"code": _code(env, secret)}, headers=H).json()["must_mfa"] is False
+    assert env.get("/api/v1/stats").status_code == 200
+    r = env.post("/api/v1/auth/mfa/disable", json={"password": pw}, headers=H)
+    assert r.status_code == 400 and "bắt buộc" in r.json()["detail"]
+    admin_login(env)
+    assert env.patch("/api/v1/users/ld", json={"mfa_reset": True}, headers=H).json()["mfa_enabled"] is False
+    assert ("user_updated", "success", "admin", {"target": "ld", "change": "đặt lại xác thực 2 lớp"}) in env.audit
+    assert login(env, "ld", pw).json()["must_mfa"] is True                # mất điện thoại: bật lại từ đầu

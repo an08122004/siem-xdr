@@ -127,9 +127,9 @@ async def grafana(path: str, request: Request) -> Response:
     token = request.cookies.get(auth.COOKIE)
     s = auth.sessions.get(token, touch=is_activity(request, path)) if token else None
     target = PREFIX + path + (f"?{request.url.query}" if request.url.query else "")
-    if not s or s.must_change:
+    if not s or s.must_change or s.must_mfa:
         if is_navigation(request):
-            reason = "change=1&" if s else ("reason=expired&" if token else "")
+            reason = ("change=1&" if s.must_change else "mfa=1&") if s else ("reason=expired&" if token else "")
             nxt = PREFIX if path.startswith("login") else target      # trang login riêng của Grafana đã tắt
             return RedirectResponse(f"/login?{reason}next={quote(nxt, safe='')}", status_code=303)
         return JSONResponse({"detail": "chưa đăng nhập hoặc phiên đã hết hạn"}, status_code=401)

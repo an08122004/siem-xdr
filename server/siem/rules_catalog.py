@@ -243,6 +243,8 @@ DETECTORS = [
     ("HLT-005", "Đường ống Kafka bị nghẽn", "high", "soar/health.py",
      "Consumer analyzer / SOAR tụt sau quá KAFKA_LAG_MAX_MESSAGES message liên tục KAFKA_LAG_MINUTES phút"),
     ("HLT-006", "Elasticsearch lỗi hoặc sắp đầy đĩa", "high", "soar/health.py", "Cluster RED, hoặc đĩa node >= ES_DISK_MAX_PCT%"),
+    ("HLT-007", "Sao lưu Elasticsearch không chạy", "high", "soar/health.py",
+     "Không có chính sách SLM daily-snapshots, lần chạy gần nhất lỗi, hoặc snapshot thành công cũ hơn SNAPSHOT_MAX_AGE_HOURS giờ"),
 ]
 
 

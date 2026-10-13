@@ -654,6 +654,8 @@ def console(request: Request) -> FileResponse | RedirectResponse:
         return RedirectResponse("/login?" + ("reason=expired&" if token else "") + "next=%2F", status_code=303)
     if s.must_change:
         return RedirectResponse("/login?change=1&next=%2F", status_code=303)
+    if s.must_mfa:
+        return RedirectResponse("/login?mfa=1&next=%2F", status_code=303)
     return FileResponse(STATIC / "console.html")
 
 

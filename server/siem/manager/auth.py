@@ -17,6 +17,10 @@
   "ngoại lệ AI cần 2 người KHÁC NHAU duyệt" có hiệu lực thật.
 - Đăng nhập / đăng xuất / đổi mật khẩu / quản lý tài khoản được gửi vào Kafka thành event của chính SIEM
   (event_type console_auth): lưu trong siem-events-*, hiện trên Grafana (Phiên đăng nhập), rule AUTH-001 áp dụng được.
+- Xác thực 2 lớp TOTP (RFC 6238: HMAC-SHA1, 30 giây, 6 số; Google Authenticator, Microsoft Authenticator...). Bật
+  tự nguyện, hoặc bắt buộc với vai trò trong CONSOLE_MFA_REQUIRED_ROLES: chưa bật thì phiên chỉ dùng được để bật MFA.
+  Mỗi mã chỉ dùng được một lần (lưu bước thời gian đã dùng), nhập sai mã tính như sai mật khẩu. Khóa bí mật TOTP nằm
+  trong console-users (ngoài siem-*, chỉ manager đọc được), không bao giờ trả ra API sau khi đã bật.
 """
 from __future__ import annotations
 
@@ -97,6 +101,48 @@ def verify_password(password: str, stored: str) -> bool:
 _DUMMY_HASH = hash_password(secrets.token_hex(16))   # tên không tồn tại vẫn tính scrypt như thật
 
 
+# --------------------------------------------------------------------------- TOTP (RFC 6238)
+TOTP_STEP, TOTP_DIGITS, TOTP_WINDOW = 30, 6, 1       # chấp nhận lệch ±1 bước (đồng hồ điện thoại lệch tới 30 giây)
+MFA_ISSUER = "SOC Platform"
+
+
+def totp_secret() -> str:
+    return base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
+
+
+def totp_at(secret: str, step: int) -> str:
+    key = base64.b32decode(secret.upper() + "=" * (-len(secret) % 8))
+    mac = hmac.new(key, step.to_bytes(8, "big"), hashlib.sha1).digest()
+    off = mac[-1] & 0x0F
+    return str((int.from_bytes(mac[off:off + 4], "big") & 0x7FFFFFFF) % 10 ** TOTP_DIGITS).zfill(TOTP_DIGITS)
+
+
+def totp_match(secret: str, code: str, last_step: int = -1) -> int | None:
+    """Bước thời gian khớp với mã (để ghi lại, chống dùng lại), None nếu sai / đã dùng."""
+    code = "".join(ch for ch in str(code or "") if ch.isdigit())
+    if len(code) != TOTP_DIGITS:
+        return None
+    now = int(time.time() // TOTP_STEP)
+    for step in range(now - TOTP_WINDOW, now + TOTP_WINDOW + 1):
+        if step > last_step and hmac.compare_digest(totp_at(secret, step), code):
+            return step
+    return None
+
+
+def otpauth_uri(secret: str, username: str) -> str:
+    from urllib.parse import quote
+    return (f"otpauth://totp/{quote(MFA_ISSUER)}:{quote(username)}?secret={secret}&issuer={quote(MFA_ISSUER)}"
+            f"&algorithm=SHA1&digits={TOTP_DIGITS}&period={TOTP_STEP}")
+
+
+def mfa_required(role: str) -> bool:
+    return role in settings.CONSOLE_MFA_REQUIRED_ROLES
+
+
+def mfa_enabled(user: dict[str, Any]) -> bool:
+    return bool((user.get("mfa") or {}).get("enabled") and (user.get("mfa") or {}).get("secret"))
+
+
 def password_problem(password: str, username: str) -> str | None:
     if len(password) < MIN_PASSWORD:
         return f"mật khẩu tối thiểu {MIN_PASSWORD} ký tự"
@@ -115,7 +161,10 @@ def new_user(username: str, role: str, password: str, must_change: bool = True) 
 
 
 def public(user: dict[str, Any]) -> dict[str, Any]:
-    return {k: v for k, v in user.items() if k != "password_hash"}
+    """Tài khoản trả ra API: không hash mật khẩu, không khóa bí mật TOTP."""
+    out = {k: v for k, v in user.items() if k not in ("password_hash", "mfa")}
+    out["mfa_enabled"] = mfa_enabled(user)
+    return out
 
 
 class UserStore:
@@ -192,6 +241,7 @@ class Session:
     created: float
     last_active: float
     must_change: bool
+    must_mfa: bool = False         # vai trò bắt buộc MFA mà chưa bật: phiên chỉ dùng để bật MFA
 
 
 class Sessions:
@@ -211,7 +261,8 @@ class Sessions:
     def create(self, user: dict[str, Any], ip: str) -> tuple[str, Session]:
         token = secrets.token_urlsafe(32)
         now = time.time()
-        s = Session(self._key(token), user["username"], user["role"], ip, now, now, bool(user.get("must_change")))
+        s = Session(self._key(token), user["username"], user["role"], ip, now, now, bool(user.get("must_change")),
+                    mfa_required(user["role"]) and not mfa_enabled(user))
         with self._lock:
             # dọn phiên bỏ dở (đóng trình duyệt không đăng xuất) để bộ nhớ không phình theo thời gian
             for k in [k for k, x in self._d.items() if self._expired(x, now)]:
@@ -355,6 +406,8 @@ def session(request: Request) -> Session:
 def current_user(s: Session = Depends(session)) -> Session:
     if s.must_change:
         raise HTTPException(403, "phải đổi mật khẩu trước khi dùng console")
+    if s.must_mfa:
+        raise HTTPException(403, "phải bật xác thực 2 lớp trước khi dùng console (vai trò của bạn bắt buộc MFA)")
     return s
 
 
@@ -381,6 +434,7 @@ router = APIRouter()
 class LoginBody(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=256)
+    otp: str | None = Field(None, max_length=16)
 
 
 class PasswordBody(BaseModel):
@@ -398,11 +452,22 @@ class UserUpdate(BaseModel):
     role: str | None = Field(None, pattern=ROLE_PATTERN)
     disabled: bool | None = None
     password: str | None = Field(None, min_length=1, max_length=256)   # đặt lại -> buộc đổi ở lần đăng nhập sau
+    mfa_reset: bool | None = None          # mất điện thoại: xóa MFA, người dùng bật lại ở lần đăng nhập sau
+
+
+class MfaCode(BaseModel):
+    code: str = Field(min_length=6, max_length=16)
+
+
+class MfaDisable(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
 
 
 def _me(s: Session) -> dict[str, Any]:
+    user = users.get(s.username) if users else None
     return {"username": s.username, "role": s.role, "role_label": ROLE_LABELS.get(s.role, s.role),
-            "permissions": sorted(PERMISSIONS.get(s.role, ())), "must_change": s.must_change,
+            "permissions": sorted(PERMISSIONS.get(s.role, ())), "must_change": s.must_change, "must_mfa": s.must_mfa,
+            "mfa_enabled": mfa_enabled(user or {}), "mfa_required": mfa_required(s.role),
             "idle_minutes": settings.CONSOLE_IDLE_MINUTES, "session_hours": settings.CONSOLE_SESSION_HOURS}
 
 
@@ -426,6 +491,15 @@ def login(body: LoginBody, request: Request, response: Response) -> dict[str, An
         locked = throttle.failure(*keys)
         audit("login", "failure", username, ip, reason="locked" if locked else "bad_credentials")
         raise HTTPException(401, "sai tên đăng nhập hoặc mật khẩu")
+    if mfa_enabled(user):
+        if not body.otp:          # mật khẩu đúng: trang đăng nhập hỏi tiếp mã 6 số (không tính là sai)
+            raise HTTPException(401, {"message": "nhập mã xác thực 6 số trong ứng dụng xác thực", "mfa": "required"})
+        step = totp_match(user["mfa"]["secret"], body.otp, int(user["mfa"].get("last_step", -1)))
+        if step is None:
+            locked = throttle.failure(*keys)
+            audit("login", "failure", username, ip, reason="locked" if locked else "bad_otp")
+            raise HTTPException(401, {"message": "mã xác thực không đúng hoặc đã dùng", "mfa": "invalid"})
+        user["mfa"]["last_step"] = step
     throttle.success(keys[0])
     token, s = sessions.create(user, ip)
     user["last_login"] = store.now_iso()
@@ -494,6 +568,55 @@ def change_password(body: PasswordBody, request: Request, s: Session = Depends(s
     return _me(s)
 
 
+@router.post("/api/v1/auth/mfa/setup")
+def mfa_setup(request: Request, s: Session = Depends(session)) -> dict[str, Any]:
+    """Tạo khóa bí mật TOTP mới (chờ xác nhận bằng một mã đúng). Bật rồi thì phải tắt / nhờ admin đặt lại trước."""
+    if s.must_change:
+        raise HTTPException(403, "phải đổi mật khẩu trước")
+    user = users.get(s.username)
+    if mfa_enabled(user):
+        raise HTTPException(409, "tài khoản đã bật xác thực 2 lớp")
+    secret = totp_secret()
+    user["mfa"] = {**(user.get("mfa") or {}), "enabled": False, "secret": None, "pending": secret}
+    users.put(user)
+    return {"secret": secret, "otpauth_uri": otpauth_uri(secret, s.username), "issuer": MFA_ISSUER,
+            "digits": TOTP_DIGITS, "period": TOTP_STEP}
+
+
+@router.post("/api/v1/auth/mfa/enable")
+def mfa_enable(body: MfaCode, request: Request, s: Session = Depends(session)) -> dict[str, Any]:
+    user, ip = users.get(s.username), client_ip(request)
+    pending = (user.get("mfa") or {}).get("pending")
+    if not pending:
+        raise HTTPException(400, "chưa tạo khóa xác thực, bấm thiết lập lại")
+    step = totp_match(pending, body.code)
+    if step is None:
+        throttle.failure(f"user:{s.username}", f"ip:{ip}")
+        audit("mfa_enabled", "failure", s.username, ip, reason="bad_otp")
+        raise HTTPException(400, "mã không đúng: kiểm tra giờ trên điện thoại và nhập mã đang hiện")
+    user["mfa"] = {"enabled": True, "secret": pending, "pending": None, "last_step": step, "enabled_at": store.now_iso()}
+    user["updated_at"] = store.now_iso()
+    users.put(user)
+    sessions.drop_user(s.username, keep=s)            # phiên cũ (chưa qua MFA) phải đăng nhập lại
+    s.must_mfa = False
+    audit("mfa_enabled", "success", s.username, ip, role=s.role)
+    return _me(s)
+
+
+@router.post("/api/v1/auth/mfa/disable")
+def mfa_disable(body: MfaDisable, request: Request, s: Session = Depends(current_user)) -> dict[str, Any]:
+    if mfa_required(s.role):
+        raise HTTPException(400, "vai trò của bạn bắt buộc xác thực 2 lớp, không tắt được")
+    user, ip = users.get(s.username), client_ip(request)
+    if not verify_password(body.password, user["password_hash"]):
+        throttle.failure(f"user:{s.username}", f"ip:{ip}")
+        raise HTTPException(400, "mật khẩu không đúng")
+    user["mfa"] = {"enabled": False, "secret": None, "pending": None}
+    users.put(user)
+    audit("mfa_disabled", "success", s.username, ip, role=s.role)
+    return _me(s)
+
+
 @router.get("/api/v1/users")
 def list_users(s: Session = Depends(require_perm("users"))) -> list[dict[str, Any]]:
     return [public(u) for u in users.list()]
@@ -534,6 +657,9 @@ def update_user(username: str, body: UserUpdate, request: Request,
             raise HTTPException(400, problem)
         user.update(password_hash=hash_password(body.password), must_change=True)
         changes.append("đặt lại mật khẩu")
+    if body.mfa_reset and mfa_enabled(user):
+        user["mfa"] = {"enabled": False, "secret": None, "pending": None}
+        changes.append("đặt lại xác thực 2 lớp")
     if changes:
         user["updated_at"] = store.now_iso()
         users.put(user)

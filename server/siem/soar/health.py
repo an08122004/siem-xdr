@@ -8,6 +8,8 @@ HLT-* bằng SOAR (ghi thẳng Elasticsearch, không qua analyzer / Kafka) để
   HLT-004  mất đồng bộ trạng thái agent với Wazuh manager (SOAR không gọi được Wazuh API)
   HLT-005  Kafka nghẽn: consumer analyzer / SOAR tụt sau quá KAFKA_LAG_MAX_MESSAGES message liên tục KAFKA_LAG_MINUTES phút
   HLT-006  Elasticsearch: cluster đỏ, hoặc đĩa quá ES_DISK_MAX_PCT%
+  HLT-007  sao lưu: chưa có chính sách snapshot, lần chạy gần nhất lỗi, hoặc bản thành công gần nhất cũ hơn
+           SNAPSHOT_MAX_AGE_HOURS giờ (security/setup.sh tạo chính sách SLM daily-snapshots)
 
 Mỗi sự cố chỉ một alert đang mở (khóa: mã + nguồn); hết sự cố thì ghi "đã hồi phục" vào lịch sử alert để analyst đóng.
 Trạng thái từng nguồn ghi vào index siem-sources (Grafana "SOC KPI": sức khỏe nguồn log)."""
@@ -34,7 +36,9 @@ CHECKS = {
     "HLT-004": ("Mất đồng bộ trạng thái agent với Wazuh manager", [], None),
     "HLT-005": ("Đường ống Kafka bị nghẽn", [], None),
     "HLT-006": ("Elasticsearch lỗi hoặc sắp đầy đĩa", [], None),
+    "HLT-007": ("Sao lưu Elasticsearch không chạy", [], None),
 }
+SLM_POLICY = "daily-snapshots"
 
 
 def _iso(ts: float) -> str:
@@ -113,7 +117,8 @@ class HealthMonitor:
     def run(self) -> None:
         if not self._loaded:
             self.load_open()
-        for check in (self.check_agents, self.check_sources, self.check_kafka, self.check_elasticsearch):
+        for check in (self.check_agents, self.check_sources, self.check_kafka, self.check_elasticsearch,
+                      self.check_snapshots):
             try:
                 check()
             except Exception as e:  # noqa: BLE001 - một phép kiểm tra lỗi không chặn các phép khác
@@ -246,6 +251,32 @@ class HealthMonitor:
                             f"{settings.ES_DISK_MAX_PCT}%): ES ngừng ghi index ở 95% (flood stage)", disk_used_pct=round(used, 1))
             else:
                 self.recover("HLT-006", key, f"đĩa node {node.get('name')} còn {100 - used:.0f}% trống")
+
+
+    def check_snapshots(self) -> None:
+        now = self.clock()
+        try:
+            pol = self.es.slm.get_lifecycle(policy_id=SLM_POLICY).get(SLM_POLICY) or {}
+        except Exception as e:  # noqa: BLE001 - NotFound: es-setup chưa tạo chính sách (hệ thống cũ chưa chạy lại es-setup)
+            if "404" in str(e) or "not_found" in str(e) or "NotFound" in type(e).__name__:
+                self.raise_("HLT-007", SLM_POLICY, "medium", "chưa có chính sách snapshot daily-snapshots: chạy lại "
+                            "`docker compose up -d --force-recreate es-setup`; hiện KHÔNG có bản sao lưu nào")
+                return
+            raise
+        ok = ((pol.get("last_success") or {}).get("time") or 0) / 1000
+        bad = ((pol.get("last_failure") or {}).get("time") or 0) / 1000
+        created = (pol.get("modified_date_millis") or 0) / 1000
+        max_age = settings.SNAPSHOT_MAX_AGE_HOURS * 3600
+        if bad > ok:
+            why = ((pol.get("last_failure") or {}).get("details") or "")[:300]
+            self.raise_("HLT-007", SLM_POLICY, "high", f"lần snapshot gần nhất ({_iso(bad)}) thất bại: {why}",
+                        last_failure=_iso(bad))
+        elif now - max(ok, created) > max_age:
+            self.raise_("HLT-007", SLM_POLICY, "high",
+                        f"không có snapshot thành công trong {settings.SNAPSHOT_MAX_AGE_HOURS:g} giờ qua "
+                        f"(lần gần nhất: {_iso(ok) if ok else 'chưa có'})", last_success=_iso(ok) if ok else None)
+        else:
+            self.recover("HLT-007", SLM_POLICY, f"snapshot thành công lúc {_iso(ok)}" if ok else "chính sách snapshot đã có")
 
 
 def kafka_lag_reader(groups: dict[str, list[str]]) -> Callable[[], dict[str, int]]:
