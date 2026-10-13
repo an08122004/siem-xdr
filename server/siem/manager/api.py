@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field
 
 from .. import priority as prio
 from .. import rules_catalog, settings, store
-from . import auth, grafana_proxy, kpi
+from . import auth, grafana_proxy, kpi, soc
 from .auth import Session, current_user, has, require_perm
 
 log = logging.getLogger("manager")
@@ -115,6 +115,9 @@ async def security_headers(request: Request, call_next):
 
 def es():
     return _state["es"]
+
+
+soc.setup(es)
 
 
 triage = require_perm("triage")
@@ -784,5 +787,6 @@ def ai_status() -> dict[str, Any]:
     return {"worker": worker, "jobs": jobs}
 
 
+app.include_router(soc.router)            # threat hunting, giao ca, AI hỗ trợ analyst
 # Route bắt-tất-cả /grafana/{path} phải đăng ký SAU mọi route của app (vd /grafana/go/...), FastAPI khớp theo thứ tự
 app.include_router(grafana_proxy.router)

@@ -353,7 +353,9 @@ const NAV = [
   ['overview', 'Tổng quan', 'M2 2h5v5H2z|M9 2h5v3H9z|M9 7h5v7H9z|M2 9h5v5H2z'],
   ['alerts', 'Cảnh báo', 'M8 2 1.5 13.5h13z|M8 6.5v3.5|M8 12v.1'],
   ['cases', 'Case', 'M2 4.5h4l1.5 1.5H14v7.5H2z'],
+  ['handover', 'Giao ca', 'M2 5h9l-2.5-2.5|M14 11H5l2.5 2.5'],
   ['investigate', 'Điều tra', 'M7 2.5a4.5 4.5 0 1 0 0 9a4.5 4.5 0 1 0 0-9|M10.3 10.3 14 14'],
+  ['hunts', 'Threat hunting', 'M8 1.5v3|M8 11.5v3|M1.5 8h3|M11.5 8h3|M8 4.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 1 0 0-7'],
   ['kpi', 'KPI', 'M2 13.5h12|M3.5 11V8|M7 11V5|M10.5 11V7|M13 3 10.5 5.5 7.5 4 3.5 6.5'],
   null,
   ['actions', 'Lệnh phản ứng', 'M9 1.5 3 9h4.5L7 14.5 13 7H8.5z'],
@@ -475,6 +477,173 @@ VIEWS.overview = {
   },
   async load() { showFrame('overview', grafanaUrl('siem-overview', this.range)); },
 };
+
+// ---------------------------------------------------------------- AI hỗ trợ analyst (manager/soc.py, ai/triage.py)
+const canAssist = () => can('triage') || can('hunt') || can('rules');
+const AI_TASK = { summary: 'Tóm tắt', explain: 'Giải thích dòng lệnh', report: 'Nháp báo cáo sau sự cố', query: 'Câu hỏi -> truy vấn' };
+const AI_JOB_ST = { pending: ['Đang chờ AI', 'work'], running: ['AI đang làm', 'work'], done: ['Xong', 'done'], error: ['Lỗi', 'bad'] };
+function aiResult(j) {
+  const r = j.result || {};
+  const ev = ids => (ids || []).map((id, i) => [i ? ', ' : ' (', el('a', { href: '#/alerts/' + id }, 'alert'), i === ids.length - 1 ? ')' : '']);
+  if (j.task === 'summary') return [el('p', { style: 'margin:6px 0' }, r.summary), el('p', { cls: 'sub', style: 'margin:0 0 6px' }, `Đánh giá: ${r.assessment || '—'} (độ tin cậy ${r.confidence || '?'})`),
+    (r.timeline || []).length ? el('ul', { cls: 'hist' }, r.timeline.map(t => el('li', {}, `${t.time}: ${t.event}`, ev(t.evidence)))) : null,
+    (r.next_steps || []).length ? [el('div', { cls: 'sub', style: 'margin-top:6px' }, 'Bước kiểm tra tiếp theo:'),
+      el('ol', { style: 'margin:4px 0;padding-left:20px' }, r.next_steps.map(s => el('li', {}, el('b', {}, s.step), ` — ${s.why}`, ev(s.evidence))))] : null,
+    r.dropped ? el('p', { cls: 'sub' }, `Đã bỏ ${r.dropped} ý AI nêu mà không dẫn được alert có thật.`) : null];
+  if (j.task === 'explain') return [(r.decoded || []).map(d => [el('div', { cls: 'sub' }, `Giải mã ${d.via} (${d.encoding}):`), el('pre', {}, d.text)]),
+    el('p', { style: 'margin:6px 0' }, r.what_it_does), (r.suspicious || []).length ? el('ul', { style: 'margin:0;padding-left:18px' }, r.suspicious.map(s => el('li', {}, s))) : null,
+    el('p', { cls: 'sub' }, `Kỹ thuật: ${(r.techniques || []).join(', ') || '—'}; nhận định: ${r.verdict_hint || '—'}`)];
+  if (j.task === 'report') return el('pre', {}, r.markdown || '');
+  if (j.task === 'query') return [el('pre', {}, r.query || ''), el('p', { cls: r.valid === false ? 'bad' : 'sub' },
+      r.valid === false ? 'Truy vấn sai cú pháp: ' + (r.invalid_reason || '') : r.explanation || ''),
+    r.valid !== false && r.query ? el('a', { cls: 'btn', href: '#/investigate?q=' + encodeURIComponent(r.query) }, 'Dùng truy vấn này') : null];
+  return null;
+}
+function aiJob(j, reload) {
+  const fb = j.feedback;
+  return el('li', {}, el('b', {}, AI_TASK[j.task] || j.task), ' ', stLabel(AI_JOB_ST, j.status),
+    el('span', { cls: 'sub' }, ` ${j.requested_by}, ${fmt(j.created_at)}${(j.result || {}).llm ? `, ${j.result.llm.model} ${j.result.llm.seconds} giây` : ''}`),
+    j.status === 'error' ? el('div', { cls: 'bad' }, sentence(j.error)) : null,
+    j.status === 'done' ? [el('div', { cls: 'sub', style: 'color:var(--medium)' }, 'AI — bản tham khảo, cần người kiểm tra'), aiResult(j),
+      fb ? el('div', { cls: 'sub' }, `Đánh giá: ${fb.useful ? 'hữu ích' : 'không hữu ích'} (${fb.by})`)
+        : el('div', { cls: 'btns', style: 'margin-top:6px' }, ['Hữu ích', 'Không hữu ích'].map((l, i) => button(l, b => run(b,
+          () => api(`/api/v1/ai/assist/${j._id}/feedback`, { method: 'POST', body: { useful: i === 0 } }), 'Đã ghi đánh giá.').then(reload))))] : null);
+}
+// khối AI trong ngăn chi tiết alert / case: nút gửi việc + kết quả gần nhất (tự hỏi lại 3 giây/lần khi đang chờ AI)
+function aiPanel(type, id, tasks) {
+  if (!canAssist()) return null;
+  const list = el('ul', { cls: 'items', style: 'margin-top:8px' });
+  let timer = null, tries = 0;
+  const load = async () => {
+    clearTimeout(timer);
+    if (box.dataset.mounted && !box.isConnected) return;
+    box.dataset.mounted = '1';
+    let jobs = [];
+    try { jobs = await api(`/api/v1/ai/assist?target_type=${type}&target_id=${encodeURIComponent(id)}&size=5`, { auto: true }); } catch (e) { return; }
+    list.replaceChildren(...jobs.map(j => aiJob(j, load)));
+    if (jobs.some(j => j.status === 'pending' || j.status === 'running') && ++tries < 200) timer = setTimeout(load, 3000);
+  };
+  const ask = (b, task) => { tries = 0; return run(b, () => api('/api/v1/ai/assist', { method: 'POST', body: { task, target_type: type, target_id: id } }),
+    'Đã gửi cho AI; kết quả hiện ở đây sau vài giây đến vài phút.').then(load); };
+  const box = el('div', {}, el('div', { cls: 'btns' }, tasks.map(([task, label]) => button(label, b => ask(b, task)))),
+    el('p', { cls: 'sub', style: 'margin:4px 0 0' }, 'AI chạy nội bộ, chỉ đọc dữ liệu, không thực hiện hành động nào; nội dung log được coi là dữ liệu, không phải chỉ dẫn.'), list);
+  setTimeout(load);
+  return box;
+}
+
+// ---------------------------------------------------------------- Giao ca (manager/soc.py)
+VIEWS.handover = {
+  title: 'Giao ca', list: true,
+  async load(auto) {
+    const [s, past] = await Promise.all([api('/api/v1/handover', { auto }), api('/api/v1/handovers?size=10', { auto })]);
+    const note = el('textarea', { cls: 'field', placeholder: 'Việc bàn giao cho ca sau: đang theo dõi gì, chờ ai phản hồi, lưu ý...' });
+    const to = el('input', { cls: 'field', type: 'text', placeholder: 'giao cho (tài khoản ca sau)', style: 'width:220px', 'aria-label': 'Giao cho' });
+    const alertLi = a => el('li', { cls: 'link', tabindex: '0', onClick: () => go('#/alerts/' + a._id) }, prioTag(a.priority), ' ', el('b', {}, a.rule || ''),
+      el('span', { cls: 'sub' }, ` ${a.host || a.source_ip || ''} ${a.status ? '· ' + (ALERT_ST[a.status] || [a.status])[0] : ''}`));
+    const text = () => [`BIÊN BẢN GIAO CA ${fmt(s.generated_at)}`, `Alert đang mở: ${s.alerts_open} (${Object.entries(s.alerts_by_priority).map(([p, n]) => p + ': ' + n).join(', ')})`,
+      `Case đang xử lý: ${s.cases.length}, quá hạn xác nhận: ${s.cases_overdue}`,
+      ...s.cases.map(c => `- [${c.priority}] ${c.title} — ${CASE_ST[c.status] ? CASE_ST[c.status][0] : c.status}, ${c.assignee || 'chưa giao'}${c.overdue ? ', QUÁ HẠN' : ''}${c.major ? ', SỰ CỐ LỚN' : ''}`),
+      `Lệnh chặn sắp hết hạn (12 giờ): ${s.blocks_expiring.map(b => `${b.target} trên ${b.agent_id} lúc ${fmt(b.expires_at)}`).join('; ') || 'không'}`,
+      `Bước SOAR chờ duyệt: ${s.awaiting_approval.length}; sự cố nền tảng: ${s.platform_incidents.map(a => a.rule).join('; ') || 'không'}`,
+      note.value.trim() ? 'Ghi chú: ' + note.value.trim() : ''].filter(Boolean).join('\n');
+    paint('handover', { s: { ...s, generated_at: null }, past }, () => el('div', { style: 'padding:12px 20px;max-width:1100px' },
+      el('p', { cls: 'sub' }, `Tạo lúc ${fmt(s.generated_at)}. Đọc lại cùng người nhận ca rồi lưu biên bản.`),
+      facts([['Alert đang mở', `${s.alerts_open} — ${Object.entries(s.alerts_by_priority).map(([p, n]) => `${p}: ${n}`).join(', ') || 'không có'}`],
+             ['Case đang xử lý', `${s.cases.length}, quá hạn xác nhận ${s.cases_overdue}`],
+             ['Sự cố lớn', s.major_incidents.length ? s.major_incidents.map(c => c.title).join('; ') : 'không']]),
+      el('h3', {}, `Alert P1 / P2 đang mở (${s.alerts_top.length})`),
+      s.alerts_top.length ? el('ul', { cls: 'items' }, s.alerts_top.map(alertLi)) : el('p', { cls: 'sub' }, 'Không có.'),
+      el('h3', {}, `Case đang xử lý (${s.cases.length})`),
+      s.cases.length ? el('ul', { cls: 'items' }, s.cases.map(c => el('li', { cls: 'link', tabindex: '0', onClick: () => go('#/cases/' + c._id) },
+        prioTag(c.priority), ' ', el('b', {}, c.title), ' ', stLabel(CASE_ST, c.status), el('span', { cls: 'sub' }, ` ${c.assignee || 'chưa giao'}`),
+        c.overdue ? el('span', { cls: 'late' }, ' quá hạn xác nhận') : null, c.major ? el('span', { cls: 'late' }, ' sự cố lớn') : null))) : el('p', { cls: 'sub' }, 'Không có.'),
+      el('h3', {}, 'Lệnh chặn IP hết hạn trong 12 giờ tới'),
+      s.blocks_expiring.length ? el('ul', { cls: 'items' }, s.blocks_expiring.map(b => el('li', {}, el('span', { cls: 'mono' }, b.target), ` trên agent ${b.agent_id}, hết hạn ${fmt(b.expires_at)}`))) : el('p', { cls: 'sub' }, 'Không có.'),
+      el('h3', {}, `Bước SOAR chờ duyệt (${s.awaiting_approval.length})`),
+      s.awaiting_approval.length ? el('ul', { cls: 'items' }, s.awaiting_approval.map(alertLi)) : el('p', { cls: 'sub' }, 'Không có.'),
+      el('h3', {}, `Sự cố nền tảng đang mở (${s.platform_incidents.length})`),
+      s.platform_incidents.length ? el('ul', { cls: 'items' }, s.platform_incidents.map(alertLi)) : el('p', { cls: 'sub' }, 'Không có.'),
+      el('h3', {}, 'Bàn giao'), note,
+      el('div', { cls: 'inline-form', style: 'margin-top:6px' }, to,
+        can('triage') ? button('Lưu biên bản giao ca', b => run(b, () => api('/api/v1/handover', { method: 'POST', body: { note: note.value, to: to.value.trim() || null } }),
+          'Đã lưu biên bản giao ca.').then(r => { if (r) { note.value = ''; delete note.dataset.dirty; listState.handover = null; VIEWS.handover.load(); } }), 'primary') : null,
+        button('Sao chép dạng văn bản', b => navigator.clipboard.writeText(text()).then(() => toast('Đã sao chép biên bản.'), () => toast('Trình duyệt chặn sao chép.', true)))),
+      el('h3', {}, 'Các lần giao ca gần đây'),
+      past.length ? el('ul', { cls: 'hist' }, past.map(h => el('li', {}, `${h.by}${h.to ? ' → ' + h.to : ''}: ${h.alerts_open} alert mở, ${h.cases.length} case, ${h.cases_overdue} quá hạn`,
+        h.note ? el('div', {}, h.note) : null, el('span', { cls: 'sub' }, fmt(h['@timestamp']))))) : el('p', { cls: 'sub' }, 'Chưa có.')), auto);
+  },
+};
+
+// ---------------------------------------------------------------- Threat hunting (manager/soc.py, PEAK)
+const HUNT_ST = { planned: ['Kế hoạch', 'new'], in_progress: ['Đang săn', 'work'], completed: ['Hoàn thành', 'done'], cancelled: ['Hủy', 'done'] };
+const OUTCOME = { found_threat: 'Tìm thấy mối đe dọa', no_threat: 'Không thấy dấu hiệu', inconclusive: 'Chưa kết luận được' };
+VIEWS.hunts = {
+  title: 'Threat hunting', list: true, open: null, creating: false, starter: null,
+  tools() {
+    return [can('hunt') ? button('Cuộc hunt mới', () => { this.creating = !this.creating; this.starter = null; listState.hunts = null; this.load(); }, 'primary') : null,
+      el('span', { cls: 'sub' }, 'Mỗi cuộc hunt: giả thuyết gắn kỹ thuật ATT&CK → truy vấn → kết luận, rule mới nếu tìm được mẫu, dữ liệu còn thiếu.')].filter(Boolean);
+  },
+  async load(auto) {
+    const [rows, starters] = await Promise.all([api('/api/v1/hunts?size=200', { auto }), this.starters || api('/api/v1/hunts/starters')]);
+    this.starters = starters;
+    paint('hunts', { rows, open: this.open, c: this.creating, st: this.starter }, () => [
+      this.creating ? huntForm(this, starters) : null,
+      rows.length ? el('table', { cls: 'list' }, head(['Tạo lúc', 'Cuộc hunt', 'Kỹ thuật', 'Người phụ trách', 'Kết luận', 'Trạng thái']),
+        el('tbody', {}, rows.flatMap(h => {
+          const open = this.open === h._id;
+          const tr = el('tr', { cls: 'row', 'aria-expanded': String(open), 'data-id': h._id },
+            el('td', {}, when(h.created_at)), el('td', {}, el('div', { cls: 'title' }, h.title), el('div', { cls: 'sub' }, h.hypothesis)),
+            el('td', { cls: 'mono' }, (h.techniques || []).join(', ')), el('td', {}, h.owner), el('td', {}, OUTCOME[h.outcome] || '—'),
+            el('td', {}, stLabel(HUNT_ST, h.status)));
+          tr.tabIndex = 0;
+          const toggle = () => { this.open = open ? null : h._id; this.load(); };
+          tr.addEventListener('click', e => { if (!e.target.closest('button, a, input, textarea, select')) toggle(); });
+          tr.addEventListener('keydown', e => { if (e.key === 'Enter') toggle(); });
+          return [tr, open ? el('tr', {}, el('td', { colspan: '6' }, huntDetail(h))) : null];
+        })))
+        : this.creating ? null : empty('Chưa có cuộc hunt nào.', 'Bắt đầu từ một giả thuyết mẫu của kế hoạch SOC (Kerberoasting, tác vụ hẹn giờ, DNS tunneling...).')]);
+  },
+};
+function huntForm(view, starters) {
+  const st = view.starter || {};
+  const title = el('input', { cls: 'field', placeholder: 'Tên cuộc hunt', value: st.title || '', style: 'width:100%' });
+  const hyp = el('textarea', { cls: 'field', placeholder: 'Giả thuyết: kẻ tấn công có thể đang ... trên ..., để lại dấu vết ở ...' }); hyp.value = st.hypothesis || '';
+  const tech = el('input', { cls: 'field', placeholder: 'Kỹ thuật ATT&CK, vd T1558.003, T1078', value: (st.techniques || []).join(', '), style: 'width:100%' });
+  const src = el('input', { cls: 'field', placeholder: 'Nguồn dữ liệu, cách nhau dấu phẩy', value: (st.data_sources || []).join(', '), style: 'width:100%' });
+  const q = el('textarea', { cls: 'field', placeholder: 'Truy vấn (Lucene) dùng ở trang Điều tra' }); q.value = st.queries || '';
+  return el('div', { style: 'margin:12px 20px;max-width:900px;display:grid;gap:6px' },
+    el('div', { cls: 'btns' }, el('span', { cls: 'sub' }, 'Giả thuyết mẫu:'), starters.map(s => el('button', { type: 'button', cls: 'chip',
+      onClick: () => { view.starter = s; listState.hunts = null; view.load(); } }, s.title))),
+    title, hyp, tech, src, q,
+    el('div', { cls: 'btns' }, button('Tạo', b => run(b, () => api('/api/v1/hunts', { method: 'POST', body: {
+      title: title.value.trim(), hypothesis: hyp.value.trim(), techniques: tech.value.split(',').map(x => x.trim()).filter(Boolean),
+      data_sources: src.value.split(',').map(x => x.trim()).filter(Boolean), queries: q.value } }), 'Đã tạo cuộc hunt.')
+      .then(r => { if (r) { view.creating = false; view.open = r.id; listState.hunts = null; view.load(); } }), 'primary'),
+      button('Hủy', () => { view.creating = false; listState.hunts = null; view.load(); })));
+}
+function huntDetail(h) {
+  const edit = can('hunt') && !['completed', 'cancelled'].includes(h.status);
+  const q = el('textarea', { cls: 'field' }); q.value = h.queries || '';
+  const findings = el('textarea', { cls: 'field', placeholder: 'Phát hiện: đã xem gì, thấy gì, máy / tài khoản liên quan' }); findings.value = h.findings || '';
+  const outcome = el('select', { cls: 'field', 'aria-label': 'Kết luận' }, el('option', { value: '' }, 'Kết luận…'),
+    Object.entries(OUTCOME).map(([k, v]) => el('option', { value: k, selected: h.outcome === k }, v)));
+  const rules = el('input', { cls: 'field', placeholder: 'Rule mới / đề xuất (mã), cách nhau dấu phẩy', value: (h.new_rules || []).join(', '), style: 'width:100%' });
+  const gaps = el('input', { cls: 'field', placeholder: 'Dữ liệu còn thiếu, cách nhau dấu phẩy', value: (h.data_gaps || []).join(', '), style: 'width:100%' });
+  const list = x => x.value.split(',').map(s => s.trim()).filter(Boolean);
+  const save = (b, status) => run(b, () => api(`/api/v1/hunts/${h._id}`, { method: 'PATCH', body: {
+    status, queries: q.value, findings: findings.value || null, outcome: outcome.value || null, new_rules: list(rules), data_gaps: list(gaps) } }),
+    status ? `Đã chuyển sang “${HUNT_ST[status][0]}”.` : 'Đã lưu.').then(r => { if (r) { listState.hunts = null; VIEWS.hunts.load(); } });
+  return el('div', { style: 'padding:4px 0 12px;max-width:900px;display:grid;gap:6px' },
+    el('h3', { style: 'margin-top:4px' }, 'Giả thuyết'), el('div', {}, h.hypothesis),
+    el('div', { cls: 'sub' }, 'Nguồn dữ liệu: ' + ((h.data_sources || []).join(', ') || '—')),
+    el('h3', {}, 'Truy vấn'), edit ? q : el('pre', {}, h.queries || '—'),
+    h.queries ? el('div', { cls: 'btns' }, el('a', { cls: 'btn', href: '#/investigate?q=' + encodeURIComponent(h.queries.split('\n')[0]) }, 'Chạy trên trang Điều tra')) : null,
+    el('h3', {}, 'Kết quả'), edit ? [findings, outcome, rules, gaps] : [el('div', {}, h.findings || '—'),
+      el('div', { cls: 'sub' }, `Kết luận: ${OUTCOME[h.outcome] || '—'}; rule mới: ${(h.new_rules || []).join(', ') || '—'}; dữ liệu thiếu: ${(h.data_gaps || []).join(', ') || '—'}`)],
+    edit ? el('div', { cls: 'btns' }, button('Lưu', b => save(b)), h.status === 'planned' ? button('Bắt đầu săn', b => save(b, 'in_progress')) : null,
+      button('Hoàn thành', b => save(b, 'completed'), 'primary'), button('Hủy cuộc hunt', b => save(b, 'cancelled'))) : null,
+    el('h3', {}, 'Lịch sử'), hist((h.notes || []).slice().reverse()));
+}
 
 // ---------------------------------------------------------------- KPI (dashboard Grafana soc-kpi, manager/kpi.py)
 VIEWS.kpi = {
@@ -618,7 +787,25 @@ VIEWS.investigate = {
         el('button', { type: 'button', cls: 'chip', onClick: () => go('#/investigate?q=' + encodeURIComponent(entityQuery(v))) },
           el('i', { style: `background:var(--${s})` }), v)));
     }).catch(() => {});
-    return [input, button('Điều tra', submit, 'primary'), rangeControl(this.range, v => { this.range = v; render(true); }), sugg];
+    // Hỏi AI bằng tiếng Việt -> truy vấn Lucene (AI hỗ trợ, ai/triage.py); dùng được ngay khi Elasticsearch xác nhận cú pháp
+    const ask = el('input', { cls: 'field', type: 'text', style: 'width:300px', placeholder: 'Hỏi AI, vd: máy nào chạy certutil tải file?',
+      'aria-label': 'Câu hỏi cho AI' });
+    const out = el('span', { cls: 'sub' });
+    const poll = async (id, n = 0) => {
+      const j = await api('/api/v1/ai/assist/' + id, { auto: true }).catch(() => null);
+      if (!j || n > 100) return;
+      if (j.status === 'done') {
+        const r = j.result || {};
+        out.replaceChildren(r.valid === false ? el('span', { cls: 'bad' }, 'AI viết sai cú pháp: ' + (r.query || '')) :
+          el('a', { href: '#/investigate?q=' + encodeURIComponent(r.query) }, 'AI gợi ý: ' + r.query), ' ', el('span', { cls: 'sub' }, r.explanation || ''));
+      } else if (j.status === 'error') out.textContent = 'AI lỗi: ' + (j.error || '');
+      else setTimeout(() => poll(id, n + 1), 3000);
+    };
+    const askAI = b => ask.value.trim() && run(b, () => api('/api/v1/ai/assist', { method: 'POST', body: { task: 'query', text: ask.value.trim() } }))
+      .then(r => { if (r) { out.textContent = 'AI đang soạn truy vấn…'; poll(r._id); } });
+    ask.addEventListener('keydown', e => { if (e.key === 'Enter') askAI(null); });
+    return [input, button('Điều tra', submit, 'primary'), rangeControl(this.range, v => { this.range = v; render(true); }), sugg,
+      canAssist() ? el('div', { cls: 'inline-form', style: 'width:100%' }, ask, button('Hỏi AI', askAI), out) : null].filter(Boolean);
   },
   async load() {
     showFrame('investigate', grafanaUrl('siem-investigate', this.range, { q: route().params.get('q') || '*' }));
@@ -978,6 +1165,8 @@ function alertDrawer(a) {
         el('ul', { cls: 'items' }, a.contributions.slice().reverse().map(c => el('li', { cls: 'link', tabindex: '0',
           onClick: () => go('#/alerts/' + c.alert_id), onKeydown: e => { if (e.key === 'Enter') go('#/alerts/' + c.alert_id); } },
           el('b', {}, c.rule_id), ' ', c.rule_name || '', el('span', { cls: 'sub num' }, ` +${c.score}`), el('div', { cls: 'sub' }, fmt(c.at)))))] : null,
+      canAssist() ? [el('h3', {}, 'AI hỗ trợ'), aiPanel('alert', a._id, [['summary', 'Tóm tắt cảnh báo'],
+        ...(g(a, 'process.command_line') || g(a, 'trigger_event.powershell.script_block') ? [['explain', 'Giải thích dòng lệnh']] : [])])] : null,
       el('h3', {}, 'SOAR đã làm'),
       (g(a, 'soar.results') || []).length ? el('ul', { cls: 'items' }, g(a, 'soar.results').map(r => el('li', {},
         el('b', {}, ACTION_LABEL[r.action] || r.action), `: ${SOAR_ST[r.status] || r.status}`,
@@ -1101,6 +1290,7 @@ function caseDrawer(c) {
       can('contain') ? el('div', { cls: 'inline-form', style: 'margin-top:6px' }, el('span', { cls: 'sub' }, 'Ưu tiên:'), prioSel,
         button('Đổi ưu tiên', b => prioSel.value === c.priority ? null : note.value.trim() ? upd(b, { priority: prioSel.value, note: note.value }, `Đã đổi ưu tiên sang ${prioSel.value}.`)
           : (toast('Ghi lý do đổi ưu tiên vào ô ghi chú.', true), note.focus()))) : null],
+      canAssist() ? [el('h3', {}, 'AI hỗ trợ'), aiPanel('case', c._id, [['summary', 'Tóm tắt case'], ['report', 'Nháp báo cáo sau sự cố']])] : null,
       el('h3', {}, 'Cảnh báo trong case'),
       (c.alerts || []).length ? el('ul', { cls: 'items' }, c.alerts.map(a => el('li', { cls: 'link', tabindex: '0',
         onClick: () => go('#/alerts/' + a._id), onKeydown: e => { if (e.key === 'Enter') go('#/alerts/' + a._id); } },

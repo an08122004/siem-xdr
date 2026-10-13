@@ -14,6 +14,7 @@ import time
 import uuid
 
 from .. import settings, store
+from . import triage
 from .golden import PublicDatasets
 from .llm import LLMError, OllamaClient
 from .worker import AIWorker, now_iso
@@ -62,6 +63,8 @@ def main() -> None:
             log.warning("Ollama chưa sẵn sàng: %s — thử lại sau 15s", e)
             set_status(es, model=settings.AI_MODEL, model_ready=False, last_error=str(e))
             time.sleep(15)
+    if not args.once:
+        triage.start(es, llm)            # AI hỗ trợ analyst (tóm tắt, giải thích lệnh...): luồng riêng, không chờ chu kỳ rule
     golden = PublicDatasets.load()
     worker = AIWorker(es, llm, golden)
     set_status(es, model=settings.AI_MODEL, model_ready=True, last_error=None,

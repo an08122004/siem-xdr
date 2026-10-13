@@ -83,6 +83,8 @@ _TEMPLATES = {
                     "proposal": {"type": "object", "enabled": False},
                     "llm": {"type": "object", "enabled": False},
                     "evidence": {"type": "object", "enabled": False},
+                    # kết quả AI hỗ trợ analyst (ai/triage.py): cấu trúc theo từng việc -> lưu nguyên, không index
+                    "result": {"type": "object", "enabled": False},
                 },
             },
         },
@@ -107,7 +109,7 @@ _TEMPLATES = {
     },
     "siem-state": {
         "index_patterns": ["siem-agents", "siem-actions", "siem-cases", "siem-sources", "siem-kpi", "siem-hunts",
-                           "siem-intel"],
+                           "siem-intel", "siem-handovers"],
         "template": {
             "settings": {"number_of_shards": 1, "number_of_replicas": 0},
             "mappings": {

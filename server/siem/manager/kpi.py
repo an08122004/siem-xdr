@@ -146,6 +146,19 @@ def compute(es, rules_dir: Path | None = None, config_dir: Path | None = None, d
     except Exception:  # noqa: BLE001 - chưa có cuộc hunt nào
         doc["hunts_month"] = 0
 
+    # ---------------------------------------------------------------- AI hỗ trợ analyst: tỉ lệ gợi ý được đánh giá hữu ích
+    try:
+        r = es.search(index=settings.IDX_AI_JOBS, size=0, query={"bool": {"filter": [
+            {"term": {"kind": "triage"}}, {"range": {"created_at": {"gte": since}}}]}}, aggs={
+            "rated": {"filter": {"exists": {"field": "feedback.useful"}},
+                      "aggs": {"useful": {"filter": {"term": {"feedback.useful": True}}}}}})
+        rated = r["aggregations"]["rated"]["doc_count"]
+        useful = r["aggregations"]["rated"]["useful"]["doc_count"]
+        doc["ai_assist"] = {"requests": r["hits"]["total"]["value"], "rated": rated, "useful": useful}
+        doc["ai_acceptance_pct"] = _pct(useful, rated)
+    except Exception:  # noqa: BLE001 - chưa ai dùng AI hỗ trợ
+        doc["ai_assist"], doc["ai_acceptance_pct"] = {"requests": 0}, None
+
     # ---------------------------------------------------------------- độ phủ ATT&CK
     if rules_dir:
         from ..detection.lint import lint

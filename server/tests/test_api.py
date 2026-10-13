@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -751,3 +752,103 @@ def test_mfa_required_role_and_admin_reset(env, monkeypatch):
     assert env.patch("/api/v1/users/ld", json={"mfa_reset": True}, headers=H).json()["mfa_enabled"] is False
     assert ("user_updated", "success", "admin", {"target": "ld", "change": "đặt lại xác thực 2 lớp"}) in env.audit
     assert login(env, "ld", pw).json()["must_mfa"] is True                # mất điện thoại: bật lại từ đầu
+
+
+# ------------------------------------------------------------------ threat hunting, giao ca, AI hỗ trợ (manager/soc.py)
+class IdxES:
+    """ES giả theo index: index / get / update có seq_no như ES thật."""
+
+    def __init__(self):
+        self.docs, self.seq = {}, {}
+
+    def index(self, index, document, id=None, **_):
+        id = id or f"auto{len(self.docs)}"
+        self.docs[(index, id)], self.seq[(index, id)] = dict(document), 1
+        return {"_id": id}
+
+    def get(self, index, id):
+        from elasticsearch import NotFoundError
+        if (index, id) not in self.docs:
+            raise NotFoundError("not found", meta=type("M", (), {"status": 404})(), body={})
+        return {"_source": dict(self.docs[(index, id)]), "_seq_no": self.seq[(index, id)], "_primary_term": 1}
+
+    def update(self, index, id, doc, if_seq_no=None, **_):
+        if if_seq_no is not None and if_seq_no != self.seq[(index, id)]:
+            raise RuntimeError("conflict")
+        self.docs[(index, id)].update(doc)
+        self.seq[(index, id)] += 1
+
+
+def test_threat_hunting_log(env):
+    from siem.manager import api
+    fake = IdxES()
+    api._state["es"] = fake
+    pw_an, pw_hu = activate(env, "an", "analyst"), activate(env, "hu", "hunter")
+    body = {"title": "Kerberoasting trên DC", "hypothesis": "Tài khoản domain xin vé TGS RC4 hàng loạt",
+            "techniques": ["T1558.003"], "data_sources": ["4769"], "queries": "winlog.event_id:4769"}
+    login(env, "an", pw_an)
+    assert env.post("/api/v1/hunts", json=body, headers=H).status_code == 403            # analyst không có quyền hunt
+    assert len(env.get("/api/v1/hunts/starters").json()) == 5
+    login(env, "hu", pw_hu)
+    assert env.post("/api/v1/hunts", json=body | {"techniques": ["T15"]}, headers=H).status_code == 400
+    h = env.post("/api/v1/hunts", json=body, headers=H).json()
+    assert h["status"] == "planned" and h["owner"] == "hu"
+    patch = lambda **b: env.patch(f"/api/v1/hunts/{h['id']}", json=b, headers=H)     # noqa: E731
+    assert patch(status="in_progress").status_code == 200
+    r = patch(status="completed")
+    assert r.status_code == 400 and "kết luận" in r.json()["detail"]
+    r = patch(status="completed", findings="Không thấy vé RC4 bất thường trong 30 ngày", outcome="no_threat",
+              data_gaps=["chưa thu 4769 từ DC2"])
+    doc = fake.docs[("siem-hunts", h["id"])]
+    assert r.status_code == 200 and doc["status"] == "completed" and doc["completed_at"] and doc["data_gaps"] == ["chưa thu 4769 từ DC2"]
+    assert [n["text"] for n in doc["notes"]][-1] == "trạng thái: in_progress -> completed"
+
+
+def test_shift_handover_summary_and_saved_record(env, monkeypatch):
+    from siem.manager import api
+    fake = IdxES()
+    api._state["es"] = fake
+    now = datetime.now(timezone.utc)
+    rows = {
+        settings.IDX_ALERTS: [
+            {"_id": "a1", "priority": "P1", "@timestamp": "t1", "rule": {"name": "Webshell"}, "alert": {"status": "open"},
+             "soar": {"results": [{"action": "isolate_host", "status": "awaiting_approval"}]}},
+            {"_id": "a2", "priority": "P3", "rule": {"name": "Quét cổng"}, "alert": {"status": "acknowledged"}},
+            {"_id": "h1", "priority": "P2", "rule": {"name": "Agent mất kết nối"}, "alert": {"status": "open", "source": "health"}}],
+        settings.IDX_CASES: [
+            {"_id": "c1", "title": "Webshell", "priority": "P1", "status": "open", "sla_due": (now - timedelta(minutes=5)).isoformat()},
+            {"_id": "c2", "title": "Ransomware", "priority": "P1", "status": "in_progress", "acknowledged_at": "x",
+             "incident": {"declared_at": "y"}}],
+        settings.IDX_ACTIONS: [{"agent_id": "001", "target": "203.0.113.9", "expires_at": (now + timedelta(hours=2)).isoformat()}],
+    }
+    monkeypatch.setattr(store, "search", lambda es, index, query=None, **kw: rows.get(index, []))
+    pw = activate(env, "an", "analyst")
+    login(env, "an", pw)
+    s = env.get("/api/v1/handover").json()
+    assert s["alerts_open"] == 3 and s["alerts_by_priority"] == {"P1": 1, "P2": 1, "P3": 1}
+    assert [a["_id"] for a in s["alerts_top"]] == ["a1", "h1"] and [a["_id"] for a in s["awaiting_approval"]] == ["a1"]
+    assert s["cases_overdue"] == 1 and [c["_id"] for c in s["major_incidents"]] == ["c2"]
+    assert s["blocks_expiring"][0]["target"] == "203.0.113.9" and [a["_id"] for a in s["platform_incidents"]] == ["h1"]
+    r = env.post("/api/v1/handover", json={"note": "Ca đêm: theo dõi case c1", "to": "binh"}, headers=H).json()
+    saved = fake.docs[("siem-handovers", r["_id"])]
+    assert saved["by"] == "an" and saved["to"] == "binh" and saved["cases_overdue"] == 1
+
+
+def test_ai_assist_jobs_and_feedback(env):
+    from siem.manager import api
+    fake = IdxES()
+    api._state["es"] = fake
+    pw = activate(env, "an", "analyst")
+    login(env, "an", pw)
+    post = lambda **b: env.post("/api/v1/ai/assist", json=b, headers=H)              # noqa: E731
+    assert post(task="summary").status_code == 400                                   # tóm tắt cần alert / case
+    assert post(task="report", target_type="alert", target_id="a1").status_code == 400
+    assert post(task="query").status_code == 400
+    r = post(task="summary", target_type="case", target_id="c1").json()
+    job = fake.docs[(settings.IDX_AI_JOBS, r["_id"])]
+    assert job["kind"] == "triage" and job["status"] == "pending" and job["requested_by"] == "an" and "AI" in job["label"]
+    fb = lambda useful: env.post(f"/api/v1/ai/assist/{r['_id']}/feedback", json={"useful": useful}, headers=H)  # noqa: E731
+    assert fb(True).status_code == 409                                               # chưa xong
+    fake.docs[(settings.IDX_AI_JOBS, r["_id"])]["status"] = "done"
+    assert fb(False).json()["feedback"]["useful"] is False and fake.docs[(settings.IDX_AI_JOBS, r["_id"])]["feedback"]["by"] == "an"
+    assert env.get("/api/v1/ai/assist/khong-co").status_code == 404
