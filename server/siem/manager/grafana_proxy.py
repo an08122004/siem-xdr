@@ -27,7 +27,10 @@ from . import auth
 log = logging.getLogger("manager.grafana")
 logging.getLogger("httpx").setLevel(logging.WARNING)            # không ghi log mỗi request được chuyển tiếp
 
-ROLE_MAP = {"admin": "Admin", "lead": "Editor", "analyst": "Viewer"}
+# Editor cho mọi vai trò cần Explore / sửa dashboard (hunter săn mối đe dọa, detection sửa Thư viện rule, manager sửa
+# dashboard SOC KPI); analyst chỉ xem
+ROLE_MAP = {"admin": "Admin", "manager": "Editor", "lead": "Editor", "hunter": "Editor", "detection": "Editor",
+            "analyst": "Viewer"}
 PREFIX = "/grafana/"
 # header không chuyển tiếp (hop-by-hop / do proxy tự tính lại)
 _HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "trailers",

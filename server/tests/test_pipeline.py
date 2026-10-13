@@ -340,9 +340,9 @@ def test_case_playbook_selection_and_tasks():
 
 def test_every_rule_gets_a_specific_case_playbook():
     """Mỗi rule có quy trình đúng loại sự cố (không rơi vào PB-00 "Điều tra chung"); nhãn duyệt đều có trong bảng
-    phân quyền (api.APPROVAL_ROLES), mã playbook không trùng."""
+    phân quyền (api.APPROVAL_PERMISSIONS), mã playbook không trùng."""
     import yaml
-    from siem.manager.api import APPROVAL_ROLES
+    from siem.manager.api import APPROVAL_PERMISSIONS
     from siem.soar.cases import CasePlaybooks
     cp = CasePlaybooks(ROOT / "config" / "case_playbooks.yml")
     for r in load_rules(ROOT / "rules"):
@@ -352,7 +352,7 @@ def test_every_rule_gets_a_specific_case_playbook():
     assert len({p["id"] for p in pbs}) == len(pbs)
     tasks = [t for p in pbs for ph in p["phases"] for t in ph["tasks"]] + [t for c in data["common"] for t in c["tasks"]]
     labels = {t.get("approval") for t in tasks if isinstance(t, dict)} - {None}
-    assert labels <= set(APPROVAL_ROLES), labels - set(APPROVAL_ROLES)
+    assert labels <= set(APPROVAL_PERMISSIONS), labels - set(APPROVAL_PERMISSIONS)
 
 
 def test_case_playbook_detail_references_and_common_tasks():
@@ -448,3 +448,70 @@ def test_soar_case_gets_playbook():
     case = next(iter(es.docs["siem-cases"].values()))
     assert case["playbook"]["id"] == "PB-09" and case["priority"] == "P1" and case["sla_due"]
     assert len(case["tasks"]) >= 8 and case["status"] == "open"
+
+
+# ------------------------------------------------------------------ ưu tiên P1-P4, SLA, rule chạy bóng
+def test_priority_matrix_by_asset_criticality():
+    """Ưu tiên = severity × mức quan trọng tài sản; tài sản không có trong danh mục = medium (giữ cách tính cũ)."""
+    from siem.priority import DEFAULT_MATRIX, DEFAULT_SLA, Policy, higher, met
+    p = Policy.load(ROOT / "config" / "priority.yml")
+    assert p.matrix == DEFAULT_MATRIX and p.sla == DEFAULT_SLA                    # file cấu hình = bảng mặc định
+    assert [p.priority(s) for s in ("critical", "high", "medium", "low")] == ["P1", "P2", "P3", "P4"]
+    assert p.priority("high", "critical") == "P1" and p.priority("medium", "critical") == "P2"
+    assert p.priority("critical", "low") == "P2" and p.priority("low", "khong-ro") == "P4"
+    d = p.dues("2026-10-13T10:00:00+00:00", "P1")
+    assert d == {"ack_due": "2026-10-13T10:15:00+00:00", "contain_due": "2026-10-13T11:00:00+00:00"}
+    assert higher("P1", "P2") and higher("P2", None) and not higher("P3", "P1") and not higher(None, "P4")
+    assert met("2026-10-13T10:10:00+00:00", d["ack_due"]) is True
+    assert met("2026-10-13T10:20:00+00:00", d["ack_due"]) is False
+    with pytest.raises(ValueError):
+        Policy({"high": ("P1", "P2")})
+
+
+def test_alert_priority_detection_time_and_shadow_mode():
+    """Alert mang ưu tiên theo tài sản và thời gian phát hiện từ event ĐẦU TIÊN của chuỗi (KPI MTTD); rule `mode:
+    shadow` sinh alert gắn alert.shadow."""
+    from siem.detection.rules import Rule
+    rule = Rule.from_dict({"id": "T-001", "title": "thử", "severity": "high", "type": "threshold", "mode": "shadow",
+                           "condition": {"field": "event.outcome", "op": "eq", "value": "failure"},
+                           "threshold": {"count": 3, "window": 600, "group_by": ["source.ip"]}})
+    eng = RuleEngine([rule])
+    dets = []
+    for i in range(3):
+        dets += eng.process({"@timestamp": (T0 + timedelta(seconds=60 * i)).isoformat(), "event": {
+            "id": f"e{i}", "outcome": "failure"}, "source": {"ip": "203.0.113.5"},
+            "asset": {"criticality": "critical"}})
+    assert len(dets) == 1 and dets[0].first_time == T0.timestamp()
+    a = alert_builder.from_detection(dets[0])
+    assert a["priority"] == "P1" and a["first_event_time"] == T0.isoformat()
+    assert a["metrics"]["ttd_seconds"] > 0 and a["alert"]["shadow"] is True and a["rule"]["mode"] == "shadow"
+    with pytest.raises(ValueError, match="mode"):
+        Rule.from_dict({"id": "T-2", "title": "x", "mode": "test", "condition": {"field": "a", "op": "exists"}})
+
+
+def test_soar_ignores_shadow_alerts_and_case_inherits_priority():
+    from siem.soar.cases import CasePlaybooks
+    from siem.soar.engine import Notifier, Soar, load_playbooks
+    es = FakeES()
+    soar = Soar(es, load_playbooks(ROOT / "config" / "playbooks.yml"), whitelist=[], notifier=Notifier(),
+                case_playbooks=CasePlaybooks(ROOT / "config" / "case_playbooks.yml"))
+    base = {"rule": {"id": "WEB-001", "name": "SQLi", "tags": []}, "severity": "high", "severity_score": 3,
+            "source": {"ip": "203.0.113.5"}, "agent": {"id": "001"}, "message": "x"}
+    assert soar.handle({**base, "alert": {"id": "s1", "source": "rule", "shadow": True}}) == []
+    assert "siem-cases" not in es.docs and "siem-actions" not in es.docs
+    # máy chủ critical: alert high thành P1, case P1 với hạn xác nhận 15 phút / khoanh vùng 60 phút
+    soar.handle({**base, "alert": {"id": "a1", "source": "rule"}, "priority": "P1"})
+    case = next(iter(es.docs["siem-cases"].values()))
+    assert case["priority"] == "P1" and case["sla_due"] == case["sla"]["ack_due"]
+    gap = datetime.fromisoformat(case["sla"]["contain_due"]) - datetime.fromisoformat(case["created_at"])
+    assert gap == timedelta(minutes=60)
+
+
+def test_case_add_alert_script_escalates_priority():
+    """Painless gom alert vào case: alert ưu tiên cao hơn nâng ưu tiên case và kéo hạn SLA về sớm hơn (kiểm tra tham
+    số script dùng đúng tên SOAR truyền vào)."""
+    import re
+    from siem.soar.engine import CASE_ADD_ALERT
+    used = set(re.findall(r"params\.(\w+)", CASE_ADD_ALERT))
+    assert used == {"id", "max", "now", "prio", "ack_due", "contain_due"}
+    assert "compareTo(ctx._source.priority) < 0" in CASE_ADD_ALERT

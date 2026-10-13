@@ -10,7 +10,9 @@
   không gửi được header tự đặt vì manager không bật CORS).
 - Chống dò mật khẩu: sai CONSOLE_MAX_FAILURES lần trong 15 phút (theo tên đăng nhập hoặc theo IP) -> khóa 15 phút.
   Tên không tồn tại vẫn tốn đúng một lần tính scrypt -> không dò được tên qua thời gian phản hồi.
-- Vai trò: analyst (L1) < lead (Trưởng nhóm IR, được cô lập máy) < admin (quản lý tài khoản).
+- Vai trò theo cơ cấu SOC (SOC-OPERATIONS.md mục 1): analyst (Tier 1), lead (Tier 2 IR), hunter (Tier 3), detection
+  (Detection Engineer), manager (SOC Manager), admin. Quyền tính theo năng lực (PERMISSIONS), không theo thang:
+  Detection Engineer duyệt rule nhưng không cô lập máy; người xử lý cảnh báo không tự duyệt rule mình dùng.
 - Người thực hiện mọi thao tác lấy từ phiên (không tự khai) -> lịch sử case / duyệt AI đáng tin, và quy định
   "ngoại lệ AI cần 2 người KHÁC NHAU duyệt" có hiệu lực thật.
 - Đăng nhập / đăng xuất / đổi mật khẩu / quản lý tài khoản được gửi vào Kafka thành event của chính SIEM
@@ -38,8 +40,30 @@ from .. import bus, settings, store
 
 log = logging.getLogger("manager.auth")
 
-ROLES = {"analyst": 1, "lead": 2, "admin": 3}
-ROLE_PATTERN = r"^(analyst|lead|admin)$"
+# Vai trò -> quyền. Quyền:
+#   triage   xử lý alert / case, chặn IP, kill tiến trình, task cần Analyst L1 duyệt
+#   contain  cô lập / bỏ cô lập máy, duyệt bước SOAR cô lập, task cần Trưởng nhóm IR duyệt, nâng ưu tiên case
+#   hunt     ghi nhật ký threat hunting
+#   rules    duyệt / từ chối / gỡ đề xuất AI, bật chính thức rule đang chạy bóng, chạy phân tích AI
+#   declare  tuyên bố sự cố lớn (P1), ghi nhận đã thông báo cơ quan chức năng
+#   users    quản lý tài khoản
+# Trước 13/10/2026 chỉ có thang analyst < lead < admin, và analyst duyệt được cả rule AI do chính mình xử lý cảnh báo.
+PERMISSIONS: dict[str, frozenset[str]] = {
+    "analyst": frozenset({"triage"}),                                       # Tier 1, CTI analyst
+    "lead": frozenset({"triage", "contain"}),                               # Tier 2 Incident Responder
+    "hunter": frozenset({"triage", "contain", "hunt"}),                     # Tier 3 Threat Hunter / DFIR
+    "detection": frozenset({"rules", "hunt"}),                              # Detection Engineer
+    "manager": frozenset({"triage", "contain", "hunt", "declare"}),         # SOC Manager
+    "admin": frozenset({"triage", "contain", "hunt", "rules", "declare", "users"}),   # SOC Platform Engineer
+}
+ROLES = tuple(PERMISSIONS)
+ROLE_LABELS = {"analyst": "Analyst (Tier 1)", "lead": "Trưởng nhóm IR (Tier 2)", "hunter": "Threat Hunter (Tier 3)",
+               "detection": "Detection Engineer", "manager": "SOC Manager", "admin": "Quản trị nền tảng"}
+ROLE_PATTERN = "^(" + "|".join(ROLES) + ")$"
+
+
+def has(role: str, perm: str) -> bool:
+    return perm in PERMISSIONS.get(role, frozenset())
 USERNAME_PATTERN = r"^[a-z0-9][a-z0-9._-]{1,31}$"
 COOKIE = "siem_session"
 CSRF_HEADER, CSRF_VALUE = "x-requested-with", "siem-console"
@@ -334,10 +358,18 @@ def current_user(s: Session = Depends(session)) -> Session:
     return s
 
 
-def require_role(role: str) -> Callable[..., Session]:
+PERMISSION_TEXT = {"triage": "xử lý cảnh báo", "contain": "cô lập máy (Trưởng nhóm IR)", "hunt": "threat hunting",
+                   "rules": "duyệt rule (Detection Engineer)", "declare": "tuyên bố sự cố (SOC Manager)",
+                   "users": "quản lý tài khoản (admin)"}
+
+
+def require_perm(perm: str) -> Callable[..., Session]:
+    if perm not in PERMISSION_TEXT:
+        raise ValueError(f"quyền không tồn tại: {perm}")
+
     def dep(s: Session = Depends(current_user)) -> Session:
-        if ROLES.get(s.role, 0) < ROLES[role]:
-            raise HTTPException(403, f"cần quyền {role} trở lên")
+        if not has(s.role, perm):
+            raise HTTPException(403, f"cần quyền {PERMISSION_TEXT[perm]}; vai trò {s.role} không có quyền này")
         return s
     return dep
 
@@ -369,8 +401,15 @@ class UserUpdate(BaseModel):
 
 
 def _me(s: Session) -> dict[str, Any]:
-    return {"username": s.username, "role": s.role, "must_change": s.must_change,
+    return {"username": s.username, "role": s.role, "role_label": ROLE_LABELS.get(s.role, s.role),
+            "permissions": sorted(PERMISSIONS.get(s.role, ())), "must_change": s.must_change,
             "idle_minutes": settings.CONSOLE_IDLE_MINUTES, "session_hours": settings.CONSOLE_SESSION_HOURS}
+
+
+@router.get("/api/v1/auth/roles")
+def roles(s: Session = Depends(current_user)) -> list[dict[str, Any]]:
+    """Danh sách vai trò và quyền (trang Tài khoản hiển thị, chọn vai trò)."""
+    return [{"role": r, "label": ROLE_LABELS[r], "permissions": sorted(p)} for r, p in PERMISSIONS.items()]
 
 
 @router.post("/api/v1/auth/login")
@@ -456,12 +495,12 @@ def change_password(body: PasswordBody, request: Request, s: Session = Depends(s
 
 
 @router.get("/api/v1/users")
-def list_users(s: Session = Depends(require_role("admin"))) -> list[dict[str, Any]]:
+def list_users(s: Session = Depends(require_perm("users"))) -> list[dict[str, Any]]:
     return [public(u) for u in users.list()]
 
 
 @router.post("/api/v1/users")
-def create_user(body: NewUser, request: Request, s: Session = Depends(require_role("admin"))) -> dict[str, Any]:
+def create_user(body: NewUser, request: Request, s: Session = Depends(require_perm("users"))) -> dict[str, Any]:
     if (problem := password_problem(body.password, body.username)):
         raise HTTPException(400, problem)
     user = new_user(body.username, body.role, body.password, must_change=True)
@@ -473,7 +512,7 @@ def create_user(body: NewUser, request: Request, s: Session = Depends(require_ro
 
 @router.patch("/api/v1/users/{username}")
 def update_user(username: str, body: UserUpdate, request: Request,
-                s: Session = Depends(require_role("admin"))) -> dict[str, Any]:
+                s: Session = Depends(require_perm("users"))) -> dict[str, Any]:
     user = users.get(username)
     if not user:
         raise HTTPException(404, "không có tài khoản này")

@@ -20,12 +20,7 @@
 # `common`: task chung gắn vào MỌI playbook (đầu hoặc cuối giai đoạn) — các bước giống nhau ở mọi nguồn.
 # Tiêu đề luôn đặt trong dấu nháy kép; `detail` dùng khối `|-` (giữ xuống dòng).
 
-# Mức ưu tiên và thời hạn triage (phút) theo severity của alert
-priority:
-  critical: {level: P1, sla_minutes: 15}
-  high:     {level: P2, sla_minutes: 60}
-  medium:   {level: P3, sla_minutes: 480}
-  low:      {level: P4, sla_minutes: 1440}
+# Mức ưu tiên P1-P4 và SLA (xác nhận / khoanh vùng) của case: config/priority.yml (severity × mức quan trọng tài sản).
 
 common:
   - phase: Phát hiện & phân tích

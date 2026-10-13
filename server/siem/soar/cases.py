@@ -16,16 +16,17 @@ from __future__ import annotations
 import fnmatch
 import logging
 import re
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
 import yaml
 
+from .. import priority as prio
+from ..store import now_iso
+
 log = logging.getLogger("soar.cases")
 
 PHASES = ["Phát hiện & phân tích", "Ngăn chặn", "Loại bỏ", "Khôi phục", "Rút kinh nghiệm"]
-_DEFAULT_PRIORITY = {"critical": ("P1", 15), "high": ("P2", 60), "medium": ("P3", 480), "low": ("P4", 1440)}
 _TECHNIQUE = re.compile(r"^T\d{4}(\.\d{3})?$")
 
 
@@ -37,11 +38,10 @@ class CasePlaybooks:
     def __init__(self, path: Path | None):
         self.playbooks: list[dict[str, Any]] = []
         self.common: list[dict[str, Any]] = []
-        self.priority = dict(_DEFAULT_PRIORITY)
         if path and path.exists():
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            for sev, p in (data.get("priority") or {}).items():
-                self.priority[sev] = (p["level"], int(p["sla_minutes"]))
+            if data.get("priority"):
+                log.warning("case_playbooks.yml: khóa `priority` không còn dùng, ưu tiên / SLA nằm ở config/priority.yml")
             self.playbooks = data.get("playbooks") or []
             self.common = data.get("common") or []
             for c in self.common:
@@ -84,13 +84,17 @@ class CasePlaybooks:
                 return pb, "mặc định"
         return None, ""
 
-    def build(self, rule_id: str, severity: str, techniques: Iterable[str] = (), tags: Iterable[str] = ()
-              ) -> dict[str, Any]:
-        """Trả về các trường gắn vào case mới: playbook, tasks, priority, sla_due."""
-        level, minutes = self.priority.get(severity, _DEFAULT_PRIORITY["medium"])
+    def build(self, rule_id: str, severity: str, techniques: Iterable[str] = (), tags: Iterable[str] = (),
+              priority: str | None = None, created: str | None = None) -> dict[str, Any]:
+        """Trả về các trường gắn vào case mới: playbook, tasks, priority, hạn SLA. `priority`: ưu tiên của alert (đã
+        tính theo mức quan trọng tài sản, xem priority.py); không có thì tính theo severity."""
+        level = priority if priority in prio.PRIORITIES else prio.policy().priority(severity)
+        dues = prio.policy().dues(created or now_iso(), level)
         fields: dict[str, Any] = {
             "priority": level,
-            "sla_due": (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat(),
+            "sla": dues,
+            "sla_due": dues["ack_due"],          # hạn xác nhận (tên cũ, Grafana / console bản trước đọc trường này)
+            "contain_due": dues["contain_due"],
             "playbook": None,
             "tasks": [],
         }

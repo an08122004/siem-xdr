@@ -1,0 +1,21 @@
+# Mức ưu tiên và SLA (SOC-OPERATIONS.md mục 2). Đọc bởi analyzer (gắn priority cho alert), SOAR (case mới) và manager.
+# Đổi file này thì khởi động lại analyzer, soar, manager.
+#
+# Ưu tiên = severity của rule × mức quan trọng của tài sản (server/config/assets.yml). Tài sản không có trong danh mục
+# coi là medium. Cột theo thứ tự: low, medium, high, critical.
+matrix:
+  critical: [P2, P1, P1, P1]
+  high:     [P3, P2, P2, P1]
+  medium:   [P4, P3, P3, P2]
+  low:      [P4, P4, P4, P3]
+
+# SLA (phút) tính từ lúc alert / case được tạo:
+#   ack      xác nhận: analyst nhận xử lý (giao người, đổi trạng thái, đánh dấu task, ghi chú)
+#   contain  khoanh vùng xong (case chuyển "Đã ngăn chặn")
+#   update   chu kỳ cập nhật trạng thái cho lãnh đạo; trống = cập nhật khi đóng
+# "1 ngày làm việc" / "3 ngày làm việc" của kế hoạch tính theo lịch: 1440 / 4320 phút.
+sla:
+  P1: {ack: 15,  contain: 60,   update: 60}
+  P2: {ack: 30,  contain: 240,  update: 240}
+  P3: {ack: 120, contain: 1440, update: null}
+  P4: {ack: 480, contain: 4320, update: null}

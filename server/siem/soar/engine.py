@@ -27,6 +27,7 @@ from typing import Any
 
 import yaml
 
+from .. import priority as prio
 from .. import settings, store
 from .cases import CasePlaybooks
 from .wazuh import PROC_NAME
@@ -50,6 +51,8 @@ CASE_MAX_ALERT_IDS = 500
 # Thêm alert vào case NGAY TRÊN Elasticsearch (bản mới nhất của case), bỏ qua nếu đã có (Kafka giao lại alert sau khi
 # SOAR khởi động lại). Trước đây SOAR ghi đè alert_ids bằng danh sách đọc từ kết quả search, vốn trễ tới 1 giây so với
 # bản mới nhất: alert dồn dập cùng rule + thực thể ghi đè nhau và bị mất khỏi case.
+# Alert mới ưu tiên cao hơn case (vd P3 -> P1 vì máy chủ critical) -> nâng ưu tiên case, kéo hạn SLA chưa đạt về sớm hơn
+# (không bao giờ lùi hạn), ghi vào lịch sử case. So sánh chuỗi: "P1" < "P2", thời điểm ISO cùng định dạng UTC.
 CASE_ADD_ALERT = """
 if (ctx._source.alert_ids == null) { ctx._source.alert_ids = new ArrayList(); }
 if (ctx._source.alert_ids.contains(params.id)) { ctx.op = 'noop'; }
@@ -58,6 +61,20 @@ else {
   if (ctx._source.alert_ids.size() > params.max) { ctx._source.alert_ids.remove(0); }
   ctx._source.alert_count = (ctx._source.alert_count == null ? 0 : ctx._source.alert_count) + 1;
   ctx._source.updated_at = params.now;
+  if (params.prio != null && (ctx._source.priority == null || params.prio.compareTo(ctx._source.priority) < 0)) {
+    def old = ctx._source.priority;
+    ctx._source.priority = params.prio;
+    if (ctx._source.sla == null) { ctx._source.sla = new HashMap(); }
+    if (ctx._source.acknowledged_at == null && (ctx._source.sla_due == null || params.ack_due.compareTo(ctx._source.sla_due) < 0)) {
+      ctx._source.sla_due = params.ack_due; ctx._source.sla.ack_due = params.ack_due;
+    }
+    if (ctx._source.contained_at == null && (ctx._source.contain_due == null || params.contain_due.compareTo(ctx._source.contain_due) < 0)) {
+      ctx._source.contain_due = params.contain_due; ctx._source.sla.contain_due = params.contain_due;
+    }
+    if (ctx._source.notes == null) { ctx._source.notes = new ArrayList(); }
+    ctx._source.notes.add(['at': params.now, 'by': 'hệ thống',
+                           'text': 'nâng ưu tiên ' + old + ' -> ' + params.prio + ' do alert ' + params.id]);
+  }
 }
 """
 
@@ -119,6 +136,9 @@ class Soar:
 
     # ------------------------------------------------------------------
     def handle(self, alert: dict[str, Any]) -> list[dict[str, Any]]:
+        if get(alert, "alert.shadow"):
+            # rule chạy bóng: chỉ để đo số alert / tỉ lệ báo nhầm trước khi bật chính thức (detection/rules.py)
+            return []
         results: list[dict[str, Any]] = []
         done: set[str] = set()
         for pb in self.playbooks:
@@ -269,25 +289,30 @@ class Soar:
             {"term": {"rule_id": get(alert, "rule.id")}}, {"term": {"entity": entity}},
             {"terms": {"status": list(OPEN_CASE_STATUSES)}}, {"range": {"created_at": {"gte": since}}},
         ]}}, sort=[{"created_at": "desc"}])
-        alert_id = get(alert, "alert.id")
+        alert_id, now = get(alert, "alert.id"), store.now_iso()
+        level = alert.get("priority")
+        if level not in prio.PRIORITIES:                # alert tạo trước khi có priority.py
+            level = prio.policy().priority(alert.get("severity"), get(alert, "asset.criticality"))
         if existing:
             case = existing[0]
             self.es.update(index=settings.IDX_CASES, id=case["_id"], retry_on_conflict=5, script={
                 "lang": "painless", "source": CASE_ADD_ALERT,
-                "params": {"id": alert_id, "now": store.now_iso(), "max": CASE_MAX_ALERT_IDS}})
+                "params": {"id": alert_id, "now": now, "max": CASE_MAX_ALERT_IDS, "prio": level,
+                           **prio.policy().dues(now, level)}})
             return {"status": "updated", "case_id": case["_id"]}
         case_id = store.new_id()
         # kỹ thuật MITRE + tag: chọn playbook cho rule không biết trước mã (rule AI viết, cảnh báo ruleset Wazuh)
         techniques = get(alert, "rule.mitre.technique") or []
         self.es.index(index=settings.IDX_CASES, id=case_id, refresh="wait_for", document={
-            "@timestamp": store.now_iso(), "created_at": store.now_iso(), "updated_at": store.now_iso(),
+            "@timestamp": now, "created_at": now, "updated_at": now,
             "id": case_id, "title": f"{get(alert, 'rule.name')} — {entity}", "rule_id": get(alert, "rule.id"),
             "entity": entity, "severity": alert.get("severity"), "status": "open",
             "alert_ids": [alert_id], "alert_count": 1, "assignee": None,
             "host": get(alert, "host.name") or get(alert, "agent.id"), "notes": [],
+            "asset": {k: get(alert, f"asset.{k}") for k in ("id", "criticality") if get(alert, f"asset.{k}")} or None,
             **self.case_playbooks.build(str(get(alert, "rule.id", "")), alert.get("severity", "medium"),
                                         techniques=[techniques] if isinstance(techniques, str) else techniques,
-                                        tags=get(alert, "rule.tags") or []),
+                                        tags=get(alert, "rule.tags") or [], priority=level, created=now),
         })
         return {"status": "created", "case_id": case_id}
 

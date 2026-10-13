@@ -187,20 +187,48 @@ def test_roles_and_identity_from_session(env):
     r = env.post("/api/v1/actions", json={"agent_id": "001", "type": "block_ip", "params": {"ip": "1.2.3.4"}}, headers=H)
     assert r.status_code == 200 and r.json()["requested_by"] == "an"
     r = env.post("/api/v1/actions", json={"agent_id": "001", "type": "isolate_host", "params": {}}, headers=H)
-    assert r.status_code == 403 and "lead" in r.json()["detail"]
+    assert r.status_code == 403 and "contain" in r.json()["detail"]
     assert env.get("/api/v1/users").status_code == 403
     login(env, "lan", "Rieng-Tu-Zx9-3-2026")
     assert env.post("/api/v1/actions", json={"agent_id": "001", "type": "isolate_host", "params": {}},
                     headers=H).status_code == 200
 
 
+def test_new_soc_roles_have_capabilities_not_a_ladder(env):
+    """Vai trò theo cơ cấu SOC: quyền theo năng lực. Detection Engineer duyệt rule nhưng không xử lý cảnh báo / chặn IP;
+    hunter và manager cô lập được máy; chỉ admin quản lý tài khoản."""
+    from siem.manager import api
+    body = {"agent_id": "001", "type": "isolate_host", "params": {}}
+    block = {"agent_id": "001", "type": "block_ip", "params": {"ip": "1.2.3.4"}}
+    expect = {"hunter": (200, 200, 403), "manager": (200, 200, 403), "detection": (403, 403, 403)}
+    for role, (iso, blk, users) in expect.items():
+        pw = activate(env, f"u-{role}", role)
+        login(env, f"u-{role}", pw)
+        me = env.get("/api/v1/auth/me").json()
+        assert me["role"] == role and me["permissions"] == sorted(api.auth.PERMISSIONS[role]), role
+        assert env.post("/api/v1/actions", json=body, headers=H).status_code == iso, role
+        assert env.post("/api/v1/actions", json=block, headers=H).status_code == blk, role
+        assert env.get("/api/v1/users").status_code == users, role
+    roles = env.get("/api/v1/auth/roles").json()
+    assert [r["role"] for r in roles] == ["analyst", "lead", "hunter", "detection", "manager", "admin"]
+    assert env.post("/api/v1/users", json={"username": "x-y", "role": "god", "password": "Tam-Thoi-Qwe-2026"},
+                    headers=H).status_code in (403, 422)
+
+
 def test_ai_approval_identity_comes_from_session(env, monkeypatch):
+    """Duyệt rule AI là việc của Detection Engineer (quyền rules): analyst xử lý cảnh báo không tự duyệt rule mình dùng
+    (trước 13/10/2026 analyst duyệt được)."""
     from siem.manager import api
     monkeypatch.setattr(api.ai_deploy, "approve", lambda es, pid, analyst, *a, **kw: {"by": analyst})
+    monkeypatch.setattr(api, "refresh_catalog", lambda: None)
     pw = activate(env, "an", "analyst")
     login(env, "an", pw)
+    assert env.post("/api/v1/ai/proposals/p1/approve", json={}, headers=H).status_code == 403
+    assert env.post("/api/v1/ai/run", json={}, headers=H).status_code == 403
+    pw = activate(env, "de", "detection")
+    login(env, "de", pw)
     r = env.post("/api/v1/ai/proposals/p1/approve", json={"analyst": "nguoi-khac"}, headers=H)
-    assert r.status_code == 200 and r.json() == {"by": "an"}                     # tên tự khai bị bỏ qua
+    assert r.status_code == 200 and r.json() == {"by": "de"}                     # tên tự khai bị bỏ qua
 
 
 def test_user_admin_guards(env):
@@ -255,10 +283,14 @@ def test_case_workflow(env):
     api._state["es"] = fake
     r = env.patch("/api/v1/cases/c1", json={"analyst": "gia-mao", "task_index": 0, "task_done": True}, headers=H)
     assert r.status_code == 200 and fake.doc["tasks"][0]["done_by"] == "an"
-    # đóng case bắt buộc có kết luận
+    assert fake.doc["acknowledged_at"] and fake.doc["acknowledged_by"] == "an"           # thao tác đầu tiên = xác nhận
+    # đóng case bắt buộc có ghi chú và kết luận
     assert env.patch("/api/v1/cases/c1", json={"status": "closed"}, headers=H).status_code == 400
     r = env.patch("/api/v1/cases/c1", json={"status": "closed", "note": "đã xử lý"}, headers=H)
+    assert r.status_code == 400 and "kết luận" in r.json()["detail"]
+    r = env.patch("/api/v1/cases/c1", json={"status": "closed", "note": "đã xử lý", "verdict": "true_positive"}, headers=H)
     assert r.status_code == 200 and fake.doc["status"] == "closed" and fake.doc["closed_at"]
+    assert fake.doc["verdict"] == "true_positive" and fake.doc["contained_at"] == fake.doc["closed_at"]
     assert [n["by"] for n in fake.doc["notes"]] == ["an", "an", "an"]
     assert env.patch("/api/v1/cases/c1", json={"status": "bậy"}, headers=H).status_code == 422
     env.post("/api/v1/auth/logout")
@@ -278,8 +310,8 @@ def test_case_tasks_needing_approval_require_role(env, monkeypatch):
     tick = lambda i, done=True, note="": env.patch("/api/v1/cases/c1", headers=H, json={   # noqa: E731
         "task_index": i, "task_done": done, "note": note}).status_code
     login(env, "an", pw_an)
-    assert [t["approval_role"] for t in env.get("/api/v1/cases/c1").json()["tasks"]] == [
-        None, "analyst", "lead", "lead", "lead"]                                   # nhãn lạ -> cần lead
+    assert [t["approval_permission"] for t in env.get("/api/v1/cases/c1").json()["tasks"]] == [
+        None, "triage", "contain", "contain", "contain"]                           # nhãn lạ -> cần contain
     assert [tick(0), tick(1), tick(2), tick(4)] == [200, 200, 403, 403]
     login(env, "ld", pw_ld)
     assert tick(2) == 200 and es.docs["c1"]["tasks"][2]["done_by"] == "ld"
@@ -379,8 +411,109 @@ def test_case_search_by_title_words_and_active_alert_count(env, monkeypatch):
             return {"count": 0}
     api._state["es"] = CountES()
     env.get("/api/v1/stats")
-    # số trên menu "Cảnh báo" = danh sách "Đang mở" của console (gồm cả đã xác nhận)
-    assert (settings.IDX_ALERTS, {"terms": {"alert.status": ["open", "acknowledged", "in_progress"]}}) in counts
+    # số trên menu "Cảnh báo" = danh sách "Đang mở" của console (gồm cả đã xác nhận), không tính alert chạy bóng
+    assert (settings.IDX_ALERTS, {"bool": {"filter": [{"terms": {"alert.status": ["open", "acknowledged", "in_progress"]}}],
+                                           "must_not": [{"term": {"alert.shadow": True}}]}}) in counts
+
+
+def test_alert_close_requires_verdict_and_records_acknowledgement(env, monkeypatch):
+    """Đóng alert phải chọn kết luận (đo tỉ lệ báo nhầm); lần đổi trạng thái đầu tiên = xác nhận (KPI MTTA); kết luận
+    "báo nhầm" luôn đi cùng trạng thái false_positive (AI worker lấy nhãn theo trạng thái này)."""
+    from siem.manager import api
+    monkeypatch.setattr(store, "search", lambda *a, **kw: [])
+    docs = {k: {"@timestamp": "2026-10-13T10:00:00+00:00", "alert": {"id": k, "status": "open"}} for k in ("a1", "a2")}
+    docs["sh"] = {"@timestamp": "2026-10-13T10:00:00+00:00", "alert": {"id": "sh", "status": "open", "shadow": True}}
+    api._state["es"] = DocES(docs)
+    pw = activate(env, "an", "analyst")
+    login(env, "an", pw)
+    patch = lambda k, **b: env.patch(f"/api/v1/alerts/{k}", json=b, headers=H)          # noqa: E731
+    r = patch("a1", status="closed")
+    assert r.status_code == 400 and "kết luận" in r.json()["detail"]
+    assert patch("a1", status="closed", verdict="lung-tung").status_code == 422
+    r = patch("a1", status="acknowledged")
+    a1 = docs["a1"]["alert"]
+    assert r.status_code == 200 and a1["acknowledged_by"] == "an" and docs["a1"]["metrics"]["tta_seconds"] > 0
+    first_ack = a1["acknowledged_at"]
+    r = patch("a1", status="closed", verdict="benign_true_positive", note="pentest đã báo trước")
+    a1 = docs["a1"]["alert"]
+    assert r.json()["verdict"] == "benign_true_positive" and a1["status"] == "closed" and a1["closed_by"] == "an"
+    assert a1["acknowledged_at"] == first_ack                                       # xác nhận chỉ ghi lần đầu
+    assert "hoạt động hợp lệ" in a1["history"][-1]["text"]
+    r = patch("a2", status="closed", verdict="false_positive")                     # kết luận báo nhầm -> trạng thái
+    assert r.json()["status"] == "false_positive" and docs["a2"]["alert"]["verdict"] == "false_positive"
+    assert patch("a2", status="open").json()["verdict"] is None                     # mở lại -> bỏ kết luận
+    # alert của rule chạy bóng: Detection Engineer ghi kết luận được (đo báo nhầm trước khi bật), alert thường thì không
+    pw = activate(env, "de", "detection")
+    login(env, "de", pw)
+    assert patch("a1", status="open").status_code == 403
+    assert patch("sh", status="false_positive").status_code == 200
+
+
+def test_alert_list_hides_shadow_rules_and_filters_priority(env, monkeypatch):
+    searches = []
+    monkeypatch.setattr(store, "search", lambda es, index, query=None, **kw: searches.append(query) or [])
+    admin_login(env)
+    env.get("/api/v1/alerts?priority=P1,P2")
+    q = searches[-1]["bool"]
+    assert {"terms": {"priority": ["P1", "P2"]}} in q["filter"] and q["must_not"] == [{"term": {"alert.shadow": True}}]
+    env.get("/api/v1/alerts?shadow=only")
+    assert {"term": {"alert.shadow": True}} in searches[-1]["bool"]["filter"] and "must_not" not in searches[-1]["bool"]
+    env.get("/api/v1/alerts?shadow=all")
+    assert searches[-1] == {"bool": {"filter": []}}
+
+
+def test_case_priority_change_sla_and_closing_alerts(env, monkeypatch):
+    """Đổi ưu tiên cần quyền contain + lý do; nâng ưu tiên kéo hạn SLA về sớm hơn. Chuyển "Đã ngăn chặn" ghi mốc khoanh
+    vùng (KPI MTTC) và đạt / trễ SLA. Đóng case đóng luôn các alert còn mở trong case, cùng kết luận."""
+    from siem.manager import api
+    monkeypatch.setattr(store, "search", lambda *a, **kw: [])
+    created = store.now_iso()
+    case = {"id": "c1", "status": "open", "notes": [], "tasks": [], "priority": "P3", "created_at": created,
+            "alert_ids": ["a1", "a2"], **{k: v for k, v in api.prio.policy().dues(created, "P3").items()}}
+    case["sla_due"], case["contain_due"] = case.pop("ack_due"), case.pop("contain_due")
+    es = DocES({"c1": case})
+    queries = []
+    es.update_by_query = lambda **kw: queries.append(kw) or {"updated": 2}
+    api._state["es"] = es
+    pw_an, pw_ld = activate(env, "an", "analyst"), activate(env, "ld", "lead")
+    patch = lambda **b: env.patch("/api/v1/cases/c1", json=b, headers=H)          # noqa: E731
+    login(env, "an", pw_an)
+    assert patch(priority="P1", note="máy chủ thanh toán").status_code == 403          # analyst không đổi ưu tiên
+    login(env, "ld", pw_ld)
+    assert patch(priority="P1").status_code == 400                                     # phải ghi lý do
+    r = patch(priority="P1", note="máy chủ thanh toán bị ảnh hưởng")
+    assert r.status_code == 200 and case["priority"] == "P1"
+    assert case["sla"]["ack_due"] < api.prio.policy().dues(created, "P3")["ack_due"]   # hạn kéo về sớm hơn
+    assert case["acknowledged_by"] == "ld" and case["sla"]["ack_met"] is True and case["metrics"]["tta_seconds"] >= 0
+    r = patch(status="contained")
+    assert case["contained_at"] and case["sla"]["contain_met"] is True and "ttc_seconds" in case["metrics"]
+    r = patch(status="closed", verdict="duplicate", note="trùng case c0")
+    assert r.status_code == 200 and r.json()["alerts_closed"] == 2 and case["verdict"] == "duplicate"
+    q = queries[-1]
+    assert q["query"]["bool"]["filter"][0] == {"terms": {"alert.id": ["a1", "a2"]}}
+    assert q["script"]["params"]["status"] == "closed" and q["script"]["params"]["verdict"] == "duplicate"
+
+
+def test_major_incident_declaration_by_soc_manager(env, monkeypatch):
+    """Tuyên bố sự cố lớn: chỉ SOC Manager (quyền declare); case thành P1; lộ dữ liệu cá nhân -> hạn thông báo 72 giờ
+    (Luật BVDLCN 91/2025, Điều 23) tính từ lúc hệ thống phát hiện; ghi nhận đã thông báo."""
+    from siem.manager import api
+    case = {"id": "c1", "status": "in_progress", "notes": [], "tasks": [], "priority": "P2",
+            "created_at": "2026-10-13T08:00:00+00:00", "sla_due": "2026-10-13T08:30:00+00:00"}
+    api._state["es"] = DocES({"c1": case})
+    pw_ld, pw_mg = activate(env, "ld", "lead"), activate(env, "mg", "manager")
+    post = lambda **b: env.post("/api/v1/cases/c1/incident", json=b, headers=H)   # noqa: E731
+    login(env, "ld", pw_ld)
+    assert post(action="declare", note="ransomware lan 3 máy").status_code == 403
+    login(env, "mg", pw_mg)
+    assert post(action="notified", note="đã gửi A05").status_code == 409            # chưa tuyên bố
+    assert post(action="declare", note="").status_code == 400
+    r = post(action="declare", personal_data=True, note="ransomware lan 3 máy, có CSDL khách hàng")
+    assert r.status_code == 200 and case["priority"] == "P1" and case["incident"]["declared_by"] == "mg"
+    assert case["incident"]["notify_due"] == "2026-10-16T08:00:00+00:00"
+    assert post(action="declare", note="lần nữa").status_code == 409
+    assert post(action="notified", note="đã thông báo A05 lúc 10:00").status_code == 200
+    assert case["incident"]["notified_by"] == "mg" and "đã thông báo" in case["notes"][-1]["text"]
 
 
 def test_manual_actions_are_validated(env):

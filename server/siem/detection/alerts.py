@@ -1,11 +1,13 @@
 """Dựng alert document chuẩn từ kết quả rule engine / ML."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
+from .. import priority as prio
 from ..pipeline.normalize import Doc, get
 from ..store import new_id, now_iso
-from .rules import SEVERITY_SCORE, Detection
+from .rules import SEVERITY_SCORE, Detection, event_time
 
 # Các trường thực thể (entity) được sao chép từ event kích hoạt lên alert,
 # để SOAR/analyst biết "ai / máy nào / IP nào" mà không cần mở event gốc.
@@ -42,6 +44,17 @@ def _trigger(event: Doc) -> Doc:
     return {k: v for k, v in event.items() if k != "raw"}
 
 
+def _timing(alert: Doc, first: float | None) -> None:
+    """Ưu tiên P1-P4 (severity × mức quan trọng tài sản) và thời gian phát hiện: từ event ĐẦU TIÊN của chuỗi tới lúc
+    sinh alert (KPI MTTD). Đồng hồ máy gửi log lệch về tương lai thì tính 0."""
+    alert["priority"] = prio.policy().priority(alert["severity"], get(alert, "asset.criticality"))
+    if first is None:
+        return
+    ts = datetime.fromtimestamp(first, timezone.utc).isoformat()
+    alert["first_event_time"] = ts
+    alert["metrics"] = {"ttd_seconds": prio.seconds_between(ts, alert["@timestamp"])}
+
+
 def from_detection(d: Detection) -> Doc:
     r = d.rule
     alert: Doc = {
@@ -61,7 +74,12 @@ def from_detection(d: Detection) -> Doc:
         "event_time": d.event.get("@timestamp"),
         "trigger_event": _trigger(d.event),
     }
+    if r.mode == "shadow":
+        # chạy bóng: lưu để đo, SOAR bỏ qua, console ẩn khỏi danh sách mặc định (rules.py)
+        alert["alert"]["shadow"] = True
+        alert["rule"]["mode"] = "shadow"
     _copy_entities(d.event, alert)
+    _timing(alert, d.first_time if d.first_time is not None else event_time(d.event))
     alert["message"] = _message(alert)
     return alert
 
@@ -87,6 +105,7 @@ def from_anomaly(a: Any, severity: str, description: str, features: dict[str, An
     }
     _copy_entities(a.event, alert)
     alert.setdefault("source", {})["ip"] = a.ip
+    _timing(alert, event_time(a.event))
     alert["message"] = _message(alert)
     return alert
 
@@ -122,6 +141,7 @@ def from_wazuh(event: Doc, severity: str) -> Doc:
             for p in path.split(".")[:-1]:
                 cur = cur.setdefault(p, {})
             cur[path.split(".")[-1]] = v
+    _timing(alert, event_time(event))
     alert["message"] = _message(alert)
     return alert
 

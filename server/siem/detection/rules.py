@@ -10,6 +10,11 @@ Hỗ trợ 3 kiểu:
   type: sequence   -> chuỗi bước theo thứ tự trong khoảng `within` giây, cùng
                       group_by (vd: brute-force xong đăng nhập thành công)
 
+Chế độ (`mode`): `active` (mặc định) hoặc `shadow` — rule CHẠY BÓNG: vẫn sinh alert (gắn alert.shadow) để đo số alert
+và tỉ lệ báo nhầm, nhưng SOAR bỏ qua (không thông báo, không mở case, không phản ứng), console ẩn khỏi danh sách mặc
+định. Rule mới (kể cả rule AI vừa duyệt) chạy bóng tối thiểu 7 ngày rồi Detection Engineer mới bật chính thức
+(SOC-OPERATIONS.md mục 4).
+
 Ngoại lệ (exceptions): điều kiện LOẠI TRỪ gắn vào một rule — event khớp ngoại lệ
 thì rule bỏ qua. Dùng để giảm báo nhầm mà KHÔNG sửa điều kiện gốc của rule.
 Khai báo trong file riêng rules/exceptions/*.yml (mỗi mục có rule_id) hoặc
@@ -41,6 +46,7 @@ from ..pipeline.normalize import Doc, get
 log = logging.getLogger(__name__)
 
 SEVERITY_SCORE = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+RULE_MODES = ("active", "shadow")
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +163,8 @@ class Rule:
     suppress: int = 0
     exceptions: list["RuleException"] = field(default_factory=list)
     source_file: str = ""
+    mode: str = "active"            # active | shadow (chạy bóng, xem docstring module)
+    shadow_since: str | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Rule":
@@ -172,6 +180,8 @@ class Rule:
             count=int(thr.get("count", 1)), window=int(thr.get("window", 60)),
             distinct=thr.get("distinct"), within=int(seq.get("within", 300)),
             suppress=int(d.get("suppress", 0 if rtype == "match" else 300)),
+            mode=str(d.get("mode", "active")).lower(),
+            shadow_since=str(d["shadow_since"]) if d.get("shadow_since") else None,
         )
         for st in seq.get("steps") or []:
             r.steps.append((Condition(st["condition"]), int(st.get("count", 1))))
@@ -179,6 +189,8 @@ class Rule:
             r.exceptions.append(RuleException.from_dict({"id": f"{r.id}-inline-{i}", **ex, "rule_id": r.id}))
         if r.severity not in SEVERITY_SCORE:
             raise ValueError(f"severity không hợp lệ: {r.severity}")
+        if r.mode not in RULE_MODES:
+            raise ValueError(f"mode không hợp lệ: {r.mode} (active | shadow)")
         if rtype in ("match", "threshold") and r.condition is None:
             raise ValueError("thiếu condition")
         if rtype == "sequence" and len(r.steps) < 2:
@@ -308,6 +320,7 @@ class Detection:
     group: dict[str, Any]
     count: int
     related: list[str]
+    first_time: float | None = None     # thời điểm event ĐẦU TIÊN của chuỗi (threshold / sequence) -> MTTD
 
 
 class RuleEngine:
@@ -370,7 +383,7 @@ class RuleEngine:
         if rule.type == "match":
             if rule.suppress and self._is_suppressed(key, ts, rule):
                 return None
-            return Detection(rule, doc, group, 1, [eid])
+            return Detection(rule, doc, group, 1, [eid], ts)
 
         # threshold
         win = self._windows[key]
@@ -381,10 +394,11 @@ class RuleEngine:
         if n < rule.count:
             return None
         related = [e for _, _, e in win][-50:]
+        first = win[0][0]
         win.clear()
         if self._is_suppressed(key, ts, rule):
             return None
-        return Detection(rule, doc, group, n, related)
+        return Detection(rule, doc, group, n, related, first)
 
     def _sequence(self, rule: Rule, doc: Doc, ts: float, eid: str) -> Detection | None:
         grp = self._group(rule, doc)
@@ -415,7 +429,7 @@ class RuleEngine:
         self._seq.pop(key, None)
         if self._is_suppressed(key, ts, rule):
             return None
-        return Detection(rule, doc, dict(zip(rule.group_by, grp)), len(st["related"]), st["related"][-50:])
+        return Detection(rule, doc, dict(zip(rule.group_by, grp)), len(st["related"]), st["related"][-50:], st["start"])
 
     def _gc(self, now: float) -> None:
         """Dọn state cũ để bộ nhớ không phình vô hạn."""

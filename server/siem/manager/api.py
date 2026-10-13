@@ -4,13 +4,15 @@ Agent là Wazuh agent: enroll, gửi event và nhận lệnh phản ứng qua wa
 Danh sách agent do SOAR đồng bộ từ Wazuh API; lệnh tạo ở đây được SOAR gửi xuống agent (soar/wazuh.py).
 
 Đăng nhập bằng tài khoản riêng (manager/auth.py): POST /api/v1/auth/login -> cookie phiên. Người thực hiện mọi
-thao tác (case, lệnh, duyệt AI) lấy từ phiên, không tự khai.
+thao tác (case, lệnh, duyệt AI) lấy từ phiên, không tự khai. Quyền theo năng lực của vai trò (auth.PERMISSIONS):
   GET  /api/v1/agents | /alerts | /actions | /cases | /stats | /ai/...     mọi tài khoản
-  PATCH /api/v1/alerts/{id}, /cases/{id}; POST /api/v1/actions; duyệt AI   analyst trở lên
-  POST /api/v1/actions (isolate_host / unisolate_host)                     lead trở lên
-  POST /api/v1/alerts/{id}/soar/decline (từ chối bước SOAR chờ duyệt)      analyst trở lên (cô lập: lead)
+  PATCH /api/v1/alerts/{id}, /cases/{id}; POST /api/v1/actions             triage (alert chạy bóng: cả rules)
+  POST /api/v1/actions (isolate_host / unisolate_host), đổi ưu tiên case   contain
+  POST /api/v1/alerts/{id}/soar/decline (từ chối bước SOAR chờ duyệt)      triage (cô lập: contain)
   PATCH /api/v1/cases/{id} với task cần duyệt                              theo nhãn approval của task
-  /api/v1/users                                                            admin
+  POST /api/v1/cases/{id}/incident (tuyên bố sự cố lớn, đã thông báo)      declare
+  duyệt / từ chối / gỡ đề xuất AI, bật chính thức rule chạy bóng           rules
+  /api/v1/users                                                            users
   GET  /                                                                   SOC console (HTML)
 
 Chạy: uvicorn siem.manager.api:app --host 0.0.0.0 --port 8000
@@ -22,6 +24,7 @@ import ipaddress
 import logging
 import re
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -30,9 +33,10 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
+from .. import priority as prio
 from .. import rules_catalog, settings, store
 from . import auth, grafana_proxy
-from .auth import ROLES, Session, current_user, require_role
+from .auth import Session, current_user, has, require_perm
 
 log = logging.getLogger("manager")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -95,8 +99,10 @@ def es():
     return _state["es"]
 
 
-analyst = require_role("analyst")
-lead = require_role("lead")
+triage = require_perm("triage")
+contain = require_perm("contain")
+rules_perm = require_perm("rules")
+declare = require_perm("declare")
 
 
 class NewAction(BaseModel):
@@ -108,11 +114,29 @@ class NewAction(BaseModel):
 
 ALERT_STATUSES = ("open", "acknowledged", "in_progress", "closed", "false_positive")
 ACTIVE_ALERT_STATUSES = ALERT_STATUSES[:3]              # chưa đóng
+CLOSED_STATUSES = ("closed", "false_positive")
+# Kết luận bắt buộc khi đóng alert / case (đo tỉ lệ báo nhầm, SOC-OPERATIONS.md mục 3). "false_positive" luôn đi cùng
+# trạng thái false_positive (AI worker lấy nhãn báo nhầm theo trạng thái này, ai/dataset.py).
+VERDICTS = {"true_positive": "Đúng - độc hại", "benign_true_positive": "Đúng - hoạt động hợp lệ (pentest, quản trị)",
+            "false_positive": "Báo nhầm", "duplicate": "Trùng lặp"}
+VERDICT_PATTERN = "^(" + "|".join(VERDICTS) + ")$"
 
 
 class AlertUpdate(BaseModel):
     status: str = Field(pattern=r"^(open|acknowledged|in_progress|closed|false_positive)$")
     note: str = Field("", max_length=4000)
+    verdict: str | None = Field(None, pattern=VERDICT_PATTERN)
+
+
+def closing(status: str, verdict: str | None, what: str) -> tuple[str, str | None]:
+    """(trạng thái, kết luận) sau khi chuẩn hóa: đóng phải có kết luận; kết luận báo nhầm -> trạng thái false_positive."""
+    if status == "false_positive":
+        return status, "false_positive"
+    if status == "closed":
+        if not verdict:
+            raise HTTPException(400, f"đóng {what} phải chọn kết luận: " + ", ".join(VERDICTS.values()))
+        return ("false_positive" if verdict == "false_positive" else "closed"), verdict
+    return status, None
 
 
 SINCE = {"1h": "now-1h", "24h": "now-24h", "7d": "now-7d", "30d": "now-30d"}
@@ -143,20 +167,31 @@ def agents() -> list[dict[str, Any]]:
     return store.list_agents(es())
 
 
+NOT_SHADOW = {"term": {"alert.shadow": True}}         # dùng trong must_not: alert của rule chạy bóng
+
+
 @app.get("/api/v1/alerts", dependencies=[Depends(current_user)])
-def alerts(status: str | None = None, severity: str | None = None, q: str | None = None, since: str | None = None,
-           size: int = 100) -> list[dict[str, Any]]:
-    """Lọc: status / severity (nhiều giá trị cách nhau bằng dấu phẩy), q (từ khóa hoặc IP), since (1h|24h|7d|30d)."""
+def alerts(status: str | None = None, severity: str | None = None, priority: str | None = None, q: str | None = None,
+           since: str | None = None, shadow: str = "exclude", size: int = 100) -> list[dict[str, Any]]:
+    """Lọc: status / severity / priority (nhiều giá trị cách nhau bằng dấu phẩy), q (từ khóa hoặc IP), since
+    (1h|24h|7d|30d), shadow: exclude (mặc định, ẩn alert của rule chạy bóng) | only | all."""
     filters: list[dict] = []
     if st := _csv(status):
         filters.append({"terms": {"alert.status": st}})
     if sev := _csv(severity):
         filters.append({"terms": {"severity": sev}})
+    if pr := _csv(priority):
+        filters.append({"terms": {"priority": pr}})
     if since in SINCE:
         filters.append({"range": {"@timestamp": {"gte": SINCE[since]}}})
     if q and q.strip():
         filters.append(_text_query(q.strip()[:200], ["message.text", "rule.name", "rule.id"], ["source.ip"]))
-    return store.search(es(), settings.IDX_ALERTS, {"bool": {"filter": filters}}, size=min(max(size, 1), 1000))
+    if shadow == "only":
+        filters.append(NOT_SHADOW)
+    query: dict[str, Any] = {"bool": {"filter": filters}}
+    if shadow not in ("only", "all"):
+        query["bool"]["must_not"] = [NOT_SHADOW]
+    return store.search(es(), settings.IDX_ALERTS, query, size=min(max(size, 1), 1000))
 
 
 def _get(index: str, doc_id: str, what: str) -> dict[str, Any]:
@@ -179,21 +214,34 @@ def get_alert(alert_id: str) -> dict[str, Any]:
 
 
 @app.patch("/api/v1/alerts/{alert_id}")
-def update_alert(alert_id: str, body: AlertUpdate, s: Session = Depends(analyst)) -> dict[str, Any]:
-    """Đổi trạng thái alert; mọi lần đổi được ghi vào alert.history (ai, lúc nào, ghi chú)."""
+def update_alert(alert_id: str, body: AlertUpdate, s: Session = Depends(current_user)) -> dict[str, Any]:
+    """Đổi trạng thái alert; mọi lần đổi được ghi vào alert.history (ai, lúc nào, ghi chú). Đóng phải có kết luận.
+    Lần đầu analyst đổi trạng thái = xác nhận (acknowledged_at, metrics.tta_seconds cho KPI MTTA). Alert chạy bóng:
+    Detection Engineer (quyền rules) cũng ghi kết luận được, để đo tỉ lệ báo nhầm trước khi bật rule chính thức."""
     cur = _get(settings.IDX_ALERTS, alert_id, "alert")
     alert, now = cur["_source"], store.now_iso()
-    old = (alert.get("alert") or {}).get("status")
-    text = f"trạng thái: {old} -> {body.status}" + (f" — {body.note.strip()}" if body.note.strip() else "")
-    history = ((alert.get("alert") or {}).get("history") or []) + [{"at": now, "by": s.username, "text": text}]
+    meta = alert.get("alert") or {}
+    if not (has(s.role, "triage") or (meta.get("shadow") and has(s.role, "rules"))):
+        raise HTTPException(403, "cần quyền xử lý cảnh báo")
+    status, verdict = closing(body.status, body.verdict, "cảnh báo")
+    old = meta.get("status")
+    text = f"trạng thái: {old} -> {status}" + (f" ({VERDICTS[verdict]})" if verdict else "") + \
+        (f" — {body.note.strip()}" if body.note.strip() else "")
+    history = (meta.get("history") or []) + [{"at": now, "by": s.username, "text": text}]
+    change: dict[str, Any] = {"status": status, "note": body.note.strip(), "updated_at": now, "updated_by": s.username,
+                              "history": history[-100:], "verdict": verdict,
+                              "closed_at": now if status in CLOSED_STATUSES else None,
+                              "closed_by": s.username if status in CLOSED_STATUSES else None}
+    doc: dict[str, Any] = {"alert": change}
+    if not meta.get("acknowledged_at") and status != "open":
+        change.update(acknowledged_at=now, acknowledged_by=s.username)
+        doc["metrics"] = {"tta_seconds": prio.seconds_between(alert.get("@timestamp"), now)}
     try:
         es().update(index=settings.IDX_ALERTS, id=alert_id, refresh="wait_for",
-                    if_seq_no=cur["_seq_no"], if_primary_term=cur["_primary_term"],
-                    doc={"alert": {"status": body.status, "note": body.note.strip(), "updated_at": now,
-                                   "updated_by": s.username, "history": history[-100:]}})
+                    if_seq_no=cur["_seq_no"], if_primary_term=cur["_primary_term"], doc=doc)
     except ConflictError:
         raise HTTPException(409, "alert vừa được cập nhật (bởi SOAR hoặc người khác), hãy thử lại")
-    return {"ok": True, "status": body.status, "history": history[-100:]}
+    return {"ok": True, "status": status, "verdict": verdict, "history": history[-100:]}
 
 
 @app.get("/api/v1/actions", dependencies=[Depends(current_user)])
@@ -260,9 +308,9 @@ def decide_soar_step(alert_id: str, action: str, changes: dict[str, Any], note: 
 
 
 @app.post("/api/v1/actions")
-def create_action(body: NewAction, s: Session = Depends(analyst)) -> dict[str, Any]:
-    if body.type in ("isolate_host", "unisolate_host") and ROLES[s.role] < ROLES["lead"]:
-        raise HTTPException(403, "cô lập / bỏ cô lập máy cần quyền lead (Trưởng nhóm IR)")
+def create_action(body: NewAction, s: Session = Depends(triage)) -> dict[str, Any]:
+    if body.type in ("isolate_host", "unisolate_host") and not has(s.role, "contain"):
+        raise HTTPException(403, "cô lập / bỏ cô lập máy cần quyền contain (Trưởng nhóm IR)")
     if body.type not in store.ACTION_TYPES:
         raise HTTPException(400, f"loại lệnh không hỗ trợ: {body.type}")
     validate_action(body)
@@ -284,11 +332,11 @@ class SoarDecline(BaseModel):
 
 
 @app.post("/api/v1/alerts/{alert_id}/soar/decline")
-def decline_soar_step(alert_id: str, body: SoarDecline, s: Session = Depends(analyst)) -> dict[str, Any]:
+def decline_soar_step(alert_id: str, body: SoarDecline, s: Session = Depends(triage)) -> dict[str, Any]:
     """Không thực hiện bước SOAR đang chờ duyệt, ghi ai quyết định và vì sao. Cần cùng quyền với việc tự tạo lệnh đó
-    (cô lập máy: lead)."""
-    if body.action == "isolate_host" and ROLES[s.role] < ROLES["lead"]:
-        raise HTTPException(403, "quyết định cô lập máy cần quyền lead (Trưởng nhóm IR)")
+    (cô lập máy: contain)."""
+    if body.action == "isolate_host" and not has(s.role, "contain"):
+        raise HTTPException(403, "quyết định cô lập máy cần quyền contain (Trưởng nhóm IR)")
     reason = body.reason.strip()
     if len(reason) < 3:
         raise HTTPException(400, "từ chối phải ghi lý do")
@@ -316,22 +364,29 @@ def cases(status: str | None = None, q: str | None = None, alert_id: str | None 
 
 
 CASE_STATUSES = r"^(open|in_progress|contained|closed|false_positive)$"
-# Ai được đánh dấu task cần duyệt (nhãn `approval` trong config/case_playbooks.yml, bảng phân quyền ở README mục 4).
-# Nhãn lạ (vd playbook tự viết) cần lead. Chủ hệ thống không có tài khoản trên console: ai đồng ý thì ghi vào note.
-APPROVAL_ROLES = {"Analyst L1": "analyst", "Trưởng nhóm IR": "lead", "Trưởng nhóm IR + chủ hệ thống": "lead"}
+# Ai được đánh dấu task cần duyệt (nhãn `approval` trong config/case_playbooks.yml, bảng phân quyền ở README mục 4) ->
+# quyền cần có (auth.PERMISSIONS). Nhãn lạ (vd playbook tự viết) cần contain. Chủ hệ thống không có tài khoản trên
+# console: ai đồng ý thì ghi vào note.
+APPROVAL_PERMISSIONS = {"Analyst L1": "triage", "Trưởng nhóm IR": "contain", "Trưởng nhóm IR + chủ hệ thống": "contain"}
 OWNER_APPROVAL = "chủ hệ thống"
+# Luật Bảo vệ dữ liệu cá nhân 91/2025/QH15, Điều 23: thông báo vi phạm chậm nhất 72 giờ từ khi phát hiện. Tính từ lúc
+# hệ thống phát hiện (tạo case), không từ lúc tuyên bố sự cố: cách tính thận trọng (SOC-OPERATIONS.md mục 6).
+BREACH_NOTIFY_HOURS = 72
 
 
-def approval_role(task: dict[str, Any]) -> str | None:
-    return APPROVAL_ROLES.get(task["approval"], "lead") if task.get("approval") else None
+def approval_permission(task: dict[str, Any]) -> str | None:
+    return APPROVAL_PERMISSIONS.get(task["approval"], "contain") if task.get("approval") else None
 
 
 class CaseUpdate(BaseModel):
     status: str | None = Field(None, pattern=CASE_STATUSES)
+    verdict: str | None = Field(None, pattern=VERDICT_PATTERN)
+    priority: str | None = Field(None, pattern=r"^P[1-4]$")
     assignee: str | None = Field(None, max_length=64)
     note: str = Field("", max_length=4000)
     task_index: int | None = Field(None, ge=0)
     task_done: bool | None = None
+    close_alerts: bool = True           # đóng case -> đóng luôn các alert còn mở trong case, cùng kết luận
 
 
 @app.get("/api/v1/cases/{case_id}", dependencies=[Depends(current_user)])
@@ -344,25 +399,94 @@ def get_case(case_id: str) -> dict[str, Any]:
                        "status": (a.get("alert") or {}).get("status")}
                       for a in store.search(es(), settings.IDX_ALERTS, {"terms": {"alert.id": ids}}, size=50)] if ids else []
     for t in case.get("tasks") or []:
-        t["approval_role"] = approval_role(t)          # console khóa ô đánh dấu nếu tài khoản không đủ quyền
+        t["approval_permission"] = approval_permission(t)   # console khóa ô đánh dấu nếu tài khoản không đủ quyền
     return case
 
 
+def _sla(case: dict[str, Any]) -> dict[str, Any]:
+    """Hạn SLA của case; case tạo trước 13/10/2026 chỉ có sla_due (hạn triage)."""
+    sla = dict(case.get("sla") or {})
+    sla.setdefault("ack_due", case.get("sla_due"))
+    sla.setdefault("contain_due", case.get("contain_due"))
+    return sla
+
+
+def _reprioritize(case: dict[str, Any], level: str, now: str) -> dict[str, Any]:
+    """Đổi ưu tiên: nâng -> hạn chưa đạt kéo về sớm hơn (now + SLA mới, không lùi hạn); hạ -> hạn tính lại từ lúc tạo."""
+    sla, changes = _sla(case), {"priority": level}
+    if prio.higher(level, case.get("priority")):
+        new = prio.policy().dues(now, level)
+        for key, done in (("ack_due", "acknowledged_at"), ("contain_due", "contained_at")):
+            if not case.get(done) and (not sla.get(key) or new[key] < sla[key]):
+                sla[key] = new[key]
+    else:
+        sla.update(prio.policy().dues(case.get("created_at") or now, level))
+    changes.update(sla=sla, sla_due=sla["ack_due"], contain_due=sla["contain_due"])
+    return changes
+
+
+# Đóng case -> đóng các alert còn mở của case (cùng kết luận), ghi vào lịch sử từng alert. Trước đây đóng case không
+# đụng tới alert: 76 alert thử nghiệm còn "mở" dù case đã xử lý xong, KPI báo nhầm / MTTA không đo được.
+CLOSE_CASE_ALERTS = """
+def a = ctx._source.alert;
+if (a != null && params.active.contains(a.status)) {
+  a.status = params.status; a.verdict = params.verdict; a.closed_at = params.now; a.closed_by = params.by;
+  a.updated_at = params.now; a.updated_by = params.by;
+  if (a.acknowledged_at == null) { a.acknowledged_at = params.now; a.acknowledged_by = params.by; }
+  if (a.history == null) { a.history = new ArrayList(); }
+  a.history.add(['at': params.now, 'by': params.by, 'text': params.text]);
+} else { ctx.op = 'noop'; }
+"""
+
+
+def close_case_alerts(case: dict[str, Any], case_id: str, status: str, verdict: str, who: str, now: str) -> int:
+    ids = (case.get("alert_ids") or [])[-500:]
+    if not ids:
+        return 0
+    try:
+        r = es().update_by_query(index=settings.IDX_ALERTS, conflicts="proceed", refresh=True, query={"bool": {"filter": [
+            {"terms": {"alert.id": ids}}, {"terms": {"alert.status": list(ACTIVE_ALERT_STATUSES)}}]}},
+            script={"lang": "painless", "source": CLOSE_CASE_ALERTS, "params": {
+                "active": list(ACTIVE_ALERT_STATUSES), "status": status, "verdict": verdict, "by": who, "now": now,
+                "text": f"đóng theo case {case_id}: {VERDICTS[verdict]}"}})
+        return int(r.get("updated", 0))
+    except Exception as e:  # noqa: BLE001 - case đã đóng; alert còn mở thì analyst đóng tay, không được làm hỏng thao tác
+        log.warning("không đóng được alert của case %s: %s", case_id, e)
+        return -1
+
+
 @app.patch("/api/v1/cases/{case_id}")
-def update_case(case_id: str, body: CaseUpdate, s: Session = Depends(analyst)) -> dict[str, Any]:
-    """Cập nhật case: trạng thái, người xử lý, đánh dấu task playbook, ghi chú.
-    Mọi thay đổi được ghi vào `notes` (lịch sử) kèm tài khoản thực hiện và thời điểm."""
+def update_case(case_id: str, body: CaseUpdate, s: Session = Depends(triage)) -> dict[str, Any]:
+    """Cập nhật case: trạng thái (đóng phải có kết luận), ưu tiên, người xử lý, đánh dấu task playbook, ghi chú.
+    Mọi thay đổi được ghi vào `notes` (lịch sử) kèm tài khoản thực hiện và thời điểm. Thao tác đầu tiên của người =
+    xác nhận (acknowledged_at, KPI MTTA, SLA xác nhận); chuyển "Đã ngăn chặn" = khoanh vùng xong (KPI MTTC)."""
     cur = _get(settings.IDX_CASES, case_id, "case")
     case, now, who = cur["_source"], store.now_iso(), s.username
     changes: dict[str, Any] = {"updated_at": now}
     history: list[str] = []
+    closed_as: tuple[str, str] | None = None
     if body.status and body.status != case.get("status"):
-        if body.status in ("closed", "false_positive") and not body.note.strip():
+        status, verdict = closing(body.status, body.verdict, "case")
+        if status in CLOSED_STATUSES and not body.note.strip():
             raise HTTPException(400, "đóng case phải ghi lý do / kết luận vào note")
-        changes["status"] = body.status
-        if body.status in ("closed", "false_positive"):
-            changes["closed_at"] = now
-        history.append(f"trạng thái: {case.get('status')} -> {body.status}")
+        changes["status"] = status
+        if status == "contained" and not case.get("contained_at"):
+            changes["contained_at"] = now
+        if status in CLOSED_STATUSES:
+            changes.update(closed_at=now, closed_by=who, verdict=verdict)
+            if verdict in ("true_positive", "benign_true_positive") and not case.get("contained_at"):
+                changes["contained_at"] = now            # sự cố thật đã xử lý xong thì cũng đã khoanh vùng
+            closed_as = (status, verdict)
+        elif case.get("status") in CLOSED_STATUSES:     # mở lại case đã đóng
+            changes.update(closed_at=None, closed_by=None, verdict=None)
+        history.append(f"trạng thái: {case.get('status')} -> {status}" + (f" ({VERDICTS[verdict]})" if verdict else ""))
+    if body.priority and body.priority != case.get("priority"):
+        if not has(s.role, "contain"):
+            raise HTTPException(403, "đổi ưu tiên case cần quyền contain (Trưởng nhóm IR)")
+        if not body.note.strip():
+            raise HTTPException(400, "đổi ưu tiên phải ghi lý do vào note")
+        changes.update(_reprioritize(case, body.priority, now))
+        history.append(f"ưu tiên: {case.get('priority')} -> {body.priority}")
     if body.assignee is not None and body.assignee != case.get("assignee"):
         changes["assignee"] = body.assignee or None
         history.append(f"giao cho: {body.assignee or '(bỏ giao)'}")
@@ -373,9 +497,9 @@ def update_case(case_id: str, body: CaseUpdate, s: Session = Depends(analyst)) -
         t = tasks[body.task_index]
         # task cần duyệt: chỉ người có thẩm quyền được đánh dấu / bỏ đánh dấu (trước đây analyst L1 tick được cả task
         # "cô lập máy, cần Trưởng nhóm IR duyệt": nhãn chỉ để hiển thị)
-        need = approval_role(t)
-        if need and ROLES[s.role] < ROLES[need]:
-            raise HTTPException(403, f"task này cần {t['approval']} duyệt (quyền {need} trở lên)")
+        need = approval_permission(t)
+        if need and not has(s.role, need):
+            raise HTTPException(403, f"task này cần {t['approval']} duyệt (quyền {need})")
         if body.task_done and need and OWNER_APPROVAL in t["approval"] and not body.note.strip():
             raise HTTPException(400, "task cần chủ hệ thống đồng ý: ghi vào note ai đã đồng ý và lúc nào")
         t.update(done=body.task_done, done_by=who if body.task_done else None,
@@ -387,6 +511,7 @@ def update_case(case_id: str, body: CaseUpdate, s: Session = Depends(analyst)) -
         history.append(f"ghi chú: {body.note.strip()}")
     if not history:
         return case
+    _timings(case, changes, now, who)
     changes["notes"] = (case.get("notes") or []) + [{"at": now, "by": who, "text": h} for h in history]
     try:
         es().update(index=settings.IDX_CASES, id=case_id, doc=changes, refresh="wait_for",
@@ -394,6 +519,72 @@ def update_case(case_id: str, body: CaseUpdate, s: Session = Depends(analyst)) -
     except Exception:  # noqa: BLE001 - người khác vừa sửa case
         raise HTTPException(409, "case vừa được người khác cập nhật, hãy tải lại")
     log.info("case %s cập nhật bởi %s: %s", case_id, who, "; ".join(history))
+    out = case | changes
+    if closed_as and body.close_alerts:
+        out["alerts_closed"] = close_case_alerts(case, case_id, *closed_as, who, now)
+    return out
+
+
+def _timings(case: dict[str, Any], changes: dict[str, Any], now: str, who: str) -> None:
+    """Mốc thời gian và SLA cho KPI (MTTA, MTTC, thời gian xử lý, tỉ lệ đạt SLA)."""
+    merged = case | changes
+    sla = dict(merged.get("sla") or _sla(case))
+    metrics = dict(case.get("metrics") or {})
+    if not case.get("acknowledged_at"):
+        changes.update(acknowledged_at=now, acknowledged_by=who)
+        metrics["tta_seconds"] = prio.seconds_between(case.get("created_at"), now)
+        sla["ack_met"] = prio.met(now, sla.get("ack_due"))
+    if changes.get("contained_at") and not case.get("contained_at"):
+        metrics["ttc_seconds"] = prio.seconds_between(case.get("created_at"), changes["contained_at"])
+        sla["contain_met"] = prio.met(changes["contained_at"], sla.get("contain_due"))
+    if changes.get("closed_at"):
+        metrics["ttr_seconds"] = prio.seconds_between(case.get("created_at"), changes["closed_at"])
+    elif "closed_at" in changes:                        # mở lại
+        metrics.pop("ttr_seconds", None)
+    changes.update(metrics=metrics, sla=sla)
+
+
+class IncidentAction(BaseModel):
+    action: str = Field(pattern=r"^(declare|notified)$")
+    personal_data: bool = False
+    note: str = Field("", max_length=4000)
+
+
+@app.post("/api/v1/cases/{case_id}/incident")
+def case_incident(case_id: str, body: IncidentAction, s: Session = Depends(declare)) -> dict[str, Any]:
+    """SOC Manager tuyên bố sự cố lớn (case thành P1, bắt đầu đếm hạn thông báo nếu lộ dữ liệu cá nhân) hoặc ghi nhận
+    đã thông báo cơ quan chức năng / người bị ảnh hưởng."""
+    cur = _get(settings.IDX_CASES, case_id, "case")
+    case, now = cur["_source"], store.now_iso()
+    note = body.note.strip()
+    if len(note) < 3:
+        raise HTTPException(400, "ghi rõ căn cứ tuyên bố / đã thông báo cho ai, lúc nào")
+    inc = dict(case.get("incident") or {})
+    if body.action == "declare":
+        if inc.get("declared_at"):
+            raise HTTPException(409, "case đã được tuyên bố là sự cố lớn")
+        inc.update(declared_at=now, declared_by=s.username, personal_data=body.personal_data, note=note)
+        if body.personal_data:
+            start = case.get("created_at") or now
+            inc["notify_due"] = (datetime.fromisoformat(start) + timedelta(hours=BREACH_NOTIFY_HOURS)).isoformat()
+        changes: dict[str, Any] = {"incident": inc, "updated_at": now}
+        if case.get("priority") != "P1":
+            changes.update(_reprioritize(case, "P1", now))
+        text = "tuyên bố sự cố lớn" + (" (có dữ liệu cá nhân, hạn thông báo 72 giờ)" if body.personal_data else "") + \
+            f": {note}"
+    else:
+        if not inc.get("declared_at"):
+            raise HTTPException(409, "case chưa được tuyên bố là sự cố lớn")
+        inc.update(notified_at=now, notified_by=s.username, notified_note=note)
+        changes = {"incident": inc, "updated_at": now}
+        text = f"đã thông báo: {note}"
+    changes["notes"] = (case.get("notes") or []) + [{"at": now, "by": s.username, "text": text}]
+    try:
+        es().update(index=settings.IDX_CASES, id=case_id, doc=changes, refresh="wait_for",
+                    if_seq_no=cur["_seq_no"], if_primary_term=cur["_primary_term"])
+    except Exception:  # noqa: BLE001
+        raise HTTPException(409, "case vừa được người khác cập nhật, hãy tải lại")
+    log.warning("case %s: %s (%s)", case_id, text, s.username)
     return case | changes
 
 
@@ -406,15 +597,20 @@ def stats() -> dict[str, Any]:
             return 0
     last24 = {"range": {"@timestamp": {"gte": "now-24h"}}}
     ag = store.list_agents(es())
+    open_cases = {"terms": {"status": ["open", "in_progress", "contained"]}}
     return {
         "events_24h": count(f"{settings.IDX_EVENTS}-*", last24),
-        "alerts_24h": count(settings.IDX_ALERTS, last24),
+        "alerts_24h": count(settings.IDX_ALERTS, {"bool": {"filter": [last24], "must_not": [NOT_SHADOW]}}),
         # cùng tập trạng thái với mục "Đang mở" của console (trước đây thiếu acknowledged: số trên menu nhỏ hơn danh sách)
-        "alerts_open": count(settings.IDX_ALERTS, {"terms": {"alert.status": list(ACTIVE_ALERT_STATUSES)}}),
+        "alerts_open": count(settings.IDX_ALERTS, {"bool": {"filter": [
+            {"terms": {"alert.status": list(ACTIVE_ALERT_STATUSES)}}], "must_not": [NOT_SHADOW]}}),
         "agents_total": len(ag),
         "agents_online": sum(a["status"] == "online" for a in ag),
         "actions_pending": count(settings.IDX_ACTIONS, {"terms": {"status": ["pending", "sent"]}}),
-        "cases_open": count(settings.IDX_CASES, {"terms": {"status": ["open", "in_progress", "contained"]}}),
+        "cases_open": count(settings.IDX_CASES, open_cases),
+        # chưa ai nhận mà đã quá hạn xác nhận (SLA của mức ưu tiên)
+        "cases_overdue": count(settings.IDX_CASES, {"bool": {"filter": [
+            open_cases, {"range": {"sla_due": {"lt": "now"}}}], "must_not": [{"exists": {"field": "acknowledged_at"}}]}}),
         "ai_pending": count(settings.IDX_AI_PROPOSALS, {"term": {"status": "pending"}}),
     }
 
@@ -487,27 +683,28 @@ def ai_proposals(status: str | None = None, size: int = 100) -> list[dict[str, A
 
 
 @app.post("/api/v1/ai/proposals/{pid}/approve")
-def ai_approve(pid: str, s: Session = Depends(analyst)) -> dict[str, Any]:
-    # ngoại lệ cần 2 người KHÁC NHAU duyệt: danh tính lấy từ phiên nên không giả được bằng cách đổi tên
+def ai_approve(pid: str, s: Session = Depends(rules_perm)) -> dict[str, Any]:
+    # Detection Engineer duyệt (quyền rules): người xử lý cảnh báo không tự duyệt rule mình dùng. Ngoại lệ cần 2 người
+    # KHÁC NHAU duyệt: danh tính lấy từ phiên nên không giả được bằng cách đổi tên
     return _ai(ai_deploy.approve, es(), pid, s.username, settings.RULES_DIR, now=store.now_iso())
 
 
 @app.post("/api/v1/ai/proposals/{pid}/reject")
-def ai_reject(pid: str, body: AIDecision, s: Session = Depends(analyst)) -> dict[str, Any]:
+def ai_reject(pid: str, body: AIDecision, s: Session = Depends(rules_perm)) -> dict[str, Any]:
     if len(body.reason.strip()) < 3:
         raise HTTPException(400, "từ chối phải ghi lý do (AI dùng lý do này để không lặp lại lỗi)")
     return _ai(ai_deploy.reject, es(), pid, s.username, body.reason.strip(), now=store.now_iso())
 
 
 @app.post("/api/v1/ai/proposals/{pid}/rollback")
-def ai_rollback(pid: str, body: AIDecision, s: Session = Depends(analyst)) -> dict[str, Any]:
+def ai_rollback(pid: str, body: AIDecision, s: Session = Depends(rules_perm)) -> dict[str, Any]:
     if len(body.reason.strip()) < 3:
         raise HTTPException(400, "gỡ phải ghi lý do")
     return _ai(ai_deploy.rollback, es(), pid, s.username, body.reason.strip(), settings.RULES_DIR, now=store.now_iso())
 
 
 @app.post("/api/v1/ai/run")
-def ai_run(s: Session = Depends(analyst)) -> dict[str, Any]:
+def ai_run(s: Session = Depends(rules_perm)) -> dict[str, Any]:
     job = {"kind": "job", "status": "pending", "requested_by": s.username, "created_at": store.now_iso()}
     r = es().index(index=settings.IDX_AI_JOBS, document=job, refresh="wait_for")
     return job | {"id": r["_id"]}

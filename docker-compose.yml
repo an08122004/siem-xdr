@@ -209,6 +209,7 @@ services:
       - ./server/rules:/app/rules:ro
       - ./server/rules/ai:/app/rules/ai
       - ./server/rules/exceptions:/app/rules/exceptions
+      - ./server/config:/app/config:ro                # priority.yml (ưu tiên / SLA), threat_profile.yml (độ phủ ATT&CK)
       - ./datasets/processed:/datasets:ro
 
   # Syslog collector: Vector (Rust) thay cho bản Python cũ (siem/collector/syslog_server.py, giữ lại để đối chiếu).
