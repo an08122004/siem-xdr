@@ -674,12 +674,49 @@ def _ai(fn, *args, **kw):
     return res
 
 
+def _rule_modes() -> dict[str, Any]:
+    from ..detection.rules import load_rules
+    try:
+        return {r.id: r for r in load_rules(settings.RULES_DIR)}
+    except Exception as e:  # noqa: BLE001 - thư mục rule lỗi: danh sách đề xuất vẫn phải hiện
+        log.warning("không đọc được rule: %s", e)
+        return {}
+
+
 @app.get("/api/v1/ai/proposals", dependencies=[Depends(current_user)])
 def ai_proposals(status: str | None = None, size: int = 100) -> list[dict[str, Any]]:
     q = {"bool": {"filter": [{"term": {"status": status}}]}} if status else None
     rows = store.search(es(), settings.IDX_AI_PROPOSALS, q, size=min(size, 500), sort=[{"created_at": "desc"}])
-    # nhãn để mở phần "So sánh với rule hiện có" của dashboard Thư viện rule đúng đề xuất này
-    return [r | {"catalog_pick": rules_catalog.pick(r | {"id": r.get("id") or r["_id"]})} for r in rows]
+    modes = _rule_modes() if any(r.get("status") == "approved" and r.get("kind") == "new_rule" for r in rows) else {}
+    out = []
+    for r in rows:
+        # nhãn để mở phần "So sánh với rule hiện có" của dashboard Thư viện rule đúng đề xuất này
+        r = r | {"catalog_pick": rules_catalog.pick(r | {"id": r.get("id") or r["_id"]})}
+        rule = modes.get(str((r.get("proposal") or {}).get("id"))) if r.get("status") == "approved" else None
+        if rule is not None:
+            r["rule_mode"] = rule.mode
+            if rule.mode == "shadow":
+                st = ai_deploy.shadow_stats(es(), rule.id, rule.shadow_since)
+                r["shadow"] = st | {"problems": ai_deploy.promotion_problems(st)}
+        out.append(r)
+    return out
+
+
+@app.get("/api/v1/rules/{rule_id}/shadow", dependencies=[Depends(current_user)])
+def rule_shadow(rule_id: str) -> dict[str, Any]:
+    """Số liệu chạy bóng của một rule và các tiêu chí còn thiếu để bật chính thức."""
+    rule = _rule_modes().get(rule_id)
+    if not rule:
+        raise HTTPException(404, "không có rule này")
+    st = ai_deploy.shadow_stats(es(), rule.id, rule.shadow_since) if rule.mode == "shadow" else None
+    return {"rule_id": rule.id, "mode": rule.mode, "stats": st,
+            "problems": ai_deploy.promotion_problems(st) if st else []}
+
+
+@app.post("/api/v1/rules/{rule_id}/promote")
+def rule_promote(rule_id: str, s: Session = Depends(rules_perm)) -> dict[str, Any]:
+    """Bật chính thức rule AI đang chạy bóng (Detection Engineer). Rule viết tay đổi `mode` qua kho rule + CI."""
+    return _ai(ai_deploy.promote, es(), rule_id, s.username, settings.RULES_DIR, now=store.now_iso())
 
 
 @app.post("/api/v1/ai/proposals/{pid}/approve")

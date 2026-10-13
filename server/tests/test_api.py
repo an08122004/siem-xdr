@@ -678,3 +678,16 @@ def test_grafana_folder_permissions_set_once():
         assert len(posts) == 1                                                       # đã có quyền -> không ghi đè
     finally:
         grafana_proxy.set_client(None)
+
+
+def test_promote_shadow_rule_needs_detection_engineer(env, monkeypatch):
+    from siem.manager import api
+    monkeypatch.setattr(api.ai_deploy, "promote", lambda es, rid, who, *a, **kw: {"rule_id": rid, "by": who})
+    monkeypatch.setattr(api, "refresh_catalog", lambda: None)
+    pw = activate(env, "an", "analyst")
+    login(env, "an", pw)
+    assert env.post("/api/v1/rules/AI-077/promote", json={}, headers=H).status_code == 403
+    pw = activate(env, "de", "detection")
+    login(env, "de", pw)
+    assert env.post("/api/v1/rules/AI-077/promote", json={}, headers=H).json() == {"rule_id": "AI-077", "by": "de"}
+    assert env.get("/api/v1/rules/KHONG-CO/shadow").status_code == 404

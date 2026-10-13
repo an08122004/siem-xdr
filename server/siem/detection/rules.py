@@ -74,6 +74,11 @@ class Condition:
             if op == "regex":
                 flags = 0 if spec.get("case_sensitive") else re.IGNORECASE
                 pats = value if isinstance(value, list) else [value]
+                # mọi rule (không chỉ rule AI): regex quay lui theo cấp số nhân thì một event treo được analyzer
+                # (WEB-001 đã mắc, sửa 13/10/2026) -> không nạp rule, lỗi ghi log, các rule khác vẫn chạy
+                for p in pats:
+                    if (why := regex_risk(str(p))):
+                        raise ValueError(f"{why}: {str(p)[:80]}")
                 value = [re.compile(p, flags) for p in pats]
             elif op == "cidr":
                 nets = value if isinstance(value, list) else [value]
@@ -222,6 +227,8 @@ class RuleException:
 
 
 EXCEPTIONS_DIR = "exceptions"
+CASES_DIR = "cases"            # ca test dương / âm của rule (detection/ruletest.py), không phải rule
+SKIP_DIRS = (EXCEPTIONS_DIR, CASES_DIR)
 
 
 def _yaml_docs(path: Path) -> list[dict[str, Any]]:
@@ -234,7 +241,7 @@ def load_rules(rules_dir: Path) -> list[Rule]:
     rồi gắn các ngoại lệ trong rules/exceptions/*.yml vào rule tương ứng."""
     rules: list[Rule] = []
     for path in sorted(rules_dir.glob("**/*.y*ml")):
-        if EXCEPTIONS_DIR in path.relative_to(rules_dir).parts:
+        if set(SKIP_DIRS) & set(path.relative_to(rules_dir).parts):
             continue
         for d in _yaml_docs(path):
             if d.get("enabled", True) is False:

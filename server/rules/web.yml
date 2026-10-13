@@ -1,10 +1,18 @@
 # Luật phát hiện tấn công Web (nguồn: Apache access log)
 - id: WEB-001
   title: Tấn công SQL Injection
+  # Comment SQL giữa UNION và SELECT viết dạng không mơ hồ (nội dung không chứa */). Trước 13/10/2026 là
+  # `union(\s|/\*.*?\*/|\+)+`: chuỗi `union/**//**/...` không có select làm regex quay lui theo cấp số nhân (20 comment
+  # 0,25 giây, mỗi 2 comment thêm chậm gấp 4) -> một request treo được analyzer (ReDoS). Lint (tools/rule_lint.py) bắt lỗi này.
   description: URL chứa payload SQL injection điển hình (UNION SELECT, OR 1=1, SLEEP, comment...)
   severity: high
   mitre: {tactic: Initial Access, technique: [T1190]}
   tags: [web, sqli, owasp-a03]
+  logsource: {product: apache, category: webserver}
+  owner: detection-engineering
+  falsepositives:
+    - "Máy quét lỗ hổng / pentest được phép (Nessus, OpenVAS, Burp của đội an ninh)"
+    - "Ứng dụng truyền câu SQL hoặc văn bản có từ khóa SQL qua URL (công cụ quản trị CSDL trên web)"
   type: match
   suppress: 60
   group_by: [source.ip]
@@ -14,7 +22,7 @@
       - field: url.decoded
         op: regex
         value:
-          - "union(\\s|/\\*.*?\\*/|\\+)+(all\\s+)?select"
+          - "union(?:\\s|\\+|/\\*(?:(?!\\*/).)*\\*/)+(?:all\\s+)?select"
           - "'\\s*(or|and)\\s*'?\\d+'?\\s*=\\s*'?\\d+"
           - "'\\s*(or|and)\\s+'[^']*'\\s*=\\s*'"
           - "\\b(sleep|benchmark|pg_sleep)\\s*\\("
@@ -28,6 +36,11 @@
   severity: medium
   mitre: {tactic: Initial Access, technique: [T1189]}
   tags: [web, xss, owasp-a03]
+  logsource: {product: apache, category: webserver}
+  owner: detection-engineering
+  falsepositives:
+    - "Máy quét lỗ hổng / pentest được phép (Nessus, OpenVAS, Burp của đội an ninh)"
+    - "CMS / trang soạn thảo gửi HTML trong tham số URL"
   type: match
   suppress: 60
   group_by: [source.ip]
@@ -43,6 +56,11 @@
   severity: high
   mitre: {tactic: Initial Access, technique: [T1190]}
   tags: [web, lfi, owasp-a01]
+  logsource: {product: apache, category: webserver}
+  owner: detection-engineering
+  falsepositives:
+    - "Máy quét lỗ hổng / pentest được phép (Nessus, OpenVAS, Burp của đội an ninh)"
+    - "Ứng dụng nhận đường dẫn tương đối hợp lệ trong tham số"
   type: match
   suppress: 60
   group_by: [source.ip]
@@ -55,9 +73,18 @@
 
 - id: WEB-004
   title: Command Injection / RCE qua Web
+  # Trước 13/10/2026 vế `[;|`&]\s*(...|id|cat|ls|sh|...)\b` khớp cả URL bình thường `?page=2&id=5`, `?lang=vi&cat=3`
+  # (`&` là dấu tách tham số) -> alert critical và SOAR tự chặn IP người dùng thật. Giờ tên lệnh đứng ngay sau dấu tách
+  # mà theo sau là `=` (tên tham số) thì không tính; `;id`, `|id`, `&&whoami`, `&cat /etc/passwd` vẫn khớp.
   severity: critical
   mitre: {tactic: Execution, technique: [T1059, T1190]}
   tags: [web, rce]
+  logsource: {product: apache, category: webserver}
+  owner: detection-engineering
+  falsepositives:
+    - "Máy quét lỗ hổng / pentest được phép (Nessus, OpenVAS, Burp của đội an ninh)"
+    - "Ô tìm kiếm chứa từ như cat, ls sau dấu ; hoặc |"
+    - "Trang tài liệu có chuỗi cmd.exe trong URL"
   type: match
   suppress: 60
   group_by: [source.ip]
@@ -66,7 +93,7 @@
       - {field: event.category, op: eq, value: web}
       - field: url.decoded
         op: regex
-        value: ["[;|`&]\\s*(cat|ls|id|whoami|uname|wget|curl|nc|bash|sh|powershell|cmd)\\b", "\\$\\((id|whoami|cat|curl|wget)", "\\$\\{jndi:", "cmd\\.exe", "/bin/(ba)?sh"]
+        value: ["[;|`&]\\s*(cat|ls|id|whoami|uname|wget|curl|nc|bash|sh|powershell|cmd)\\b(?!\\s*=)", "\\$\\((id|whoami|cat|curl|wget)", "\\$\\{jndi:", "cmd\\.exe", "/bin/(ba)?sh"]
 
 - id: WEB-005
   title: Công cụ quét lỗ hổng Web
@@ -74,6 +101,10 @@
   severity: medium
   mitre: {tactic: Reconnaissance, technique: [T1595.002]}
   tags: [web, scanner]
+  logsource: {product: apache, category: webserver}
+  owner: detection-engineering
+  falsepositives:
+    - "Máy quét lỗ hổng của đội an ninh chạy theo lịch (nên ghi IP vào ngoại lệ)"
   type: match
   suppress: 300
   group_by: [source.ip]
@@ -90,6 +121,11 @@
   severity: medium
   mitre: {tactic: Discovery, technique: [T1083, T1595.003]}
   tags: [web, dirbusting]
+  logsource: {product: apache, category: webserver}
+  owner: detection-engineering
+  falsepositives:
+    - "Crawler của công cụ tìm kiếm gặp nhiều liên kết chết"
+    - "Giám sát uptime / kiểm thử tự động gọi URL không tồn tại"
   type: threshold
   condition:
     all:
@@ -102,6 +138,11 @@
   severity: high
   mitre: {tactic: Credential Access, technique: [T1110.001]}
   tags: [web, bruteforce]
+  logsource: {product: apache, category: webserver}
+  owner: detection-engineering
+  falsepositives:
+    - "Giám sát / kiểm thử tải tự động gửi form đăng nhập"
+    - "Nhiều người dùng sau cùng một NAT / proxy / RD Gateway"
   type: threshold
   condition:
     all:
@@ -112,9 +153,15 @@
 
 - id: WEB-008
   title: Truy cập Webshell
+  # Tham số lệnh phải là TÊN tham số đầy đủ (neo đầu chuỗi / sau `&`). Trước 13/10/2026 `(cmd|exec|command|c)=` không neo
+  # nên `src=`, `abc=` cũng khớp: `/images/thumb.php?src=...` (timthumb của nhiều theme WordPress) thành alert critical.
   severity: critical
   mitre: {tactic: Persistence, technique: [T1505.003]}
   tags: [web, webshell]
+  logsource: {product: apache, category: webserver}
+  owner: detection-engineering
+  falsepositives:
+    - "Ứng dụng hợp lệ có file tên shell.php hoặc tham số cmd= trong thư mục upload"
   type: match
   suppress: 120
   group_by: [source.ip]
@@ -124,7 +171,7 @@
       - any:
           - {field: url.path, op: regex, value: "/(uploads?|images?|tmp|files)/[^/]+\\.(php|phtml|jsp|aspx?)$"}
           - {field: url.path, op: regex, value: "(c99|r57|b374k|wso|shell|cmd)\\.(php|jsp|aspx?)$"}
-      - {field: url.query, op: regex, value: "(cmd|exec|command|c)="}
+      - {field: url.query, op: regex, value: "(^|&)(cmd|exec|command|c)="}
 
 - id: WEB-009
   title: HTTP Flood (dấu hiệu DoS)
@@ -132,6 +179,11 @@
   severity: high
   mitre: {tactic: Impact, technique: [T1498, T1499.002]}
   tags: [web, dos]
+  logsource: {product: apache, category: webserver}
+  owner: detection-engineering
+  falsepositives:
+    - "Nhiều người dùng sau cùng một NAT / proxy / RD Gateway"
+    - "Crawler, giám sát hoặc kiểm thử tải được phép"
   type: threshold
   condition: {field: event.category, op: eq, value: web}
   threshold: {count: 300, window: 60, group_by: [source.ip]}

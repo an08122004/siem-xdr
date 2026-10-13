@@ -5,6 +5,11 @@
   severity: high
   mitre: {tactic: Credential Access, technique: [T1110.001]}
   tags: [auth, bruteforce, ssh]
+  logsource: {product: linux, service: auth}
+  owner: detection-engineering
+  falsepositives:
+    - "Người dùng gõ sai mật khẩu nhiều lần"
+    - "Script / cron dùng mật khẩu cũ sau khi đổi"
   type: threshold
   condition:
     all:
@@ -19,6 +24,11 @@
   severity: critical
   mitre: {tactic: Credential Access, technique: [T1110, T1078]}
   tags: [auth, bruteforce, compromise]
+  logsource: {product: linux, service: auth}
+  owner: detection-engineering
+  falsepositives:
+    - "Người dùng gõ sai nhiều lần rồi nhớ ra mật khẩu"
+    - "Nhiều người dùng sau cùng một NAT / proxy / RD Gateway"
   type: sequence
   sequence:
     group_by: [source.ip]
@@ -40,6 +50,11 @@
   severity: high
   mitre: {tactic: Credential Access, technique: [T1110.003]}
   tags: [auth, spraying]
+  logsource: {product: linux, service: auth}
+  owner: detection-engineering
+  falsepositives:
+    - "Máy chủ nhảy (jump host) / NAT tập trung nhiều người cùng gõ sai"
+    - "Công cụ kiểm kê thử nhiều tài khoản dịch vụ"
   type: threshold
   condition:
     all:
@@ -52,6 +67,10 @@
   severity: medium
   mitre: {tactic: Privilege Escalation, technique: [T1078.003]}
   tags: [auth, root]
+  logsource: {product: linux, service: auth}
+  owner: detection-engineering
+  falsepositives:
+    - "Quản trị viên đăng nhập root khi còn bật PermitRootLogin (nên tắt)"
   type: match
   condition:
     all:
@@ -64,6 +83,10 @@
   severity: medium
   mitre: {tactic: Persistence, technique: [T1136.001]}
   tags: [iam, linux]
+  logsource: {product: linux, service: auth}
+  owner: detection-engineering
+  falsepositives:
+    - "Quản trị viên / công cụ cấu hình (Ansible, cloud-init) tạo tài khoản theo kế hoạch"
   type: match
   condition:
     all:
@@ -75,6 +98,11 @@
   severity: medium
   mitre: {tactic: Privilege Escalation, technique: [T1548.003]}
   tags: [linux, sudo]
+  logsource: {product: linux, service: auth}
+  owner: detection-engineering
+  falsepositives:
+    - "Quản trị viên chạy sudo -i / sudo bash khi bảo trì"
+    - "Gõ sai mật khẩu sudo"
   type: match
   condition:
     all:

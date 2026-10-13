@@ -1,0 +1,114 @@
+# Ca test rule web (server/rules/web.yml): dòng access log Apache đi qua normalize như log thật (siem/detection/ruletest.py)
+- rule: WEB-001
+  name: UNION SELECT trong tham số
+  expect: alert
+  events:
+    - {apache: "GET /products.php?id=1%20UNION%20SELECT%20username,password%20FROM%20users HTTP/1.1"}
+- rule: WEB-001
+  name: tham số thường, từ update / select trong văn bản tìm kiếm
+  expect: none
+  events:
+    - {apache: "GET /products.php?page=2&id=5&sort=price HTTP/1.1"}
+    - {apache: "GET /search?q=update+my+account+and+select+a+plan HTTP/1.1"}
+
+- rule: WEB-002
+  name: thẻ script trong tham số
+  expect: alert
+  events:
+    - {apache: "GET /search?q=%3Cscript%3Ealert(document.cookie)%3C/script%3E HTTP/1.1"}
+- rule: WEB-002
+  name: tìm chữ javascript không có dấu hai chấm
+  expect: none
+  events:
+    - {apache: "GET /search?q=javascript+tutorial&page=2 HTTP/1.1"}
+
+- rule: WEB-003
+  name: đọc /etc/passwd bằng ../
+  expect: alert
+  events:
+    - {apache: "GET /download.php?file=../../../../etc/passwd HTTP/1.1"}
+- rule: WEB-003
+  name: một cấp ../ trong đường dẫn tĩnh
+  expect: none
+  events:
+    - {apache: "GET /static/css/../img/logo.png HTTP/1.1"}
+
+- rule: WEB-004
+  name: chèn lệnh sau dấu chấm phẩy (ping.cgi máy demo)
+  expect: alert
+  events:
+    - {apache: "GET /cgi-bin/ping.cgi?host=127.0.0.1;cat%20/etc/passwd HTTP/1.1"}
+- rule: WEB-004
+  name: chèn lệnh bằng && đã mã hóa URL
+  expect: alert
+  events:
+    - {apache: "GET /cgi-bin/ping.cgi?host=127.0.0.1%26%26whoami HTTP/1.1"}
+- rule: WEB-004
+  name: tên tham số id / cat / ls sau dấu & (báo nhầm trước 13/10/2026)
+  expect: none
+  events:
+    - {apache: "GET /products.php?page=2&id=5 HTTP/1.1"}
+    - {apache: "GET /index.php?lang=vi&cat=3&ls=1 HTTP/1.1"}
+
+- rule: WEB-005
+  name: User-Agent của sqlmap
+  expect: alert
+  events:
+    - {apache: "GET /index.php?id=1 HTTP/1.1", ua: "sqlmap/1.7.2#stable (https://sqlmap.org)"}
+- rule: WEB-005
+  name: trình duyệt thường
+  expect: none
+  events:
+    - {apache: "GET /index.php?id=1 HTTP/1.1"}
+
+- rule: WEB-006
+  name: 30 phản hồi 404 trong 30 giây
+  expect: alert
+  repeat: 30
+  events:
+    - {apache: "GET /backup.zip HTTP/1.1", status: 404}
+- rule: WEB-006
+  name: 29 phản hồi 404 (dưới ngưỡng)
+  expect: none
+  repeat: 29
+  events:
+    - {apache: "GET /backup.zip HTTP/1.1", status: 404}
+
+- rule: WEB-007
+  name: 10 lần POST form đăng nhập trong 10 giây
+  expect: alert
+  repeat: 10
+  events:
+    - {apache: "POST /wp-login.php HTTP/1.1", status: 200}
+- rule: WEB-007
+  name: mở trang đăng nhập (GET) nhiều lần
+  expect: none
+  repeat: 10
+  events:
+    - {apache: "GET /wp-login.php HTTP/1.1", status: 200}
+
+- rule: WEB-008
+  name: gọi file php trong thư mục upload với tham số cmd
+  expect: alert
+  events:
+    - {apache: "GET /uploads/avatar.php?cmd=id HTTP/1.1"}
+- rule: WEB-008
+  name: timthumb trong thư mục images với tham số src (báo nhầm trước 13/10/2026)
+  expect: none
+  events:
+    - {apache: "GET /images/thumb.php?src=a.jpg&w=100 HTTP/1.1"}
+
+- rule: WEB-009
+  name: 300 request trong 30 giây từ một IP
+  expect: alert
+  repeat: 300
+  step: 0.1
+  events:
+    - {apache: "GET /index.html HTTP/1.1"}
+- rule: WEB-009
+  name: 299 request (dưới ngưỡng)
+  expect: none
+  repeat: 299
+  step: 0.1
+  events:
+    - {apache: "GET /index.html HTTP/1.1"}

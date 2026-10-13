@@ -1,0 +1,73 @@
+# CI cho kho mã + kho rule (detection-as-code, SOC-OPERATIONS.md mục 4). Mọi thay đổi rule phải qua đây trước khi merge.
+#   test     unit test server (rule engine, SOAR, API, AI, Wazuh...) trên Python 3.12 như image server
+#   rules    kiểm tra kho rule: metadata bắt buộc, ReDoS, ca test dương / âm, playbook riêng, độ phủ ATT&CK ưu tiên;
+#            xuất layer ATT&CK Navigator làm artifact (chạy cả hằng tuần để theo dõi độ phủ)
+#   vector   unit test cấu hình Vector (syslog, Wazuh -> Kafka)
+#   compose  docker compose config hợp lệ (secret giả, không chạy container)
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+  schedule:
+    - cron: "0 1 * * 1"          # 08:00 thứ Hai giờ Việt Nam: layer ATT&CK hằng tuần
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+      - run: pip install -r server/requirements.txt pytest httpx
+      - name: Unit test
+        working-directory: server
+        run: python -m pytest -q
+
+  rules:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+      - run: pip install -r server/requirements.txt
+      - name: Kiểm tra kho rule
+        run: python tools/rule_lint.py --layer build/attack-layer.json --markdown build/rule-lint.md
+      - name: Báo cáo vào trang tóm tắt của lần chạy
+        if: always()
+        run: cat build/rule-lint.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: attack-layer
+          path: build/
+
+  vector:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit test cấu hình Vector
+        run: |
+          docker run --rm -v "$PWD/vector:/etc/vector:ro" timberio/vector:0.58.0-alpine test /etc/vector/vector.yaml /etc/vector/tests.yaml
+          docker run --rm -v "$PWD/vector:/etc/vector:ro" timberio/vector:0.58.0-alpine test /etc/vector/wazuh.yaml /etc/vector/wazuh-tests.yaml
+
+  compose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker compose config
+        run: |
+          python3 tools/init_secrets.py
+          cp .env.example .env
+          docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai --profile demo config -q

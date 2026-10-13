@@ -5,6 +5,10 @@
   severity: medium
   mitre: {tactic: Discovery, technique: [T1046]}
   tags: [network, scan]
+  logsource: {product: firewall, category: network_connection}
+  owner: detection-engineering
+  falsepositives:
+    - "Máy quét lỗ hổng / kiểm kê mạng được phép (nmap của đội IT)"
   type: threshold
   condition:
     all:
@@ -17,6 +21,11 @@
   severity: medium
   mitre: {tactic: Reconnaissance, technique: [T1595.001]}
   tags: [network, firewall]
+  logsource: {product: firewall, category: network_connection}
+  owner: detection-engineering
+  falsepositives:
+    - "Máy cấu hình sai liên tục thử kết nối tới dịch vụ bị chặn"
+    - "Dò quét nền từ Internet vào IP public"
   type: threshold
   condition:
     all:
@@ -30,6 +39,11 @@
   severity: high
   mitre: {tactic: Initial Access, technique: [T1133]}
   tags: [network, exposure]
+  logsource: {product: firewall, category: network_connection}
+  owner: detection-engineering
+  falsepositives:
+    - "Dịch vụ quản trị cố ý mở ra Internet có kiểm soát (VPN, bastion)"
+    - "Đối tác được phép truy cập theo whitelist"
   type: match
   suppress: 600
   group_by: [source.ip, destination.port]
@@ -45,6 +59,11 @@
   severity: high
   mitre: {tactic: Initial Access, technique: [T1190]}
   tags: [network, ids, suricata]
+  logsource: {product: suricata, category: ids}
+  owner: detection-engineering
+  falsepositives:
+    - "Chữ ký IDS chung chung / lỗi thời khớp lưu lượng hợp lệ"
+    - "Máy quét lỗ hổng / pentest được phép (Nessus, OpenVAS, Burp của đội an ninh)"
   type: match
   suppress: 120
   group_by: [source.ip, suricata.signature_id]
@@ -59,6 +78,10 @@
   severity: high
   mitre: {tactic: Lateral Movement, technique: [T1021.002]}
   tags: [network, lateral]
+  logsource: {product: firewall, category: network_connection}
+  owner: detection-engineering
+  falsepositives:
+    - "Máy chủ quản trị, quét lỗ hổng hoặc phân phối phần mềm kết nối SMB tới nhiều máy"
   type: threshold
   condition:
     all:
@@ -72,6 +95,11 @@
   severity: high
   mitre: {tactic: Command and Control, technique: [T1071]}
   tags: [threat-intel]
+  logsource: {product: any, category: threat_intel}
+  owner: detection-engineering
+  falsepositives:
+    - "IOC lỗi thời / hết hạn (IP dùng chung, CDN, hosting)"
+    - "IOC độ tin cậy thấp từ nguồn OSINT"
   type: match
   suppress: 300
   group_by: [threat.indicator.value]

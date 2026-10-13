@@ -1,0 +1,74 @@
+# Ca test rule mạng và Threat Intel (server/rules/network.yml): event firewall / Suricata đã chuẩn hóa
+- rule: NET-001
+  name: 20 cổng đích khác nhau trong 20 giây
+  expect: alert
+  repeat: 20
+  vary: {field: destination.port, values: [21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 443, 445, 993, 995, 1433, 3306, 3389, 5432, 5900, 8080]}
+  events:
+    - {event: {category: network, action: deny}, source: {ip: 203.0.113.10}, destination: {ip: 10.0.0.5}}
+- rule: NET-001
+  name: nhiều kết nối tới cùng cổng 443
+  expect: none
+  repeat: 20
+  events:
+    - {event: {category: network, action: allow}, source: {ip: 10.0.0.20}, destination: {ip: 10.0.0.5, port: 443}}
+
+- rule: NET-002
+  name: 50 kết nối bị chặn trong 50 giây
+  expect: alert
+  repeat: 50
+  events:
+    - {event: {category: network, action: deny}, source: {ip: 203.0.113.11}, destination: {ip: 10.0.0.5, port: 23}}
+- rule: NET-002
+  name: 50 kết nối được cho phép
+  expect: none
+  repeat: 50
+  events:
+    - {event: {category: network, action: allow}, source: {ip: 203.0.113.11}, destination: {ip: 10.0.0.5, port: 443}}
+
+- rule: NET-003
+  name: IP public vào RDP được cho phép
+  expect: alert
+  events:
+    - {event: {category: network, action: allow}, source: {ip: 203.0.113.12, ip_scope: public}, destination: {ip: 10.0.0.5, port: 3389}}
+- rule: NET-003
+  name: máy nội bộ vào RDP
+  expect: none
+  events:
+    - {event: {category: network, action: allow}, source: {ip: 10.0.0.30, ip_scope: private}, destination: {ip: 10.0.0.5, port: 3389}}
+
+- rule: NET-004
+  name: chữ ký Suricata mức 1
+  expect: alert
+  events:
+    - {event: {category: intrusion_detection}, source: {ip: 203.0.113.13}, suricata: {severity: 1, signature_id: 2010935}}
+- rule: NET-004
+  name: chữ ký Suricata mức 3 (thông tin)
+  expect: none
+  events:
+    - {event: {category: intrusion_detection}, source: {ip: 203.0.113.13}, suricata: {severity: 3, signature_id: 2210054}}
+
+- rule: NET-005
+  name: một máy kết nối SMB tới 10 máy trong 10 giây
+  expect: alert
+  repeat: 10
+  vary: {field: destination.ip, values: [10.0.0.11, 10.0.0.12, 10.0.0.13, 10.0.0.14, 10.0.0.15, 10.0.0.16, 10.0.0.17, 10.0.0.18, 10.0.0.19, 10.0.0.20]}
+  events:
+    - {event: {category: network, action: allow}, source: {ip: 10.0.0.50}, destination: {port: 445}}
+- rule: NET-005
+  name: nhiều phiên SMB tới cùng máy chủ file
+  expect: none
+  repeat: 10
+  events:
+    - {event: {category: network, action: allow}, source: {ip: 10.0.0.50}, destination: {ip: 10.0.0.2, port: 445}}
+
+- rule: TI-001
+  name: IP đích khớp IOC
+  expect: alert
+  events:
+    - {event: {category: network}, destination: {ip: 203.0.113.66}, threat: {matched: true, indicator: {type: ip, value: 203.0.113.66}}}
+- rule: TI-001
+  name: kết nối không khớp IOC
+  expect: none
+  events:
+    - {event: {category: network}, destination: {ip: 198.51.100.20}}

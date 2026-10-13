@@ -264,8 +264,8 @@ Nhóm = kỹ thuật gốc theo hệ điều hành. AI chỉ nhận nhóm có t�
 |---|---|---|---|
 | WEB-001 | Tấn công SQL Injection | 810 | 0 |
 | WEB-002 | Tấn công Cross-Site Scripting (XSS) | 752 | 0 |
-| WEB-004 | Command Injection / RCE qua Web | 192 | 0 |
 | WEB-003 | Path Traversal / Local File Inclusion | 97 | 0 |
+| WEB-004 | Command Injection / RCE qua Web | 97 | 0 |
 | WIN-006 | Script PowerShell độc hại (download cradle / bypass AMSI / Mimikatz) | 71 | 0 |
 | WIN-012 | Lạm dụng LOLBins để tải/thực thi mã | 47 | 0 |
 | WIN-007 | Đánh cắp thông tin đăng nhập (Mimikatz / dump LSASS) | 32 | 0 |

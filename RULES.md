@@ -161,6 +161,21 @@ SOAR nhận alert và:
    cùng PB-00 điều tra chung. Ưu tiên và hạn xử lý theo mức độ: critical P1 15 phút, high P2 60 phút, medium P3 8 giờ, low P4
    24 giờ. Chi tiết ở `PLAYBOOKS.md`.
 
+### 2.11 Detection-as-code: metadata bắt buộc, ca test, chạy bóng
+
+Từ 13/10/2026 kho rule được kiểm tra như mã nguồn (`SOC-OPERATIONS.md` mục 4):
+- **Metadata bắt buộc** mỗi rule: `id`, `title`, `severity`, `mitre` (tactic + kỹ thuật), `tags`, `logsource` (nguồn log),
+  `owner` (người / nhóm phụ trách), `falsepositives` (khi nào rule có thể báo nhầm). Case playbook liên kết được tính tự động
+  (mục 2.10) và phải là playbook riêng, không phải PB-00.
+- **Ca test** ở `server/rules/cases/*.yml`: mỗi rule viết tay có ít nhất 1 ca dương (phải bắn) và 1 ca âm (gần giống nhưng hợp
+  lệ). Ca test là event đã chuẩn hóa hoặc dòng access log thật (đi qua parser). Hiện có 81 ca cho 40 rule, đều đạt.
+- **`tools/rule_lint.py`** chạy mọi kiểm tra trên, kiểm ReDoS cho mọi regex, in độ phủ theo hồ sơ mối đe dọa
+  (`server/config/threat_profile.yml`, 12 kỹ thuật ưu tiên: 10/12 có rule, thiếu T1547 và T1486) và xuất layer ATT&CK
+  Navigator (`--layer`). CI (`.github/workflows/ci.yml`) chạy nó cùng unit test trước khi merge.
+- **Chạy bóng** (`mode: shadow`, `shadow_since`): rule vẫn sinh alert (gắn `alert.shadow`) nhưng SOAR bỏ qua, console ẩn khỏi
+  danh sách mặc định (mục *Chạy bóng* của trang Cảnh báo). Rule AI vừa duyệt luôn vào chế độ này; Detection Engineer bật chính
+  thức sau tối thiểu 7 ngày nếu dưới 5 alert/ngày và tỉ lệ báo nhầm dưới 30%.
+
 ## 3. Danh sách rule
 
 Cột *Dataset* là số mẫu tấn công rule bắt được / số mẫu bình thường bắt nhầm trên dataset công khai (mục 4.2):
@@ -190,7 +205,7 @@ Cột *Dataset* là số mẫu tấn công rule bắt được / số mẫu bìn
 | WEB-001 | SQL Injection | high | so khớp | T1190 | chặn IP, thông báo, case | PB-02 | 810 / 0 |
 | WEB-002 | Cross-Site Scripting (XSS) | medium | so khớp | T1189 | case | PB-02 | 752 / 0 |
 | WEB-003 | Path traversal / Local File Inclusion | high | so khớp | T1190 | chặn IP, thông báo, case | PB-02 | 97 / 0 |
-| WEB-004 | Command injection / RCE qua web | critical | so khớp | T1059, T1190 | chặn IP, thông báo, case | PB-02 | 192 / 0 |
+| WEB-004 | Command injection / RCE qua web | critical | so khớp | T1059, T1190 | chặn IP, thông báo, case | PB-02 | 97 / 0 |
 | WEB-005 | Công cụ quét lỗ hổng web | medium | so khớp | T1595.002 | case | PB-02 | 0 / 0 |
 | WEB-006 | Dò quét thư mục (directory brute-force) | medium | ngưỡng ≥ 30 / 60 giây, theo `source.ip` | T1083, T1595.003 | case | PB-02 | — |
 | WEB-007 | Brute-force form đăng nhập web | high | ngưỡng ≥ 10 / 60 giây, theo `source.ip` | T1110.001 | chặn IP, thông báo, case | PB-01 | — |
@@ -214,6 +229,18 @@ Ngày 12/10/2026 đã chỉnh 3 rule sau khi tập bình thường mở rộng l
 - WIN-005 bỏ qua lớp vỏ PowerShell của Ansible khi quản trị qua WinRM;
 - WIN-013 chỉ bắt tác vụ chạy trình thông dịch, LOLBin, file script hoặc file trong thư mục người dùng ghi được;
 - LNX-003 bỏ qua các bộ cài chính thức (Docker, nvm, rustup…).
+
+Ngày 13/10/2026, khi viết ca test dương / âm cho từng rule (`server/rules/cases/`, mục 2.11) và chạy `tools/rule_lint.py`,
+tìm ra và sửa 3 lỗi:
+- **WEB-001 có regex ReDoS.** `union(\s|/\*.*?\*/|\+)+` quay lui theo cấp số nhân với chuỗi `union/**//**/...` không có
+  `select` (20 comment: 0,25 giây, mỗi 2 comment thêm chậm gấp 4): một request treo được analyzer. Viết lại phần comment SQL
+  dạng không mơ hồ; vẫn bắt đúng 810 mẫu SQLi như trước. Từ nay rule nào có regex bị `regex_risk` đánh giá nguy hiểm đều không
+  được nạp (trước chỉ áp cho rule AI).
+- **WEB-004 báo nhầm URL bình thường.** Vế `[;|&]\s*(id|cat|ls|sh|...)\b` khớp `?page=2&id=5`, `?lang=vi&cat=3` (`&` là dấu
+  tách tham số): alert critical, SOAR tự chặn IP người dùng thật. Tên lệnh theo sau là `=` (tên tham số) không còn tính. Số mẫu
+  CSIC WEB-004 bắt giảm 192 → 97: cả 95 mẫu chênh lệch đều chỉ khớp do `&id=`, và vẫn bị rule đúng loại bắt (tổng web không đổi).
+- **WEB-008 khớp mọi tham số kết thúc bằng `c`.** `(cmd|exec|command|c)=` không neo nên `thumb.php?src=` trong thư mục
+  `images/` (timthumb của nhiều theme WordPress) thành "truy cập webshell". Giờ phải là tên tham số đầy đủ.
 
 ## 4. Độ phủ
 

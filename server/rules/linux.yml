@@ -4,6 +4,11 @@
   severity: critical
   mitre: {tactic: Execution, technique: [T1059.004]}
   tags: [linux, reverse-shell]
+  logsource: {product: linux, category: process_creation}
+  owner: detection-engineering
+  falsepositives:
+    - "Quản trị viên / pentest dùng socat, nc để chẩn đoán mạng"
+    - "Script hợp lệ tạo FIFO trong /tmp"
   type: match
   condition:
     all:
@@ -15,6 +20,11 @@
   severity: critical
   mitre: {tactic: Persistence, technique: [T1505.003, T1059.004]}
   tags: [linux, webshell]
+  logsource: {product: linux, category: process_creation}
+  owner: detection-engineering
+  falsepositives:
+    - "Ứng dụng web gọi shell hợp lệ (CGI, xử lý ảnh, tác vụ nền trong PHP)"
+    - "Tiến trình mồ côi bị gán cho httpd khi httpd là PID 1 trong container (đã gặp 3/10/2026)"
   type: match
   condition:
     all:
@@ -32,6 +42,10 @@
   severity: high
   mitre: {tactic: Execution, technique: [T1105, T1059.004]}
   tags: [linux, download]
+  logsource: {product: linux, category: process_creation}
+  owner: detection-engineering
+  falsepositives:
+    - "Bộ cài chính thức chưa có trong danh sách loại trừ (curl ... | sh)"
   type: match
   condition:
     all:
@@ -43,6 +57,10 @@
   severity: high
   mitre: {tactic: Impact, technique: [T1496]}
   tags: [linux, miner]
+  logsource: {product: linux, category: process_creation}
+  owner: detection-engineering
+  falsepositives:
+    - "Máy được phép khai thác tiền ảo (lab, nghiên cứu)"
   type: match
   condition:
     any:
@@ -55,6 +73,10 @@
   severity: medium
   mitre: {tactic: Discovery, technique: [T1082, T1033, T1016]}
   tags: [linux, recon]
+  logsource: {product: linux, category: process_creation}
+  owner: detection-engineering
+  falsepositives:
+    - "Quản trị viên / script giám sát chạy liên tiếp nhiều lệnh hệ thống (whoami, uname, ps...)"
   type: threshold
   condition:
     all:
@@ -67,6 +89,11 @@
   severity: high
   mitre: {tactic: Persistence, technique: [T1053.003, T1098.004, T1543.002]}
   tags: [linux, persistence]
+  logsource: {product: linux, category: process_creation}
+  owner: detection-engineering
+  falsepositives:
+    - "Quản trị viên thêm khóa SSH hoặc cron job theo thay đổi đã duyệt"
+    - "Công cụ cấu hình (Ansible, Puppet) ghi authorized_keys"
   type: match
   condition:
     all:

@@ -5,6 +5,11 @@
   severity: high
   mitre: {tactic: Credential Access, technique: [T1110.001]}
   tags: [windows, bruteforce]
+  logsource: {product: windows, service: security}
+  owner: detection-engineering
+  falsepositives:
+    - "Ổ đĩa mạng / dịch vụ còn dùng mật khẩu cũ"
+    - "Nhiều người dùng sau cùng một NAT / proxy / RD Gateway"
   type: threshold
   condition:
     all:
@@ -17,6 +22,10 @@
   severity: critical
   mitre: {tactic: Defense Evasion, technique: [T1070.001]}
   tags: [windows, anti-forensics]
+  logsource: {product: windows, service: security}
+  owner: detection-engineering
+  falsepositives:
+    - "Quản trị viên xóa log theo quy trình bảo trì (hiếm, phải có phiếu thay đổi)"
   type: match
   condition: {field: event.action, op: eq, value: audit_log_cleared}
 
@@ -25,6 +34,10 @@
   severity: medium
   mitre: {tactic: Persistence, technique: [T1136.001]}
   tags: [windows, iam]
+  logsource: {product: windows, service: security}
+  owner: detection-engineering
+  falsepositives:
+    - "Quản trị viên / công cụ cấp phát tạo tài khoản theo yêu cầu"
   type: match
   condition:
     all:
@@ -36,6 +49,10 @@
   severity: high
   mitre: {tactic: Privilege Escalation, technique: [T1098]}
   tags: [windows, iam]
+  logsource: {product: windows, service: security}
+  owner: detection-engineering
+  falsepositives:
+    - "Thay đổi nhóm quản trị theo phiếu yêu cầu đã duyệt"
   type: match
   condition:
     all:
@@ -53,6 +70,10 @@
   severity: high
   mitre: {tactic: Execution, technique: [T1059.001, T1027]}
   tags: [windows, powershell]
+  logsource: {product: windows, category: process_creation}
+  owner: detection-engineering
+  falsepositives:
+    - "Công cụ quản trị (SCCM, Intune, Ansible ngoài dạng đã loại trừ) chạy PowerShell -EncodedCommand"
   type: match
   condition:
     all:
@@ -67,6 +88,11 @@
   severity: critical
   mitre: {tactic: Execution, technique: [T1059.001]}
   tags: [windows, powershell]
+  logsource: {product: windows, category: ps_script}
+  owner: detection-engineering
+  falsepositives:
+    - "Script quản trị hợp lệ tải module bằng DownloadString"
+    - "Đợt red team / purple team được phép"
   type: match
   condition:
     any:
@@ -80,6 +106,11 @@
   severity: critical
   mitre: {tactic: Credential Access, technique: [T1003.001]}
   tags: [windows, credential-dumping]
+  logsource: {product: windows, category: process_creation}
+  owner: detection-engineering
+  falsepositives:
+    - "Kỹ thuật viên dùng procdump lấy dump LSASS khi hỗ trợ sự cố"
+    - "Phần mềm bảo mật truy cập bộ nhớ LSASS"
   type: match
   condition:
     any:
@@ -95,6 +126,10 @@
   severity: high
   mitre: {tactic: Execution, technique: [T1204.002, T1566.001]}
   tags: [windows, phishing, macro]
+  logsource: {product: windows, category: process_creation}
+  owner: detection-engineering
+  falsepositives:
+    - "Add-in / macro nội bộ hợp lệ gọi cmd hoặc PowerShell"
   type: match
   condition:
     all:
@@ -107,6 +142,10 @@
   severity: high
   mitre: {tactic: Persistence, technique: [T1543.003]}
   tags: [windows, service]
+  logsource: {product: windows, service: system}
+  owner: detection-engineering
+  falsepositives:
+    - "Phần mềm hợp lệ cài service từ ProgramData hoặc dùng cmd /c (một số bộ cài, agent quản lý)"
   type: match
   condition:
     all:
@@ -118,6 +157,10 @@
   severity: critical
   mitre: {tactic: Impact, technique: [T1490]}
   tags: [windows, ransomware]
+  logsource: {product: windows, category: process_creation}
+  owner: detection-engineering
+  falsepositives:
+    - "Quản trị viên dọn shadow copy để giải phóng dung lượng (hiếm, phải có phiếu thay đổi)"
   type: match
   condition:
     all:
@@ -129,6 +172,10 @@
   severity: high
   mitre: {tactic: Execution, technique: [T1204]}
   tags: [windows, malware, av]
+  logsource: {product: windows, service: windefend}
+  owner: detection-engineering
+  falsepositives:
+    - "Defender gắn cờ nhầm công cụ quản trị / PUA"
   type: match
   condition: {field: event.category, op: eq, value: malware}
 
@@ -137,6 +184,10 @@
   severity: high
   mitre: {tactic: Defense Evasion, technique: [T1218, T1105]}
   tags: [windows, lolbin]
+  logsource: {product: windows, category: process_creation}
+  owner: detection-engineering
+  falsepositives:
+    - "Quản trị viên dùng certutil / bitsadmin tải file hợp lệ"
   type: match
   condition:
     all:
@@ -152,6 +203,10 @@
   severity: medium
   mitre: {tactic: Persistence, technique: [T1053.005]}
   tags: [windows, persistence]
+  logsource: {product: windows, category: process_creation}
+  owner: detection-engineering
+  falsepositives:
+    - "Tác vụ hợp lệ của phần mềm / quản trị viên chạy script PowerShell hoặc file trong ProgramData"
   type: match
   condition:
     any:

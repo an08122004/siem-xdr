@@ -304,7 +304,7 @@ def catalog_count(query):
     return int(sum(sum(v for v in f["data"]["values"][1] if v) for f in frames if len(f["data"]["values"]) > 1))
 
 
-n_files = sum(1 for f in Path("server/rules").glob("**/*.y*ml") if "exceptions" not in f.parts
+n_files = sum(1 for f in Path("server/rules").glob("**/*.y*ml") if not {"exceptions", "cases"} & set(f.parts)
               for line in f.read_text(encoding="utf-8").splitlines() if line.startswith("- id:"))
 n_rules = catalog_count("origin:rule")
 check("grafana", "Thư viện rule liệt kê đủ rule trong server/rules (Grafana đọc qua siem-rules)", n_rules == n_files,

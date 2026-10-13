@@ -491,3 +491,48 @@ def test_web_keeps_no_unverified_sigmahq_atoms(tmp_path, monkeypatch):
     assert saved[0]["status"] == "pending"
     assert not [a for a in saved[0]["llm"]["atoms"] if a["source"] == "sigmahq"]
     assert "cve-1" not in saved[0]["sigma"]
+
+
+def test_approved_ai_rule_runs_in_shadow_then_promoted(tmp_path, monkeypatch):
+    """Rule AI vừa duyệt vào chế độ chạy bóng kèm metadata bắt buộc của kho rule (đạt lint); bật chính thức chỉ khi đủ
+    tiêu chí (số ngày, alert/ngày, tỉ lệ báo nhầm), ghi ai bật và số liệu lúc bật."""
+    import yaml
+    from siem import settings
+    from siem.detection.lint import check_rule
+    rd = write_rules(tmp_path)
+    monkeypatch.setattr(deploy, "golden", lambda: PublicDatasets(directory=Path(".")))
+    rule = {"id": "AI-077", "title": "Tải file sao lưu", "severity": "medium", "type": "match",
+            "mitre": {"tactic": "collection", "technique": ["T1005"]}, "tags": ["ai-generated", "sigma", "web"],
+            "condition": {"all": [{"field": "url.path", "op": "endswith", "value": ".bak"}]},
+            "ai_proposal_id": "0123456789ab",
+            "sigma": "title: Tải file sao lưu\nlogsource:\n  category: webserver\ndetection:\n  sel:\n"
+                     "    cs-uri-stem|endswith: .bak\n  condition: sel\nfalsepositives:\n  - Sao lưu thủ công qua web\n"}
+    es = PropES({"id": "0123456789ab", "kind": "new_rule", "target_rule_id": "AI-077", "proposal": rule,
+                 "status": "pending", "required_approvals": 1, "approvals": [], "llm": {"model": "fake"},
+                 "updated_at": "2026-10-13T10:00:00+00:00"})
+    deploy.approve(es, "0123456789ab", "de", rd, now="2026-10-13T10:00:00+00:00")
+    f = rd / "ai" / "AI-077.yml"
+    written = yaml.safe_load(f.read_text(encoding="utf-8"))[0]
+    assert written["mode"] == "shadow" and written["shadow_since"] == "2026-10-13" and written["owner"] == "de"
+    assert written["logsource"] == {"category": "webserver"} and written["falsepositives"] == ["Sao lưu thủ công qua web"]
+    assert check_rule(written, "ai/AI-077.yml", ai=True) == []
+    assert {r.id: r for r in load_rules(rd)}["AI-077"].mode == "shadow"
+    with pytest.raises(deploy.DeployError) as e:                         # mới chạy bóng, chưa đủ 7 ngày
+        deploy.promote(es, "AI-077", "de", rd, now="2026-10-13T11:00:00+00:00")
+    assert e.value.code == 409 and "tối thiểu" in str(e.value)
+    monkeypatch.setattr(settings, "SHADOW_MIN_DAYS", 0)
+    monkeypatch.setattr(deploy, "shadow_stats", lambda es, rid, since: {
+        "since": since, "days": 8.0, "alerts": 40, "alerts_per_day": 5.0, "judged": 10, "fp_rate": 0.1, "verdicts": {}})
+    with pytest.raises(deploy.DeployError, match="alert/ngày"):         # ồn quá
+        deploy.promote(es, "AI-077", "de", rd, now="2026-10-21T11:00:00+00:00")
+    monkeypatch.setattr(deploy, "shadow_stats", lambda es, rid, since: {
+        "since": since, "days": 8.0, "alerts": 8, "alerts_per_day": 1.0, "judged": 5, "fp_rate": 0.2, "verdicts": {}})
+    r = deploy.promote(es, "AI-077", "de", rd, now="2026-10-21T11:00:00+00:00")
+    after = yaml.safe_load(f.read_text(encoding="utf-8"))[0]
+    assert r["mode"] == "active" and after["mode"] == "active" and after["promoted"]["by"] == "de"
+    assert {r.id: r for r in load_rules(rd)}["AI-077"].mode == "active"
+    assert es.doc["promoted_by"] == "de" and "bật chính thức" in es.doc["history"][-1]["text"]
+    with pytest.raises(deploy.DeployError, match="không ở chế độ chạy bóng"):
+        deploy.promote(es, "AI-077", "de", rd, now="t")
+    with pytest.raises(deploy.DeployError, match="rule AI"):
+        deploy.promote(es, "WEB-001", "de", rd, now="t")

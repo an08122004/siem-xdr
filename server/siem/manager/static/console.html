@@ -714,7 +714,7 @@ VIEWS.ai = {
             el('td', {}, el('div', { cls: 'title' }, p.title), el('div', { cls: 'sub' }, KIND[p.kind] || p.kind, p.risk ? `, rủi ro ${p.risk}` : '')),
             el('td', {}, p.validation ? el('span', { cls: v.passed ? 'ok' : 'bad' }, v.passed ? 'Đạt' : 'Không đạt') : '—'),
             el('td', { cls: 'num' }, p.required_approvals ? `${(p.approvals || []).length}/${p.required_approvals}` : '—'),
-            el('td', {}, stLabel(AI_ST, p.status)));
+            el('td', {}, stLabel(AI_ST, p.status), p.rule_mode ? el('div', { cls: 'sub' }, p.rule_mode === 'shadow' ? 'đang chạy bóng' : 'chạy chính thức') : null));
           tr.tabIndex = 0;
           const toggle = () => { open ? this.expanded.delete(p.id) : this.expanded.add(p.id); this.load(); };
           tr.addEventListener('click', toggle); tr.addEventListener('keydown', e => { if (e.key === 'Enter') toggle(); });
@@ -744,6 +744,16 @@ function aiDetail(p) {
       el('span', { cls: c.ok ? 'ok' : (c.blocking ? 'bad' : 'warn') }, c.ok ? 'Đạt' : (c.blocking ? 'Chặn' : 'Lưu ý')), ': ', el('b', {}, c.name), ' — ', c.detail))),
     p.sigma ? el('h3', {}, 'Rule Sigma do AI viết') : null, p.sigma ? el('pre', {}, p.sigma) : null,
     el('h3', {}, p.sigma ? 'Bản đã biên dịch mà analyzer chạy (file triển khai gồm cả rule Sigma ở trên)' : 'Nội dung sẽ triển khai'), el('pre', {}, p.yaml || ''),
+    p.shadow ? [el('h3', {}, 'Chạy bóng'), el('p', { cls: 'sub', style: 'margin:0' },
+      `Từ ${p.shadow.since}: ${p.shadow.alerts} alert trong ${String(p.shadow.days).replace('.', ',')} ngày (${String(p.shadow.alerts_per_day).replace('.', ',')}/ngày), `
+      + (p.shadow.judged ? `${p.shadow.judged} alert đã có kết luận, báo nhầm ${Math.round(100 * p.shadow.fp_rate)}%.` : 'chưa alert nào có kết luận.')),
+      (p.shadow.problems || []).length ? el('p', { cls: 'warn', style: 'margin:4px 0 0' }, 'Chưa bật chính thức được: ' + p.shadow.problems.join('; ') + '.')
+        : el('p', { cls: 'ok', style: 'margin:4px 0 0' }, 'Đạt tiêu chí bật chính thức.'),
+      el('div', { cls: 'btns', style: 'margin-top:6px' },
+        el('a', { cls: 'btn', href: '#/alerts?set=shadow&since=30d&q=' + encodeURIComponent(p.proposal?.id || '') }, 'Xem alert chạy bóng'),
+        can('rules') && !(p.shadow.problems || []).length ? confirmButton('Bật chính thức', 'Bật chính thức (SOAR sẽ xử lý alert)?',
+          b => run(b, () => api(`/api/v1/rules/${encodeURIComponent(p.proposal.id)}/promote`, { method: 'POST', body: {} }),
+            `Đã bật chính thức ${p.proposal.id}.`).then(() => VIEWS.ai.load())) : null)] : null,
     p.catalog_pick ? el('div', { cls: 'btns', style: 'margin-top:8px' }, el('a', { cls: 'btn',
       href: '#/rules?proposal=' + encodeURIComponent(p.catalog_pick) }, 'So sánh với rule hiện có')) : null,
     el('h3', {}, 'Lịch sử'), el('ul', { cls: 'hist' }, (p.history || []).map(h => el('li', {}, h.text, el('span', { cls: 'sub' }, `${h.by}, ${fmt(h.at)}`)))),

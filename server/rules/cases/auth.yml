@@ -1,0 +1,73 @@
+# Ca test rule xác thực (server/rules/auth.yml): event đã chuẩn hóa như parser auth.log / PAM sinh ra
+- rule: AUTH-001
+  name: 5 lần SSH sai trong 5 giây từ một IP
+  expect: alert
+  repeat: 5
+  events:
+    - {event: {category: authentication, outcome: failure, module: auth, action: ssh_login}, source: {ip: 203.0.113.7}, user: {name: admin}}
+- rule: AUTH-001
+  name: 4 lần sai (dưới ngưỡng)
+  expect: none
+  repeat: 4
+  events:
+    - {event: {category: authentication, outcome: failure, module: auth, action: ssh_login}, source: {ip: 203.0.113.7}, user: {name: admin}}
+
+- rule: AUTH-002
+  name: 5 lần sai rồi đăng nhập được từ cùng IP
+  expect: alert
+  events:
+    - {times: 5, event: {event: {category: authentication, outcome: failure, module: auth}, source: {ip: 203.0.113.8}, user: {name: deploy}}}
+    - {event: {category: authentication, outcome: success, module: auth}, source: {ip: 203.0.113.8}, user: {name: deploy}}
+- rule: AUTH-002
+  name: sai từ một IP, đăng nhập thành công từ IP khác
+  expect: none
+  events:
+    - {times: 5, event: {event: {category: authentication, outcome: failure, module: auth}, source: {ip: 203.0.113.8}, user: {name: deploy}}}
+    - {event: {category: authentication, outcome: success, module: auth}, source: {ip: 10.0.0.25}, user: {name: deploy}}
+
+- rule: AUTH-003
+  name: 5 tài khoản khác nhau sai từ một IP
+  expect: alert
+  repeat: 5
+  vary: {field: user.name, values: [an, binh, chi, dung, em]}
+  events:
+    - {event: {category: authentication, outcome: failure, module: auth}, source: {ip: 203.0.113.9}}
+- rule: AUTH-003
+  name: một tài khoản gõ sai 5 lần (không phải spraying)
+  expect: none
+  repeat: 5
+  events:
+    - {event: {category: authentication, outcome: failure, module: auth}, source: {ip: 203.0.113.9}, user: {name: an}}
+
+- rule: AUTH-004
+  name: đăng nhập SSH bằng root thành công
+  expect: alert
+  events:
+    - {event: {category: authentication, action: ssh_login, outcome: success, module: auth}, user: {name: root}, source: {ip: 10.0.0.5}}
+- rule: AUTH-004
+  name: đăng nhập SSH bằng tài khoản thường
+  expect: none
+  events:
+    - {event: {category: authentication, action: ssh_login, outcome: success, module: auth}, user: {name: deploy}, source: {ip: 10.0.0.5}}
+
+- rule: AUTH-005
+  name: useradd tạo tài khoản mới
+  expect: alert
+  events:
+    - {event: {category: iam, action: user_created, module: auth}, user: {name: backdoor}}
+- rule: AUTH-005
+  name: xóa tài khoản
+  expect: none
+  events:
+    - {event: {category: iam, action: user_deleted, module: auth}, user: {name: olduser}}
+
+- rule: AUTH-006
+  name: sudo mở bash root
+  expect: alert
+  events:
+    - {event: {action: sudo, outcome: success, module: auth}, user: {name: deploy}, process: {command_line: /bin/bash}}
+- rule: AUTH-006
+  name: sudo chạy lệnh cập nhật gói
+  expect: none
+  events:
+    - {event: {action: sudo, outcome: success, module: auth}, user: {name: deploy}, process: {command_line: /usr/bin/apt update}}

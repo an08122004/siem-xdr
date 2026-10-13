@@ -27,7 +27,7 @@ from typing import Any, Iterable
 import yaml
 
 from . import settings
-from .detection.rules import EXCEPTIONS_DIR, SEVERITY_SCORE
+from .detection.rules import EXCEPTIONS_DIR, SEVERITY_SCORE, SKIP_DIRS
 
 log = logging.getLogger("rules_catalog")
 
@@ -176,7 +176,7 @@ def rule_docs(rules_dir: Path, alert_stats: dict[str, dict[str, Any]]) -> list[d
     docs = []
     for path in sorted(rules_dir.glob("**/*.y*ml")):
         rel = path.relative_to(rules_dir)
-        if EXCEPTIONS_DIR in rel.parts:
+        if set(SKIP_DIRS) & set(rel.parts):
             continue
         try:
             items = _yaml_docs(path)
