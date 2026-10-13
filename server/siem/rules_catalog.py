@@ -234,6 +234,8 @@ def rule_docs(rules_dir: Path, alert_stats: dict[str, dict[str, Any]], report=No
 DETECTORS = [
     ("RBA-001", "Rủi ro tích lũy vượt ngưỡng trên máy / tài khoản", "high", "soar/risk.py",
      "Tổng risk_score các alert của cùng máy / tài khoản trong RBA_WINDOW_HOURS giờ >= RBA_THRESHOLD, từ >= RBA_MIN_RULES rule khác nhau"),
+    ("TI-002", "IOC mới khớp log cũ (dò ngược)", "high", "soar/retrohunt.py",
+     "IOC mới (config/intel, MISP) khớp event trong RETROHUNT_DAYS ngày qua mà lúc vào chưa được gắn IOC đó"),
     ("HLT-001", "Agent mất kết nối", "medium", "soar/health.py", "Wazuh báo disconnected, keepalive cuối quá AGENT_DOWN_MINUTES phút"),
     ("HLT-002", "Nguồn log im lặng", "medium", "soar/health.py",
      "Không event nào trong SOURCE_SILENT_MINUTES phút dù trung bình 7 ngày phải có >= SOURCE_MIN_EXPECTED event"),

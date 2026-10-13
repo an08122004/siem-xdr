@@ -1,4 +1,6 @@
 # IP độc hại đã biết (1 dòng 1 IP hoặc CIDR). Có thể cập nhật từ feed (abuse.ch, AlienVault OTX...)
+# Vòng đời: ghi hạn sau dấu # (vd `203.0.113.9  # C2 nhóm X, hết hạn: 2026-12-31`); quá hạn thì tự hết khớp.
+# IOC mới thêm vào được SOAR dò ngược 30 ngày log cũ (TI-002). Feed MISP: đặt MISP_URL (README mục 3).
 # Các giá trị dưới đây là dải TEST-NET dành cho tài liệu (RFC 5737) — dùng để demo.
 203.0.113.66
 198.51.100.0/24

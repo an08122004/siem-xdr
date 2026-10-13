@@ -3,11 +3,13 @@ import logging
 import time
 
 from .. import bus, settings, store
-from ..pipeline.enrich import AssetDB
+from ..pipeline import misp
+from ..pipeline.enrich import AssetDB, ThreatIntel
 from . import risk
 from .cases import CasePlaybooks
 from .engine import Notifier, Soar, load_playbooks
 from .health import HealthMonitor, kafka_lag_reader
+from .retrohunt import RetroHunter
 from .wazuh import Responder, WazuhAPI
 
 log = logging.getLogger("soar")
@@ -53,6 +55,15 @@ def main() -> None:
                                kafka_lag=kafka_lag_reader({"siem-analyzer": [settings.TOPIC_RAW],
                                                            "siem-soar": [settings.TOPIC_ALERTS]}))
         tasks.append(Every(60, "giám sát sức khỏe nguồn log / nền tảng", health.run))
+    if settings.RETROHUNT_ENABLED:
+        ti = ThreatIntel(settings.CONFIG_DIR / "intel", feed=misp.from_settings(start=True))
+
+        def indicators() -> list:
+            ti.maybe_reload()                       # file IOC vừa sửa / IOC vừa hết hạn
+            return ti.indicators()
+        hunter = RetroHunter(es, indicators, soar.emit, days=settings.RETROHUNT_DAYS,
+                             max_per_run=settings.RETROHUNT_MAX_PER_RUN)
+        tasks.append(Every(600, "vòng đời IOC + dò ngược log cũ", hunter.run))
     if settings.WAZUH_API_PASSWORD:
         responder = Responder(es, WazuhAPI(settings.WAZUH_API_URL, settings.WAZUH_API_USER,
                                            settings.WAZUH_API_PASSWORD, settings.WAZUH_API_CA))

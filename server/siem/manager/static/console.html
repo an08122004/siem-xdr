@@ -938,6 +938,11 @@ function alertDrawer(a) {
           rba: 'Tương quan điểm rủi ro (RBA)', health: 'Giám sát sức khỏe nền tảng' }[g(a, 'alert.source')] || g(a, 'alert.source')],
         ['Điểm rủi ro tích lũy', a.risk ? `${a.risk.total} / ngưỡng ${a.risk.threshold} trong ${a.risk.window_hours} giờ (${g(a, 'risk.entity.field')} = ${g(a, 'risk.entity.value')})` : null],
         ['Chi tiết', g(a, 'health.detail') || null],
+        ['IOC', g(a, 'threat.indicator.value') ? [el('span', { cls: 'mono' }, g(a, 'threat.indicator.value')),
+          ` (${[g(a, 'threat.indicator.provider') === 'misp' ? 'MISP' : g(a, 'threat.indicator.provider') === 'local' ? 'danh sách nội bộ' : g(a, 'threat.indicator.provider'),
+               g(a, 'threat.indicator.description'), g(a, 'threat.indicator.expires') ? 'hết hạn ' + g(a, 'threat.indicator.expires') : null]
+              .filter(Boolean).join(', ')})`] : null],
+        ['Dò ngược', a.retrohunt ? `${a.retrohunt.hits} event trong ${a.retrohunt.days} ngày, ${fmt(a.retrohunt.first)} – ${fmt(a.retrohunt.last)}` : null],
         ['IP nguồn', ip ? el('span', { cls: 'mono' }, ip, g(a, 'source.port') ? ':' + g(a, 'source.port') : '') : null],
         ['IP đích', g(a, 'destination.ip') ? el('span', { cls: 'mono' }, g(a, 'destination.ip')) : null],
         ['Máy', [g(a, 'host.name'), agent ? `(agent ${agent})` : ''].filter(Boolean).join(' ')],

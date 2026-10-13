@@ -1,3 +1,5 @@
 # Domain độc hại (khớp cả subdomain). Dùng TLD .example / .test (RFC 2606) cho demo.
+# Vòng đời: ghi hạn sau dấu # (vd `203.0.113.9  # C2 nhóm X, hết hạn: 2026-12-31`); quá hạn thì tự hết khớp.
+# IOC mới thêm vào được SOAR dò ngược 30 ngày log cũ (TI-002). Feed MISP: đặt MISP_URL (README mục 3).
 evil-c2.example
 malware-download.test

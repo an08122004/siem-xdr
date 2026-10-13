@@ -86,6 +86,17 @@ NOTIFY_COOLDOWN_SECONDS = int(os.getenv("NOTIFY_COOLDOWN_SECONDS", "300"))
 
 AGENT_OFFLINE_SECONDS = int(os.getenv("AGENT_OFFLINE_SECONDS", "90"))
 
+# Threat intelligence: feed MISP (pipeline/misp.py, tùy chọn) và dò ngược log cũ khi có IOC mới (soar/retrohunt.py)
+MISP_URL = os.getenv("MISP_URL", "")                                   # vd https://misp.example.org; trống = tắt
+MISP_API_KEY = _secret("MISP_API_KEY")                                 # Docker secret misp_api_key (auth key MISP)
+MISP_CA_CERT = os.getenv("MISP_CA_CERT", "")                           # CA của MISP nếu dùng chứng chỉ nội bộ
+MISP_VERIFY_TLS = _bool("MISP_VERIFY_TLS", True)
+MISP_INTERVAL_MINUTES = float(os.getenv("MISP_INTERVAL_MINUTES", "60"))
+MISP_TTL_DAYS = {k: int(os.getenv(f"MISP_TTL_{k.upper()}_DAYS", d)) for k, d in (("ip", "30"), ("domain", "90"), ("hash", "365"))}
+RETROHUNT_ENABLED = _bool("RETROHUNT_ENABLED", True)
+RETROHUNT_DAYS = int(os.getenv("RETROHUNT_DAYS", "30"))                # IOC mới -> tìm lại N ngày log cũ (TI-002)
+RETROHUNT_MAX_PER_RUN = int(os.getenv("RETROHUNT_MAX_PER_RUN", "300"))  # tối đa N IOC mỗi chu kỳ 10 phút
+
 # Risk-based alerting (soar/risk.py): cộng risk_score theo máy / tài khoản trong N giờ, vượt ngưỡng từ >= N rule -> RBA-001
 RBA_ENABLED = _bool("RBA_ENABLED", True)
 RBA_THRESHOLD = float(os.getenv("RBA_THRESHOLD", "150"))

@@ -1,4 +1,6 @@
 # Hash (md5/sha1/sha256, chữ thường) của file độc hại
+# Vòng đời: ghi hạn sau dấu # (vd `203.0.113.9  # C2 nhóm X, hết hạn: 2026-12-31`); quá hạn thì tự hết khớp.
+# IOC mới thêm vào được SOAR dò ngược 30 ngày log cũ (TI-002). Feed MISP: đặt MISP_URL (README mục 3).
 # EICAR test file
 44d88612fea8a8f36de82e1278abb02f
 3395856ce81f2b7382dee72602f798b642f14140

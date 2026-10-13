@@ -307,7 +307,8 @@ services:
       <<: *app-env
       ES_USER: siem_analyzer
       ES_PASSWORD_FILE: /run/secrets/analyzer_es_password
-    secrets: [analyzer_es_password]
+      MISP_API_KEY_FILE: /run/secrets/misp_api_key   # feed IOC từ MISP khi đặt MISP_URL trong .env (pipeline/misp.py)
+    secrets: [analyzer_es_password, misp_api_key]
     volumes:
       - ./server/rules:/app/rules:ro
       - ./server/config:/app/config:ro
@@ -325,7 +326,8 @@ services:
       WAZUH_API_URL: https://wazuh-manager:55000
       WAZUH_API_USER: siem-soar
       WAZUH_API_PASSWORD_FILE: /run/secrets/wazuh_api_password
-    secrets: [soar_es_password, wazuh_api_password]
+      MISP_API_KEY_FILE: /run/secrets/misp_api_key   # dò ngược log cũ cả với IOC mới từ MISP (soar/retrohunt.py)
+    secrets: [soar_es_password, wazuh_api_password, misp_api_key]
     volumes:
       - ./server/config:/app/config:ro
       - *ca-mount
@@ -394,6 +396,7 @@ secrets:
   console_admin_password: {file: ./secrets/console_admin_password}
   ai_es_password:         {file: ./secrets/ai_es_password}
   wazuh_api_password:     {file: ./secrets/wazuh_api_password}
+  misp_api_key:           {file: ./secrets/misp_api_key}           # tùy chọn: để trống nếu không dùng MISP
 
 networks:
   soc:

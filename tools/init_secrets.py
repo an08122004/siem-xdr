@@ -19,6 +19,10 @@ NAMES = [
     "console_admin_password", # mật khẩu tạm của tài khoản console `admin` đầu tiên (phải đổi khi đăng nhập lần đầu)
     "wazuh_api_password",     # user Wazuh API `siem-soar` (SOAR ra lệnh active response)
 ]
+# Bí mật TÙY CHỌN do người dùng tự điền (không sinh ngẫu nhiên): tạo file rỗng để docker compose chạy được khi chưa dùng
+OPTIONAL = [
+    "misp_api_key",           # auth key MISP (feed IOC, pipeline/misp.py); điền khi đặt MISP_URL trong .env
+]
 ALPHABET = string.ascii_letters + string.digits  # không ký tự đặc biệt -> an toàn khi nhúng JSON/shell
 # Wazuh API bắt buộc mật khẩu có chữ thường, chữ hoa, số và ký tự đặc biệt -> thêm đủ 4 loại (ký tự an toàn với shell)
 NEEDS_SYMBOL = {"wazuh_api_password"}
@@ -44,6 +48,11 @@ for name in NAMES:
         continue
     p.write_text(generate(name), encoding="utf-8")
     print(f"đã tạo      {p.name}")
+for name in OPTIONAL:
+    p = out / name
+    if not p.exists():
+        p.write_text("", encoding="utf-8")
+        print(f"đã tạo rỗng {p.name} (tùy chọn, tự điền khi dùng)")
 
 # Quyền trên Linux: docker compose (không swarm) bind-mount nguyên file secret vào /run/secrets, GIỮ quyền của host.
 # Service chạy bằng user riêng (manager/analyzer/soar/ai-worker uid 10001, Grafana uid 472) nên file phải đọc được
