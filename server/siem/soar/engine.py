@@ -124,8 +124,9 @@ def load_playbooks(path: Path) -> list[Playbook]:
 class Soar:
     def __init__(self, es, playbooks: list[Playbook], auto_response: bool = True,
                  whitelist: list[str] | None = None, notifier=None, case_playbooks: CasePlaybooks | None = None,
-                 max_auto_kills: int = 0, clock=time.monotonic):
+                 max_auto_kills: int = 0, clock=time.monotonic, risk=None):
         self.es = es
+        self.risk = risk                                             # soar/risk.py RiskTracker, None = tắt RBA
         self.playbooks = playbooks
         self.case_playbooks = case_playbooks or CasePlaybooks(None)
         self.auto_response = auto_response
@@ -161,7 +162,17 @@ class Soar:
                 results.append({"playbook": pb.name, "action": action, **res})
         if results:
             self._update_alert(alert, results)
+        if self.risk is not None:
+            for rba in self.risk.add(alert):
+                log.warning("RBA: %s", rba["message"])
+                self.emit(rba)
         return results
+
+    def emit(self, alert: dict[str, Any]) -> list[dict[str, Any]]:
+        """Alert do chính SOAR sinh (RBA, sức khỏe nền tảng): ghi vào siem-alerts rồi xử lý như alert từ analyzer
+        (thông báo, mở case theo playbook). Không đi qua Kafka: vẫn chạy khi analyzer / Kafka hỏng."""
+        self.es.index(index=settings.IDX_ALERTS, id=alert["alert"]["id"], document=alert, refresh="wait_for")
+        return self.handle(alert)
 
     def run_step(self, step: dict[str, Any], alert: dict[str, Any]) -> dict[str, Any]:
         action = step.get("action")

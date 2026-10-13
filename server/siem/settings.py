@@ -84,6 +84,24 @@ NOTIFY_COOLDOWN_SECONDS = int(os.getenv("NOTIFY_COOLDOWN_SECONDS", "300"))
 
 AGENT_OFFLINE_SECONDS = int(os.getenv("AGENT_OFFLINE_SECONDS", "90"))
 
+# Risk-based alerting (soar/risk.py): cộng risk_score theo máy / tài khoản trong N giờ, vượt ngưỡng từ >= N rule -> RBA-001
+RBA_ENABLED = _bool("RBA_ENABLED", True)
+RBA_THRESHOLD = float(os.getenv("RBA_THRESHOLD", "150"))
+RBA_MIN_RULES = int(os.getenv("RBA_MIN_RULES", "2"))
+RBA_WINDOW_HOURS = float(os.getenv("RBA_WINDOW_HOURS", "24"))
+RBA_ENTITY_FIELDS = [f.strip() for f in os.getenv("RBA_ENTITY_FIELDS", "host.name,user.name").split(",") if f.strip()]
+
+# Giám sát sức khỏe nguồn log và nền tảng (soar/health.py, alert HLT-*)
+HEALTH_ENABLED = _bool("HEALTH_ENABLED", True)
+AGENT_DOWN_MINUTES = float(os.getenv("AGENT_DOWN_MINUTES", "15"))          # agent mất kết nối quá N phút -> HLT-001
+SOURCE_SILENT_MINUTES = float(os.getenv("SOURCE_SILENT_MINUTES", "30"))    # nguồn không gửi event N phút -> HLT-002
+SOURCE_MIN_EXPECTED = float(os.getenv("SOURCE_MIN_EXPECTED", "10"))        # ... nếu trung bình phải có >= N event
+VOLUME_DEVIATION = float(os.getenv("VOLUME_DEVIATION", "0.5"))             # lưu lượng giờ lệch > 50% -> HLT-003
+VOLUME_MIN_PER_HOUR = float(os.getenv("VOLUME_MIN_PER_HOUR", "100"))       # ... chỉ xét nguồn >= N event / giờ
+KAFKA_LAG_MAX_MESSAGES = int(os.getenv("KAFKA_LAG_MAX_MESSAGES", "5000"))  # consumer tụt sau > N message
+KAFKA_LAG_MINUTES = float(os.getenv("KAFKA_LAG_MINUTES", "5"))             # ... liên tục N phút -> HLT-005
+ES_DISK_MAX_PCT = float(os.getenv("ES_DISK_MAX_PCT", "80"))                # đĩa ES dùng >= N% -> HLT-006
+
 # AI hỗ trợ viết rule (LLM nội bộ qua Ollama). AI CHỈ ĐỀ XUẤT: mọi thay đổi rule phải được
 # analyst duyệt trên console; đề xuất ngoại lệ (làm giảm cảnh báo) cần 2 người duyệt.
 IDX_AI_PROPOSALS = "ai-rule-proposals"

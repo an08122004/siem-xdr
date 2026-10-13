@@ -106,7 +106,8 @@ _TEMPLATES = {
         },
     },
     "siem-state": {
-        "index_patterns": ["siem-agents", "siem-actions", "siem-cases"],
+        "index_patterns": ["siem-agents", "siem-actions", "siem-cases", "siem-sources", "siem-kpi", "siem-hunts",
+                           "siem-intel"],
         "template": {
             "settings": {"number_of_shards": 1, "number_of_replicas": 0},
             "mappings": {
@@ -129,6 +130,10 @@ _TEMPLATES = {
                                                "ttr_seconds": {"type": "float"}}},
                     "incident": {"properties": {"declared_at": {"type": "date"}, "notify_due": {"type": "date"},
                                                 "notified_at": {"type": "date"}}},
+                    # siem-sources (soar/health.py), siem-hunts, siem-intel
+                    "last_event": {"type": "date"}, "first_event_7d": {"type": "date"}, "checked_at": {"type": "date"},
+                    "completed_at": {"type": "date"}, "first_seen": {"type": "date"}, "retro_hunted_at": {"type": "date"},
+                    "expected_per_hour": {"type": "float"},
                     "params": {"type": "object", "enabled": False},
                 },
             },

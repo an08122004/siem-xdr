@@ -3,8 +3,11 @@ import logging
 import time
 
 from .. import bus, settings, store
+from ..pipeline.enrich import AssetDB
+from . import risk
 from .cases import CasePlaybooks
 from .engine import Notifier, Soar, load_playbooks
+from .health import HealthMonitor, kafka_lag_reader
 from .wazuh import Responder, WazuhAPI
 
 log = logging.getLogger("soar")
@@ -37,8 +40,19 @@ def main() -> None:
                           cooldown=settings.NOTIFY_COOLDOWN_SECONDS),
         case_playbooks=CasePlaybooks(settings.CONFIG_DIR / "case_playbooks.yml"),
         max_auto_kills=settings.SOAR_MAX_AUTO_KILLS,
+        risk=risk.from_settings() if settings.RBA_ENABLED else None,
     )
+    if soar.risk is not None:
+        try:
+            soar.risk.load(es)
+        except Exception as e:  # noqa: BLE001 - chưa có alert nào: bắt đầu với cửa sổ rỗng
+            log.warning("RBA: không dựng lại được cửa sổ điểm rủi ro: %s", e)
     tasks = [Every(30, "housekeeping", soar.housekeeping)]
+    if settings.HEALTH_ENABLED:
+        health = HealthMonitor(es, soar.emit, assets=AssetDB(settings.CONFIG_DIR / "assets.yml"),
+                               kafka_lag=kafka_lag_reader({"siem-analyzer": [settings.TOPIC_RAW],
+                                                           "siem-soar": [settings.TOPIC_ALERTS]}))
+        tasks.append(Every(60, "giám sát sức khỏe nguồn log / nền tảng", health.run))
     if settings.WAZUH_API_PASSWORD:
         responder = Responder(es, WazuhAPI(settings.WAZUH_API_URL, settings.WAZUH_API_USER,
                                            settings.WAZUH_API_PASSWORD, settings.WAZUH_API_CA))

@@ -100,16 +100,18 @@ role() { api PUT "/_security/role/$1" "$2"; echo "[setup] role $1"; }
 user() { api POST "/_security/user/$1" "{\"password\":\"$(cat "$S/$2")\",\"roles\":[\"$3\"],\"full_name\":\"$4\"}"; echo "[setup] user $1 -> $3"; }
 
 META='"cluster": ["monitor", "manage_index_templates"]'
+# siem-kpi: KPI tính định kỳ (manager/kpi.py); siem-hunts: nhật ký threat hunting; siem-sources / siem-intel do SOAR ghi
 role siem_manager  "{$META, \"indices\": [
-  {\"names\": [\"siem-actions\", \"siem-alerts\", \"siem-cases\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]},
-  {\"names\": [\"siem-events-*\", \"siem-agents\"], \"privileges\": [\"read\", \"view_index_metadata\"]},
+  {\"names\": [\"siem-actions\", \"siem-alerts\", \"siem-cases\", \"siem-kpi\", \"siem-hunts\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]},
+  {\"names\": [\"siem-events-*\", \"siem-agents\", \"siem-sources\", \"siem-intel\"], \"privileges\": [\"read\", \"view_index_metadata\"]},
   {\"names\": [\"console-users\", \"siem-rules\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]},
   {\"names\": [\"ai-*\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]}]}"
 role siem_analyzer "{$META, \"indices\": [
   {\"names\": [\"siem-events-*\", \"siem-alerts\"], \"privileges\": [\"create_index\", \"create_doc\", \"write\", \"auto_configure\", \"view_index_metadata\"]}]}"
+# siem-sources: trạng thái từng nguồn log (soar/health.py); siem-intel: vòng đời IOC + dò ngược (soar/retrohunt.py)
 role siem_soar     "{$META, \"indices\": [
   {\"names\": [\"siem-alerts\"], \"privileges\": [\"read\", \"write\", \"view_index_metadata\"]},
-  {\"names\": [\"siem-actions\", \"siem-cases\", \"siem-agents\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]},
+  {\"names\": [\"siem-actions\", \"siem-cases\", \"siem-agents\", \"siem-sources\", \"siem-intel\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]},
   {\"names\": [\"siem-events-*\"], \"privileges\": [\"read\", \"view_index_metadata\"]}]}"
 role siem_ai      "{\"cluster\": [\"monitor\"], \"indices\": [
   {\"names\": [\"siem-events-*\", \"siem-alerts\", \"siem-cases\"], \"privileges\": [\"read\", \"view_index_metadata\"]},
