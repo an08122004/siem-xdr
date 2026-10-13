@@ -39,6 +39,7 @@ def env(monkeypatch):
     monkeypatch.setattr(settings, "CONSOLE_ADMIN_PASSWORD", ADMIN_TMP)
     monkeypatch.setattr(settings, "GRAFANA_URL", "")                      # không gán quyền Grafana lúc khởi động
     monkeypatch.setattr(settings, "RULES_CATALOG_SECONDS", 0)             # không đồng bộ danh mục rule nền
+    monkeypatch.setattr(settings, "KPI_SECONDS", 0)                       # không tính KPI nền
     monkeypatch.setattr(store, "create_action", lambda es, aid, t, p, **kw: actions.setdefault(
         f"a{len(actions)}", {"agent_id": aid, "type": t, "params": p, "status": "pending", **kw}))
     monkeypatch.setattr(store, "list_agents", lambda es: [{"agent_id": "001", "hostname": "demo-web", "status": "online"}])

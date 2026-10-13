@@ -109,6 +109,10 @@ IDX_AI_JOBS = "ai-jobs"
 # Danh mục rule + đề xuất AI cho tra cứu / so sánh (rules_catalog.py, Grafana "Thư viện rule"); trong siem-* -> Grafana đọc được
 IDX_RULES = "siem-rules"
 RULES_CATALOG_SECONDS = int(os.getenv("RULES_CATALOG_SECONDS", "60"))
+# KPI SOC (manager/kpi.py): tính mỗi N giây trên cửa sổ N ngày, lưu vào siem-kpi (Grafana "SOC KPI")
+KPI_SECONDS = int(os.getenv("KPI_SECONDS", "300"))
+KPI_WINDOW_DAYS = int(os.getenv("KPI_WINDOW_DAYS", "30"))
+SOC_SHIFTS_PER_DAY = int(os.getenv("SOC_SHIFTS_PER_DAY", "1"))     # 1 = trực 8x5 (giai đoạn 1-2); 2 = hai ca 12 giờ (24/7)
 # Rule chạy bóng (mode: shadow) -> bật chính thức khi: chạy đủ N ngày, dưới N alert/ngày, tỉ lệ báo nhầm dưới ngưỡng
 SHADOW_MIN_DAYS = float(os.getenv("SHADOW_MIN_DAYS", "7"))
 SHADOW_MAX_ALERTS_PER_DAY = float(os.getenv("SHADOW_MAX_ALERTS_PER_DAY", "5"))

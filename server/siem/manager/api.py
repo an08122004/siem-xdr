@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field
 
 from .. import priority as prio
 from .. import rules_catalog, settings, store
-from . import auth, grafana_proxy
+from . import auth, grafana_proxy, kpi
 from .auth import Session, current_user, has, require_perm
 
 log = logging.getLogger("manager")
@@ -52,9 +52,10 @@ async def lifespan(_app: FastAPI):
     auth.setup(_state["es"])
     grafana_setup = asyncio.create_task(grafana_proxy.ensure_folder_permissions()) if settings.GRAFANA_URL else None
     catalog = asyncio.create_task(catalog_loop()) if settings.RULES_CATALOG_SECONDS > 0 else None
+    kpis = asyncio.create_task(kpi_loop()) if settings.KPI_SECONDS > 0 else None
     log.info("manager sẵn sàng")
     yield
-    for t in (grafana_setup, catalog):
+    for t in (grafana_setup, catalog, kpis):
         if t:
             t.cancel()
     await grafana_proxy.close()
@@ -68,6 +69,23 @@ async def catalog_loop() -> None:
         except Exception as e:  # noqa: BLE001
             log.warning("đồng bộ danh mục rule lỗi: %s", e)
         await asyncio.sleep(settings.RULES_CATALOG_SECONDS)
+
+
+def compute_kpi() -> dict[str, Any]:
+    doc = kpi.compute(es(), settings.RULES_DIR, settings.CONFIG_DIR)
+    kpi.save(es(), doc)
+    return doc
+
+
+async def kpi_loop() -> None:
+    """KPI SOC (manager/kpi.py) tính định kỳ, lưu thành chuỗi thời gian cho dashboard SOC KPI."""
+    await asyncio.sleep(20)                         # chờ SOAR / analyzer khởi động, index đã có
+    while True:
+        try:
+            await asyncio.to_thread(compute_kpi)
+        except Exception as e:  # noqa: BLE001
+            log.warning("tính KPI lỗi: %s", e)
+        await asyncio.sleep(settings.KPI_SECONDS)
 
 
 def refresh_catalog() -> None:
@@ -613,6 +631,13 @@ def stats() -> dict[str, Any]:
             open_cases, {"range": {"sla_due": {"lt": "now"}}}], "must_not": [{"exists": {"field": "acknowledged_at"}}]}}),
         "ai_pending": count(settings.IDX_AI_PROPOSALS, {"term": {"status": "pending"}}),
     }
+
+
+@app.get("/api/v1/kpi", dependencies=[Depends(current_user)])
+def kpi_latest(fresh: bool = False) -> dict[str, Any]:
+    """KPI mới nhất (fresh=true: tính lại ngay). Đích GĐ2 / GĐ4 và mức đạt nằm trong `targets` / `grade`."""
+    doc = None if fresh else kpi.latest(es())
+    return doc or compute_kpi()
 
 
 @app.get("/health")

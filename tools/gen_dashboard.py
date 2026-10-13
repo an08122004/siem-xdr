@@ -265,9 +265,10 @@ rules_vars = [
      "options": [{"selected": True, "text": "*", "value": "*"}]},
     terms_var("proposal", "Đề xuất cần so sánh", "proposal.pick", query="origin:ai_proposal", all_=False, size=500),
 ]
-CATALOG_COLS = ["origin_label", "rule.id", "rule.name", "severity", "type", "mitre.tactic", "technique_text", "tags_text",
-                "fields_text", "condition_text", "alerts.h24", "alerts.d7", "alerts.last", "proposal.status_label",
-                "proposal.test", "proposal.fp", "proposal.alerts_per_day", "file", "proposal.id"]
+CATALOG_COLS = ["origin_label", "rule.id", "rule.name", "severity", "type", "mode_label", "mitre.tactic", "technique_text",
+                "tags_text", "fields_text", "condition_text", "alerts.h24", "alerts.d7", "alerts.fp_rate30", "alerts.last",
+                "playbook", "proposal.status_label", "proposal.test", "proposal.fp", "proposal.alerts_per_day", "file",
+                "proposal.id"]
 most_alerts = {"id": pid(), "type": "bargauge", "title": "Rule kêu nhiều nhất (7 ngày)", "datasource": RU,
                "gridPos": {"x": 16, "y": 5, "w": 8, "h": 8},
                "targets": [{"refId": "A", "datasource": RU, "query": "origin:rule AND alerts.d7:>0", "timeField": "@timestamp",
@@ -294,6 +295,7 @@ rules_lib = [
           rename={"origin_label": "Nguồn", "rule.id": "Mã", "rule.name": "Tên", "severity": "Mức độ", "type": "Loại",
                   "mitre.tactic": "Tactic", "technique_text": "Kỹ thuật", "tags_text": "Tag", "fields_text": "Trường log",
                   "condition_text": "Điều kiện", "alerts.h24": "Alert 24h", "alerts.d7": "Alert 7 ngày",
+                  "mode_label": "Chế độ", "alerts.fp_rate30": "Báo nhầm 30 ngày", "playbook": "Case playbook",
                   "alerts.last": "Alert gần nhất", "proposal.status_label": "Trạng thái đề xuất",
                   "proposal.test": "Bắt mẫu kiểm tra", "proposal.fp": "Báo nhầm", "proposal.alerts_per_day": "Alert/ngày (ước tính)",
                   "file": "File"},
@@ -323,10 +325,117 @@ rules_lib = [
                      width("score", 90), width("rule.id", 90), wrap("rule.name", 170), link_to("rule.id", "Xem cảnh báo của rule trên console", '/go/rule/${__data.fields["rule.id"]}')]),
 ]
 
+# ------------------------------------------------------------------ SOC KPI
+# Dữ liệu: siem-kpi (manager/kpi.py tính mỗi 5 phút trên 30 ngày gần nhất) -> ô chỉ số lấy giá trị MỚI NHẤT, tô màu theo
+# đích của kế hoạch SOC: xanh = đạt đích cuối giai đoạn 4, vàng = đạt đích giai đoạn 2, đỏ = chưa đạt.
+KP = {"type": "elasticsearch", "uid": "siem-kpi"}
+SR = {"type": "elasticsearch", "uid": "siem-sources"}
+KPI_TARGETS = {   # = manager/kpi.py TARGETS: (đích GĐ2, đích GĐ4, càng thấp càng tốt?)
+    "mttd_critical_s": (1800, 900, True), "mtta_p1_s": (1800, 900, True), "mttc_p1_s": (14400, 3600, True),
+    "sla_pct": (85, 95, False), "fp_rate_pct": (50, 30, True), "alerts_per_analyst_shift": (60, 40, True),
+    "enrichment_pct": (50, 80, False), "attack_coverage_pct": (50, 70, False), "source_health_pct": (95, 98, False),
+    "hunts_month": (1, 2, False),
+}
+
+
+def kpi_steps(field):
+    g2, g4, low = KPI_TARGETS[field]
+    if low:
+        return [{"color": "green", "value": None}, {"color": "yellow", "value": g4}, {"color": "red", "value": g2}]
+    return [{"color": "red", "value": None}, {"color": "yellow", "value": g2}, {"color": "green", "value": g4}]
+
+
+def kpi_stat(title, field, unit, x, y, w=4, desc=""):
+    g2, g4, low = KPI_TARGETS[field]
+    fmt = (lambda v: f"{v / 60:g} phút" if v < 3600 else f"{v / 3600:g} giờ") if unit == "s" else \
+        (lambda v: f"{v:g}%" if unit == "percent" else f"{v:g}")
+    cmp = "≤" if low else "≥"
+    return {"id": pid(), "type": "stat", "title": title, "datasource": KP, "gridPos": {"x": x, "y": y, "w": w, "h": 4},
+            "description": f"{desc} Đích: GĐ2 {cmp} {fmt(g2)}, GĐ4 {cmp} {fmt(g4)}.".strip(),
+            "targets": [target(KP, "", metric={"id": "1", "type": "max", "field": field})],
+            "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False}, "colorMode": "background",
+                        "graphMode": "area", "textMode": "value"},
+            "fieldConfig": {"defaults": {"unit": unit, "decimals": 1, "noValue": "chưa đo",
+                                         "thresholds": {"mode": "absolute", "steps": kpi_steps(field)},
+                                         "color": {"mode": "thresholds"}}, "overrides": []}}
+
+
+def kpi_trend(title, fields, unit, x, y, w=12, h=8):
+    return {"id": pid(), "type": "timeseries", "title": title, "datasource": KP, "gridPos": {"x": x, "y": y, "w": w, "h": h},
+            "targets": [target(KP, "", metric={"id": "1", "type": "max", "field": f}, ref=chr(65 + i), alias=label)
+                        for i, (f, label) in enumerate(fields)],
+            "fieldConfig": {"defaults": {"unit": unit, "custom": {"drawStyle": "line", "lineWidth": 2, "spanNulls": True}},
+                            "overrides": []},
+            "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}}
+
+
+def avg_by(title, ds, query, field, by, unit, x, y, w=8, h=8, time_field="created_at"):
+    return {"id": pid(), "type": "bargauge", "title": title, "datasource": ds, "gridPos": {"x": x, "y": y, "w": w, "h": h},
+            "targets": [{"refId": "A", "datasource": ds, "query": query, "timeField": time_field,
+                         "metrics": [{"id": "1", "type": "avg", "field": field}],
+                         "bucketAggs": [{"id": "3", "type": "terms", "field": by,
+                                         "settings": {"size": "10", "order": "asc", "orderBy": "_term", "min_doc_count": "1"}}]}],
+            "options": {"reduceOptions": {"values": True, "calcs": ["lastNotNull"], "fields": ""},
+                        "orientation": "horizontal", "displayMode": "basic", "showUnfilled": True},
+            "fieldConfig": {"defaults": {"unit": unit, "min": 0}, "overrides": []}}
+
+
+SOURCE_COLORS = {"ok": "green", "deviation": "yellow", "silent": "red"}
+CLOSED = "alert.status:(closed OR false_positive)"
+kpi_panels = [
+    row("Chỉ số chính (30 ngày gần nhất) — xanh: đạt đích giai đoạn 4, vàng: đạt giai đoạn 2, đỏ: chưa đạt", 0),
+    kpi_stat("MTTD alert critical", "mttd_critical_s", "s", 0, 1, desc="Từ event đầu tiên của chuỗi tấn công tới lúc sinh alert."),
+    kpi_stat("MTTA case P1", "mtta_p1_s", "s", 4, 1, desc="Từ lúc mở case tới khi có người nhận xử lý."),
+    kpi_stat("MTTC case P1", "mttc_p1_s", "s", 8, 1, desc="Từ lúc mở case tới khi khoanh vùng xong (Đã ngăn chặn)."),
+    kpi_stat("Tuân thủ SLA", "sla_pct", "percent", 12, 1, desc="% case xác nhận / khoanh vùng trong hạn của mức ưu tiên."),
+    kpi_stat("Tỉ lệ báo nhầm", "fp_rate_pct", "percent", 16, 1, desc="Alert kết luận báo nhầm / alert đã đóng."),
+    kpi_stat("Alert / analyst / ca", "alerts_per_analyst_shift", "short", 20, 1, desc="Tải công việc."),
+    kpi_stat("Làm giàu tự động", "enrichment_pct", "percent", 0, 5, w=6, desc="% alert có ngữ cảnh tài sản."),
+    kpi_stat("Độ phủ ATT&CK ưu tiên", "attack_coverage_pct", "percent", 6, 5, w=6,
+             desc="% kỹ thuật trong threat_profile.yml có rule chạy chính thức đã kiểm thử."),
+    kpi_stat("Sức khỏe nguồn log", "source_health_pct", "percent", 12, 5, w=6, desc="% nguồn đã onboard không im lặng."),
+    kpi_stat("Hunt hoàn thành / tháng", "hunts_month", "short", 18, 5, w=6, desc="Số cuộc threat hunting hoàn thành."),
+    row("Xu hướng", 9),
+    kpi_trend("Thời gian phát hiện / nhận / khoanh vùng", [("mttd_critical_s", "MTTD critical"), ("mtta_p1_s", "MTTA P1"),
+                                                         ("mttc_p1_s", "MTTC P1"), ("mtta.all", "MTTA mọi mức")], "s", 0, 10),
+    kpi_trend("Tỉ lệ (%)", [("sla_pct", "Tuân thủ SLA"), ("fp_rate_pct", "Báo nhầm"), ("enrichment_pct", "Làm giàu"),
+                            ("attack_coverage_pct", "Độ phủ ATT&CK"), ("source_health_pct", "Nguồn log khỏe")],
+              "percent", 12, 10),
+    row("Chất lượng cảnh báo (theo khoảng thời gian của dashboard)", 18),
+    pie("Kết luận khi đóng alert", AL, CLOSED, "alert.verdict", 0, 19, w=6),
+    bars("Rule báo nhầm nhiều nhất", AL, "alert.status:false_positive", "rule.id", 6, 19, w=6),
+    pie("Alert theo mức ưu tiên", AL, "NOT alert.shadow:true", "priority", 12, 19, w=6),
+    avg_by("MTTA theo mức ưu tiên (case)", CS, "_exists_:metrics.tta_seconds", "metrics.tta_seconds", "priority", "s",
+           18, 19, w=6),
+    all_time(table("Case quá hạn xác nhận (chưa ai nhận) — bấm tiêu đề để mở trên console", CS,
+                   "status:(open OR in_progress OR contained) AND NOT _exists_:acknowledged_at AND sla_due:<now",
+                   ["sla_due", "priority", "severity", "title", "entity", "alert_count", "status", "id"], 0, 27, h=8,
+                   time_field="created_at", sort=("sla_due", False),
+                   overrides=[color_cells("status", CASE_COLORS), *console_link("case", "id", "title")])),
+    row("Nguồn log (soar/health.py, cập nhật mỗi phút)", 35),
+    all_time(stat("Sự cố nền tảng đang mở", AL, "alert.source:health AND alert.status:(open OR acknowledged OR in_progress)",
+                  0, 36, "red", w=6)),
+    all_time(table("Trạng thái từng nguồn", SR, "", ["source", "host", "status", "last_event", "expected_per_hour",
+                                                     "last_hour", "events_7d", "checked_at"], 6, 36, w=18, h=8,
+                   time_field="checked_at", sort=("status", True),
+                   rename={"source": "Nguồn", "host": "Máy", "status": "Trạng thái", "last_event": "Event gần nhất",
+                           "expected_per_hour": "Trung bình / giờ", "last_hour": "1 giờ qua", "events_7d": "7 ngày",
+                           "checked_at": "Kiểm tra lúc"},
+                   overrides=[color_cells("status", SOURCE_COLORS)])),
+    row("Độ phủ kỹ thuật ATT&CK ưu tiên (server/config/threat_profile.yml)", 44),
+    all_time(table("Kỹ thuật ưu tiên và rule phát hiện", RU, "origin:coverage",
+                   ["technique", "name", "covered_text", "rules_text", "shadow_text", "why"], 0, 45, h=10,
+                   sort=("technique", False),
+                   rename={"technique": "Kỹ thuật", "name": "Tên", "covered_text": "Có rule", "rules_text": "Rule chạy chính thức",
+                           "shadow_text": "Đang chạy bóng", "why": "Vì sao ưu tiên"},
+                   overrides=[color_cells("covered_text", {"có": "green", "CHƯA CÓ": "red"})])),
+]
+
 for uid, title, body, extra in (
         ("siem-overview", "SIEM/XDR — Tổng quan SOC", panels, {}),
         ("siem-investigate", "SIEM/XDR — Điều tra thực thể", investigate, {"templating": [q_var], "time_from": "now-24h"}),
-        ("siem-rules", "SIEM/XDR — Thư viện rule", rules_lib, {"templating": rules_vars, "time_from": "now-20y", "refresh": "1m"})):
+        ("siem-rules", "SIEM/XDR — Thư viện rule", rules_lib, {"templating": rules_vars, "time_from": "now-20y", "refresh": "1m"}),
+        ("soc-kpi", "SIEM/XDR — SOC KPI", kpi_panels, {"time_from": "now-7d", "refresh": "5m"})):
     out = DIR / f"{uid}.json"
     out.write_text(json.dumps(dashboard(uid, title, body, **extra), ensure_ascii=False, indent=2),
                    encoding="utf-8", newline="\n")

@@ -56,3 +56,21 @@ datasources:
       index: "siem-rules"
       timeField: "@timestamp"
       maxConcurrentShardRequests: 5
+  # KPI SOC tính định kỳ (server/siem/manager/kpi.py) và trạng thái từng nguồn log (server/siem/soar/health.py),
+  # dashboard "SOC KPI"
+  - <<: *es
+    name: SIEM KPI
+    uid: siem-kpi
+    jsonData:
+      tlsAuthWithCACert: true
+      index: "siem-kpi"
+      timeField: "@timestamp"
+      maxConcurrentShardRequests: 5
+  - <<: *es
+    name: SIEM Sources
+    uid: siem-sources
+    jsonData:
+      tlsAuthWithCACert: true
+      index: "siem-sources"
+      timeField: "checked_at"
+      maxConcurrentShardRequests: 5

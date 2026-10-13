@@ -95,7 +95,8 @@ def test_rules_exceptions_and_proposals(rules_dir):
     docs = by_id(rc.build(rules_dir, PROPOSALS, {"WEB-001": {"h24": 3, "d7": 10, "last": "2026-10-03T10:00:00Z"}}))
     web = docs["rule:WEB-001"]
     assert web["origin"] == "rule" and web["source"] == "builtin" and web["file"] == "web.yml"
-    assert web["alerts"] == {"h24": 3, "d7": 10, "last": "2026-10-03T10:00:00Z"}
+    assert {k: web["alerts"][k] for k in ("h24", "d7", "last")} == {"h24": 3, "d7": 10, "last": "2026-10-03T10:00:00Z"}
+    assert web["alerts"]["fp_rate30"] is None and web["mode"] == "active" and web["mode_label"] == "chính thức"
     assert web["mitre"] == {"tactic": "Initial Access", "technique": ["T1190"]} and "event.category" in web["fields"]
     assert "rule:WEB-099" not in docs                                           # rule tắt không nằm trong danh mục
     auth = docs["rule:AUTH-001"]
@@ -181,3 +182,22 @@ def test_sync_writes_once_and_removes_stale(rules_dir, monkeypatch):
     (rules_dir / "ai" / "AI-021.yml").unlink()                                    # gỡ rule AI
     rc.sync(es, rules_dir)
     assert "rule:AI-021" not in [op["index"]["_id"] for op in es.bulks[1] if "index" in op]
+
+
+def test_catalog_metadata_false_positive_rate_detectors_and_coverage():
+    """Danh mục thật (server/rules + lint): rule có metadata, ca test, playbook, tỉ lệ báo nhầm 30 ngày; có bản ghi cho
+    phát hiện nền tảng (RBA, HLT) và độ phủ kỹ thuật ưu tiên."""
+    from siem.detection.lint import lint
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    rep = lint(root / "rules", root / "config")
+    docs = by_id(rc.build(root / "rules", [], {"WEB-004": {"h24": 1, "d7": 4, "d90": 9, "closed30": 8, "fp30": 2}}, rep))
+    web = docs["rule:WEB-004"]
+    assert web["owner"] == "detection-engineering" and "webserver" in web["logsource_text"]
+    assert web["tests"] == {"positive": 2, "negative": 1, "failed": 0, "tested": True} and web["playbook"] == "PB-02"
+    assert web["alerts"]["fp_rate30"] == 0.25 and web["alerts"]["d90"] == 9 and "pentest" in web["falsepositives_text"]
+    assert {d["rule"]["id"] for d in docs.values() if d["origin"] == "detector"} >= {"RBA-001", "HLT-001", "HLT-006"}
+    cov = {d["technique"]: d for d in docs.values() if d["origin"] == "coverage"}
+    assert len(cov) == 12 and cov["T1486"]["covered_text"] == "CHƯA CÓ" and "WIN-007" in cov["T1003"]["rules_text"]
+    # bản ghi mới không làm lệch đếm "rule đang chạy" (e2e so số rule YAML với origin:rule)
+    assert sum(d["origin"] == "rule" for d in docs.values()) == len(rep.rules)

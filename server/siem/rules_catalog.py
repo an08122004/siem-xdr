@@ -3,8 +3,11 @@
 Mỗi bản ghi có cùng bộ trường (mã, tên, mức độ, MITRE, tag, trường log dùng trong điều kiện, điều kiện tóm tắt, YAML), nên
 rule đang chạy và đề xuất AI đặt cạnh nhau so sánh được trực tiếp. Bốn loại bản ghi (trường `origin`):
 
-  rule          rule đang chạy (server/rules/**, kể cả rule AI đã duyệt trong rules/ai), kèm số alert 24 giờ / 7 ngày
+  rule          rule đang chạy (server/rules/**, kể cả rule AI đã duyệt trong rules/ai), kèm số alert 24 giờ / 7 ngày /
+                90 ngày, số báo nhầm 30 ngày, chế độ (chạy bóng / chính thức), metadata và kết quả ca test (detection/lint.py)
   exception     ngoại lệ đang áp dụng (rules/exceptions)
+  detector      phát hiện có sẵn của nền tảng, không viết bằng YAML: RBA-001 (soar/risk.py), HLT-* (soar/health.py)
+  coverage      kỹ thuật ATT&CK ưu tiên (config/threat_profile.yml): có / chưa có rule chạy chính thức đã kiểm thử
   ai_proposal   đề xuất của AI (ai-rule-proposals) mọi trạng thái, kèm số liệu kiểm định
   comparison    cặp (đề xuất AI, rule hiện có liên quan) kèm lý do và điểm: cùng kỹ thuật MITRE, cùng tag tấn công, cùng
                 trường log, cùng tactic, hoặc chính rule mà ngoại lệ nhắm tới — để người duyệt thấy đề xuất có trùng / bổ sung
@@ -172,7 +175,18 @@ def _common(*, tactic: Any, techniques: Any, tags: Iterable[str], fields: Iterab
 
 
 # ------------------------------------------------------------------ dựng bản ghi
-def rule_docs(rules_dir: Path, alert_stats: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+MODE_LABEL = {"active": "chính thức", "shadow": "chạy bóng"}
+
+
+def _text(v: Any) -> str:
+    if isinstance(v, dict):
+        return ", ".join(f"{k}: {x}" for k, x in v.items())
+    if isinstance(v, list):
+        return "; ".join(str(x) for x in v)
+    return str(v or "")
+
+
+def rule_docs(rules_dir: Path, alert_stats: dict[str, dict[str, Any]], report=None) -> list[dict[str, Any]]:
     docs = []
     for path in sorted(rules_dir.glob("**/*.y*ml")):
         rel = path.relative_to(rules_dir)
@@ -191,6 +205,9 @@ def rule_docs(rules_dir: Path, alert_stats: dict[str, dict[str, Any]]) -> list[d
             mitre = d.get("mitre") or {}
             st = alert_stats.get(str(d["id"]), {})
             sev = str(d.get("severity", "medium")).lower()
+            info = report.rules.get(str(d["id"])) if report else None
+            mode = str(d.get("mode", "active")).lower()
+            closed30, fp30 = st.get("closed30", 0), st.get("fp30", 0)
             docs.append({
                 "_id": f"rule:{d['id']}", "origin": "rule", "origin_label": "Rule AI (đã duyệt)" if ai else "Rule sẵn có",
                 "source": "ai" if ai else "builtin", "updated_at": _iso(path.stat().st_mtime),
@@ -200,9 +217,53 @@ def rule_docs(rules_dir: Path, alert_stats: dict[str, dict[str, Any]]) -> list[d
                 "condition_text": text, "patterns": sorted(_rule_tokens(d)), "yaml": _dump(d),
                 "file": str(rel).replace("\\", "/"),
                 "ai_proposal_id": d.get("ai_proposal_id"),
-                "alerts": {"h24": st.get("h24", 0), "d7": st.get("d7", 0), "last": st.get("last")},
+                "alerts": {"h24": st.get("h24", 0), "d7": st.get("d7", 0), "d90": st.get("d90", 0), "last": st.get("last"),
+                           "closed30": closed30, "fp30": fp30,
+                           "fp_rate30": round(fp30 / closed30, 3) if closed30 else None},
+                "mode": mode, "mode_label": MODE_LABEL.get(mode, mode), "shadow_since": d.get("shadow_since"),
+                "owner": d.get("owner"), "logsource_text": _text(d.get("logsource")),
+                "falsepositives_text": _text(d.get("falsepositives")),
+                "tests": {"positive": info.positive, "negative": info.negative, "failed": info.failed,
+                          "tested": info.tested} if info else None,
+                "playbook": info.playbook if info else None,
             })
     return docs
+
+
+# Phát hiện có sẵn của nền tảng (không phải YAML trong server/rules): để Thư viện rule tra cứu được mã alert RBA / HLT
+DETECTORS = [
+    ("RBA-001", "Rủi ro tích lũy vượt ngưỡng trên máy / tài khoản", "high", "soar/risk.py",
+     "Tổng risk_score các alert của cùng máy / tài khoản trong RBA_WINDOW_HOURS giờ >= RBA_THRESHOLD, từ >= RBA_MIN_RULES rule khác nhau"),
+    ("HLT-001", "Agent mất kết nối", "medium", "soar/health.py", "Wazuh báo disconnected, keepalive cuối quá AGENT_DOWN_MINUTES phút"),
+    ("HLT-002", "Nguồn log im lặng", "medium", "soar/health.py",
+     "Không event nào trong SOURCE_SILENT_MINUTES phút dù trung bình 7 ngày phải có >= SOURCE_MIN_EXPECTED event"),
+    ("HLT-003", "Lưu lượng log lệch bất thường", "low", "soar/health.py",
+     "Lưu lượng 1 giờ qua lệch quá VOLUME_DEVIATION so với trung bình 7 ngày"),
+    ("HLT-004", "Mất đồng bộ trạng thái agent với Wazuh manager", "high", "soar/health.py", "SOAR không gọi được Wazuh API"),
+    ("HLT-005", "Đường ống Kafka bị nghẽn", "high", "soar/health.py",
+     "Consumer analyzer / SOAR tụt sau quá KAFKA_LAG_MAX_MESSAGES message liên tục KAFKA_LAG_MINUTES phút"),
+    ("HLT-006", "Elasticsearch lỗi hoặc sắp đầy đĩa", "high", "soar/health.py", "Cluster RED, hoặc đĩa node >= ES_DISK_MAX_PCT%"),
+]
+
+
+def detector_docs(alert_stats: dict[str, dict[str, Any]], now: str) -> list[dict[str, Any]]:
+    out = []
+    for rid, name, sev, src, cond in DETECTORS:
+        st = alert_stats.get(rid, {})
+        out.append({"_id": f"detector:{rid}", "origin": "detector", "origin_label": "Phát hiện nền tảng", "source": "builtin",
+                    "updated_at": now, "rule": {"id": rid, "name": name}, "severity": sev,
+                    "severity_score": SEVERITY_SCORE.get(sev, 0), "type": "rba" if rid.startswith("RBA") else "health",
+                    **_common(tactic=None, techniques=None, tags=["platform"], fields=[]), "condition_text": cond,
+                    "file": src, "mode": "active", "mode_label": MODE_LABEL["active"],
+                    "alerts": {"h24": st.get("h24", 0), "d7": st.get("d7", 0), "d90": st.get("d90", 0), "last": st.get("last")}})
+    return out
+
+
+def coverage_docs(report, now: str) -> list[dict[str, Any]]:
+    return [{"_id": f"coverage:{c['id']}", "origin": "coverage", "origin_label": "Độ phủ ATT&CK ưu tiên", "updated_at": now,
+             "technique": c["id"], "name": c["name"], "why": c.get("why", ""), "covered": c["covered"],
+             "covered_text": "có" if c["covered"] else "CHƯA CÓ", "rules_text": ", ".join(c["rules"]) or "—",
+             "shadow_text": ", ".join(c["shadow"]) or ""} for c in (report.coverage if report else [])]
 
 
 def exception_docs(rules_dir: Path, rules: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
@@ -368,15 +429,40 @@ def comparison_docs(proposals: list[dict[str, Any]], rules: list[dict[str, Any]]
 def alert_stats(es) -> dict[str, dict[str, Any]]:
     """Số alert 24 giờ / 7 ngày và lần gần nhất của từng rule (để biết rule nào hay kêu, rule nào im lặng)."""
     try:
+        d30 = {"range": {"@timestamp": {"gte": "now-30d"}}}
         res = es.search(index=settings.IDX_ALERTS, size=0, aggs={"r": {"terms": {"field": "rule.id", "size": 2000}, "aggs": {
+            "d90": {"filter": {"range": {"@timestamp": {"gte": "now-90d"}}}},
             "d7": {"filter": {"range": {"@timestamp": {"gte": "now-7d"}}}},
             "h24": {"filter": {"range": {"@timestamp": {"gte": "now-24h"}}}},
+            # tỉ lệ báo nhầm theo rule: rà soát hằng quý, tiêu chí bật rule chạy bóng (SOC-OPERATIONS.md mục 4)
+            "closed30": {"filter": {"bool": {"filter": [d30, {"terms": {"alert.status": ["closed", "false_positive"]}}]}}},
+            "fp30": {"filter": {"bool": {"filter": [d30, {"term": {"alert.status": "false_positive"}}]}}},
             "last": {"max": {"field": "@timestamp"}}}}})
     except Exception as e:  # noqa: BLE001 - chưa có alert nào
         log.debug("không đếm được alert: %s", e)
         return {}
-    return {b["key"]: {"d7": b["d7"]["doc_count"], "h24": b["h24"]["doc_count"], "last": b["last"].get("value_as_string")}
+    return {b["key"]: {"d90": b["d90"]["doc_count"], "d7": b["d7"]["doc_count"], "h24": b["h24"]["doc_count"],
+                       "closed30": b["closed30"]["doc_count"], "fp30": b["fp30"]["doc_count"],
+                       "last": b["last"].get("value_as_string")}
             for b in res["aggregations"]["r"]["buckets"]}
+
+
+_lint_cache: tuple[Any, Any] | None = None
+
+
+def lint_report(rules_dir: Path, config_dir: Path | None):
+    """Kết quả lint kho rule (metadata, ca test, độ phủ); chỉ tính lại khi file rule đổi."""
+    global _lint_cache
+    from .detection.lint import lint
+    from .detection.rules import rules_fingerprint
+    fp = rules_fingerprint(rules_dir)
+    if _lint_cache is None or _lint_cache[0] != fp:
+        try:
+            _lint_cache = (fp, lint(rules_dir, config_dir))
+        except Exception as e:  # noqa: BLE001 - lint lỗi không được làm hỏng danh mục
+            log.warning("lint kho rule lỗi: %s", e)
+            return None
+    return _lint_cache[1]
 
 
 def load_proposals(es) -> list[dict[str, Any]]:
@@ -389,11 +475,14 @@ def load_proposals(es) -> list[dict[str, Any]]:
     return [h["_source"] | {"id": h["_source"].get("id") or h["_id"]} for h in res["hits"]["hits"]]
 
 
-def build(rules_dir: Path, proposals: list[dict[str, Any]], stats: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    rules = rule_docs(rules_dir, stats)
+def build(rules_dir: Path, proposals: list[dict[str, Any]], stats: dict[str, dict[str, Any]],
+          report=None) -> list[dict[str, Any]]:
+    rules = rule_docs(rules_dir, stats, report)
     by_id = {r["rule"]["id"]: r for r in rules}
     props = proposal_docs(proposals, by_id)
-    docs = rules + exception_docs(rules_dir, by_id) + props + comparison_docs(props, rules)
+    now = max((r["updated_at"] for r in rules), default=_iso(0))
+    docs = rules + exception_docs(rules_dir, by_id) + props + comparison_docs(props, rules) + \
+        detector_docs(stats, now) + coverage_docs(report, now)
     for d in docs:
         d["@timestamp"] = d["updated_at"]
         # bản chuỗi của các trường danh sách để bảng Grafana hiển thị gọn (danh sách vẫn giữ để lọc)
@@ -413,7 +502,7 @@ def sync(es, rules_dir: Path = settings.RULES_DIR, force: bool = False) -> int:
     Trả về số bản ghi đã ghi (0 nếu bỏ qua)."""
     global _last_sig
     with _lock:
-        docs = build(rules_dir, load_proposals(es), alert_stats(es))
+        docs = build(rules_dir, load_proposals(es), alert_stats(es), lint_report(rules_dir, settings.CONFIG_DIR))
         sig = hashlib.sha1(json.dumps(docs, sort_keys=True, default=str).encode()).hexdigest()
         if sig == _last_sig and not force:
             return 0

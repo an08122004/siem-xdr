@@ -216,6 +216,7 @@
     <div class="frame" id="frame-overview" hidden><iframe title="Dashboard tổng quan SOC (Grafana)"></iframe></div>
     <div class="frame" id="frame-investigate" hidden><iframe title="Dashboard điều tra thực thể (Grafana)"></iframe></div>
     <div class="frame" id="frame-rules" hidden><iframe title="Thư viện rule và so sánh với đề xuất AI (Grafana)"></iframe></div>
+    <div class="frame" id="frame-kpi" hidden><iframe title="KPI của SOC (Grafana)"></iframe></div>
   </main>
 </div>
 <aside class="drawer" id="drawer" role="dialog" aria-modal="false" aria-labelledby="drawer-title" hidden></aside>
@@ -352,6 +353,7 @@ const NAV = [
   ['alerts', 'Cảnh báo', 'M8 2 1.5 13.5h13z|M8 6.5v3.5|M8 12v.1'],
   ['cases', 'Case', 'M2 4.5h4l1.5 1.5H14v7.5H2z'],
   ['investigate', 'Điều tra', 'M7 2.5a4.5 4.5 0 1 0 0 9a4.5 4.5 0 1 0 0-9|M10.3 10.3 14 14'],
+  ['kpi', 'KPI', 'M2 13.5h12|M3.5 11V8|M7 11V5|M10.5 11V7|M13 3 10.5 5.5 7.5 4 3.5 6.5'],
   null,
   ['actions', 'Lệnh phản ứng', 'M9 1.5 3 9h4.5L7 14.5 13 7H8.5z'],
   ['agents', 'Agent', 'M2.5 3h11v4h-11z|M2.5 9h11v4h-11z|M5 5h.1|M5 11h.1'],
@@ -471,6 +473,17 @@ VIEWS.overview = {
       el('a', { cls: 'btn', href: '/grafana/d/siem-overview', target: '_blank', rel: 'noopener' }, 'Mở Grafana đầy đủ (tab mới)')];
   },
   async load() { showFrame('overview', grafanaUrl('siem-overview', this.range)); },
+};
+
+// ---------------------------------------------------------------- KPI (dashboard Grafana soc-kpi, manager/kpi.py)
+VIEWS.kpi = {
+  title: 'KPI', range: 'now-7d',
+  tools() {
+    return [rangeControl(this.range, v => { this.range = v; render(true); }),
+      el('span', { cls: 'sub' }, 'Ô chỉ số: giá trị mới nhất trên 30 ngày gần nhất; xanh đạt đích giai đoạn 4, vàng đạt giai đoạn 2, đỏ chưa đạt.'),
+      el('a', { cls: 'btn', href: '/grafana/d/soc-kpi', target: '_blank', rel: 'noopener' }, 'Mở Grafana đầy đủ (tab mới)')];
+  },
+  async load() { showFrame('kpi', grafanaUrl('soc-kpi', this.range)); },
 };
 
 // ---------------------------------------------------------------- Cảnh báo
