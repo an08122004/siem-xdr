@@ -388,7 +388,8 @@ CASE_STATUSES = r"^(open|in_progress|contained|closed|false_positive)$"
 # Ai được đánh dấu task cần duyệt (nhãn `approval` trong config/case_playbooks.yml, bảng phân quyền ở README mục 4) ->
 # quyền cần có (auth.PERMISSIONS). Nhãn lạ (vd playbook tự viết) cần contain. Chủ hệ thống không có tài khoản trên
 # console: ai đồng ý thì ghi vào note.
-APPROVAL_PERMISSIONS = {"Analyst L1": "triage", "Trưởng nhóm IR": "contain", "Trưởng nhóm IR + chủ hệ thống": "contain"}
+APPROVAL_PERMISSIONS = {"Analyst L1": "triage", "Trưởng nhóm IR": "contain", "Trưởng nhóm IR + chủ hệ thống": "contain",
+                        "SOC Manager": "declare"}
 OWNER_APPROVAL = "chủ hệ thống"
 # Luật Bảo vệ dữ liệu cá nhân 91/2025/QH15, Điều 23: thông báo vi phạm chậm nhất 72 giờ từ khi phát hiện. Tính từ lúc
 # hệ thống phát hiện (tạo case), không từ lúc tuyên bố sự cố: cách tính thận trọng (SOC-OPERATIONS.md mục 6).

@@ -515,3 +515,20 @@ def test_case_add_alert_script_escalates_priority():
     used = set(re.findall(r"params\.(\w+)", CASE_ADD_ALERT))
     assert used == {"id", "max", "now", "prio", "ack_due", "contain_due"}
     assert "compareTo(ctx._source.priority) < 0" in CASE_ADD_ALERT
+
+
+def test_case_playbooks_from_soc_plan_catalog():
+    """Danh mục playbook ưu tiên của kế hoạch SOC (13/10/2026): nền tảng giám sát, rò rỉ dữ liệu, nội bộ, chiếm tài khoản
+    cloud / email, khai thác lỗ hổng; chọn theo mã alert nền tảng, kỹ thuật cụ thể nhất, tag nhóm rule Wazuh."""
+    from siem.manager.api import APPROVAL_PERMISSIONS
+    from siem.soar.cases import CasePlaybooks
+    cp = CasePlaybooks(ROOT / "config" / "case_playbooks.yml")
+    pick = lambda rid, tech=(), tags=(): cp.select(rid, list(tech), list(tags))[0]["id"]      # noqa: E731
+    assert pick("HLT-002", ["T1562.001"]) == "PB-20"                     # mã alert nền tảng trước kỹ thuật (PB-17)
+    assert pick("AI-300", ["T1567.002"]) == "PB-21" and pick("AI-301", ["T1078.004"]) == "PB-23"
+    assert pick("AI-302", ["T1550.001"]) == "PB-23" and pick("AI-303", ["T1550.002"]) == "PB-16"
+    assert pick("AI-304", ["T1078"]) == "PB-09" and pick("AI-305", ["T1068"]) == "PB-24"
+    assert pick("WZH-23505", tags=["wazuh", "vulnerability-detector"]) == "PB-24" and pick("X", tags=["insider"]) == "PB-22"
+    assert pick("TI-002", ["T1071"]) == "PB-06" and APPROVAL_PERMISSIONS["SOC Manager"] == "declare"
+    insider = cp.build("X", "high", tags=["insider"])
+    assert any(t["approval"] == "SOC Manager" and "Đóng băng quyền" in t["title"] for t in insider["tasks"])

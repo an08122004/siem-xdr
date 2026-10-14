@@ -37,13 +37,20 @@ sheet cho một loại sự cố, chia 6 bước như bảng trên.
 | IRM-5 Malicious Network Behaviour | Có | PB-18 (mới), PB-05, PB-06 | NET-004 (cảnh báo IDS) trước đây gắn nhầm vào "Tấn công Web" |
 | IRM-6 Website Defacement | Có | PB-19 (mới), PB-12, PB-02 | Loại trừ nội dung bên thứ ba, quét CSDL, trang bảo trì tĩnh |
 | IRM-7 Windows Malware Detection | Có | PB-03, PB-14 | Phân loại họ mã độc, gửi mẫu dạng zip có mật khẩu, xử lý máy quan trọng / không quan trọng khác nhau |
-| IRM-12 Insider Abuse | Một phần | PB-04 | Trường hợp người trong nội bộ: yêu cầu bằng văn bản, pháp chế, nhân sự, không thao tác kỹ thuật khi đã xác nhận gian lận |
+| IRM-12 Insider Abuse | Có (13/10/2026) | PB-22, PB-04 | Yêu cầu bằng văn bản của CISO / DPO, nhân sự gặp người bị nghi, hạ quyền / đóng băng quyền / ngắt truy cập từ xa / thu giữ thiết bị, tách 2 trường hợp (bất thường chưa xác nhận: pháp chứng + nhật ký; gian lận đã xác nhận: không thao tác kỹ thuật thêm, chuyển pháp chế), hoàn tác thao tác gian lận |
+| IRM-11 Information Leakage | Có (13/10/2026) | PB-21 | Yêu cầu bằng văn bản trước khi xem dữ liệu người dùng, các kênh rò rỉ (email, web, thiết bị ngoài, file cục bộ, FTP / VPN / SSH, máy in), "đã chứng minh một kênh vẫn phải tìm kênh khác", đề nghị gỡ dữ liệu, theo dõi dữ liệu lan truyền |
+| IRM-22 Business Email Compromise | Có (13/10/2026) | PB-23 | Quy tắc chuyển tiếp / xóa thư, quyền ủy quyền, giao thức cũ vượt MFA, quyết định trong vài phút khi có yêu cầu chuyển tiền, liên hệ ngân hàng, yêu cầu gỡ (abuse) kèm header / IP / thời điểm, DMARC / SPF / DKIM chế độ từ chối |
 | IRM-16 Phishing | Có | PB-11 | Phân loại chiến dịch, lưu bằng chứng trang phishing, xóa email khỏi mọi hộp thư, theo dõi URL xuất hiện lại |
 | IRM-17 Ransomware | Có | PB-07 | Giữ máy bật để thu RAM, backup 3-2-1, theo dõi trang công bố dữ liệu |
 | IRM-18 Large scale compromise | Có | PB-07, PB-16, task chung | Nhóm xử lý khủng hoảng, ngăn chặn kín đáo khi chưa nắm hết điểm xâm nhập, thứ tự nối mạng lại |
 | IRM-20 Red Team Detection | Một phần | Task chung | Đối chiếu với white team trước khi kết luận, không để lộ cho red team |
-| IRM-21 Critical Vulnerability Prioritization | Một phần | PB-08 (SCA) | Xếp ưu tiên theo mức nghiêm trọng, khả năng khai thác, mức quan trọng tài sản; có phương án hoàn tác |
-| IRM-8 Blackmail, IRM-9 Smartphone Malware, IRM-10 Social Engineering, IRM-11 Information Leakage, IRM-13 Customer Phishing, IRM-14 Scam, IRM-15 Trademark Infringement, IRM-19 3rd-party Compromise, IRM-22 Business Email Compromise | Không | — | Hệ thống không có nguồn log để phát hiện các loại này (mail server, DLP, proxy, thiết bị di động, giám sát thương hiệu). Đưa vào khi có thêm nguồn log tương ứng |
+| IRM-21 Critical Vulnerability Prioritization | Có | PB-24, PB-08 (SCA) | CVSS (mức nghiêm trọng) + EPSS (khả năng khai thác) + mức quan trọng tài sản, hạn xử lý 24-72 giờ cho lỗ hổng nghiêm trọng, sao lưu / hoàn tác / thử trên staging trước khi vá, săn dấu hiệu khai thác trong khoảng lộ lỗ hổng sau khi vá |
+| IRM-8 Blackmail, IRM-9 Smartphone Malware, IRM-10 Social Engineering, IRM-13 Customer Phishing, IRM-14 Scam, IRM-15 Trademark Infringement, IRM-19 3rd-party Compromise | Không | — | Hệ thống không có nguồn log để phát hiện các loại này (thiết bị di động, giám sát thương hiệu, bên thứ ba). Đưa vào khi có thêm nguồn log tương ứng |
+
+IRM-11, IRM-12, IRM-22 trước 13/10/2026 không đưa vào vì chưa có nguồn log (mail, DLP, proxy). Kế hoạch SOC đưa các nguồn này vào
+giai đoạn 2-3 (email gateway, proxy, Microsoft 365 / Entra ID) và xếp rò rỉ dữ liệu, mối đe dọa nội bộ, chiếm tài khoản cloud vào
+danh mục playbook ưu tiên, nên các playbook được viết trước để quy trình sẵn sàng khi nguồn log về; tới lúc đó chúng được chọn theo
+kỹ thuật ATT&CK (rule AI, SigmaHQ) hoặc tag nhóm rule Wazuh (`office365`, `aws`, `vulnerability-detector`).
 
 ### Các nguồn khác
 
@@ -54,7 +61,9 @@ sheet cho một loại sự cố, chia 6 bước như bảng trên.
 | CISA — Eviction Strategies CM0050 *Reset KRBTGT Password Twice* | PB-10 | Kiểm tra đồng bộ AD, đổi 2 lần cách nhau ít nhất 10 giờ, RODC làm riêng, ảnh hưởng phụ |
 | Microsoft — *Password spray investigation* | PB-01, PB-09 | Phân biệt brute force / spraying, dấu hiệu "low and slow", thứ tự ưu tiên các lần đăng nhập thành công, cảnh báo IP đổi liên tục, kiểm tra người dùng chung mật khẩu. Phần riêng của Entra ID / AD FS không đưa vào |
 | Microsoft — *Phishing investigation* | PB-11 | Checklist người nhận / mở / bấm / chạy payload, phân tích header (SPF / DKIM / DMARC, IP gốc), hộp thư bị chiếm (chuyển tiếp, ủy quyền, quy tắc). Phần riêng của Exchange Online không đưa vào |
-| Microsoft — *App consent grant*, *Compromised and malicious applications* | Không | Chỉ áp dụng cho Microsoft 365 / Entra ID, hệ thống không giám sát các dịch vụ này |
+| Microsoft — *App consent grant investigation* | PB-23 | Tìm hoạt động "Consent to application" và IsAdminConsent trong audit log, quyền rủi ro cao (Mail.*, Files.*, MailboxSettings.*, Directory.*, consent AllPrincipals), vô hiệu hóa ứng dụng độc hại thay vì xóa |
+| CISA — *Known Exploited Vulnerabilities Catalog* | PB-24 | Danh sách lỗ hổng đang bị khai thác thực tế (có JSON / CSV) để xếp ưu tiên vá |
+| MITRE ATT&CK T1562.001, T1562.002 | PB-20 | Kẻ tấn công tắt / sửa công cụ giám sát và nhật ký: agent mất kết nối, nguồn log im lặng phải loại trừ khả năng này trước khi coi là lỗi kỹ thuật |
 | MITRE ATT&CK | Mọi playbook (cột `techniques`, tham khảo) | Mã kỹ thuật dùng để chọn playbook cho rule AI viết và cảnh báo ruleset Wazuh |
 | Thông tư 20/2017/TT-BTTTT; Luật Bảo vệ dữ liệu cá nhân 91/2025/QH15 + Nghị định 356/2025/NĐ-CP | Task chung "nghĩa vụ báo cáo / thông báo" | Báo cáo sự cố cho cơ quan điều phối; thông báo khi lộ dữ liệu cá nhân. Kiểm tra hiệu lực văn bản với pháp chế |
 
@@ -93,6 +102,14 @@ sheet cho một loại sự cố, chia 6 bước như bảng trên.
 | PB-17 Xóa dấu vết / tắt phòng thủ | WIN-002; T1070, T1562 | IRM-2 |
 | PB-18 Hành vi mạng độc hại / cảnh báo IDS (mới) | NET-004; tag suricata, ids | IRM-5 |
 | PB-19 Thay đổi nội dung website (mới) | WZH-100101; T1491 | IRM-6 |
+| PB-20 Sự cố nền tảng giám sát (13/10/2026) | HLT-*; tag platform, health | MITRE T1562.001 / .002, CISA phụ lục B |
+| PB-21 Rò rỉ / đánh cắp dữ liệu (13/10/2026) | T1041, T1048, T1567, T1020, T1030, T1537, T1052, T1011; tag exfiltration, dlp | IRM-11 |
+| PB-22 Mối đe dọa nội bộ (13/10/2026) | tag insider | IRM-12 |
+| PB-23 Chiếm tài khoản email / cloud (13/10/2026) | T1078.004, T1098.001, T1098.003, T1114.003, T1528, T1550.001, T1621, T1556.006; tag office365, aws, bec | IRM-22, Microsoft App consent, Microsoft Password spray |
+| PB-24 Khai thác lỗ hổng (13/10/2026) | T1203, T1068, T1211, T1212; tag vulnerability-detector, cve | IRM-21, CISA KEV, CISA vulnerability response |
+
+PB-06 nhận thêm TI-002 (IOC mới khớp log cũ khi dò ngược). Nhãn duyệt mới **SOC Manager** (quyền `declare`) dùng cho việc liên
+quan nhân sự / pháp chế, vd đóng băng quyền của người trong nội bộ (PB-21, PB-22).
 
 ## 5. Nguồn
 

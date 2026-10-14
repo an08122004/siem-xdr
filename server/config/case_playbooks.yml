@@ -16,7 +16,8 @@
 #
 # Task: `title` (ngắn), `detail` (cách làm cụ thể: lệnh, event ID, chỗ xem trên console; hiện thu gọn dưới task),
 # `approval` (hành động cần người có thẩm quyền; API chỉ cho tài khoản đủ quyền đánh dấu, README mục 4):
-#   Analyst L1 -> analyst | Trưởng nhóm IR -> lead | Trưởng nhóm IR + chủ hệ thống -> lead + ghi chú ai đã đồng ý
+#   Analyst L1 -> quyền triage | Trưởng nhóm IR -> contain | Trưởng nhóm IR + chủ hệ thống -> contain + ghi chú ai đã
+#   đồng ý | SOC Manager -> declare (việc liên quan nhân sự / pháp chế, vd đóng băng quyền của người trong nội bộ)
 # `common`: task chung gắn vào MỌI playbook (đầu hoặc cuối giai đoạn) — các bước giống nhau ở mọi nguồn.
 # Tiêu đề luôn đặt trong dấu nháy kép; `detail` dùng khối `|-` (giữ xuống dòng).
 
@@ -1023,7 +1024,7 @@ playbooks:
 
   - id: PB-06
     name: Kết nối tới IOC đã biết (Threat Intel)
-    match: [TI-001]
+    match: [TI-001, TI-002]          # TI-002: IOC mới khớp log cũ (dò ngược, soar/retrohunt.py)
     techniques: [T1071, T1568, T1573]
     references:
       - {title: "CERT Société Générale - IRM-5 Malicious Network Behaviour", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-5-MaliciousNetworkBehaviour.pdf"}
@@ -1095,6 +1096,240 @@ playbooks:
       - name: Rút kinh nghiệm
         tasks:
           - title: "Thêm thư mục quan trọng còn thiếu vào FIM (wazuh/manager/agent.conf); đặt hạn xử lý mục SCA theo mức độ"
+
+  - id: PB-20
+    name: Sự cố nền tảng giám sát (agent mất kết nối, nguồn log im lặng, đường ống, sao lưu)
+    match: ["HLT-*"]
+    tags: [platform, health]
+    references:
+      - {title: "MITRE ATT&CK T1562.001 Impair Defenses: Disable or Modify Tools", url: "https://attack.mitre.org/techniques/T1562/001/"}
+      - {title: "MITRE ATT&CK T1562.002 Impair Defenses: Disable Windows Event Logging", url: "https://attack.mitre.org/techniques/T1562/002/"}
+      - {title: "CISA - Federal Government Cybersecurity Incident & Vulnerability Response Playbooks (phụ lục B)", url: "https://www.cisa.gov/sites/default/files/2024-08/Federal_Government_Cybersecurity_Incident_and_Vulnerability_Response_Playbooks_508C.pdf"}
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - title: "Xác định loại sự cố nền tảng theo mã alert (HLT-001 ... HLT-007) và phạm vi: một máy, một nguồn hay cả hệ thống"
+            detail: |-
+              HLT-001 agent mất kết nối; HLT-002 nguồn log im lặng; HLT-003 lưu lượng lệch; HLT-004 SOAR không gọi được Wazuh API; HLT-005 Kafka nghẽn; HLT-006 Elasticsearch đỏ / đầy đĩa; HLT-007 sao lưu không chạy.
+              Xem bảng "Trạng thái từng nguồn" trên trang KPI (siem-sources) để biết nguồn nào cùng im lặng.
+          - title: "Agent / nguồn log ngừng gửi: kiểm tra máy còn bật, còn mạng, dịch vụ agent còn chạy"
+            detail: |-
+              Trên wazuh-manager: docker compose exec wazuh-manager /var/ossec/bin/agent_control -l (trạng thái từng agent).
+              Linux: systemctl status wazuh-agent; tail /var/ossec/logs/ossec.log. Windows: Get-Service WazuhSvc; xem C:\Program Files (x86)\ossec-agent\ossec.log.
+              Máy agent phải tới được cổng 1514 (event) của máy chạy wazuh-manager.
+          - title: "Loại trừ khả năng kẻ tấn công cố ý tắt giám sát trước khi coi là lỗi kỹ thuật"
+            detail: |-
+              Kẻ tấn công hay dừng agent / dịch vụ log, xóa nhật ký, chặn cổng trước khi hành động (MITRE T1562.001, T1562.002).
+              Điều tra thực thể máy đó trong 24 giờ trước lúc mất tín hiệu: cảnh báo khác, đăng nhập lạ, lệnh net stop / sc stop / systemctl stop, wevtutil cl, auditpol.
+              Có dấu hiệu thì nâng ưu tiên case và chuyển sang playbook xâm nhập tương ứng (PB-03, PB-17).
+          - title: "Pipeline / Elasticsearch / sao lưu: xác định thành phần hỏng và thời điểm bắt đầu"
+            detail: |-
+              docker compose ps; docker compose logs --tail 200 <service>. Kafka: Kafka UI (http://127.0.0.1:8088) xem consumer lag của siem-analyzer, siem-soar.
+              Elasticsearch: dung lượng đĩa, trạng thái cluster. Sao lưu: python tools/es_snapshot.py status.
+      - name: Ngăn chặn
+        tasks:
+          - title: "Ghi rõ khoảng thời gian mất giám sát (gap) và các máy / nguồn bị ảnh hưởng vào case"
+            detail: |-
+              Trong khoảng này hệ thống không phát hiện được gì trên các nguồn đó: báo Trưởng nhóm IR và ca trực để tăng giám sát thủ công nếu là tài sản quan trọng.
+          - title: "Máy quan trọng mất giám sát mà nghi bị tắt cố ý: cô lập hoặc cách ly mạng tới khi kiểm tra xong"
+            approval: Trưởng nhóm IR
+          - title: "Elasticsearch sắp đầy: giải phóng dung lượng (xóa index event quá hạn theo chính sách) trước khi chạm ngưỡng 95% (ES ngừng ghi)"
+            detail: |-
+              Không xóa alert, case, lệnh phản ứng. Có thể giảm EVENTS_RETENTION_DAYS rồi chạy lại es-setup, hoặc thêm đĩa.
+      - name: Loại bỏ
+        tasks:
+          - title: "Khắc phục nguyên nhân: khởi động lại dịch vụ, sửa cấu hình / mạng / chứng chỉ, cài lại agent nếu bị gỡ"
+          - title: "Agent bị kẻ tấn công dừng / gỡ: xử lý máy theo playbook xâm nhập trước khi cài lại agent"
+      - name: Khôi phục
+        tasks:
+          - title: "Xác nhận nguồn gửi event trở lại (alert có ghi 'đã hồi phục') và lưu lượng về mức bình thường"
+          - title: "Bù dữ liệu trong khoảng mất giám sát nếu còn: log cục bộ trên máy, hàng đợi đĩa của Vector, archives.json của wazuh-manager"
+            detail: |-
+              Wazuh agent tự gửi lại một phần log còn trong bộ đệm khi kết nối lại. Phần đã mất ghi rõ vào báo cáo.
+          - title: "Sao lưu lỗi: chụp lại ngay và thử khôi phục (python tools/es_snapshot.py now / verify)"
+      - name: Rút kinh nghiệm
+        tasks:
+          - title: "Cập nhật ngưỡng giám sát sức khỏe (AGENT_DOWN_MINUTES, SOURCE_SILENT_MINUTES...) nếu báo nhầm hoặc báo muộn"
+          - title: "Ghi thời gian mất giám sát vào báo cáo tháng (KPI sức khỏe nguồn log)"
+
+  - id: PB-21
+    name: Rò rỉ / đánh cắp dữ liệu (exfiltration, information leakage)
+    tags: [exfiltration, dlp, data-leak]
+    techniques: [T1041, T1048, T1567, T1020, T1030, T1537, T1052, T1011]
+    references:
+      - {title: "CERT Société Générale - IRM-11 Information Leakage", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-11-InformationLeakage.pdf"}
+      - {title: "MITRE ATT&CK TA0010 Exfiltration", url: "https://attack.mitre.org/tactics/TA0010/"}
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - title: "Xác nhận yêu cầu điều tra bằng văn bản của người có thẩm quyền (CISO / người phụ trách) trước khi xem dữ liệu của người dùng"
+            approval: Trưởng nhóm IR
+            detail: |-
+              IRM-11: không làm gì khi chưa có yêu cầu bằng văn bản; tùy tư vấn pháp chế, có thể cần cả đồng ý bằng văn bản của người dùng liên quan.
+              Ghi vào ghi chú case: ai yêu cầu, lúc nào, phạm vi được phép xem.
+          - title: "Xác định dữ liệu nào bị lộ, mức nhạy cảm, có dữ liệu cá nhân không"
+            detail: |-
+              Có dữ liệu cá nhân: báo SOC Manager tuyên bố sự cố lớn trên case để bắt đầu đếm hạn thông báo 72 giờ (Luật Bảo vệ dữ liệu cá nhân 2025).
+          - title: "Tìm kênh đưa dữ liệu ra: email, web / webmail, chia sẻ đám mây, FTP / SSH / VPN, thiết bị lưu trữ ngoài, máy in"
+            detail: |-
+              Điều tra thực thể theo máy / tài khoản: kết nối ra ngoài bất thường (lượng lớn, tới IP / tên miền lạ, giờ lạ), lệnh nén / sao chép hàng loạt (7z, rar, robocopy, scp, rclone, curl -T).
+              Kết nối VPN / SSH chỉ chứng minh được có kết nối, không thấy nội dung (IRM-11).
+          - title: "Tìm thêm kênh khác dù đã có bằng chứng một kênh; xác định ai thực sự dùng máy lúc rò rỉ"
+            detail: |-
+              IRM-11: chứng minh dữ liệu đi từ A tới B bằng một cách không có nghĩa là nó không đi tới C bằng cách khác. Người khác có thể đã dùng máy / tài khoản đó.
+          - title: "Loại trừ mã độc / ransomware là nguồn rò rỉ (nếu có thì xử lý thêm theo PB-03 / PB-07)"
+      - name: Ngăn chặn
+        tasks:
+          - title: "Báo lãnh đạo, pháp chế, truyền thông để chuẩn bị cho việc dữ liệu bị công bố"
+          - title: "Chặn đích nhận dữ liệu (IP, tên miền, URL) trên mọi điểm: agent, firewall biên, proxy"
+            approval: Analyst L1
+            detail: |-
+              Chặn IP: nút "Chặn IP" trên cảnh báo hoặc trang Agent; thêm IP / tên miền vào config/intel để hệ thống bắt các lần kết nối khác (TI-001) và dò ngược 30 ngày (TI-002).
+          - title: "Khóa thông tin xác thực logic và vật lý của người dùng liên quan khi đã xác nhận (có nhân sự, pháp chế)"
+            approval: SOC Manager
+          - title: "Cô lập máy dùng để rò rỉ dữ liệu, giữ nguyên để phân tích pháp chứng"
+            approval: Trưởng nhóm IR
+      - name: Loại bỏ
+        tasks:
+          - title: "Dữ liệu nằm trên máy chủ công khai: đề nghị chủ trang / nhà cung cấp gỡ, điều chỉnh cách đề nghị theo đối tượng"
+          - title: "Không gỡ được: phân tích đầy đủ cho truyền thông và lãnh đạo, theo dõi dữ liệu lan trên web / mạng xã hội"
+          - title: "Cung cấp bằng chứng cho nhân sự / pháp chế nếu khởi kiện người trong nội bộ"
+      - name: Khôi phục
+        tasks:
+          - title: "Khôi phục hoàn toàn hệ thống bị xâm nhập (nếu có), đổi thông tin xác thực / khóa bị lộ theo dữ liệu"
+          - title: "Thông báo nhân viên / đơn vị liên quan để nâng nhận thức; gỡ thông báo chính thức khi tình hình ổn định"
+      - name: Rút kinh nghiệm
+        tasks:
+          - title: "Thêm nguồn log còn thiếu để phát hiện rò rỉ sớm hơn (proxy, DNS, email gateway, DLP) và rule tương ứng"
+
+  - id: PB-22
+    name: Mối đe dọa nội bộ / lạm dụng quyền (insider)
+    tags: [insider, insider-abuse]
+    references:
+      - {title: "CERT Société Générale - IRM-12 Insider Abuse", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-12-InsiderAbuse.pdf"}
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - title: "Chỉ hành động khi có yêu cầu bằng văn bản của CISO / DPO / người phụ trách; hạn chế tối đa người biết"
+            approval: SOC Manager
+            detail: |-
+              IRM-12: không làm gì khi chưa có yêu cầu bằng văn bản; theo tư vấn pháp chế có thể cần cả đồng ý bằng văn bản của người bị nghi.
+              Không thông báo qua kênh mà người bị nghi đọc được (nhóm chat chung, email nhóm).
+          - title: "Gom tín hiệu kỹ thuật: cảnh báo SIEM / tương quan rủi ro (RBA-001) của tài khoản, IDS, kiểm soát ra vào vật lý"
+            detail: |-
+              Điều tra thực thể theo tài khoản (user.name) 30-90 ngày: đăng nhập ngoài giờ, truy cập hệ thống ngoài phạm vi công việc, tải / sao chép lượng lớn, tạo tài khoản / quyền mới, xóa nhật ký.
+          - title: "Ghi nhận nguồn báo từ con người: quản lý trực tiếp, kiểm soát / rủi ro / tuân thủ, đồng nghiệp, đối tác bên ngoài"
+          - title: "Phân loại: hoạt động bất thường chưa xác nhận hay hành vi gian lận / độc hại đã xác nhận"
+            detail: |-
+              Chưa xác nhận: song song pháp chứng máy của người bị nghi và điều tra nhật ký kiểm toán (theo PB-03 / IRM-2, IRM-3).
+              Đã xác nhận gian lận: cân nhắc khởi kiện; KHÔNG thao tác kỹ thuật thêm, chuyển toàn bộ bằng chứng cho pháp chế / cơ quan điều tra (IRM-12).
+      - name: Ngăn chặn
+        tasks:
+          - title: "Mời nhân sự, pháp chế, truyền thông, quản lý trực tiếp tham gia; nhân sự gặp người bị nghi để thông báo"
+          - title: "Người bị nghi còn làm việc trong lúc điều tra: cấp máy quyền tối thiểu"
+            approval: SOC Manager
+          - title: "Đóng băng quyền: tài khoản ứng dụng, tài khoản hệ thống, khóa, thẻ ra vào; ngắt truy cập từ xa (VPN, điện thoại, token)"
+            approval: SOC Manager
+            detail: |-
+              Quyền trên SOC console (nếu có): admin khóa tài khoản ở trang Tài khoản. Ghi rõ từng hệ thống đã khóa, ai khóa, lúc nào.
+          - title: "Thu giữ thiết bị làm việc của người bị nghi, giữ chuỗi giám định"
+            approval: Trưởng nhóm IR
+      - name: Loại bỏ
+        tasks:
+          - title: "Thu hồi mọi thông tin xác thực; rà soát chương trình / script người đó viết, gỡ đoạn mã không cần thiết"
+          - title: "Rà soát các tác vụ quản trị người đó đã làm (tài khoản, quyền, tác vụ hẹn giờ, cấu hình)"
+      - name: Khôi phục
+        tasks:
+          - title: "Hoàn tác các thao tác gian lận; thông báo các bên bị ảnh hưởng và cơ quan chức năng nếu cần (lãnh đạo cấp cao thông báo khi ảnh hưởng lớn)"
+      - name: Rút kinh nghiệm
+        tasks:
+          - title: "Cải tiến quy trình cấp / thu hồi quyền (đặc biệt quyền của vị trí cũ khi chuyển việc), kiểm soát và nâng nhận thức về gian lận"
+
+  - id: PB-23
+    name: Chiếm tài khoản email / cloud (Microsoft 365, Entra ID, ứng dụng OAuth, BEC)
+    tags: [office365, azure-ad, entra-id, aws, cloud-account, bec]
+    techniques: [T1078.004, T1098.001, T1098.003, T1114.003, T1528, T1550.001, T1621, T1556.006]
+    references:
+      - {title: "CERT Société Générale - IRM-22 Business Email Compromise", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-22-Business_Email_Compromise.pdf"}
+      - {title: "Microsoft - App consent grant investigation", url: "https://learn.microsoft.com/en-us/security/operations/incident-response-playbook-app-consent"}
+      - {title: "Microsoft - Password spray investigation", url: "https://learn.microsoft.com/en-us/security/operations/incident-response-playbook-password-spray"}
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - title: "Liệt kê mọi tài khoản email / cloud bị chiếm và quyền của từng tài khoản (tài khoản quản trị, tài chính được ưu tiên)"
+          - title: "Xác định đường vào: phishing, password spray, MFA bị dội yêu cầu, token / ứng dụng OAuth được cấp quyền"
+            detail: |-
+              Nhật ký đăng nhập cloud (Entra ID sign-in, CloudTrail ConsoleLogin): IP / quốc gia lạ, nhiều tài khoản sai mật khẩu từ cùng nguồn, nhiều lần từ chối MFA rồi chấp nhận.
+              Microsoft 365: tìm hoạt động "Consent to application" trong audit log, kiểm tra IsAdminConsent; ứng dụng có quyền Mail.*, Files.*, MailboxSettings.*, Directory.* hoặc consent AllPrincipals cần xem kỹ (Microsoft app consent playbook).
+          - title: "Tìm quy tắc hộp thư chuyển tiếp / di chuyển / xóa thư, quyền ủy quyền hộp thư, đăng nhập giao thức cũ"
+            detail: |-
+              IRM-22: quy tắc chuyển thư ra ngoài, quy tắc tự động xóa / chuyển thư, quyền delegate bất thường, tải hàng loạt thư.
+          - title: "Có yêu cầu chuyển tiền / đổi thông tin thanh toán: báo ngay tài chính và lãnh đạo, quyết định trong vài phút"
+            detail: |-
+              IRM-22: thư khẩn cấp / bí mật yêu cầu chuyển khoản, đổi số tài khoản nhà cung cấp. Giữ nguyên thư gốc kèm header để phân tích.
+      - name: Ngăn chặn
+        tasks:
+          - title: "Tạm khóa tài khoản bị chiếm, buộc đổi mật khẩu, thu hồi phiên / token đang hoạt động"
+            approval: Trưởng nhóm IR
+          - title: "Xóa quy tắc chuyển tiếp / hộp thư giả; tắt giao thức cũ vượt được MFA; bật MFA cho mọi tài khoản quan trọng"
+          - title: "Vô hiệu hóa ứng dụng OAuth độc hại (vô hiệu hóa, không xóa: xóa thì người khác có thể cấp quyền lại)"
+            approval: Trưởng nhóm IR
+          - title: "Chặn IP / tên miền của kẻ tấn công; giữ log gốc (máy chủ thư, đăng nhập, mạng) để làm bằng chứng"
+            approval: Analyst L1
+          - title: "Liên hệ ngân hàng về dòng tiền nếu đã chuyển; báo đối tác / khách hàng về thư giả mạo"
+      - name: Loại bỏ
+        tasks:
+          - title: "Xóa tài khoản / ứng dụng / quyền / dịch vụ do kẻ tấn công tạo; rà soát tài khoản quản trị"
+          - title: "Gửi yêu cầu gỡ (abuse) tới nhà đăng ký tên miền / hosting của trang lừa đảo, kèm header, IP, thời điểm"
+      - name: Khôi phục
+        tasks:
+          - title: "Trả quyền truy cập dần sau khi xác nhận tài khoản sạch; theo dõi đăng nhập tăng cường"
+          - title: "Bật DMARC / SPF / DKIM ở chế độ từ chối, kiểm tra 2 bước ngoài kênh cho mọi thay đổi thanh toán"
+      - name: Rút kinh nghiệm
+        tasks:
+          - title: "Thu log đăng nhập cloud (module office365 / aws của Wazuh) nếu chưa có, viết rule cho quy tắc chuyển tiếp thư và consent ứng dụng"
+
+  - id: PB-24
+    name: Khai thác lỗ hổng (lỗ hổng nghiêm trọng đang bị khai thác, zero-day)
+    tags: [vulnerability-detector, cve, zero-day, exploit]
+    techniques: [T1203, T1068, T1211, T1212]
+    references:
+      - {title: "CERT Société Générale - IRM-21 Critical Vulnerability Prioritization", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-21-Critical_Vulnerability_Prioritization.pdf"}
+      - {title: "CISA - Known Exploited Vulnerabilities Catalog", url: "https://www.cisa.gov/known-exploited-vulnerabilities-catalog"}
+      - {title: "CISA - Federal Government Cybersecurity Incident & Vulnerability Response Playbooks (vulnerability response)", url: "https://www.cisa.gov/sites/default/files/2024-08/Federal_Government_Cybersecurity_Incident_and_Vulnerability_Response_Playbooks_508C.pdf"}
+    phases:
+      - name: Phát hiện & phân tích
+        tasks:
+          - title: "Xác định lỗ hổng (CVE), phần mềm / phiên bản bị ảnh hưởng, đã có mã khai thác / đang bị khai thác chưa"
+            detail: |-
+              Tra danh mục CISA KEV (có tải JSON / CSV), điểm CVSS (mức nghiêm trọng) và EPSS (khả năng bị khai thác); thông báo của hãng, CERT quốc gia.
+          - title: "Lập danh sách máy có phiên bản bị ảnh hưởng, ưu tiên theo mức quan trọng tài sản và mức lộ ra Internet"
+            detail: |-
+              Kiểm kê của Wazuh (syscollector: gói, phiên bản), server/config/assets.yml. Máy trong DMZ / có dịch vụ public xử lý trước.
+          - title: "Săn dấu hiệu đã bị khai thác trong khoảng thời gian lộ lỗ hổng, không chỉ từ lúc biết lỗ hổng"
+            detail: |-
+              IRM-21: vá xong vẫn phải săn tìm dấu hiệu khai thác trước đó. Dùng trang Threat hunting: giả thuyết theo lỗ hổng, truy vấn log web / tiến trình / FIM của các máy bị ảnh hưởng.
+              Thêm IOC đã công bố (IP, hash, đường dẫn webshell) vào config/intel: hệ thống tự dò ngược 30 ngày log (TI-002).
+      - name: Ngăn chặn
+        tasks:
+          - title: "Áp biện pháp tạm thời của hãng (tắt tính năng, đổi cấu hình, chặn đường dẫn / cổng) trong lúc chờ bản vá"
+          - title: "Máy đã có dấu hiệu bị khai thác: cô lập và xử lý theo playbook xâm nhập tương ứng"
+            approval: Trưởng nhóm IR
+          - title: "Đặt hạn xử lý theo mức ưu tiên và báo các bên liên quan kế hoạch vá"
+            detail: |-
+              IRM-21: lỗ hổng nghiêm trọng thường cần xử lý trong 24-72 giờ; giao người chịu trách nhiệm từng nhóm máy.
+      - name: Loại bỏ
+        tasks:
+          - title: "Sao lưu và có phương án hoàn tác trước khi vá; thử bản vá trên môi trường staging"
+          - title: "Vá / nâng cấp theo đợt trên production"
+            approval: Trưởng nhóm IR + chủ hệ thống
+      - name: Khôi phục
+        tasks:
+          - title: "Quét lại sau khi vá để xác nhận hết lỗ hổng, không phát sinh lỗi chức năng"
+          - title: "Theo dõi tăng cường các máy từng bị lộ lỗ hổng"
+      - name: Rút kinh nghiệm
+        tasks:
+          - title: "Bật vulnerability detection / quét lỗ hổng định kỳ nếu chưa có; cập nhật hồ sơ mối đe dọa (threat_profile.yml) nếu lỗ hổng nhắm vào ngành"
 
   - id: PB-00
     name: Điều tra chung
