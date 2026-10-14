@@ -5,6 +5,9 @@ mạng thành 4 vùng, một VM chạy backend bằng Docker và các VM endpoin
 `BTL/asset.txt`. Kiến trúc, cấu hình chi tiết và giải thích từng thành phần nằm ở [README.md](README.md); tài liệu này chỉ
 đi theo thứ tự các bước cài đặt.
 
+Chạy SIEM ngay trên Docker của máy host Windows, không có VM `siem-server`: xem [LAB-VMWARE.md](LAB-VMWARE.md) (hướng dẫn
+theo từng loại máy, SIEM ở `10.10.40.1`).
+
 > **Chỉ chạy trong mạng lab cô lập.** SOAR tự chặn IP, kill tiến trình trên máy thật; máy web có thể được cài trang CGI
 > cố ý có lỗ hổng để thử. Chụp snapshot mọi VM trước khi thử tấn công.
 
