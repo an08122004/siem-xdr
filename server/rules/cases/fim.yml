@@ -1,0 +1,43 @@
+# Ca test rule FIM (server/rules/fim.yml): event syscheck của Wazuh đã chuẩn hóa (normalize._wazuh_fim)
+- rule: FIM-001
+  name: lối tắt mới trong thư mục Startup của Windows
+  expect: alert
+  events:
+    - {event: {module: fim, category: file, action: file_created}, agent: {id: "003"},
+       file: {path: 'c:\programdata\microsoft\windows\start menu\programs\startup\updater.lnk'}}
+- rule: FIM-001
+  name: giá trị mới ở khóa Run
+  expect: alert
+  events:
+    - {event: {module: fim, category: registry, action: registry_created}, agent: {id: "003"},
+       registry: {path: 'HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Run', value: Updater}}
+- rule: FIM-001
+  name: file cron mới
+  expect: alert
+  events:
+    - {event: {module: fim, category: file, action: file_created}, agent: {id: "002"}, file: {path: /etc/cron.d/backup-sync}}
+- rule: FIM-001
+  name: authorized_keys của root bị sửa
+  expect: alert
+  events:
+    - {event: {module: fim, category: file, action: file_modified}, agent: {id: "002"}, file: {path: /root/.ssh/authorized_keys}}
+- rule: FIM-001
+  name: known_hosts đổi sau khi SSH ra ngoài
+  expect: none
+  events:
+    - {event: {module: fim, category: file, action: file_modified}, agent: {id: "002"}, file: {path: /root/.ssh/known_hosts}}
+- rule: FIM-001
+  name: xóa file cron (không phải cài cơ chế duy trì)
+  expect: none
+  events:
+    - {event: {module: fim, category: file, action: file_deleted}, agent: {id: "002"}, file: {path: /etc/cron.d/backup-sync}}
+- rule: FIM-001
+  name: khóa máy chủ SSH sinh lại
+  expect: none
+  events:
+    - {event: {module: fim, category: file, action: file_modified}, agent: {id: "002"}, file: {path: /etc/ssh/ssh_host_ed25519_key}}
+- rule: FIM-001
+  name: nội dung web bị sửa (thuộc rule Wazuh 100101)
+  expect: none
+  events:
+    - {event: {module: fim, category: file, action: file_modified}, agent: {id: "001"}, file: {path: /var/www/html/index.html}}

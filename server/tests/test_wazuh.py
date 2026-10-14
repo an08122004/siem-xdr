@@ -242,7 +242,8 @@ def test_analyzer_does_not_store_wazuh_alert_twice(enricher, engine):
     an.enricher, an.engine, an.detector, an.buffer, an.stats = enricher, engine, None, [], {"events": 0, "alerts": 0}
     emitted = []
     an.emit = emitted.append
-    an.handle(wz("wazuh_alert", location="syscheck", syscheck={"path": "/etc/passwd", "event": "modified"},
+    # file không thuộc FIM-001 (rule đó chạy chính thức thì cảnh báo 550 của /etc/passwd không chuyển nữa: test_fim_rules.py)
+    an.handle(wz("wazuh_alert", location="syscheck", syscheck={"path": "/etc/hostname", "event": "modified"},
                  rule={"id": "550", "level": 7, "description": "Integrity checksum changed.", "groups": ["syscheck"]}))
     assert an.buffer == [] and [a["rule"]["id"] for a in emitted] == ["WZH-550"]
     an.handle(wz(full_log="x", location="/var/log/syslog"))

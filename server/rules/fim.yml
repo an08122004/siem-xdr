@@ -1,0 +1,44 @@
+# Luật trên event toàn vẹn file (FIM, syscheck của Wazuh agent: event.module fim, file.path / registry.path).
+# FIM-001 chuyển từ rule cùng mã của agent Go cũ (commit 77975ff, tag archive/agent-go-hardening), viết lại cho Wazuh:
+#  - ruleset Wazuh chấm "file mới" (554) và "giá trị registry mới" level 5, dưới ngưỡng chuyển alert (level 7), nên
+#    trước rule này một file thả vào thư mục Startup / cron.d hay một giá trị mới ở khóa Run không thành alert nào;
+#  - bỏ thư mục nhị phân (/usr/bin, System32) và known_hosts của rule cũ: đổi sau mỗi lần cập nhật gói / mỗi lần SSH ra
+#    ngoài, báo nhầm hàng loạt; webshell trong thư mục web do rule Wazuh 100100 / 100101 lo (wazuh/manager/local_rules.xml).
+# Khi FIM-001 chạy chính thức, cảnh báo chung 550 / 553 của Wazuh cho cùng event không chuyển thành alert nữa
+# (detection/wazuh.py covered_by), để một thay đổi file không thành 2 alert.
+- id: FIM-001
+  title: Thay đổi file / khóa registry dùng để duy trì truy cập
+  description: >-
+    File hoặc khóa registry mà kẻ tấn công hay dùng để tồn tại lâu dài bị thêm hoặc sửa: thư mục Startup và khóa
+    Run / RunOnce (Windows), cron, unit systemd, PAM, ld.so.preload, profile.d, rc.local, tài khoản và sudoers,
+    authorized_keys, cấu hình SSH (Linux). Xem file.path / registry.path, người và tiến trình sửa (user.name,
+    process.name khi bật whodata), rồi đối chiếu với thay đổi có kế hoạch (cập nhật gói, phiếu thay đổi).
+  severity: high
+  mitre:
+    tactic: Persistence
+    technique: [T1547.001, T1053.003, T1543.002, T1098.004, T1556.003, T1574.006, T1546.004, T1037.004, T1548.003]
+  tags: [fim, persistence]
+  logsource: {product: wazuh, category: file_integrity}
+  owner: detection-engineering
+  falsepositives:
+    - "Cài / cập nhật phần mềm thêm lối tắt Startup, giá trị Run, unit systemd hoặc file cron hợp lệ"
+    - "Quản trị viên sửa sudoers, PAM, cấu hình SSH, authorized_keys theo phiếu thay đổi đã duyệt"
+    - "Tạo hoặc đổi mật khẩu tài khoản làm /etc/passwd, /etc/shadow thay đổi"
+  mode: shadow
+  shadow_since: "2026-10-14"
+  type: match
+  condition:
+    all:
+      - {field: event.module, op: eq, value: fim}
+      - {field: event.action, op: in, value: [file_created, file_modified, registry_created, registry_modified]}
+      - any:
+          - field: file.path
+            op: regex
+            value:
+              - '^/etc/(passwd|shadow|group|gshadow|sudoers|crontab|rc\.local|ld\.so\.preload)$'
+              - '^/etc/(sudoers\.d|cron\.[a-z]+|pam\.d|systemd/system|profile\.d)/'
+              - '^/var/spool/cron/'
+              - '^/etc/ssh/sshd_config'
+              - '^/(root|home/[^/]+)/\.ssh/authorized_keys2?$'
+              - '\\start menu\\programs\\startup\\'
+          - {field: registry.path, op: regex, value: ['\\currentversion\\run(once)?$']}

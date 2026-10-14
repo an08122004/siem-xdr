@@ -112,9 +112,10 @@ và không có căn cứ bật chính thức rule chạy bóng.
 - Mỗi rule viết tay có ít nhất 1 ca test **dương** (phải bắn) và 1 ca **âm** (gần giống nhưng hợp lệ, không được bắn), mọi ca đạt.
 - Mỗi rule có case playbook riêng (không rơi về PB-00), ngoại lệ trỏ tới rule có thật.
 
-Hiện trạng ngày 14/10/2026: 40 rule, 81 ca test đạt, 0 lỗi. Độ phủ kỹ thuật ưu tiên trong `server/config/threat_profile.yml`
-là 83,3%: 10/12 kỹ thuật có rule chạy chính thức đã kiểm thử, còn thiếu T1547 (Boot or Logon Autostart Execution) và T1486
-(Data Encrypted for Impact). Layer cho MITRE ATT&CK Navigator: `python tools/rule_lint.py --layer build/attack-layer.json`.
+Hiện trạng ngày 14/10/2026: 41 rule (FIM-001 chạy bóng từ 14/10), 89 ca test đạt, 0 lỗi. Độ phủ kỹ thuật ưu tiên trong
+`server/config/threat_profile.yml` là 83,3%: 10/12 kỹ thuật có rule chạy chính thức đã kiểm thử. T1547 (Boot or Logon Autostart
+Execution) đã có FIM-001 đang chạy bóng, tính vào độ phủ khi được bật chính thức (sớm nhất 21/10); T1486 (Data Encrypted for
+Impact) chưa có rule. Layer cho MITRE ATT&CK Navigator: `python tools/rule_lint.py --layer build/attack-layer.json`.
 
 **Quy trình đưa một rule vào chạy:**
 

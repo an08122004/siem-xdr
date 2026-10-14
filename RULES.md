@@ -24,12 +24,12 @@ Alert trong hệ thống đến từ 4 nguồn:
 
 | Nguồn | Số lượng | Mã alert | Trạng thái |
 |---|---|---|---|
-| Rule viết tay (`server/rules/*.yml`) | 40 rule | `WEB-`, `WIN-`, `LNX-`, `AUTH-`, `NET-`, `TI-` | Đang chạy |
+| Rule viết tay (`server/rules/*.yml`) | 41 rule: 40 chạy chính thức, FIM-001 chạy bóng từ 14/10 | `WEB-`, `WIN-`, `LNX-`, `AUTH-`, `NET-`, `TI-`, `FIM-` | Đang chạy |
 | Ruleset gốc của Wazuh 4.14.7 (hơn 3.000 rule) + 2 rule riêng | Chỉ chuyển một phần thành alert (mục 2.8) | `WZH-<id rule Wazuh>` | Đang chạy |
 | Rule do AI đề xuất (`server/rules/ai/`) | 0 rule đã triển khai; 28 đề xuất chờ duyệt (11/10) | `AI-xxx` | Chờ người duyệt |
 | ML (Isolation Forest) | — | `ML-001` | Tắt (`ML_ENABLED=false`, báo nhầm khoảng 32%) |
 
-Tóm tắt 40 rule viết tay:
+Tóm tắt 40 rule viết tay chạy chính thức (chưa tính FIM-001 đang chạy bóng, mục 3):
 
 | | |
 |---|---|
@@ -145,6 +145,11 @@ Level Wazuh (0–15) đổi sang mức độ: 7–9 medium, 10–11 high, ≥ 12
 alert. Hai rule Wazuh riêng trong `wazuh/manager/local_rules.xml`: 100100 (file mới trong thư mục web, có thể là webshell) và
 100101 (nội dung web bị sửa), cùng level 10.
 
+Cùng một thay đổi file đến 2 lần: event trong `archives.json` chạy qua rule viết tay, cảnh báo trong `alerts.json` qua cầu nối.
+Khi một rule viết tay **chạy chính thức** đã bắt event FIM đó (FIM-001), cảnh báo chung của ruleset gốc (550 file bị sửa,
+553 bị xóa...) không chuyển thành alert nữa, để một thay đổi không thành 2 alert (`detection/wazuh.py` `covered_by`). Rule
+Wazuh tự viết (id ≥ 100000) luôn được chuyển; rule chạy bóng không tính, vì SOAR bỏ qua alert bóng.
+
 ### 2.9 Rule do AI đề xuất
 
 AI worker tìm lỗ hổng phát hiện (nhóm mẫu tấn công trong dataset chưa rule nào bắt, nhóm event thật chưa rule nào xét), viết
@@ -168,7 +173,7 @@ Từ 13/10/2026 kho rule được kiểm tra như mã nguồn (`SOC-OPERATIONS.m
   `owner` (người / nhóm phụ trách), `falsepositives` (khi nào rule có thể báo nhầm). Case playbook liên kết được tính tự động
   (mục 2.10) và phải là playbook riêng, không phải PB-00.
 - **Ca test** ở `server/rules/cases/*.yml`: mỗi rule viết tay có ít nhất 1 ca dương (phải bắn) và 1 ca âm (gần giống nhưng hợp
-  lệ). Ca test là event đã chuẩn hóa hoặc dòng access log thật (đi qua parser). Hiện có 81 ca cho 40 rule, đều đạt.
+  lệ). Ca test là event đã chuẩn hóa hoặc dòng access log thật (đi qua parser). Hiện có 89 ca cho 41 rule, đều đạt.
 - **`tools/rule_lint.py`** chạy mọi kiểm tra trên, kiểm ReDoS cho mọi regex, in độ phủ theo hồ sơ mối đe dọa
   (`server/config/threat_profile.yml`, 12 kỹ thuật ưu tiên: 10/12 có rule, thiếu T1547 và T1486) và xuất layer ATT&CK
   Navigator (`--layer`). CI (`.github/workflows/ci.yml`) chạy nó cùng unit test trước khi merge.
@@ -190,6 +195,7 @@ Cột *Dataset* là số mẫu tấn công rule bắt được / số mẫu bìn
 | AUTH-004 | Đăng nhập SSH bằng root | medium | so khớp | T1078.003 | case | PB-09 | không có dữ liệu |
 | AUTH-005 | Tạo tài khoản người dùng mới trên Linux | medium | so khớp | T1136.001 | case | PB-04 | không có dữ liệu |
 | AUTH-006 | Sudo mở shell root / sudo thất bại | medium | so khớp | T1548.003 | case | PB-04 | không có dữ liệu |
+| FIM-001 | Thay đổi file / khóa registry dùng để duy trì truy cập (Startup, Run, cron, systemd, PAM, sudoers, authorized_keys...). **Chạy bóng từ 14/10/2026** | high | so khớp | T1547.001, T1053.003, T1543.002, T1098.004, T1556.003, T1574.006, T1546.004, T1037.004, T1548.003 | khi chạy chính thức: thông báo, case | PB-13 | không có dữ liệu |
 | LNX-001 | Reverse shell | critical | so khớp | T1059.004 | diệt tiến trình, cô lập (duyệt), thông báo, case | PB-03 | 1 / 0 |
 | LNX-002 | Web server sinh ra shell (webshell / RCE) | critical | so khớp | T1505.003, T1059.004 | diệt tiến trình, cô lập (duyệt), thông báo, case | PB-12 | 0 / 0 |
 | LNX-003 | Tải về và thực thi script (`curl/wget \| sh`) | high | so khớp | T1105, T1059.004 | thông báo, case | PB-03 | 8 / 0 |

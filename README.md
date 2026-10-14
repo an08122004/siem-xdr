@@ -52,15 +52,15 @@ Docker. Quy trình vận hành: **[SOC-OPERATIONS.md](SOC-OPERATIONS.md)**.
 
 ## 1. Agent: Wazuh agent 4.14.7 (`wazuh/`)
 
-Endpoint dùng **Wazuh agent** chính thức, thay cho agent Go tự viết trước đây (thiếu FIM, SCA, rootcheck, kiểm kê,
-cấu hình tập trung, bộ cài chính thức). Agent kết nối tới **wazuh-manager** trong stack. Manager chỉ làm trạm thu:
+Endpoint dùng **Wazuh agent** chính thức, thay cho agent Go tự viết trước đây (thiếu FIM thời gian thực, SCA, rootcheck,
+kiểm kê, cấu hình tập trung, bộ cài chính thức). Agent kết nối tới **wazuh-manager** trong stack. Manager chỉ làm trạm thu:
 nhận event, chạy ruleset Wazuh, chuyển lệnh phản ứng xuống agent. Phân tích bằng rule riêng, lưu trữ, AI, SOAR và console
 vẫn là phần tự xây của SOC Platform. Không dùng Wazuh indexer, dashboard hay filebeat.
 
 | Chức năng | Agent Go cũ | Wazuh agent |
 |---|---|---|
 | Đọc file log, Windows Event Log | có | có, kèm decoder của Wazuh |
-| Toàn vẹn file (FIM), registry Windows | không | có, theo thời gian thực, kèm diff nội dung |
+| Toàn vẹn file (FIM), registry Windows | chỉ quét băm file định kỳ (bản cuối 28/9), không registry | có, theo thời gian thực, kèm diff nội dung |
 | Rootcheck (rootkit, trojan) | không | có |
 | SCA: chấm cấu hình theo CIS | không | có |
 | Kiểm kê: gói, cổng, tiến trình, phần cứng | không | có (syscollector) |
@@ -146,7 +146,11 @@ Kết quả được ghi vào `active-responses.log`, agent gửi dòng đó v�
 - Vulnerability detection của Wazuh (từ 4.8) cần Wazuh indexer nên đang tắt.
 - Tiến trình sống ngắn hơn khoảng 1 giây có thể lọt khỏi `siem-procs`.
 - Rootcheck / SCA trên container demo chấm chính container, nên có nhiều mục không đạt.
-- Agent Go cũ đã được gỡ khỏi repo. Mã vẫn còn trong lịch sử git (commit `32897dc`) và nhánh `worktree-agent-hardening`.
+- Agent Go cũ đã được gỡ khỏi repo. Bản cuối (PR #1 trên `main`, 28/9/2026: enroll bằng token riêng, queue chia segment,
+  FIM quét định kỳ, rule AGENT-001/002 và FIM-001..003) giữ ở tag `archive/agent-go-hardening`. Nhánh này đã hòa `main`
+  bằng merge kiểu *ours* (14/10/2026): không lấy lại mã agent Go, vì mọi phần đã có thay thế phía Wazuh (enroll bằng mật
+  khẩu authd + khóa riêng từng agent, FIM thời gian thực, kill theo PID đối chiếu tên). Riêng rule FIM-001 (file / khóa
+  registry dùng để duy trì truy cập) được viết lại cho event FIM của Wazuh: `server/rules/fim.yml`, [RULES.md](RULES.md).
 
 ## 2. Backend
 
@@ -292,9 +296,9 @@ Ghi chú cấu hình: `topic` trong `vector.yaml` phải ghi thẳng `siem.raw`.
 
 ## 3. Phát hiện
 
-Tài liệu đầy đủ về hệ thống rule (cơ chế, danh sách 40 rule, độ phủ, điểm mạnh / yếu): [`RULES.md`](RULES.md).
+Tài liệu đầy đủ về hệ thống rule (cơ chế, danh sách 41 rule, độ phủ, điểm mạnh / yếu): [`RULES.md`](RULES.md).
 
-**Luật** (`server/rules/*.yml`, 40 luật, có gắn MITRE ATT&CK):
+**Luật** (`server/rules/*.yml`, 41 luật: 40 chạy chính thức, FIM-001 chạy bóng; có gắn MITRE ATT&CK):
 
 | Nhóm | Luật |
 |---|---|
@@ -303,6 +307,7 @@ Tài liệu đầy đủ về hệ thống rule (cơ chế, danh sách 40 rule, 
 | Windows | 4625 brute-force, xóa audit log, tạo user, thêm vào Administrators, PowerShell `-enc`, download cradle/AMSI bypass, Mimikatz/LSASS dump, Office sinh shell, service lạ, xóa shadow copy, Defender, LOLBins, schtasks |
 | Linux | reverse shell, web server sinh shell, `curl \| sh`, crypto miner, trinh sát, persistence |
 | Mạng | port scan (distinct port), firewall deny hàng loạt, dịch vụ nhạy cảm lộ ra Internet, Suricata severity cao, SMB lateral, Threat Intel IOC |
+| Toàn vẹn file | file / khóa registry dùng để duy trì truy cập: Startup, Run, cron, systemd, PAM, sudoers, authorized_keys (FIM-001, trên event FIM của Wazuh) |
 
 Cú pháp luật:
 ```yaml

@@ -17,7 +17,7 @@ from .detection import ml
 from .detection import wazuh as wazuh_bridge
 from .detection.rules import RuleEngine, event_time, load_rules, rules_fingerprint
 from .pipeline.enrich import default_enricher
-from .pipeline.normalize import normalize
+from .pipeline.normalize import get, normalize
 
 log = logging.getLogger("analyzer")
 
@@ -50,7 +50,10 @@ class Analyzer:
             # cảnh báo từ alerts.json của Wazuh: event gốc đã đến qua archives.json (được lưu + chạy rule ở đó),
             # ở đây chỉ chuyển cảnh báo thuộc nhóm rule mà soc-platform không tự viết thành alert
             if (alert := wazuh_bridge.to_alert(doc)):
-                self.emit(alert)
+                if (own := wazuh_bridge.covered_by(doc, self.engine.rules)):
+                    log.debug("bỏ cảnh báo Wazuh %s: event FIM đã thành alert %s", get(doc, "wazuh.rule.id"), own)
+                else:
+                    self.emit(alert)
             return
         self.buffer.append({"_index": store.events_index(doc.get("@timestamp")), "_id": doc["event"]["id"], "_source": doc})
         self.stats["events"] += 1
