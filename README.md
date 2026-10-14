@@ -44,7 +44,8 @@ Docker. Quy trình vận hành: **[SOC-OPERATIONS.md](SOC-OPERATIONS.md)**.
 | Phân tích dựa trên luật | Rule engine YAML (match / threshold / sequence) + cảnh báo chọn lọc từ ruleset Wazuh | `server/siem/detection/`, `server/rules/` |
 | Phân tích dựa trên ML (**tạm dừng**) | Isolation Forest (scikit-learn) | `server/siem/detection/ml.py` |
 | SOAR + quản lý case | Playbook tự động + case playbook NIST, phản ứng qua Wazuh active response | `server/siem/soar/`, `server/config/playbooks.yml`, `server/config/case_playbooks.yml` |
-| AI hỗ trợ viết rule (chỉ đề xuất) | Ollama (`qwen3.5:9b`) + kiểm định tự động + duyệt trên console | `server/siem/ai/`, `tools/fetch_datasets.py`, `tools/convert_datasets.py` |
+| Vận hành SOC | 6 vai trò theo năng lực, ưu tiên P1–P4 + SLA, kết luận bắt buộc, rule chạy bóng + CI kho rule, risk-based alerting, giám sát sức khỏe HLT-*, sao lưu SLM, KPI, MISP + dò ngược IOC, threat hunting, giao ca, MFA | [SOC-OPERATIONS.md](SOC-OPERATIONS.md), `server/siem/manager/`, `server/siem/soar/`, `.github/workflows/ci.yml` |
+| AI hỗ trợ viết rule (chỉ đề xuất) và hỗ trợ analyst | Ollama (`qwen3.5:9b`) + kiểm định tự động + duyệt trên console; tóm tắt alert / case, giải thích lệnh, nháp báo cáo | `server/siem/ai/`, `tools/fetch_datasets.py`, `tools/convert_datasets.py` |
 | Bảo mật nội bộ | TLS (CA nội bộ), RBAC Elasticsearch + Wazuh API, Docker secrets + keystore | `security/setup.sh`, `tools/init_secrets.py`, `wazuh/manager/entrypoint/` |
 | Lưu trữ | Elasticsearch 8 (xpack security bật) | |
 | Trực quan hóa | Grafana 11 (4 dashboard provision sẵn: Tổng quan SOC, Điều tra thực thể, Thư viện rule, SOC KPI; nhúng trong console, cùng tài khoản) | `grafana/`, `tools/gen_dashboard.py` |
@@ -196,6 +197,9 @@ Trang đăng nhập bắt đặt mật khẩu mới ngay, sau đó vào tab *Tà
 | Case | Checklist theo playbook, giao việc, đổi trạng thái (đóng phải có kết luận), cảnh báo trong case bấm được |
 | Điều tra | Dashboard Grafana *Điều tra thực thể* lọc theo IP / máy / tài khoản / truy vấn Lucene; gợi ý sẵn thực thể từ cảnh báo đang mở. Nút "Điều tra ..." trên cảnh báo, case, agent mở thẳng trang này |
 | Thư viện rule | Dashboard Grafana *Thư viện rule*: mọi rule đang chạy, ngoại lệ và đề xuất AI trong cùng một bảng, cùng các cột (mã, tên, mức độ, MITRE, tag, trường log, điều kiện tóm tắt, số alert 24 giờ / 7 ngày); lọc theo nguồn, tactic, tag, trường log, từ khóa. Phần *So sánh*: chọn một đề xuất AI để thấy các rule hiện có liên quan, lý do liên quan và **điều kiện hai bên đặt cạnh nhau**. Bấm mã rule xem cảnh báo của rule đó |
+| Giao ca | Biên bản giao ca tự lập: alert mở theo ưu tiên, case quá hạn SLA, lệnh chặn sắp hết hạn, bước SOAR chờ duyệt, sự cố nền tảng, sự cố lớn; lưu bản đã giao ([SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 10) |
+| Threat hunting | Nhật ký hunt theo PEAK: giả thuyết gắn ATT&CK, truy vấn, kết luận, rule mới, dữ liệu còn thiếu; 5 giả thuyết mở đầu |
+| KPI | MTTD / MTTA / MTTC, đạt SLA, báo nhầm, tải analyst, độ phủ ATT&CK, sức khỏe nguồn log, hunting; tô màu theo đích (mục 7) |
 | Lệnh phản ứng, Agent, Đề xuất AI, Tài khoản | Như trước, nhập liệu bằng form ngay tại chỗ (không còn hộp `prompt`) |
 
 Liên kết hai chiều: trong bảng *Alert mới nhất* / *Case đang mở* của Grafana, bấm tên rule hoặc tiêu đề case là console mở
@@ -208,7 +212,7 @@ Phần AI (`--profile ai`, xem mục 5) và máy web demo (`--profile demo`, xem
 | URL | Dùng để | Đăng nhập |
 |---|---|---|
 | https://localhost:8000 | Hệ thống chung: dashboard, cảnh báo, case, điều tra, lệnh phản ứng, agent, đề xuất AI, tài khoản | tài khoản riêng từng người (lần đầu: `admin` / `secrets/console_admin_password`) |
-| https://localhost:8000/grafana/ | Grafana đầy đủ: *Tổng quan SOC* (tổng quan, phát hiện, telemetry, **phiên đăng nhập**, phản ứng, case) và *Điều tra thực thể* | **cùng tài khoản và phiên với console** |
+| https://localhost:8000/grafana/ | Grafana đầy đủ: *Tổng quan SOC* (tổng quan, phát hiện, telemetry, **phiên đăng nhập**, phản ứng, case), *Điều tra thực thể*, *Thư viện rule*, *SOC KPI* | **cùng tài khoản và phiên với console** |
 | https://localhost:8000/docs | Swagger của Manager API | |
 | http://127.0.0.1:8088 | Kafka UI (chỉ từ máy chạy docker) | |
 | https://127.0.0.1:9200 | Elasticsearch (chỉ từ máy chạy docker) | `analyst` / `secrets/analyst_es_password` (chỉ đọc) |
@@ -417,7 +421,7 @@ PB-00 / PB-08. Ngăn chi tiết case ghi rõ playbook được chọn theo tiêu
 | PB-03 Thực thi mã độc / hành vi độc hại trên endpoint | LNX-* còn lại, WIN-005, WIN-006, WIN-011, WIN-012 | T1059, T1105, T1218, T1027, T1082; tag `virustotal`, `yara` |
 | PB-04 Thay đổi tài khoản / đặc quyền | WIN-003, WIN-004, AUTH-005, AUTH-006 | T1136, T1098, T1548 |
 | PB-05 Trinh sát / quét mạng | NET-001..003 | T1046, T1595, T1590 |
-| PB-06 Kết nối tới IOC (Threat Intel) | TI-001 | T1071, T1568, T1573 |
+| PB-06 Kết nối tới IOC (Threat Intel) | TI-001, TI-002 (dò ngược) | T1071, T1568, T1573 |
 | PB-07 Ransomware / mã hóa dữ liệu | WIN-010 | T1486, T1490 |
 | PB-08 Thay đổi file trái phép / rootkit / cấu hình yếu | (cảnh báo Wazuh) | T1565, T1014; tag `syscheck`, `rootcheck`, `sca` |
 | PB-09 Tài khoản có thể đã bị chiếm / đăng nhập đặc quyền bất thường | AUTH-002, AUTH-004 | T1078 |
@@ -431,7 +435,16 @@ PB-00 / PB-08. Ngăn chi tiết case ghi rõ playbook được chọn theo tiêu
 | PB-17 Xóa dấu vết / vô hiệu hóa cơ chế phòng thủ | WIN-002 | T1070, T1562 |
 | PB-18 Hành vi mạng độc hại / cảnh báo IDS | NET-004 | tag `suricata`, `ids` |
 | PB-19 Thay đổi nội dung website (defacement) | WZH-100101 | T1491 |
+| PB-20 Sự cố nền tảng giám sát | HLT-* | tag `platform`, `health` |
+| PB-21 Rò rỉ / đánh cắp dữ liệu | | T1041, T1048, T1567, T1020, T1030, T1537, T1052, T1011; tag `exfiltration`, `dlp` |
+| PB-22 Mối đe dọa nội bộ / lạm dụng quyền | | tag `insider` |
+| PB-23 Chiếm tài khoản email / cloud (M365, Entra ID, OAuth, BEC) | | T1078.004, T1098.001, T1098.003, T1114.003, T1528, T1550.001, T1621, T1556.006; tag `office365`, `aws`, `bec` |
+| PB-24 Khai thác lỗ hổng nghiêm trọng / zero-day | | T1203, T1068, T1211, T1212; tag `vulnerability-detector`, `cve` |
 | PB-00 Điều tra chung | còn lại | |
+
+PB-20…PB-24 thêm ngày 13/10/2026 theo danh mục playbook ưu tiên của kế hoạch SOC (IRM-11, IRM-12, IRM-21, IRM-22, Microsoft
+App consent, CISA KEV). PB-21…PB-23 viết trước khi có nguồn log tương ứng (proxy, DLP, Microsoft 365), để quy trình sẵn sàng
+khi các nguồn này được đưa vào ở giai đoạn 2–3. Tới lúc đó, rule AI / SigmaHQ được chọn đúng playbook theo kỹ thuật ATT&CK.
 
 PB-09…PB-17 thêm ngày 11/10/2026, tách khỏi các playbook gộp chung trước đó: dò mật khẩu và tài khoản đã bị chiếm (trước cùng
 PB-01), ransomware và xóa nhật ký (PB-07), dump mật khẩu / macro Office / đào tiền ảo / cơ chế duy trì (PB-03), HTTP flood (PB-02),
@@ -441,22 +454,26 @@ trừ nội dung bên thứ ba, quét CSDL) khác với webshell. Cùng ngày, m
 mục săn mối đe dọa của CISA và giữ máy bật để thu RAM; PB-10 đặt lại krbtgt hai lần cách nhau ít nhất 10 giờ (CISA CM0050);
 PB-03 có các lệnh kiểm tra Linux của IRM-3 và event log Windows của IRM-2.
 
-- **Ưu tiên và hạn triage (SLA)** theo severity: critical = P1 / 15 phút, high = P2 / 1 giờ, medium = P3 / 8 giờ, low = P4 / 24 giờ.
-  Case `open` quá hạn hiện chữ đỏ trên console.
-- **Vòng đời case**: `open` → `in_progress` → `contained` → `closed` / `false_positive`. **Đóng case bắt buộc ghi kết luận.**
+- **Ưu tiên P1–P4** = severity của rule × mức quan trọng tài sản (`server/config/priority.yml`, `server/config/assets.yml`).
+  Mỗi alert / case có hai hạn SLA, **xác nhận** và **khoanh vùng** (P1: 15 phút / 1 giờ; P2: 30 phút / 4 giờ; P3: 2 giờ /
+  1 ngày; P4: 8 giờ / 3 ngày). Quá hạn thì hiện chữ đỏ trên console và vào biên bản giao ca. Chi tiết:
+  [SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 2. Trước 13/10/2026 ưu tiên chỉ theo severity và chỉ có hạn triage.
+- **Vòng đời case**: `open` → `in_progress` → `contained` → `closed` / `false_positive`. **Đóng alert hoặc case bắt buộc chọn
+  kết luận** (đúng - độc hại / đúng - hoạt động hợp lệ / báo nhầm / trùng lặp); đóng case thì đóng luôn alert còn mở trong case.
 - **Theo dõi trách nhiệm**: mọi thao tác (tick task, giao việc, đổi trạng thái, ghi chú) được ghi vào lịch sử case kèm tài khoản
   thực hiện (lấy từ phiên đăng nhập, không tự khai được) và thời điểm. Lệnh phản ứng thủ công ghi `requested_by`.
   Có khóa lạc quan: hai người sửa cùng lúc thì người sau nhận lỗi 409.
 - Task có nhãn **cần duyệt** chỉ người có thẩm quyền mới đánh dấu (hoặc bỏ đánh dấu) được; API kiểm tra theo vai trò của
-  tài khoản, console làm mờ ô đánh dấu với người không đủ quyền. Nhãn không có trong bảng dưới thì cần `lead`. Chủ hệ thống
+  tài khoản, console làm mờ ô đánh dấu với người không đủ quyền. Nhãn không có trong bảng dưới thì cần quyền `contain`. Chủ hệ thống
   không có tài khoản trên console, nên task cần cả chủ hệ thống phải ghi vào ghi chú ai đã đồng ý, lúc nào. Trước 11/10/2026
   nhãn chỉ để hiển thị: analyst L1 vẫn đánh dấu được task "cô lập máy, cần Trưởng nhóm IR duyệt".
 
-| Hành động | Ai được quyết định | Vai trò trên console |
+| Hành động | Nhãn duyệt | Quyền cần có (vai trò) |
 |---|---|---|
-| Đóng alert false positive, chặn IP thủ công | Analyst L1 | `analyst` trở lên |
-| Cô lập máy, khóa tài khoản | Trưởng nhóm IR | `lead` trở lên |
-| Cài lại máy, tắt dịch vụ production | Trưởng nhóm IR + chủ hệ thống | `lead` trở lên + ghi chú bắt buộc |
+| Đóng alert false positive, chặn IP thủ công | Analyst L1 | `triage` (analyst, lead, hunter, manager, admin) |
+| Cô lập máy, khóa tài khoản | Trưởng nhóm IR | `contain` (lead, hunter, manager, admin) |
+| Cài lại máy, tắt dịch vụ production | Trưởng nhóm IR + chủ hệ thống | `contain` + ghi chú bắt buộc |
+| Đóng băng quyền người trong nội bộ, việc cần nhân sự / pháp chế | SOC Manager | `declare` (manager, admin) |
 
 **Giới hạn còn lại của phản ứng:**
 - `scope: all` chỉ chặn trên agent đang online lúc có alert; agent offline lúc đó khi online lại không được chặn bổ sung.
@@ -486,7 +503,8 @@ docker compose exec ai-worker python -m siem.ai --once                          
 
 ```bash
 cd server && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt pytest httpx
-.venv/Scripts/python -m pytest -q      # 176 test: parser, rule, ML, SOAR (gia hạn chặn, gỡ chặn, gom case, thông báo, giới hạn kill), case playbook (chọn theo mã rule / MITRE / tag, mọi alert medium có case, task chung, nguồn tham khảo), API + đăng nhập + task cần duyệt, Grafana proxy, AI (web + endpoint, log thật, Sigma), Wazuh (kể cả chống giả mạo telemetry), thư viện rule
+.venv/Scripts/python -m pytest -q      # 241 test (14/10/2026): parser, rule + ca test dương / âm + lint kho rule, ML, SOAR (gia hạn chặn, gỡ chặn, gom case, thông báo, giới hạn kill), ưu tiên / SLA, RBA, giám sát sức khỏe, KPI, TI (MISP, hạn IOC, dò ngược), case playbook, API + đăng nhập + MFA + quyền theo vai trò + task cần duyệt, threat hunting / giao ca / AI hỗ trợ, Grafana proxy, AI (web + endpoint, log thật, Sigma), Wazuh (kể cả chống giả mạo telemetry), thư viện rule, công cụ đổi tên project
+cd .. && python tools/rule_lint.py      # kho rule: metadata, ReDoS, ca test, độ phủ ATT&CK (CI chạy cả hai lệnh trên)
 cd .. && docker run --rm -v ./vector:/etc/vector:ro timberio/vector:0.58.0-alpine test /etc/vector/wazuh.yaml /etc/vector/wazuh-tests.yaml
 ```
 **Kiểm thử end-to-end trên stack đang chạy** (cần `--profile demo`): `python tools/e2e_test.py`. Script không dùng tài
@@ -518,8 +536,8 @@ IP nguồn, máy, hình thức) và đăng nhập form web (POST tới đường
 | **Telemetry của agent** | Dòng tiến trình `siem-proc:` chỉ được tin khi đến từ nguồn `siem-procs`, dòng kết quả lệnh `siem-xdr:` chỉ khi đến từ `active-responses.log`, và phải khớp từ đầu dòng (`server/siem/pipeline/normalize.py`). Nguồn (location) do cấu hình agent đặt, kẻ tấn công không đổi được. Trước 11/10/2026 hai dòng này được tìm ở mọi log: chỉ cần User-Agent hay tên user SSH chứa `siem-proc: pid=...` là có event tiến trình giả → LNX-002 → SOAR tự kill PID do kẻ tấn công chọn; chứa `siem-xdr: ...` thì request tấn công thành "kết quả lệnh" và thoát mọi rule web. |
 | **Wazuh API** | Không publish cổng 55000. SOAR dùng user `siem-soar` chỉ có 2 quyền: `active-response:command` và `agent:read` (đọc rule hay sửa cấu hình → 403). Hai user mặc định `wazuh` / `wazuh-wui` (mật khẩu mặc định công khai) bị đổi sang mật khẩu ngẫu nhiên mỗi lần khởi động. |
 | **Đăng nhập console** | Trang đăng nhập chung `/login` cho console và Grafana (`server/siem/manager/static/login.html`). Tài khoản riêng từng người thay cho API key dùng chung (`server/siem/manager/auth.py`). Mật khẩu băm scrypt, tối thiểu 12 ký tự, không chứa tên đăng nhập. Phiên nằm trong cookie `HttpOnly` + `Secure` + `SameSite=Strict`, JavaScript không đọc được, không lưu gì vào localStorage. Hết hạn sau 30 phút không thao tác (lần tự làm mới 5 giây/lần của console không được tính) và tối đa 8 giờ. Sai mật khẩu 5 lần / 15 phút (theo tài khoản hoặc IP) thì khóa 15 phút. Request thay đổi dữ liệu phải có header `X-Requested-With` (chống CSRF). Cấu hình: `CONSOLE_IDLE_MINUTES`, `CONSOLE_SESSION_HOURS`, `CONSOLE_MAX_FAILURES`. |
-| **Grafana dùng chung phiên** | Grafana không mở cổng ra ngoài. Mọi request đi qua manager (`server/siem/manager/grafana_proxy.py`), nên Grafana có cùng chính sách phiên, khóa tài khoản và nhật ký đăng nhập với console. Manager kiểm tra phiên (chưa đăng nhập → `/login`), xóa header `X-WEBAUTH-*` do trình duyệt gửi, rồi gửi tên và vai trò sang Grafana ở chế độ *auth proxy*. Form đăng nhập, basic auth và phiên riêng của Grafana đều tắt. Grafana chỉ tin header từ IP của manager (`10.250.30.10`) trên mạng riêng `grafana-auth`, và chỉ lắng nghe trên mạng đó, nên container khác trong lab (vd. máy web demo bị chiếm) không gọi thẳng được. Vai trò: `admin` → Admin, `lead` → Editor (sửa dashboard), `analyst` → Viewer (chỉ xem). Dashboard tự làm mới 10 giây/lần không gia hạn phiên. Bấm *Sign out* trong Grafana là đăng xuất cả console. Lúc khởi động, manager gán quyền mặc định (Viewer xem, Editor sửa) cho thư mục SOC Platform, vì Grafana 11 tạo thư mục provisioning mà không kèm quyền nào. |
-| **Vai trò console** | `analyst` (L1): xử lý alert/case, chặn IP, kill, duyệt đề xuất AI. `lead` (Trưởng nhóm IR): thêm cô lập / bỏ cô lập máy. `admin`: thêm tạo, khóa, đổi vai trò, đặt lại mật khẩu tài khoản (tab *Tài khoản*). Tài khoản mới và mật khẩu vừa đặt lại luôn phải đổi ở lần đăng nhập đầu. Không tự khóa được chính mình, và luôn phải còn ít nhất 1 admin. |
+| **Grafana dùng chung phiên** | Grafana không mở cổng ra ngoài. Mọi request đi qua manager (`server/siem/manager/grafana_proxy.py`), nên Grafana có cùng chính sách phiên, khóa tài khoản và nhật ký đăng nhập với console. Manager kiểm tra phiên (chưa đăng nhập → `/login`), xóa header `X-WEBAUTH-*` do trình duyệt gửi, rồi gửi tên và vai trò sang Grafana ở chế độ *auth proxy*. Form đăng nhập, basic auth và phiên riêng của Grafana đều tắt. Grafana chỉ tin header từ IP của manager (`10.250.30.10`) trên mạng riêng `grafana-auth`, và chỉ lắng nghe trên mạng đó, nên container khác trong lab (vd. máy web demo bị chiếm) không gọi thẳng được. Vai trò: `admin` → Admin; `manager`, `lead`, `hunter`, `detection` → Editor (sửa dashboard, Explore); `analyst` → Viewer (chỉ xem). Dashboard tự làm mới 10 giây/lần không gia hạn phiên. Bấm *Sign out* trong Grafana là đăng xuất cả console. Lúc khởi động, manager gán quyền mặc định (Viewer xem, Editor sửa) cho thư mục SOC Platform, vì Grafana 11 tạo thư mục provisioning mà không kèm quyền nào. |
+| **Vai trò console** | 6 vai trò theo cơ cấu SOC, quyền theo năng lực ([SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 1): `analyst` (Tier 1) xử lý alert / case, chặn IP, kill; `lead` (Tier 2) thêm cô lập máy; `hunter` (Tier 3) thêm threat hunting; `detection` (Detection Engineer) duyệt đề xuất AI và bật chính thức rule, không xử lý cảnh báo; `manager` (SOC Manager) thêm tuyên bố sự cố lớn; `admin` thêm quản lý tài khoản (tab *Tài khoản*). Người xử lý cảnh báo không tự duyệt rule mình dùng (trước 13/10/2026 analyst duyệt được đề xuất AI). Xác thực 2 lớp TOTP, bắt buộc với vai trò trong `CONSOLE_MFA_REQUIRED_ROLES`. Tài khoản mới và mật khẩu vừa đặt lại luôn phải đổi ở lần đăng nhập đầu. Không tự khóa được chính mình, và luôn phải còn ít nhất 1 admin. |
 | **Nhật ký đăng nhập** | Đăng nhập (đúng/sai/bị khóa), đăng xuất, đổi mật khẩu, quản lý tài khoản của console được gửi vào Kafka thành event của chính SIEM (`event.module: console`). Chúng hiện ở mục *Phiên đăng nhập* trên Grafana, và rule brute-force AUTH-001 áp dụng được cho console. Hash mật khẩu nằm ở index `console-users` (ngoài `siem-*`), nên Grafana và tài khoản ES chỉ đọc không thấy. |
 | **RBAC** | Mỗi service có một user Elasticsearch với quyền tối thiểu (bảng dưới). Superuser `elastic` chỉ dùng trong `es-setup` và khi khẩn cấp. |
 | **Bí mật** | `tools/init_secrets.py` sinh ngẫu nhiên vào `secrets/` (đã gitignore). Mỗi service chỉ được mount **đúng** secret nó cần qua Docker secrets (`/run/secrets/...`), không có bí mật trong `.env`, biến môi trường hay compose. Mật khẩu `elastic` được Elasticsearch ghi vào **keystore** (`bootstrap.password`). |
