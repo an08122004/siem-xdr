@@ -29,6 +29,7 @@ dùng JSON schema và DSL của SIEM.
 11. [Hướng cải thiện](#11-hướng-cải-thiện)
 12. [Lệnh chạy và cấu hình](#12-lệnh-chạy-và-cấu-hình)
 13. [Nhật ký thay đổi pipeline](#13-nhật-ký-thay-đổi-pipeline)
+14. [Nghiên cứu: phương án dùng AI tự động sinh bộ rule](#14-nghiên-cứu-phương-án-dùng-ai-tự-động-sinh-bộ-rule-14102026)
 
 ## 1. AI làm gì và không làm gì
 
@@ -974,3 +975,236 @@ Khi đã dùng GPU thì mọi lệnh `up` sau đó đều phải kèm `-f docker
 | 9/10 | Vế ứng viên SigmaHQ (ghi nguồn DRL), lượt kiến thức, tập bình thường endpoint ×3 (nền ghi thật + hoạt động của con người), thêm URL thường gặp, `LLMTooLong` không làm hỏng cả đề xuất (`GENERATOR_REVISION` 9) | Mục 9.7–9.8: mục tiêu "khớp train" không thưởng kiến thức; tập bình thường nhỏ để rule rộng lọt |
 | 10/10 | Model mặc định `qwen2.5-coder:7b` → `qwen3.5:9b`; tạo lại container `ai-worker`, `manager` với code Sigma (`GENERATOR_REVISION` 9) | Tốt nhất trong 4 model ở cả DSL lẫn Sigma (mục 9.4, 9.6, 9.9, 10) |
 | 11/10 | Chặn vế chỉ có tên chương trình phổ biến, tên file bài thử tự đặt (`lab_values` của Atomic), lớp bọc `& {`; tập bình thường thêm lệnh quản trị (Windows 671, Linux 200); trần 12 vế SigmaHQ; kiểm tra lại đề xuất `pending` của generator cũ mỗi chu kỳ; thử lại khi Ollama khởi động lại (`GENERATOR_REVISION` 10) | Rà soát chạy thật (mục 9.10): AI-157 `/usr/bin/su`, AI-154 `/tmp/evilBinary`, AI-155 `systemctl daemon-reload`, AI-153 44 vế, 11/44 đề xuất cũ giữ chỗ |
+
+## 14. Nghiên cứu: phương án dùng AI tự động sinh bộ rule (14/10/2026)
+
+**Kết luận.** Trong 15 nguồn đã đọc (bài báo 2024–2026, tài liệu sản phẩm, báo cáo của đội SOC), không hệ thống dùng LLM nào tự
+triển khai rule. Tất cả theo cùng một khuôn: AI soạn bản nháp, code kiểm tra, người duyệt; hệ thống có vận hành thật thì còn đo
+trước khi bật. Với SOC Platform, nên làm như sau:
+1. giữ luồng sinh rule từ dữ liệu đang có (mục 2–10), chỉnh ba chỗ;
+2. thêm luồng **CTI → rule**, dùng lại khung ca test của detection-as-code;
+3. thêm luồng **tối ưu bộ rule**: rule trùng, rule giòn, rule báo nhầm nhiều;
+4. truy hồi rule có sẵn trước khi bảo model viết mới;
+5. cho phép model lớn qua API, nhưng chỉ với dữ liệu không nhạy cảm (báo cáo CTI công khai, sự kiện tổng hợp), và tắt mặc định.
+
+Các mục con: 14.1 bài toán, 14.2 các hướng đã có, 14.3 bài học, 14.4 so với pipeline hiện tại, 14.5 kiến trúc đề xuất,
+14.6 chỉ số, 14.7 lộ trình, 14.8 rủi ro, 14.9 nguồn.
+
+### 14.1 Bài toán và tiêu chí so sánh
+
+"Tự động sinh bộ rule" gồm ba bài toán, mỗi bài một loại đầu vào:
+
+| Bài toán | Đầu vào | Câu hỏi cần trả lời |
+|---|---|---|
+| Rule cho mối đe dọa mới | Báo cáo threat intel (CTI), blog bảo mật, bản tin CERT | Bộ rule hiện tại có bắt được mối đe dọa vừa công bố không? Nếu không thì cần rule nào? |
+| Lấp lỗ hổng từ dữ liệu | Mẫu tấn công (dataset, bài thử Atomic, log sự cố), log thật chưa có rule | Rule nào bắt được các cách làm đã thấy trong dữ liệu? |
+| Tinh chỉnh bộ rule | Alert đã có kết luận, danh mục rule | Rule nào báo nhầm, trùng nhau, giòn (chỉ khớp IOC), sai mức độ? |
+
+Các phương án được so theo năm tiêu chí:
+- chất lượng phát hiện, đo trên log (bắt đúng, báo nhầm);
+- khả năng khái quát sang cách làm chưa thấy;
+- chi phí và hạ tầng;
+- an toàn (rule làm ngập alert, ngoại lệ làm mù, prompt injection);
+- mức khớp với quy trình detection-as-code của SOC (SOC-OPERATIONS.md mục 4).
+
+### 14.2 Các hướng đã có
+
+| Hướng | Đại diện | Đầu vào → đầu ra | Có đo trên log không | Kết quả chính |
+|---|---|---|---|---|
+| Sinh chữ ký từ dữ liệu, không dùng LLM | Autograph (USENIX Security 2004) | Lưu lượng mạng → chữ ký từ các đoạn payload lặp lại | Có (trace DMZ thật) | Tự sinh chữ ký cho sâu mạng mới; đánh đổi giữa sinh sớm và độ đặc hiệu |
+| CTI → Sigma bằng LLM | LLMCloudHunter (ACSAC 2024), IntelEX (12/2024), AutoSigma (8/2026), SIGMERGE (USENIX Security 2026) | Báo cáo → TTP, lệnh, IOC → Sigma | Phần lớn **không**. LLMCloudHunter và AutoSigma chỉ đo cú pháp và độ giống rule chuẩn. IntelEX đo trên log bài thử Atomic và honeypot | 99–100% rule biên dịch được. AutoSigma với model 7B chạy nội bộ chỉ có 77,94% rule hợp lệ (model cloud: 100%). SIGMERGE có 4 rule được nhận vào kho SigmaHQ |
+| Mô tả bằng ngôn ngữ tự nhiên → rule | RulePilot (ICSE 2026) | Mô tả ý định → biểu diễn trung gian → SPL | Có (khoảng 230 nghìn log từ 61 bài thử Atomic) | Precision và recall cao hơn GPT-4o dùng trực tiếp ở hầu hết tactic. Tác giả gọi là "bán tự động", vẫn cần người kiểm |
+| Agent detection engineering có công cụ | Google SecOps Detection Engineering Agent (pre-GA), mnemonic, Sublime Security ADÉ, benchmark CTI-REALM của Microsoft (3/2026) | CTI hoặc mẫu tấn công → cơ hội phát hiện → kiểm độ phủ → soạn rule, chạy truy vấn, sửa | Có: sự kiện tổng hợp (Google), khoảng 45 nghìn email gắn nhãn (Sublime), telemetry tấn công giả lập (CTI-REALM) | CTI-REALM: model tốt nhất đạt 0,637/1. Sublime: rule của ADÉ có điểm chính xác thấp hơn rule người viết ở phần lớn trường hợp, cao hơn ở vài trường hợp; bắt ít hơn nhưng báo nhầm ít hơn hẳn |
+| Tối ưu bộ rule có sẵn | RuleGenie (5/2025); thử nghiệm với Wazuh ở SBSeg 2026 | Danh mục rule → gợi ý gộp / sửa; hồ sơ tổ chức → rule mức độ riêng | RuleGenie: không công bố số liệu. SBSeg: có (1.000 event SSH thật) | SBSeg: rule do LLM viết **kém hơn** rule gốc của Wazuh (độ chính xác thấp hơn 4,4 điểm, F1 thấp hơn 3,1 điểm), vì nâng nhầm mức của đăng nhập sai từ bên ngoài |
+| Fine-tune model riêng | SigmaGen (FPT Software, 3/2025); các LoRA cộng đồng trên Qwen2.5-7B, Qwen3-1.7B | Cặp (mô tả hoặc CTI, rule Sigma) | Không | SigmaGen fine-tune GPT-4o-mini trên 200 rule, chi phí khoảng 29 USD/tháng. LoRA Qwen2.5-7B đạt 0,96 trên các chỉ số định dạng, không đo trên log |
+
+Pipeline hiện tại của SOC Platform (mục 2–10) thuộc hướng "lấp lỗ hổng từ dữ liệu" có dùng LLM: model đọc mẫu tấn công và mẫu bình
+thường; code đo từng vế, kiểm định trên tập kiểm tra model chưa thấy và replay log thật.
+
+### 14.3 Bài học từ các nguồn
+
+1. **Biên dịch được không có nghĩa là phát hiện được.** Phần lớn nghiên cứu CTI → Sigma báo 99–100% rule hợp lệ và độ giống với rule
+   chuẩn, nhưng không chạy rule trên log bình thường. Thước đo này bỏ sót đúng loại lỗi SOC sợ nhất. Slide SigmaGen liệt kê lỗi
+   thường gặp của LLM chưa fine-tune: sai logsource, sai EventID, rule quá chung, gắn sai kỹ thuật ATT&CK. Model LoRA Qwen2.5-7B đạt
+   0,96 trên các chỉ số định dạng, nhưng chính ví dụ trong model card lại đặt URL vào trường `Image`. Pipeline của mình kiểm trên tập
+   kiểm tra chưa thấy, tập bình thường và 7 ngày log thật, tức chặt hơn hầu hết các nghiên cứu trên. Tỉ lệ qua thấp ở mục 10 một
+   phần là vì thước đo chặt.
+2. **Cỡ model ảnh hưởng lớn.**
+   - Trên CTI-REALM-50, Claude Opus 4.6 đạt 0,637 và GPT-5 đạt 0,572. Trong thí nghiệm bổ sung bộ nhớ, GPT-5-mini chỉ đạt 0,371.
+     Tác vụ cloud nhiều bước khó nhất, trung bình 0,282.
+   - AutoSigma: model 7B chạy nội bộ (Lily-Cybersecurity-7B, fine-tune từ Mistral-7B) cho 77,94% rule hợp lệ, so với 100% khi dùng
+     model cloud.
+   - Kết quả này khớp với mục 10: model 7–9B lượng tử hóa hay chép chuỗi mẫu, viết regex sai và không khái quát được.
+3. **Công cụ và truy hồi kiến thức quan trọng hơn câu chữ của prompt.**
+   - Trên CTI-REALM, bỏ các công cụ tra CTI làm điểm của cả 5 model giảm, từ 0,077 đến 0,150. Bổ sung hướng dẫn của chuyên gia cho
+     GPT-5-mini nâng điểm từ 0,371 lên 0,432.
+   - AutoSigma dùng rule Sigma có sẵn làm khuôn; IntelEX truy hồi 677 procedure của ATT&CK.
+   - Ở pipeline của mình, vế lấy từ SigmaHQ đưa T1003.003 từ 17% lên 78% (mục 9.9). Tuy vậy, chạy với LLM giả (chỉ còn vế SigmaHQ)
+     thì chỉ 3/20 nhóm qua; có model thì 9/16 nhóm cũ qua ít nhất 2/3 lần. Truy hồi và model bổ sung cho nhau, không thay nhau.
+4. **Vòng lặp có chạy thật sửa được nhiều lỗi.**
+   - RulePilot kiểm cú pháp bằng dry-run, rồi sửa theo kết quả chạy trên Splunk.
+   - IntelEX đưa lỗi cú pháp lại cho model tối đa 30 lần, rồi dùng một LLM giám định chặn rule quá chung.
+   - ADÉ của Sublime chạy rule trên mẫu và săn trong dữ liệu lịch sử rồi mới sửa.
+   - Agent của Google sinh sự kiện tổng hợp để kiểm rule hiện có đã bắt chưa, rồi mới soạn rule mới.
+   - Pipeline của mình đã có vòng lặp ở mức vế (mục 6), nhưng chưa có bước kiểm độ phủ của *toàn bộ rule hiện có* trước khi sinh.
+5. **Cần đo nhiều chiều.** Sublime dùng ba chỉ số:
+   - độ chính xác, kèm số alert đúng mà không rule nào khác bắt;
+   - chi phí để rule qua kiểm cú pháp;
+   - độ "giòn": khớp thẳng IP, domain, hash là giòn; dựa vào hành vi, độ phổ biến là bền.
+   Bài SBSeg cho thấy F1 gộp che mất lỗi: lỗi nâng nhầm mức chỉ nằm trong một nhóm event.
+6. **Không hệ thống nào tự triển khai.**
+   - Agent của Google không tự tải rule lên hệ thống; người dùng phải tự xem bản nháp và tạo rule.
+   - mnemonic để analyst duyệt mọi bản nháp trước khi merge.
+   - RulePilot tự nhận là bán tự động; model card LoRA ghi đầu ra chỉ là bản nháp.
+   - mnemonic kể lần thử năm 2023 thất bại vì model bịa kỹ thuật ATT&CK. Họ kết luận: câu trả lời thất thường, đôi khi bịa, còn tệ
+     hơn không có câu trả lời.
+7. **Nội dung đưa vào model là bề mặt tấn công.** OWASP LLM01:2025 xếp nội dung từ bên ngoài (ở đây là báo cáo CTI và log) vào loại
+   prompt injection gián tiếp. Các biện pháp OWASP nêu:
+   - tách và đánh dấu nội dung không tin cậy;
+   - kiểm định dạng đầu ra bằng code tất định;
+   - cấp quyền tối thiểu;
+   - để người duyệt hành động rủi ro.
+   OWASP cũng nói không biện pháp nào chắc chắn.
+8. **Fine-tune giúp đúng định dạng, chưa có bằng chứng giúp phát hiện tốt hơn.** SigmaGen và các LoRA cộng đồng chỉ báo chỉ số cấu
+   trúc. SIGMERGE fine-tune kèm tối ưu theo sở thích và truy hồi, có 10 case study với hệ thống thật, nhưng phần tóm tắt không nêu tỉ
+   lệ báo nhầm. Điều này khớp với ước tính ở mục 11: khoảng 250 cặp sạch đủ dạy định dạng, ít khả năng dạy thêm kiến thức.
+9. **Chi phí thấp so với công người.**
+   - Sublime: 1,51–5,13 USD mỗi rule, cần 1–3 lần thử.
+   - RulePilot: 78 giây và 0,06 USD mỗi rule với GPT-4o.
+   - SigmaGen: khoảng 29 USD/tháng cho 800 prompt. Cũng theo SigmaGen, một kỹ sư mới cần khoảng 3 ngày làm việc để viết khoảng 20 rule
+     từ một bài blog.
+   - Pipeline của mình không tốn tiền API nhưng tốn 20–60 phút GPU mỗi chu kỳ trên laptop (mục 9).
+
+### 14.4 So với pipeline hiện tại
+
+| Thực tiễn tốt từ các nguồn | SOC Platform hiện có | Còn thiếu |
+|---|---|---|
+| Đầu vào là CTI (Google, mnemonic, CTI-REALM, các bài CTI → Sigma) | Chưa có. Feed MISP chỉ lấy IOC (`pipeline/misp.py`) | Luồng đọc báo cáo, trích cơ hội phát hiện |
+| Kiểm độ phủ bằng sự kiện tổng hợp trước khi sinh (Google) | Có khung ca test `rules/cases` và `detection/ruletest.py`; có báo cáo độ phủ trên dataset (`ai/benchmark.py`) | Chạy toàn bộ rule trên sự kiện tổng hợp sinh từ CTI |
+| Truy hồi rule có sẵn làm khuôn (AutoSigma, IntelEX) | Vế ứng viên SigmaHQ (mục 9.9) | Đề xuất "nhập rule SigmaHQ" riêng, trước khi bảo model viết mới |
+| Vòng lặp chạy và sửa (RulePilot, IntelEX, ADÉ) | Ghép vế qua nhiều lượt, đo từng vế (mục 6) | — |
+| Kiểm trên log bình thường và dữ liệu chưa thấy | Tập kiểm tra theo bài thử, tập bình thường, replay 7 ngày, trần alert/ngày (mục 7) | Log tiến trình thật của lab làm tập bình thường (mục 11) |
+| Rule đi kèm ca test dương / âm (mnemonic có bước sinh test riêng) | Bắt buộc với rule viết tay (lint) | Rule AI chưa có ca test trong `rules/cases` |
+| Người duyệt, không tự triển khai | Detection Engineer duyệt; ngoại lệ cần 2 người; chạy bóng ≥ 7 ngày | — |
+| Đo kiểu Sublime: alert đúng riêng, độ giòn, chi phí để qua | Có tỉ lệ báo nhầm theo rule (Thư viện rule) và tiêu chí chạy bóng | Cả ba chỉ số |
+| Tối ưu bộ rule (RuleGenie) | Đề xuất ngoại lệ từ alert báo nhầm; so đề xuất AI với rule hiện có | Tìm rule trùng / chồng, rule giòn |
+| Model lớn (CTI-REALM, AutoSigma) | Chỉ model 7–9B nội bộ | Tùy chọn model lớn cho dữ liệu không nhạy cảm |
+
+### 14.5 Kiến trúc đề xuất
+
+Giữ nguyên nguyên tắc ở mục 1: AI chỉ đề xuất, code tất định kiểm mọi thứ, người duyệt, rule mới chạy bóng trước khi bật. Sửa một
+luồng và thêm hai luồng:
+
+```mermaid
+flowchart LR
+    subgraph IN[Đầu vào]
+      C1[Báo cáo CTI<br/>CTI analyst dán / MISP]
+      C2[Mẫu tấn công<br/>dataset, sự cố đã đóng]
+      C3[Alert có kết luận<br/>danh mục rule]
+    end
+    C1 --> T[Trích cơ hội phát hiện<br/>kỹ thuật ATT&CK tra bằng code,<br/>lệnh, nguồn log cần]
+    T --> S[Sự kiện tổng hợp<br/>cho từng cơ hội]
+    S --> K{Rule hiện có<br/>đã bắt?}
+    K -->|có| R1[Báo cáo độ phủ]
+    K -->|chưa| G[Truy hồi SigmaHQ<br/>cùng kỹ thuật]
+    C2 --> G
+    G -->|đủ| I[Đề xuất nhập rule SigmaHQ]
+    G -->|chưa đủ| L[LLM soạn Sigma<br/>+ ca test dương / âm]
+    I --> V
+    L --> V[Kiểm tất định<br/>lint, ReDoS, ca test, tập bình thường,<br/>replay 7 ngày, trần alert, độ giòn]
+    C3 --> O[Tối ưu bộ rule<br/>ngoại lệ, rule trùng, rule giòn]
+    O --> V
+    V -->|đạt| Q[Đề xuất + báo cáo<br/>Detection Engineer duyệt]
+    Q --> SH[rules/ai + rules/cases<br/>chạy bóng ≥ 7 ngày]
+    SH -->|đạt tiêu chí| ON[Bật chính thức]
+```
+
+**Luồng A — từ dữ liệu (đang có, chỉnh ba chỗ).**
+- **Truy hồi trước khi sinh.** Rule SigmaHQ cùng kỹ thuật mà đã qua kiểm định thì thành một đề xuất "nhập rule SigmaHQ" riêng (ghi
+  nguồn theo DRL), không trộn vào rule của model. Rule gọn hơn cho người duyệt (mục 11, việc 2).
+- **Đổi đơn vị bài toán** từ kỹ thuật sang cách làm (mục 11, việc 4).
+- **Kỹ thuật mà bản chất là thao tác quản trị:** đề xuất ở mức `low` để làm tín hiệu cho RBA-001 (SOC-OPERATIONS.md mục 4), thay vì
+  cố vượt tập bình thường.
+
+**Luồng B — CTI → rule (mới).**
+1. **Đầu vào:** CTI analyst dán báo cáo hoặc đường dẫn trên console, hoặc lấy event MISP có báo cáo kèm theo. Nội dung đặt trong
+   khối `<data>`, như phần AI hỗ trợ analyst (`ai/triage.py`).
+2. **Trích cơ hội phát hiện:** kỹ thuật ATT&CK, lệnh và đối số, nguồn log cần.
+   - Chỉ nhận ID kỹ thuật tra được trong dữ liệu ATT&CK của MITRE, kiểm bằng code.
+   - Cơ hội cần nguồn log mà SOC chưa thu (vd Microsoft 365) ghi thành "khoảng trống dữ liệu", không sinh rule.
+3. **Sự kiện tổng hợp:** model viết event theo định dạng ca test (`rules/cases`), code chuẩn hóa qua `normalize`, rồi chạy toàn bộ rule
+   hiện có (`ruletest`). Rule hiện có đã bắt thì ghi vào báo cáo độ phủ, không sinh rule.
+4. **Khoảng trống → luồng A:** truy hồi SigmaHQ trước, rồi mới đến model, với tập train là sự kiện tổng hợp. Model phải sinh kèm ca âm
+   "gần giống nhưng hợp lệ".
+5. **Kiểm như luồng A**, thêm một luật: rule chỉ khớp IOC (IP, domain, hash) thì chuyển IOC sang danh sách TI (`config/intel`, có hạn
+   sống và dò ngược TI-002), không thành rule.
+6. **Báo cáo kèm đề xuất:** cơ hội nào đã có rule, cơ hội nào được rule mới phủ, cơ hội nào thiếu dữ liệu.
+
+**Luồng C — tối ưu bộ rule (mới, rủi ro thấp).** Không sinh rule mới, chỉ đề xuất sửa:
+- ngoại lệ cho rule báo nhầm nhiều (đang có);
+- rule trùng hoặc chồng nhau: so điều kiện và so tập alert thật mà hai rule cùng bắt;
+- rule giòn: điều kiện chỉ gồm giá trị cụ thể của một sự cố;
+- mức độ: chỉ gợi ý đổi `level` khi có số liệu kết luận. Bài SBSeg cho thấy để LLM tự đặt mức theo hồ sơ tổ chức làm kết quả xấu đi.
+
+**Chọn model.**
+- **Bước chạm log thật** (luồng A với dữ liệu SIEM, luồng C, replay): chỉ dùng model nội bộ qua Ollama, như hiện tại.
+- **Bước chỉ dùng dữ liệu công khai hoặc tổng hợp** (đọc báo cáo CTI công khai, soạn rule từ sự kiện tổng hợp): cho phép model lớn qua
+  API, **tắt mặc định**. Bật bằng biến cấu hình, ghi nhật ký nội dung đã gửi, không bao giờ gửi log hay alert thật. Lý do: chênh lệch
+  do cỡ model ở 14.3 mục 2 lớn hơn mọi cải tiến prompt đã thử ở mục 9.
+- **Fine-tune:** chỉ cân nhắc khi luồng B đã có vài trăm cặp (báo cáo, rule đã duyệt và đã bật chính thức) của chính SOC (14.3 mục 8).
+
+### 14.6 Chỉ số đo
+
+| Chỉ số | Cách đo | Dùng để |
+|---|---|---|
+| Độ chính xác và alert đúng riêng | Trên alert đã có kết luận trong thời gian chạy bóng: đúng / (đúng + báo nhầm); số alert đúng mà không rule nào khác bắt (theo Sublime) | Quyết định bật chính thức. Rule chỉ bắt lại những gì rule khác đã bắt thì không cần |
+| Tỉ lệ bắt cách làm chưa thấy | Tỉ lệ bắt tập kiểm tra gồm bài thử / công cụ khác train (mục 7) | Đo khả năng khái quát |
+| Báo nhầm khi replay | Alert / ngày trên 7 ngày log thật | Chặn rule làm ngập alert |
+| Độ giòn | Tỉ lệ vế chỉ là giá trị cụ thể (IP, domain, hash, đường dẫn bài thử) | Chuyển IOC sang danh sách TI |
+| Chi phí để qua | Số lượt gọi LLM, phút GPU hoặc tiền API cho một đề xuất đạt | So model, so phương án |
+| Tỉ lệ người duyệt chấp nhận | Số đề xuất được duyệt / số đề xuất đạt kiểm định | Phát hiện kiểm định quá lỏng |
+| Thời gian từ CTI đến chạy bóng | Từ lúc nhận báo cáo tới lúc rule vào chạy bóng | Mục tiêu: dưới 1 ngày làm việc |
+| Độ phủ ATT&CK | KPI có sẵn (SOC-OPERATIONS.md mục 7) | Ưu tiên kỹ thuật trong hồ sơ mối đe dọa |
+
+Để so phương án và model cho công bằng, cần một bộ đo nhỏ kiểu CTI-REALM: 10–20 báo cáo công khai, mỗi báo cáo có bài thử Atomic
+tương ứng làm "đáp án", chạy 3 lần mỗi cấu hình (mục 9.9 cho thấy kết quả dao động lớn giữa các lần chạy).
+
+### 14.7 Lộ trình
+
+| Bước | Việc | Điều kiện xong |
+|---|---|---|
+| 1 (trước demo 10/11) | Không làm tính năng mới. Demo luồng đang có: 1 đề xuất AI → duyệt → chạy bóng (bật chính thức cần ≥ 7 ngày) | Kịch bản demo chạy được |
+| 2 | Luồng C (rule trùng, rule giòn) và đề xuất "nhập rule SigmaHQ" ở luồng A; thêm các chỉ số 14.6 vào Thư viện rule | Có số liệu cho mọi rule đang chạy |
+| 3 | Luồng B với model nội bộ; dựng bộ đo 10–20 báo cáo | Có báo cáo độ phủ cho từng CTI; đo được các chỉ số 14.6 |
+| 4 | Thử model lớn qua API cho luồng B trên cùng bộ đo, quyết định giữ hay bỏ | So được với model nội bộ trên cùng bộ đo |
+| 5 | Fine-tune QLoRA nếu đã có vài trăm cặp đã duyệt | Tốt hơn model gốc trên bộ đo mà không tăng báo nhầm |
+
+### 14.8 Rủi ro
+
+| Rủi ro | Cách giảm |
+|---|---|
+| Rule làm ngập alert | Trần alert/ngày khi replay, chạy bóng, KPI báo nhầm |
+| Ngoại lệ làm mù SIEM | 2 người khác nhau duyệt, kiểm lại với nhãn mới nhất (đang có) |
+| Prompt injection qua báo cáo CTI hoặc log | Khối `<data>`, đầu ra kiểm bằng code, AI không có quyền ghi, người duyệt (OWASP LLM01) |
+| Model bịa kỹ thuật ATT&CK | Chỉ nhận ID tra được trong dữ liệu ATT&CK của MITRE |
+| Học vẹt dấu vết lab | Các luật chặn ở mục 9.10 |
+| Lộ dữ liệu khi dùng API | Chỉ gửi CTI công khai và sự kiện tổng hợp; tắt mặc định; ghi nhật ký |
+| Người duyệt quá tải | Giới hạn số đề xuất mỗi chu kỳ, đề xuất kèm báo cáo, rule gọn |
+
+### 14.9 Nguồn (đọc ngày 14/10/2026)
+
+- [CTI-REALM: Benchmark to Evaluate Agent Performance on Security Detection Rule Generation Capabilities](https://arxiv.org/html/2603.13517v2) — Microsoft, 3/2026
+- [LLMCloudHunter: Harnessing LLMs for Automated Extraction of Detection Rules from Cloud-Based CTI](https://arxiv.org/html/2407.05194v1) — Ben-Gurion University, ACSAC 2024
+- [From Threat Intelligence to Detection (AutoSigma)](https://arxiv.org/abs/2608.19011) — 8/2026; số liệu lấy từ bảng II của bản PDF
+- [From Texts to Rules: Generating Sigma Rules with Large Language Models from Cyber Threat Reports (SIGMERGE)](https://www.usenix.org/conference/usenixsecurity26/presentation/cai) — USENIX Security 2026
+- [IntelEX: A LLM-driven Attack-level Threat Intelligence Extraction Framework](https://arxiv.org/html/2412.10872v1) — 12/2024
+- [RulePilot: An LLM-Powered Agent for Security Rule Generation](https://arxiv.org/html/2511.12224v1) — ICSE 2026
+- [Evaluating LLM Generated Detection Rules in Cybersecurity](https://arxiv.org/html/2509.16749v1) — Sublime Security, 9/2025
+- [RuleGenie: SIEM Detection Rule Set Optimization](https://arxiv.org/abs/2505.06701) — 5/2025
+- [Context-Aware SIEM Rule Generation with LLMs: When Site Profiles Are Not Enough](https://sol.sbc.org.br/index.php/sbseg/article/view/44366) — SBSeg 2026
+- [Google SecOps: Use the Detection Engineering Agent to evaluate threat coverage](https://docs.cloud.google.com/chronicle/docs/secops/agentic-detection-engineering) — tài liệu sản phẩm, pre-GA
+- [mnemonic: Agentic detection engineering: turning threat reports into faster detections](https://www.mnemonic.io/resources/blog/agentic-detection-engineering-turning-threat-reports-into-detections/)
+- [SigmaGen: AI-Powered Sigma Rules Generation with MITRE ATT&CK](https://ctid.mitre.org/events/apac-2025/07%20-%20SigmaGen.pdf) — FPT Software, Asia-Pacific ATT&CK Community Workshop, 3/2025
+- [Qwen2.5-7B Sigma generation LoRA (model card)](https://huggingface.co/jjhoada/qwen2.5-7b-sigma-generation-lora)
+- [OWASP LLM01:2025 Prompt Injection](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)
+- [Autograph: Toward Automated, Distributed Worm Signature Detection](https://static.usenix.org/events/sec04/tech/kim.html) — USENIX Security 2004
