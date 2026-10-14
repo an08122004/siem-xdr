@@ -1,4 +1,4 @@
-"""Chuyển dataset thô (datasets/raw) sang định dạng dùng được trong siem-xdr (datasets/processed):
+"""Chuyển dataset thô (datasets/raw) sang định dạng dùng được trong soc-platform (datasets/processed):
 
   csic_normal.jsonl.gz / csic_anomalous.jsonl.gz
       Mỗi request HTTP của CSIC 2010 -> 1 event thô giống hệt event agent gửi lên

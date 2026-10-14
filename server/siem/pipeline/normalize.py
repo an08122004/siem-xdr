@@ -574,14 +574,14 @@ def parse_mock(data: Doc, doc: Doc) -> None:
 # ---------------------------------------------------------------------------
 # Event Wazuh: {"timestamp", "agent": {id, name, ip}, "full_log" (dòng log gốc), "location" (file / kênh nguồn),
 #   "decoder": {name}, "data": {...trường đã giải mã...}, "rule": {...} (nếu khớp rule Wazuh), "syscheck": {...} (FIM)}.
-# Dòng log gốc (Apache, auth.log, Suricata...) được đưa qua ĐÚNG parser đã có ở trên, nên rule của siem-xdr
+# Dòng log gốc (Apache, auth.log, Suricata...) được đưa qua ĐÚNG parser đã có ở trên, nên rule của soc-platform
 # chạy y như trước. Windows: data.win (eventdata dạng camelCase) được đổi về dạng parse_windows đang đọc.
 
 _WAZUH_TS = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?)\d*([+-]\d\d):?(\d\d)$")
 _ACCESS_LOC = re.compile(r"access[._]log", re.I)
 _ERROR_LOC = re.compile(r"error[._]log", re.I)
 _AUTH_LOC = re.compile(r"/(auth\.log|secure)$")
-# dòng do script của siem-xdr cài trên agent in ra (wazuh/agent/linux/, windows/). Chỉ tin khi đến từ ĐÚNG nguồn
+# dòng do script của soc-platform cài trên agent in ra (wazuh/agent/linux/, windows/). Chỉ tin khi đến từ ĐÚNG nguồn
 # (location do cấu hình agent đặt, kẻ tấn công không đổi được) và khớp TỪ ĐẦU dòng. Trước đây tìm ở mọi dòng log:
 # User-Agent / tên user SSH chứa "siem-proc: pid=..." thành event tiến trình giả -> LNX-002 -> SOAR tự kill PID do
 # kẻ tấn công chọn; chứa "siem-xdr: action=..." thì thành kết quả lệnh và request tấn công thoát mọi rule web.
@@ -741,7 +741,7 @@ def _wazuh_sca(sca: Doc, doc: Doc, full: str) -> None:
 
 def _wazuh_response(m: re.Match, doc: Doc) -> None:
     """Kết quả lệnh phản ứng do script siem-xdr trên agent ghi vào active-responses.log (SOAR đọc để cập nhật lệnh)."""
-    put(doc, "event.module", "siem-xdr")
+    put(doc, "event.module", "siem-xdr")             # = tên script trên agent; dashboard / truy vấn cũ dùng giá trị này
     put(doc, "event.category", "host")
     put(doc, "event.type", "info")
     put(doc, "event.action", "response_result")

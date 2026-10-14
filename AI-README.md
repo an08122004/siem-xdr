@@ -1,6 +1,6 @@
 # AI hỗ trợ viết rule: pipeline, dữ liệu và đánh giá
 
-Tài liệu này mô tả toàn bộ phần AI của siem-xdr (`server/siem/ai/`): AI làm gì, dữ liệu lấy từ đâu, rule được sinh và kiểm
+Tài liệu này mô tả toàn bộ phần AI của SOC Platform (`server/siem/ai/`): AI làm gì, dữ liệu lấy từ đâu, rule được sinh và kiểm
 định ra sao, kết quả đo các model, và vì sao tỉ lệ đạt còn thấp. Mọi thay đổi về pipeline AI và kết quả thử nghiệm ghi vào
 file này; `README.md` chỉ giữ phần tóm tắt.
 

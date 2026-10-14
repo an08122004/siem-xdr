@@ -6,7 +6,7 @@ event -> alert -> SOAR -> Wazuh agent -> kết quả, cùng đăng nhập / phâ
 Không dùng tài khoản `admin` thật: tự tạo tài khoản quản trị tạm `e2e-admin` (mật khẩu tạm, bị buộc đổi) thẳng
 trong Elasticsearch qua container manager, và analyst `e2e-an` qua API.
 
-Cần stack chạy đủ, kể cả --profile demo. Chạy từ thư mục siem-xdr. Tác dụng phụ trên hệ thống (đều được dọn):
+Cần stack chạy đủ, kể cả --profile demo. Chạy từ thư mục mã nguồn (soc-platform). Tác dụng phụ trên hệ thống (đều được dọn):
 chặn rồi gỡ chặn IP máy host trên demo-web, tạo rồi xóa file webshell thử (sinh alert + case thật, ghi rõ nguồn e2e),
 tạo rồi xóa tài khoản `e2e-admin`, `e2e-an` (cả bên console lẫn Grafana). Không chạy kiểm tra khóa tài khoản (5 lần sai sẽ khóa IP của bạn 15 phút).
 """
@@ -279,7 +279,7 @@ check("grafana", "Sign out trong Grafana → đăng xuất luôn phiên console"
 st, orgs = admin.grafana("/api/user/orgs")
 check("grafana", "quản trị console (e2e-admin) → Admin trong Grafana", st == 200 and orgs[0]["role"] == "Admin")
 st, d = admin.grafana("/api/dashboards/uid/siem-overview")
-check("grafana", "dashboard SIEM/XDR tải được", st == 200 and len(d["dashboard"]["panels"]) == 36,
+check("grafana", "dashboard Tổng quan SOC tải được", st == 200 and len(d["dashboard"]["panels"]) == 36,
       f"{len(d['dashboard']['panels'])} panel" if st == 200 else str(st))
 q = {"refId": "A", "datasource": {"type": "elasticsearch", "uid": "siem-events"},
      "query": "event.module:console AND event.category:authentication", "metrics": [{"id": "1", "type": "count"}],

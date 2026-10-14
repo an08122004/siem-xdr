@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cài siem-xdr trên máy chủ Ubuntu / Debian bằng MỘT lệnh:
+# Cài SOC Platform (soc-platform, trước 14/10/2026 tên là siem-xdr) trên máy chủ Ubuntu / Debian bằng MỘT lệnh:
 #
 #   sudo ./install.sh                 # cài / cập nhật cấu hình, khởi động toàn bộ hệ thống
 #   sudo ./install.sh --demo          # thêm máy web demo (có lỗ hổng cố ý, chỉ dùng trong lab)
@@ -14,7 +14,8 @@ set -euo pipefail
 
 cd "$(dirname "$(readlink -f "$0")")"
 ROOT=$PWD
-PROJECT=siem-xdr
+PROJECT=soc-platform                # tên project Compose (= name: trong docker-compose.yml); hệ thống cũ: xem pick_project
+OLD_PROJECT=siem-xdr
 APP_UID=10001                       # user "siem" trong image server (server/Dockerfile)
 WAZUH_VERSION=4.14.7
 MIN_DOCKER=26                       # docker-compose.yml dùng volume subpath (Docker Engine >= 26)
@@ -74,7 +75,7 @@ compose() { docker compose "$@"; }   # COMPOSE_FILE / COMPOSE_PROFILES / COMPOSE
 check_system() {
   say "1/8 Kiểm tra máy"
   [ "$(id -u)" = 0 ] || die "cần quyền root: chạy lại bằng  sudo ./install.sh"
-  [ -f docker-compose.yml ] && [ -f tools/init_secrets.py ] || die "không thấy mã nguồn siem-xdr trong $ROOT"
+  [ -f docker-compose.yml ] && [ -f tools/init_secrets.py ] || die "không thấy mã nguồn soc-platform trong $ROOT"
   if grep -q $'\r' install.sh security/setup.sh 2>/dev/null; then
     die "file có ký tự xuống dòng Windows (CRLF). Chép mã bằng tools/deploy-vm.ps1 hoặc git, không chép thẳng thư mục từ Windows"
   fi
@@ -142,12 +143,13 @@ install_docker() {
 
 tune_kernel() {
   say "3/8 Tham số kernel"
-  cat > /etc/sysctl.d/99-siem-xdr.conf <<'EOF'
-# siem-xdr (install.sh)
+  rm -f /etc/sysctl.d/99-siem-xdr.conf               # tên file trước khi đổi tên project
+  cat > /etc/sysctl.d/99-soc-platform.conf <<'EOF'
+# soc-platform (install.sh)
 vm.max_map_count=262144
 net.core.rmem_max=33554432
 EOF
-  sysctl -q -p /etc/sysctl.d/99-siem-xdr.conf >/dev/null 2>&1 || warn "không đặt được sysctl (đang chạy trong container?)"
+  sysctl -q -p /etc/sysctl.d/99-soc-platform.conf >/dev/null 2>&1 || warn "không đặt được sysctl (đang chạy trong container?)"
   ok "vm.max_map_count=$(sysctl -n vm.max_map_count) (Elasticsearch), net.core.rmem_max (buffer UDP syslog)"
   if command -v timedatectl >/dev/null 2>&1; then timedatectl set-ntp true >/dev/null 2>&1 || true; fi
 }
@@ -178,6 +180,19 @@ detect_ip() {
 }
 
 # ------------------------------------------------------------------------------------------------ cấu hình
+# Tên project Compose: giữ tên đang dùng, không tự đổi (đổi tên mà không chép volume = hệ thống mới rỗng). Bản cài trước
+# 14/10/2026 ghi COMPOSE_PROJECT_NAME=siem-xdr vào .env, dữ liệu nằm trong volume siem-xdr_*.
+pick_project() {
+  local cur; cur=$(env_get COMPOSE_PROJECT_NAME)
+  if [ -n "$cur" ]; then PROJECT=$cur
+  elif docker volume inspect "${OLD_PROJECT}_certs" >/dev/null 2>&1; then PROJECT=$OLD_PROJECT
+  fi
+  if [ "$PROJECT" = "$OLD_PROJECT" ]; then
+    warn "hệ thống cài trước khi đổi tên: vẫn chạy với tên project $OLD_PROJECT (dữ liệu trong volume ${OLD_PROJECT}_*)"
+    warn "muốn chuyển dữ liệu sang tên mới: sudo python3 tools/migrate_project.py --apply && sudo ./install.sh --update"
+  fi
+}
+
 configure() {
   say "4/8 Bí mật và cấu hình"
   python3 tools/init_secrets.py | grep "đã tạo" | sed 's/^/    /' || true
@@ -191,6 +206,7 @@ configure() {
   chmod -R a+rX server wazuh vector grafana security demo tools 2>/dev/null || true
 
   [ -f .env ] || { cp .env.example .env; ok "tạo .env từ .env.example"; }
+  pick_project
   local old_ip; old_ip=$(env_get MANAGER_TLS_IPS | cut -d, -f1)
   if [ -z "$IP" ]; then IP=${old_ip:-$(detect_ip)}; fi
   valid_ipv4 "$IP" || die "IP không hợp lệ: $IP"

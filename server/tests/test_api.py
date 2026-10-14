@@ -659,12 +659,19 @@ def test_grafana_folder_permissions_set_once():
     import asyncio
     import httpx
     from siem.manager import grafana_proxy
-    perms, posts = [{"userId": 7, "permission": 4, "role": ""}], []
+    perms, posts, deleted = [{"userId": 7, "permission": 4, "role": ""}], [], []
+    legacy = {"old1": [], "old2": [{"uid": "mine", "type": "dash-db"}]}      # thư mục cũ: rỗng / có dashboard tự lưu
 
     def upstream(req):
         assert req.headers["x-webauth-user"] == "admin"
         if req.url.path == "/grafana/api/folders":
-            return httpx.Response(200, json=[{"uid": "abc", "title": "SIEM-XDR"}])
+            return httpx.Response(200, json=[{"uid": "abc", "title": "SOC Platform"}, {"uid": "old1", "title": "SIEM-XDR"},
+                                             {"uid": "old2", "title": "SIEM-XDR"}, {"uid": "x", "title": "Khác"}])
+        if req.url.path == "/grafana/api/search":
+            return httpx.Response(200, json=legacy[req.url.params["folderUIDs"]])
+        if req.method == "DELETE":
+            deleted.append(req.url.path)
+            return httpx.Response(200, json={"message": "ok"})
         if req.method == "POST":
             posts.append(json.loads(req.content))
             perms[:] = [{**p, "role": p.get("role", "")} for p in posts[-1]["items"]]
@@ -678,6 +685,7 @@ def test_grafana_folder_permissions_set_once():
         grafana_proxy.set_client(httpx.AsyncClient(transport=httpx.MockTransport(upstream), base_url="http://g"))
         assert asyncio.run(grafana_proxy.ensure_folder_permissions(attempts=1, delay=0))
         assert len(posts) == 1                                                       # đã có quyền -> không ghi đè
+        assert deleted == ["/grafana/api/folders/old1"] * 2           # chỉ xóa thư mục cũ đã rỗng, không đụng thư mục khác
     finally:
         grafana_proxy.set_client(None)
 

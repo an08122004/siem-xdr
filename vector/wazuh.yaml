@@ -1,11 +1,11 @@
-# Đưa dữ liệu của Wazuh manager vào pipeline siem-xdr (service wazuh-forwarder).
+# Đưa dữ liệu của Wazuh manager vào pipeline soc-platform (service wazuh-forwarder).
 #
 #   Wazuh agent --1514--> wazuh-manager --archives.json (MỌI event, đã giải mã)--> Vector --> Kafka siem.raw
 #                                       --alerts.json   (cảnh báo ruleset Wazuh)--> Vector --> Kafka siem.raw
 #
-# archives -> event_type "wazuh": analyzer chuẩn hóa, lưu vào siem-events-*, chạy rule của siem-xdr.
+# archives -> event_type "wazuh": analyzer chuẩn hóa, lưu vào siem-events-*, chạy rule của soc-platform.
 # alerts   -> event_type "wazuh_alert": analyzer KHÔNG lưu lại (event đó đã có trong archives), chỉ chuyển
-#             cảnh báo của các nhóm rule Wazuh mà siem-xdr không tự viết (FIM, rootcheck, SCA...) thành alert.
+#             cảnh báo của các nhóm rule Wazuh mà soc-platform không tự viết (FIM, rootcheck, SCA...) thành alert.
 # Đọc file từ volume wazuh_logs (chỉ đọc), vị trí đã đọc lưu trong data_dir và chỉ tiến lên khi Kafka đã nhận.
 # Kiểm thử: vector test /etc/vector/wazuh.yaml /etc/vector/wazuh-tests.yaml
 

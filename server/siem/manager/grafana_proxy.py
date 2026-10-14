@@ -67,8 +67,23 @@ async def close() -> None:
         await _client.aclose()
 
 
-FOLDER = "SIEM-XDR"                                    # = folder trong grafana/provisioning/dashboards
+FOLDER = "SOC Platform"                                # = folder trong grafana/provisioning/dashboards
+LEGACY_FOLDERS = ("SIEM-XDR",)                         # tên thư mục trước khi đổi tên project (14/10/2026)
 DEFAULT_PERMS = [{"role": "Viewer", "permission": 1}, {"role": "Editor", "permission": 2}]   # 1 = xem, 2 = sửa
+
+
+async def drop_empty_legacy_folders(folders: list[dict], hdr: dict) -> None:
+    """Đổi tên thư mục provisioning thì Grafana tạo thư mục mới, chuyển dashboard sang và để lại thư mục cũ rỗng. Chỉ xóa
+    thư mục cũ khi nó rỗng hẳn: xóa thư mục Grafana là xóa luôn dashboard bên trong (vd dashboard người dùng tự lưu vào),
+    còn thư mục có alert rule thì Grafana tự từ chối xóa."""
+    for f in folders:
+        if f.get("title") not in LEGACY_FOLDERS:
+            continue
+        r = await client().get(PREFIX + "api/search", headers=hdr, params={"folderUIDs": f["uid"]})
+        if r.status_code == 200 and r.json() == []:
+            r = await client().delete(f"{PREFIX}api/folders/{f['uid']}", headers=hdr)
+            if r.status_code == 200:
+                log.info("đã xóa thư mục Grafana cũ %s (rỗng sau khi đổi tên thành %s)", f["title"], FOLDER)
 
 
 async def ensure_folder_permissions(attempts: int = 60, delay: float = 5.0) -> bool:
@@ -79,17 +94,20 @@ async def ensure_folder_permissions(attempts: int = 60, delay: float = 5.0) -> b
     for i in range(attempts):
         try:
             r = await client().get(PREFIX + "api/folders", headers=hdr)
-            folder = next((f for f in r.json() if f.get("title") == FOLDER), None) if r.status_code == 200 else None
+            folders = r.json() if r.status_code == 200 else []
+            folder = next((f for f in folders if f.get("title") == FOLDER), None)
             if folder:
                 url = f"{PREFIX}api/folders/{folder['uid']}/permissions"
                 current = (await client().get(url, headers=hdr)).json()
                 if any(p.get("role") for p in current):
+                    await drop_empty_legacy_folders(folders, hdr)
                     return True
                 keep = [{k: p[k] for k in ("userId", "teamId", "permission") if p.get(k)} for p in current
                         if p.get("userId") or p.get("teamId")]
                 r = await client().post(url, headers=hdr, json={"items": keep + DEFAULT_PERMS})
                 if r.status_code == 200:
                     log.info("đã gán quyền mặc định cho thư mục Grafana %s (Viewer xem, Editor sửa)", FOLDER)
+                    await drop_empty_legacy_folders(folders, hdr)
                     return True
                 log.warning("gán quyền thư mục Grafana thất bại: %s %s", r.status_code, r.text[:200])
         except (httpx.HTTPError, ValueError) as e:

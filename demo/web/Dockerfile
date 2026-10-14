@@ -1,5 +1,5 @@
 # Máy chủ web DEMO (vai trò S001 Web-01): Apache + Wazuh agent 4.14.7 trong cùng container.
-# Build context là thư mục gốc siem-xdr (xem docker-compose.yml).
+# Build context là thư mục gốc của mã nguồn (xem docker-compose.yml).
 FROM httpd:2.4
 ARG WAZUH_AGENT_VERSION=4.14.7-1
 RUN apt-get update \

@@ -1,4 +1,5 @@
-﻿# Script active response của siem-xdr cho Wazuh agent Windows (A001 PC-01), gọi qua siem-xdr.cmd.
+﻿# Script active response của SOC Platform cho Wazuh agent Windows (A001 PC-01), gọi qua siem-xdr.cmd (tên lệnh giữ từ
+# trước khi đổi tên project, để agent đã cài không phải cài lại).
 # SOAR gửi: PUT /active-response {"command": "!siem-xdr.cmd", "arguments": [<loại>, <đích>, <action_id>]}
 #
 #   block_ip / unblock_ip <ip>      Windows Firewall, rule "siem-xdr block <ip>" (chặn chiều vào)

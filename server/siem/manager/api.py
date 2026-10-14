@@ -96,7 +96,7 @@ def refresh_catalog() -> None:
         log.warning("cập nhật danh mục rule lỗi: %s", e)
 
 
-app = FastAPI(title="SIEM/XDR Manager", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="SOC Platform Manager", version="1.0.0", lifespan=lifespan)
 app.include_router(auth.router)
 
 

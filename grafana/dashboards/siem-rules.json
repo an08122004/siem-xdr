@@ -1,6 +1,6 @@
 {
   "uid": "siem-rules",
-  "title": "SIEM/XDR — Thư viện rule",
+  "title": "SOC Platform — Thư viện rule",
   "tags": [
     "siem",
     "xdr",

@@ -1,7 +1,15 @@
-# SIEM/XDR Lab — tự xây dựng
+# SOC Platform — nền tảng SOC tự xây dựng
 
-Hệ thống SIEM + XDR cho môn GSANM, dựng theo kiến trúc trong `BTL/SIEM.txt`
-và danh mục tài sản `BTL/asset.txt`. Toàn bộ backend đóng gói bằng Docker.
+Nền tảng cho một trung tâm điều hành an ninh (SOC) của môn GSANM. Hệ thống gồm SIEM (thu thập, chuẩn hóa, phát hiện), XDR
+(phản ứng trên endpoint qua Wazuh agent), SOAR và quản lý case, cùng quy trình vận hành SOC: vai trò, mức ưu tiên và SLA,
+detection-as-code, giám sát sức khỏe, KPI, threat intelligence, threat hunting. Dựng theo kiến trúc trong `BTL/SIEM.txt`,
+danh mục tài sản `BTL/asset.txt` và *Kế hoạch xây dựng hệ thống SOC chuyên nghiệp* (10/2026). Toàn bộ backend đóng gói bằng
+Docker. Quy trình vận hành: **[SOC-OPERATIONS.md](SOC-OPERATIONS.md)**.
+
+> Trước 14/10/2026 project tên là **siem-xdr**. Với hệ thống đã cài từ trước, xem *Nâng cấp từ siem-xdr* ở mục 2 (vẫn giữ dữ liệu).
+> Một số tên giữ nguyên để không phải cài lại agent hay đổi dữ liệu đã lưu: lệnh phản ứng trên agent (`siem-xdr`,
+> `siem-xdr.cmd`, nhóm firewall `siem-xdr-isolate`), `event.module: siem-xdr` của kết quả lệnh, tiền tố index `siem-*`,
+> topic Kafka `siem.*`, package Python `siem`.
 
 ```
  Endpoint / Server                        Backend (docker-compose)
@@ -39,14 +47,14 @@ và danh mục tài sản `BTL/asset.txt`. Toàn bộ backend đóng gói bằng
 | AI hỗ trợ viết rule (chỉ đề xuất) | Ollama (`qwen3.5:9b`) + kiểm định tự động + duyệt trên console | `server/siem/ai/`, `tools/fetch_datasets.py`, `tools/convert_datasets.py` |
 | Bảo mật nội bộ | TLS (CA nội bộ), RBAC Elasticsearch + Wazuh API, Docker secrets + keystore | `security/setup.sh`, `tools/init_secrets.py`, `wazuh/manager/entrypoint/` |
 | Lưu trữ | Elasticsearch 8 (xpack security bật) | |
-| Trực quan hóa | Grafana 11 (2 dashboard provision sẵn, nhúng trong console, cùng tài khoản) | `grafana/`, `tools/gen_dashboard.py` |
+| Trực quan hóa | Grafana 11 (4 dashboard provision sẵn: Tổng quan SOC, Điều tra thực thể, Thư viện rule, SOC KPI; nhúng trong console, cùng tài khoản) | `grafana/`, `tools/gen_dashboard.py` |
 
 ## 1. Agent: Wazuh agent 4.14.7 (`wazuh/`)
 
 Endpoint dùng **Wazuh agent** chính thức, thay cho agent Go tự viết trước đây (thiếu FIM, SCA, rootcheck, kiểm kê,
 cấu hình tập trung, bộ cài chính thức). Agent kết nối tới **wazuh-manager** trong stack. Manager chỉ làm trạm thu:
 nhận event, chạy ruleset Wazuh, chuyển lệnh phản ứng xuống agent. Phân tích bằng rule riêng, lưu trữ, AI, SOAR và console
-vẫn là phần tự xây của siem-xdr. Không dùng Wazuh indexer, dashboard hay filebeat.
+vẫn là phần tự xây của SOC Platform. Không dùng Wazuh indexer, dashboard hay filebeat.
 
 | Chức năng | Agent Go cũ | Wazuh agent |
 |---|---|---|
@@ -158,8 +166,23 @@ cp .env.example .env           # cấu hình không bí mật
 docker compose up -d --build
 docker compose ps              # es-setup phải Exited (0); kafka, elasticsearch, wazuh-manager healthy
 ```
-Hệ thống đã chạy từ trước thì chạy lại `python tools/init_secrets.py` (sinh thêm `wazuh_api_password`, `console_admin_password`),
-rồi `docker compose up -d --force-recreate es-certs es-setup` để sinh chứng chỉ Wazuh API và cập nhật quyền RBAC.
+Hệ thống đã chạy từ trước thì chạy lại `python tools/init_secrets.py` (sinh thêm các bí mật mới, vd `misp_api_key` rỗng),
+rồi `docker compose up -d --force-recreate es-certs es-setup` để cập nhật chứng chỉ, quyền RBAC và chính sách snapshot.
+
+**Nâng cấp từ siem-xdr (hệ thống cài trước 14/10/2026)**: `docker-compose.yml` giờ đặt `name: soc-platform` (không còn phụ
+thuộc tên thư mục), nên volume mới là `soc-platform_*`. Dữ liệu cũ (Elasticsearch, khóa agent Wazuh, chứng chỉ, Grafana, Kafka)
+vẫn nằm trong `siem-xdr_*`. Nếu cứ `up` thì sẽ ra một hệ thống mới rỗng, agent phải enroll lại. Trước lần `up` đầu tiên với mã mới:
+```bash
+python tools/migrate_project.py               # xem hiện trạng, không đổi gì
+python tools/migrate_project.py --apply       # dừng hệ thống cũ, chép từng volume sang soc-platform_* (kiểm số file)
+docker compose up -d --build                  # build image soc-platform-server, chạy hệ thống mới
+# hoặc giữ tên cũ, không chép gì: python tools/migrate_project.py --keep-name  (ghi COMPOSE_PROJECT_NAME=siem-xdr vào .env)
+```
+Công cụ không xóa volume cũ. Kiểm tra console, alert, agent còn đủ rồi mới xóa bằng lệnh mà công cụ in ra. Trên máy chủ cài
+bằng `install.sh`, script đọc `COMPOSE_PROJECT_NAME` trong `.env` và tiếp tục dùng tên `siem-xdr` cho tới khi bạn chạy
+`sudo python3 tools/migrate_project.py --apply && sudo ./install.sh --update`. `tools/deploy-vm.ps1` thấy máy chủ đã có
+`~/siem-xdr` (chưa có `~/soc-platform`) thì cập nhật vào thư mục cũ. Grafana chuyển dashboard sang thư mục *SOC Platform*;
+manager xóa thư mục *SIEM-XDR* cũ khi nó đã rỗng.
 
 **Đăng nhập lần đầu**: mở https://localhost:8000, tài khoản `admin`, mật khẩu tạm trong `secrets/console_admin_password`.
 Trang đăng nhập bắt đặt mật khẩu mới ngay, sau đó vào tab *Tài khoản* để tạo tài khoản riêng cho từng người (xem mục 7).
@@ -297,9 +320,9 @@ model bắt được tấn công nhưng **báo nhầm khoảng 32%** lưu lượ
 Nguyên nhân chính: baseline tổng hợp và một model chung cho mọi nguồn. Code được giữ lại trong `server/siem/detection/ml.py`.
 Trước khi bật lại cần: giai đoạn học trên dữ liệu thật, tách model theo nguồn, hiệu chỉnh ngưỡng, chống lặp alert.
 
-**Cảnh báo từ ruleset Wazuh** (`server/siem/detection/wazuh.py`): rule của siem-xdr chạy trên MỌI event lấy từ
+**Cảnh báo từ ruleset Wazuh** (`server/siem/detection/wazuh.py`): rule của SOC Platform chạy trên MỌI event lấy từ
 `archives.json`. Ruleset Wazuh (hơn 3.000 rule) phần lớn trùng việc với rule tự viết (web, SSH, đăng nhập Windows...), nên
-không chuyển hết sang để tránh mỗi sự cố thành 2 alert. Chỉ lấy cảnh báo trong `alerts.json` thuộc các nhóm siem-xdr không
+không chuyển hết sang để tránh mỗi sự cố thành 2 alert. Chỉ lấy cảnh báo trong `alerts.json` thuộc các nhóm mà SOC Platform không
 có rule tương đương (`WAZUH_ALERT_GROUPS`, mặc định `syscheck`, `rootcheck`, `vulnerability-detector`, `virustotal`, `yara`) từ level 7,
 cộng mọi cảnh báo level ≥ 12. Alert có `rule.id = WZH-<id rule Wazuh>`, `alert.source = wazuh`. Level ánh xạ sang severity:
 7–9 medium, 10–11 high, ≥ 12 critical. Kết quả SCA (CIS) KHÔNG chuyển thành alert: máy demo có 83 mục không đạt ngay khi khởi động,
@@ -495,7 +518,7 @@ IP nguồn, máy, hình thức) và đăng nhập form web (POST tới đường
 | **Telemetry của agent** | Dòng tiến trình `siem-proc:` chỉ được tin khi đến từ nguồn `siem-procs`, dòng kết quả lệnh `siem-xdr:` chỉ khi đến từ `active-responses.log`, và phải khớp từ đầu dòng (`server/siem/pipeline/normalize.py`). Nguồn (location) do cấu hình agent đặt, kẻ tấn công không đổi được. Trước 11/10/2026 hai dòng này được tìm ở mọi log: chỉ cần User-Agent hay tên user SSH chứa `siem-proc: pid=...` là có event tiến trình giả → LNX-002 → SOAR tự kill PID do kẻ tấn công chọn; chứa `siem-xdr: ...` thì request tấn công thành "kết quả lệnh" và thoát mọi rule web. |
 | **Wazuh API** | Không publish cổng 55000. SOAR dùng user `siem-soar` chỉ có 2 quyền: `active-response:command` và `agent:read` (đọc rule hay sửa cấu hình → 403). Hai user mặc định `wazuh` / `wazuh-wui` (mật khẩu mặc định công khai) bị đổi sang mật khẩu ngẫu nhiên mỗi lần khởi động. |
 | **Đăng nhập console** | Trang đăng nhập chung `/login` cho console và Grafana (`server/siem/manager/static/login.html`). Tài khoản riêng từng người thay cho API key dùng chung (`server/siem/manager/auth.py`). Mật khẩu băm scrypt, tối thiểu 12 ký tự, không chứa tên đăng nhập. Phiên nằm trong cookie `HttpOnly` + `Secure` + `SameSite=Strict`, JavaScript không đọc được, không lưu gì vào localStorage. Hết hạn sau 30 phút không thao tác (lần tự làm mới 5 giây/lần của console không được tính) và tối đa 8 giờ. Sai mật khẩu 5 lần / 15 phút (theo tài khoản hoặc IP) thì khóa 15 phút. Request thay đổi dữ liệu phải có header `X-Requested-With` (chống CSRF). Cấu hình: `CONSOLE_IDLE_MINUTES`, `CONSOLE_SESSION_HOURS`, `CONSOLE_MAX_FAILURES`. |
-| **Grafana dùng chung phiên** | Grafana không mở cổng ra ngoài. Mọi request đi qua manager (`server/siem/manager/grafana_proxy.py`), nên Grafana có cùng chính sách phiên, khóa tài khoản và nhật ký đăng nhập với console. Manager kiểm tra phiên (chưa đăng nhập → `/login`), xóa header `X-WEBAUTH-*` do trình duyệt gửi, rồi gửi tên và vai trò sang Grafana ở chế độ *auth proxy*. Form đăng nhập, basic auth và phiên riêng của Grafana đều tắt. Grafana chỉ tin header từ IP của manager (`10.250.30.10`) trên mạng riêng `grafana-auth`, và chỉ lắng nghe trên mạng đó, nên container khác trong lab (vd. máy web demo bị chiếm) không gọi thẳng được. Vai trò: `admin` → Admin, `lead` → Editor (sửa dashboard), `analyst` → Viewer (chỉ xem). Dashboard tự làm mới 10 giây/lần không gia hạn phiên. Bấm *Sign out* trong Grafana là đăng xuất cả console. Lúc khởi động, manager gán quyền mặc định (Viewer xem, Editor sửa) cho thư mục SIEM-XDR, vì Grafana 11 tạo thư mục provisioning mà không kèm quyền nào. |
+| **Grafana dùng chung phiên** | Grafana không mở cổng ra ngoài. Mọi request đi qua manager (`server/siem/manager/grafana_proxy.py`), nên Grafana có cùng chính sách phiên, khóa tài khoản và nhật ký đăng nhập với console. Manager kiểm tra phiên (chưa đăng nhập → `/login`), xóa header `X-WEBAUTH-*` do trình duyệt gửi, rồi gửi tên và vai trò sang Grafana ở chế độ *auth proxy*. Form đăng nhập, basic auth và phiên riêng của Grafana đều tắt. Grafana chỉ tin header từ IP của manager (`10.250.30.10`) trên mạng riêng `grafana-auth`, và chỉ lắng nghe trên mạng đó, nên container khác trong lab (vd. máy web demo bị chiếm) không gọi thẳng được. Vai trò: `admin` → Admin, `lead` → Editor (sửa dashboard), `analyst` → Viewer (chỉ xem). Dashboard tự làm mới 10 giây/lần không gia hạn phiên. Bấm *Sign out* trong Grafana là đăng xuất cả console. Lúc khởi động, manager gán quyền mặc định (Viewer xem, Editor sửa) cho thư mục SOC Platform, vì Grafana 11 tạo thư mục provisioning mà không kèm quyền nào. |
 | **Vai trò console** | `analyst` (L1): xử lý alert/case, chặn IP, kill, duyệt đề xuất AI. `lead` (Trưởng nhóm IR): thêm cô lập / bỏ cô lập máy. `admin`: thêm tạo, khóa, đổi vai trò, đặt lại mật khẩu tài khoản (tab *Tài khoản*). Tài khoản mới và mật khẩu vừa đặt lại luôn phải đổi ở lần đăng nhập đầu. Không tự khóa được chính mình, và luôn phải còn ít nhất 1 admin. |
 | **Nhật ký đăng nhập** | Đăng nhập (đúng/sai/bị khóa), đăng xuất, đổi mật khẩu, quản lý tài khoản của console được gửi vào Kafka thành event của chính SIEM (`event.module: console`). Chúng hiện ở mục *Phiên đăng nhập* trên Grafana, và rule brute-force AUTH-001 áp dụng được cho console. Hash mật khẩu nằm ở index `console-users` (ngoài `siem-*`), nên Grafana và tài khoản ES chỉ đọc không thấy. |
 | **RBAC** | Mỗi service có một user Elasticsearch với quyền tối thiểu (bảng dưới). Superuser `elastic` chỉ dùng trong `es-setup` và khi khẩn cấp. |

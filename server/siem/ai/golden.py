@@ -35,7 +35,7 @@ log = logging.getLogger("ai.golden")
 DEFAULT_DIR = Path(os.getenv("DATASETS_DIR", Path(__file__).resolve().parents[3] / "datasets" / "processed"))
 _TOKEN = re.compile(r"[a-z][a-z0-9_]{2,}")
 _ARTIFACT = re.compile("|".join(sorted(DATASET_ARTIFACTS)), re.I)
-# event.module của siem-xdr -> logsource tương ứng bên Sigma (để ưu tiên rule cùng loại nguồn)
+# event.module của soc-platform -> logsource tương ứng bên Sigma (để ưu tiên rule cùng loại nguồn)
 MODULE_TO_SIGMA = {
     "apache": {"category": "webserver"}, "windows": {"product": "windows"}, "sysmon": {"product": "windows"},
     "auth": {"product": "linux"}, "syslog": {"product": "linux"}, "process": {"product": "linux"},

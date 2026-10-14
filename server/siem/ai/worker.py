@@ -390,7 +390,7 @@ class AIWorker:
             "condition": cond, "ai_proposal_id": pid,
             "sigma": sigma.render(sig, title=title, description=description, level=severity, techniques=techs[:5],
                                   tactic=tactic, logsource=sigma.LOGSOURCE[domain],
-                                  author=f"siem-xdr AI worker ({self.llm.model}), {rid}",
+                                  author=f"soc-platform AI worker ({self.llm.model}), {rid}",
                                   derived=sig.get("_derived") or []),
         }
 
