@@ -21,3 +21,15 @@ echo "[siem-setup] đã cài chứng chỉ Wazuh API"
 
 # 4. User Wazuh API quyền tối thiểu cho SOAR + vô hiệu hóa 2 user mặc định (wazuh / wazuh-wui)
 /var/ossec/framework/python/bin/python3 /entrypoint-scripts/siem_api_user.py "$S/wazuh_api_password"
+
+# 5. Bao lâu không có keepalive thì Wazuh đánh dấu agent "disconnected". HLT-001 (soar/health.py) chỉ báo khi agent đã ở
+#    trạng thái này VÀ keepalive cũ hơn AGENT_DOWN_MINUTES, nên tổng thời gian ≈ giá trị lớn hơn trong hai mốc. Mặc định
+#    10m như ossec.conf; lab đặt WAZUH_AGENTS_DISCONNECTION_TIME=1m + AGENT_DOWN_MINUTES=2 trong .env (kịch bản ~2-3 phút).
+T=${WAZUH_AGENTS_DISCONNECTION_TIME:-10m}
+if [[ "$T" =~ ^[1-9][0-9]*[smhd]?$ ]]; then
+  sed -i "s|<agents_disconnection_time>[^<]*</agents_disconnection_time>|<agents_disconnection_time>$T</agents_disconnection_time>|" \
+    /var/ossec/etc/ossec.conf
+  echo "[siem-setup] agents_disconnection_time = $T"
+else
+  echo "[siem-setup] WAZUH_AGENTS_DISCONNECTION_TIME không hợp lệ ('$T', vd 1m, 10m): giữ giá trị trong ossec.conf"
+fi

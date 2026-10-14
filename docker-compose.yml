@@ -261,6 +261,9 @@ services:
       memlock: {soft: -1, hard: -1}
       nofile: {soft: 655360, hard: 655360}
     ports: ["1514:1514", "1515:1515"]
+    environment:
+      # agent im lặng bao lâu thì Wazuh coi là "disconnected" (entrypoint/10-siem-setup.sh ghi vào ossec.conf); lab: 1m
+      WAZUH_AGENTS_DISCONNECTION_TIME: ${WAZUH_AGENTS_DISCONNECTION_TIME:-10m}
     secrets: [enrollment_key, wazuh_api_password]
     volumes:
       - wazuh_api_configuration:/var/ossec/api/configuration
