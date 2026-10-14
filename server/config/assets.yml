@@ -1,10 +1,14 @@
 # Danh mục tài sản (theo BTL/asset.txt). Dùng để enrich event: asset.id, criticality
+# Tra theo agent_id / hostname (event từ Wazuh agent) hoặc IP trong `ips` (observer.ip: IP máy gửi syslog).
+# IP theo mô hình lab 4 vùng của DEPLOY-VM.md mục 0: DMZ 10.10.20.0/24, LAN 10.10.30.0/24, SOC 10.10.40.0/24,
+# Internet giả 203.0.113.0/24. Đổi mô hình mạng thì sửa ở đây rồi `docker compose restart analyzer soar`.
 - id: A001
   name: PC-01
   type: endpoint
   os: windows
   agent_id: A001-PC-01
   hostname: PC-01
+  ips: [10.10.30.30]
   criticality: medium
 - id: A003
   name: Ubuntu-01
@@ -12,6 +16,7 @@
   os: linux
   agent_id: A003-Ubuntu-01
   hostname: Ubuntu-01
+  ips: [10.10.30.21]
   criticality: medium
 - id: S001
   name: Web-01
@@ -19,7 +24,15 @@
   os: linux
   agent_id: S001-Web-01
   hostname: Web-01
+  ips: [10.10.20.20]
   criticality: high
+- id: S002
+  name: DC-01 (tùy chọn, Active Directory)
+  type: server
+  os: windows
+  hostname: DC-01
+  ips: [10.10.30.10]
+  criticality: critical
 - id: S001-DEMO
   name: demo-web (container)
   type: server
@@ -30,5 +43,7 @@
   name: Firewall
   type: network
   os: appliance
-  ips: [192.168.1.1]
+  # Mọi cổng của firewall; syslog tới siem-server đi ra từ cổng SOC (10.10.40.254), các IP còn lại để nhận ra firewall
+  # khi nó xuất hiện trong log khác.
+  ips: [10.10.40.254, 10.10.20.254, 10.10.30.254, 203.0.113.1]
   criticality: critical
