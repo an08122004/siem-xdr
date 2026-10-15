@@ -15,6 +15,7 @@
     "to": "now"
   },
   "editable": true,
+  "graphTooltip": 1,
   "panels": [
     {
       "id": 65,
@@ -82,7 +83,7 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "area",
         "textMode": "value"
       },
@@ -95,15 +96,15 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3fb27f",
                 "value": null
               },
               {
-                "color": "yellow",
+                "color": "#e0b93b",
                 "value": 900
               },
               {
-                "color": "red",
+                "color": "#ea5a5d",
                 "value": 1800
               }
             ]
@@ -168,7 +169,7 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "area",
         "textMode": "value"
       },
@@ -181,15 +182,15 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3fb27f",
                 "value": null
               },
               {
-                "color": "yellow",
+                "color": "#e0b93b",
                 "value": 900
               },
               {
-                "color": "red",
+                "color": "#ea5a5d",
                 "value": 1800
               }
             ]
@@ -254,7 +255,7 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "area",
         "textMode": "value"
       },
@@ -267,15 +268,15 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3fb27f",
                 "value": null
               },
               {
-                "color": "yellow",
+                "color": "#e0b93b",
                 "value": 3600
               },
               {
-                "color": "red",
+                "color": "#ea5a5d",
                 "value": 14400
               }
             ]
@@ -340,7 +341,7 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "area",
         "textMode": "value"
       },
@@ -353,15 +354,15 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "#ea5a5d",
                 "value": null
               },
               {
-                "color": "yellow",
+                "color": "#e0b93b",
                 "value": 85
               },
               {
-                "color": "green",
+                "color": "#3fb27f",
                 "value": 95
               }
             ]
@@ -426,7 +427,7 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "area",
         "textMode": "value"
       },
@@ -439,15 +440,15 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3fb27f",
                 "value": null
               },
               {
-                "color": "yellow",
+                "color": "#e0b93b",
                 "value": 30
               },
               {
-                "color": "red",
+                "color": "#ea5a5d",
                 "value": 50
               }
             ]
@@ -512,7 +513,7 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "area",
         "textMode": "value"
       },
@@ -525,15 +526,15 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3fb27f",
                 "value": null
               },
               {
-                "color": "yellow",
+                "color": "#e0b93b",
                 "value": 40
               },
               {
-                "color": "red",
+                "color": "#ea5a5d",
                 "value": 60
               }
             ]
@@ -598,7 +599,7 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "area",
         "textMode": "value"
       },
@@ -611,15 +612,15 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "#ea5a5d",
                 "value": null
               },
               {
-                "color": "yellow",
+                "color": "#e0b93b",
                 "value": 50
               },
               {
-                "color": "green",
+                "color": "#3fb27f",
                 "value": 80
               }
             ]
@@ -684,7 +685,7 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "area",
         "textMode": "value"
       },
@@ -697,15 +698,15 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "#ea5a5d",
                 "value": null
               },
               {
-                "color": "yellow",
+                "color": "#e0b93b",
                 "value": 50
               },
               {
-                "color": "green",
+                "color": "#3fb27f",
                 "value": 70
               }
             ]
@@ -770,7 +771,7 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "area",
         "textMode": "value"
       },
@@ -783,15 +784,15 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "#ea5a5d",
                 "value": null
               },
               {
-                "color": "yellow",
+                "color": "#e0b93b",
                 "value": 95
               },
               {
-                "color": "green",
+                "color": "#3fb27f",
                 "value": 98
               }
             ]
@@ -856,7 +857,7 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "area",
         "textMode": "value"
       },
@@ -869,15 +870,15 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "#ea5a5d",
                 "value": null
               },
               {
-                "color": "yellow",
+                "color": "#e0b93b",
                 "value": 1
               },
               {
-                "color": "green",
+                "color": "#3fb27f",
                 "value": 2
               }
             ]
@@ -1036,10 +1037,73 @@
           "custom": {
             "drawStyle": "line",
             "lineWidth": 2,
-            "spanNulls": true
+            "spanNulls": true,
+            "fillOpacity": 0,
+            "showPoints": "auto"
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MTTD critical"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#3987e5"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MTTA P1"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#d95926"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MTTC P1"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#199e70"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MTTA mọi mức"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#c98500"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -1047,7 +1111,8 @@
           "placement": "bottom"
         },
         "tooltip": {
-          "mode": "multi"
+          "mode": "multi",
+          "sort": "desc"
         }
       }
     },
@@ -1213,10 +1278,88 @@
           "custom": {
             "drawStyle": "line",
             "lineWidth": 2,
-            "spanNulls": true
+            "spanNulls": true,
+            "fillOpacity": 0,
+            "showPoints": "auto"
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Tuân thủ SLA"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#3987e5"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Báo nhầm"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#d95926"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Làm giàu"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#199e70"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Độ phủ ATT&CK"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#c98500"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Nguồn log khỏe"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#d55181"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -1224,7 +1367,8 @@
           "placement": "bottom"
         },
         "tooltip": {
-          "mode": "multi"
+          "mode": "multi",
+          "sort": "desc"
         }
       }
     },
@@ -1243,7 +1387,7 @@
     },
     {
       "id": 80,
-      "type": "piechart",
+      "type": "table",
       "title": "Kết luận khi đóng alert",
       "datasource": {
         "type": "elasticsearch",
@@ -1287,26 +1431,67 @@
         }
       ],
       "options": {
-        "reduceOptions": {
-          "values": true,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "pieType": "donut",
-        "legend": {
-          "displayMode": "table",
-          "placement": "right",
-          "values": [
-            "value"
-          ]
+        "showHeader": false,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
         }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#4f9dde"
+          },
+          "min": 0,
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "number"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "string"
+            },
+            "properties": [
+              {
+                "id": "custom.minWidth",
+                "value": 50
+              }
+            ]
+          }
+        ]
       }
     },
     {
       "id": 81,
-      "type": "bargauge",
+      "type": "table",
       "title": "Rule báo nhầm nhiều nhất",
       "datasource": {
         "type": "elasticsearch",
@@ -1350,30 +1535,67 @@
         }
       ],
       "options": {
-        "reduceOptions": {
-          "values": true,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true
+        "showHeader": false,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
       },
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "continuous-YlRd"
+            "mode": "fixed",
+            "fixedColor": "#4f9dde"
           },
-          "min": 0
+          "min": 0,
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "number"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "string"
+            },
+            "properties": [
+              {
+                "id": "custom.minWidth",
+                "value": 50
+              }
+            ]
+          }
+        ]
       }
     },
     {
       "id": 82,
-      "type": "piechart",
+      "type": "table",
       "title": "Alert theo mức ưu tiên",
       "datasource": {
         "type": "elasticsearch",
@@ -1408,8 +1630,8 @@
               "field": "priority",
               "settings": {
                 "size": "10",
-                "order": "desc",
-                "orderBy": "_count",
+                "order": "asc",
+                "orderBy": "_term",
                 "min_doc_count": "1"
               }
             }
@@ -1417,26 +1639,67 @@
         }
       ],
       "options": {
-        "reduceOptions": {
-          "values": true,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "pieType": "donut",
-        "legend": {
-          "displayMode": "table",
-          "placement": "right",
-          "values": [
-            "value"
-          ]
+        "showHeader": false,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
         }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#4f9dde"
+          },
+          "min": 0,
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "number"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "string"
+            },
+            "properties": [
+              {
+                "id": "custom.minWidth",
+                "value": 50
+              }
+            ]
+          }
+        ]
       }
     },
     {
       "id": 83,
-      "type": "bargauge",
+      "type": "table",
       "title": "MTTA theo mức ưu tiên (case)",
       "datasource": {
         "type": "elasticsearch",
@@ -1456,6 +1719,7 @@
             "uid": "siem-cases"
           },
           "query": "_exists_:metrics.tta_seconds",
+          "alias": "",
           "timeField": "created_at",
           "metrics": [
             {
@@ -1480,23 +1744,62 @@
         }
       ],
       "options": {
-        "reduceOptions": {
-          "values": true,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "orientation": "horizontal",
-        "displayMode": "basic",
-        "showUnfilled": true
+        "showHeader": false,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
       },
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#4f9dde"
+          },
+          "min": 0,
           "unit": "s",
-          "min": 0
+          "decimals": 1,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "number"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "string"
+            },
+            "properties": [
+              {
+                "id": "custom.minWidth",
+                "value": 50
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -1566,14 +1869,49 @@
               "status": 6,
               "id": 7
             },
-            "renameByName": {}
+            "renameByName": {
+              "@timestamp": "Thời điểm",
+              "created_at": "Tạo lúc",
+              "severity": "Mức độ",
+              "priority": "Ưu tiên",
+              "rule.id": "Mã rule",
+              "rule.name": "Cảnh báo",
+              "source.ip": "IP nguồn",
+              "user.name": "Tài khoản",
+              "host.name": "Máy",
+              "agent.id": "Agent",
+              "agent_id": "Agent",
+              "risk_score": "Rủi ro",
+              "alert.status": "Trạng thái",
+              "status": "Trạng thái",
+              "message": "Nội dung",
+              "event.category": "Loại",
+              "event.action": "Hành động",
+              "event.outcome": "Kết quả",
+              "process.name": "Tiến trình",
+              "url.original": "URL",
+              "url.path": "URL",
+              "auth.method": "Phương thức",
+              "winlog.logon.type": "Kiểu logon",
+              "http.response.status_code": "Mã HTTP",
+              "type": "Lệnh",
+              "target": "Đối tượng",
+              "source": "Nguồn",
+              "expires_at": "Hết hạn",
+              "output": "Kết quả trả về",
+              "title": "Tiêu đề",
+              "entity": "Thực thể",
+              "alert_count": "Số alert",
+              "assignee": "Người xử lý"
+            }
           }
         }
       ],
       "fieldConfig": {
         "defaults": {
           "custom": {
-            "filterable": true
+            "filterable": true,
+            "minWidth": 90
           }
         },
         "overrides": [
@@ -1586,7 +1924,7 @@
               {
                 "id": "custom.cellOptions",
                 "value": {
-                  "type": "color-background"
+                  "type": "color-text"
                 }
               },
               {
@@ -1595,20 +1933,24 @@
                   {
                     "type": "value",
                     "options": {
-                      "low": {
-                        "color": "blue",
+                      "critical": {
+                        "text": "■ Nghiêm trọng",
+                        "color": "#ea5a5d",
                         "index": 0
                       },
-                      "medium": {
-                        "color": "yellow",
+                      "high": {
+                        "text": "■ Cao",
+                        "color": "#e7793a",
                         "index": 1
                       },
-                      "high": {
-                        "color": "orange",
+                      "medium": {
+                        "text": "■ Trung bình",
+                        "color": "#e0b93b",
                         "index": 2
                       },
-                      "critical": {
-                        "color": "red",
+                      "low": {
+                        "text": "■ Thấp",
+                        "color": "#4f9dde",
                         "index": 3
                       }
                     }
@@ -1626,7 +1968,7 @@
               {
                 "id": "custom.cellOptions",
                 "value": {
-                  "type": "color-background"
+                  "type": "color-text"
                 }
               },
               {
@@ -1636,24 +1978,73 @@
                     "type": "value",
                     "options": {
                       "open": {
-                        "color": "red",
+                        "text": "Mới",
+                        "color": "#ffb1b3",
                         "index": 0
                       },
                       "in_progress": {
-                        "color": "orange",
+                        "text": "Đang xử lý",
+                        "color": "#ffd38a",
                         "index": 1
                       },
                       "contained": {
-                        "color": "yellow",
+                        "text": "Đã ngăn chặn",
+                        "color": "#ffd38a",
                         "index": 2
                       },
                       "closed": {
-                        "color": "green",
+                        "text": "Đã đóng",
+                        "color": "#9fdcbf",
                         "index": 3
                       },
                       "false_positive": {
-                        "color": "blue",
+                        "text": "Báo nhầm",
+                        "color": "#9fdcbf",
                         "index": 4
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "priority"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "P1": {
+                        "text": "P1",
+                        "color": "#ea5a5d",
+                        "index": 0
+                      },
+                      "P2": {
+                        "text": "P2",
+                        "color": "#e7793a",
+                        "index": 1
+                      },
+                      "P3": {
+                        "text": "P3",
+                        "color": "#e0b93b",
+                        "index": 2
+                      },
+                      "P4": {
+                        "text": "P4",
+                        "color": "#4f9dde",
+                        "index": 3
                       }
                     }
                   }
@@ -1762,6 +2153,7 @@
           ]
         }
       ],
+      "maxDataPoints": 30,
       "options": {
         "reduceOptions": {
           "calcs": [
@@ -1770,17 +2162,19 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "none",
         "graphMode": "area",
-        "textMode": "value"
+        "textMode": "value",
+        "justifyMode": "auto"
       },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "fixed",
-            "fixedColor": "red"
+            "fixedColor": "#cc313a"
           },
-          "unit": "short"
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": []
       },
@@ -1870,7 +2264,8 @@
       "fieldConfig": {
         "defaults": {
           "custom": {
-            "filterable": true
+            "filterable": true,
+            "minWidth": 90
           }
         },
         "overrides": [
@@ -1883,7 +2278,7 @@
               {
                 "id": "custom.cellOptions",
                 "value": {
-                  "type": "color-background"
+                  "type": "color-text"
                 }
               },
               {
@@ -1892,20 +2287,24 @@
                   {
                     "type": "value",
                     "options": {
-                      "low": {
-                        "color": "blue",
+                      "critical": {
+                        "text": "■ Nghiêm trọng",
+                        "color": "#ea5a5d",
                         "index": 0
                       },
-                      "medium": {
-                        "color": "yellow",
+                      "high": {
+                        "text": "■ Cao",
+                        "color": "#e7793a",
                         "index": 1
                       },
-                      "high": {
-                        "color": "orange",
+                      "medium": {
+                        "text": "■ Trung bình",
+                        "color": "#e0b93b",
                         "index": 2
                       },
-                      "critical": {
-                        "color": "red",
+                      "low": {
+                        "text": "■ Thấp",
+                        "color": "#4f9dde",
                         "index": 3
                       }
                     }
@@ -1923,7 +2322,7 @@
               {
                 "id": "custom.cellOptions",
                 "value": {
-                  "type": "color-background"
+                  "type": "color-text"
                 }
               },
               {
@@ -1933,15 +2332,18 @@
                     "type": "value",
                     "options": {
                       "ok": {
-                        "color": "green",
+                        "text": "Bình thường",
+                        "color": "#9fdcbf",
                         "index": 0
                       },
                       "deviation": {
-                        "color": "yellow",
+                        "text": "Lệch nhịp",
+                        "color": "#ffd38a",
                         "index": 1
                       },
                       "silent": {
-                        "color": "red",
+                        "text": "Im lặng",
+                        "color": "#ffb1b3",
                         "index": 2
                       }
                     }
@@ -2055,7 +2457,8 @@
       "fieldConfig": {
         "defaults": {
           "custom": {
-            "filterable": true
+            "filterable": true,
+            "minWidth": 90
           }
         },
         "overrides": [
@@ -2068,7 +2471,7 @@
               {
                 "id": "custom.cellOptions",
                 "value": {
-                  "type": "color-background"
+                  "type": "color-text"
                 }
               },
               {
@@ -2077,20 +2480,24 @@
                   {
                     "type": "value",
                     "options": {
-                      "low": {
-                        "color": "blue",
+                      "critical": {
+                        "text": "■ Nghiêm trọng",
+                        "color": "#ea5a5d",
                         "index": 0
                       },
-                      "medium": {
-                        "color": "yellow",
+                      "high": {
+                        "text": "■ Cao",
+                        "color": "#e7793a",
                         "index": 1
                       },
-                      "high": {
-                        "color": "orange",
+                      "medium": {
+                        "text": "■ Trung bình",
+                        "color": "#e0b93b",
                         "index": 2
                       },
-                      "critical": {
-                        "color": "red",
+                      "low": {
+                        "text": "■ Thấp",
+                        "color": "#4f9dde",
                         "index": 3
                       }
                     }
@@ -2108,7 +2515,7 @@
               {
                 "id": "custom.cellOptions",
                 "value": {
-                  "type": "color-background"
+                  "type": "color-text"
                 }
               },
               {
@@ -2118,11 +2525,13 @@
                     "type": "value",
                     "options": {
                       "có": {
-                        "color": "green",
+                        "text": "Có",
+                        "color": "#9fdcbf",
                         "index": 0
                       },
                       "CHƯA CÓ": {
-                        "color": "red",
+                        "text": "Chưa có",
+                        "color": "#ffb1b3",
                         "index": 1
                       }
                     }

@@ -15,9 +15,10 @@
     "to": "now"
   },
   "editable": true,
+  "graphTooltip": 1,
   "panels": [
     {
-      "id": 51,
+      "id": 50,
       "type": "row",
       "title": "Tổng quan thư viện",
       "collapsed": false,
@@ -30,7 +31,7 @@
       "panels": []
     },
     {
-      "id": 52,
+      "id": 51,
       "type": "stat",
       "title": "Rule đang chạy",
       "datasource": {
@@ -72,6 +73,7 @@
           ]
         }
       ],
+      "maxDataPoints": 30,
       "options": {
         "reduceOptions": {
           "calcs": [
@@ -80,23 +82,25 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "none",
         "graphMode": "area",
-        "textMode": "value"
+        "textMode": "value",
+        "justifyMode": "auto"
       },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "fixed",
-            "fixedColor": "blue"
+            "fixedColor": "#6b7280"
           },
-          "unit": "short"
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": []
       }
     },
     {
-      "id": 53,
+      "id": 52,
       "type": "stat",
       "title": "Rule do AI viết (đã duyệt)",
       "datasource": {
@@ -138,6 +142,7 @@
           ]
         }
       ],
+      "maxDataPoints": 30,
       "options": {
         "reduceOptions": {
           "calcs": [
@@ -146,23 +151,25 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "none",
         "graphMode": "area",
-        "textMode": "value"
+        "textMode": "value",
+        "justifyMode": "auto"
       },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "fixed",
-            "fixedColor": "purple"
+            "fixedColor": "#6b7280"
           },
-          "unit": "short"
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": []
       }
     },
     {
-      "id": 54,
+      "id": 53,
       "type": "stat",
       "title": "Ngoại lệ đang áp dụng",
       "datasource": {
@@ -204,6 +211,7 @@
           ]
         }
       ],
+      "maxDataPoints": 30,
       "options": {
         "reduceOptions": {
           "calcs": [
@@ -212,23 +220,25 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "none",
         "graphMode": "area",
-        "textMode": "value"
+        "textMode": "value",
+        "justifyMode": "auto"
       },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "fixed",
-            "fixedColor": "yellow"
+            "fixedColor": "#6b7280"
           },
-          "unit": "short"
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": []
       }
     },
     {
-      "id": 55,
+      "id": 54,
       "type": "stat",
       "title": "Đề xuất AI chờ duyệt",
       "datasource": {
@@ -270,6 +280,7 @@
           ]
         }
       ],
+      "maxDataPoints": 30,
       "options": {
         "reduceOptions": {
           "calcs": [
@@ -278,23 +289,25 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "none",
         "graphMode": "area",
-        "textMode": "value"
+        "textMode": "value",
+        "justifyMode": "auto"
       },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "fixed",
-            "fixedColor": "orange"
+            "fixedColor": "#6b7280"
           },
-          "unit": "short"
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": []
       }
     },
     {
-      "id": 56,
+      "id": 55,
       "type": "stat",
       "title": "Đề xuất không đạt kiểm định",
       "datasource": {
@@ -336,6 +349,7 @@
           ]
         }
       ],
+      "maxDataPoints": 30,
       "options": {
         "reduceOptions": {
           "calcs": [
@@ -344,23 +358,25 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "none",
         "graphMode": "area",
-        "textMode": "value"
+        "textMode": "value",
+        "justifyMode": "auto"
       },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "fixed",
-            "fixedColor": "red"
+            "fixedColor": "#6b7280"
           },
-          "unit": "short"
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": []
       }
     },
     {
-      "id": 57,
+      "id": 56,
       "type": "stat",
       "title": "Rule im lặng 7 ngày",
       "datasource": {
@@ -402,6 +418,7 @@
           ]
         }
       ],
+      "maxDataPoints": 30,
       "options": {
         "reduceOptions": {
           "calcs": [
@@ -410,24 +427,26 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
+        "colorMode": "none",
         "graphMode": "area",
-        "textMode": "value"
+        "textMode": "value",
+        "justifyMode": "auto"
       },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "fixed",
-            "fixedColor": "text"
+            "fixedColor": "#6b7280"
           },
-          "unit": "short"
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": []
       }
     },
     {
-      "id": 58,
-      "type": "piechart",
+      "id": 57,
+      "type": "table",
       "title": "Rule theo MITRE tactic",
       "datasource": {
         "type": "elasticsearch",
@@ -471,26 +490,67 @@
         }
       ],
       "options": {
-        "reduceOptions": {
-          "values": true,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "pieType": "donut",
-        "legend": {
-          "displayMode": "table",
-          "placement": "right",
-          "values": [
-            "value"
-          ]
+        "showHeader": false,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
         }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#4f9dde"
+          },
+          "min": 0,
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "number"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "string"
+            },
+            "properties": [
+              {
+                "id": "custom.minWidth",
+                "value": 50
+              }
+            ]
+          }
+        ]
       }
     },
     {
-      "id": 59,
-      "type": "piechart",
+      "id": 58,
+      "type": "table",
       "title": "Đề xuất AI theo trạng thái",
       "datasource": {
         "type": "elasticsearch",
@@ -534,26 +594,67 @@
         }
       ],
       "options": {
-        "reduceOptions": {
-          "values": true,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "pieType": "donut",
-        "legend": {
-          "displayMode": "table",
-          "placement": "right",
-          "values": [
-            "value"
-          ]
+        "showHeader": false,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
         }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#4f9dde"
+          },
+          "min": 0,
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "number"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "string"
+            },
+            "properties": [
+              {
+                "id": "custom.minWidth",
+                "value": 50
+              }
+            ]
+          }
+        ]
       }
     },
     {
-      "id": 50,
-      "type": "bargauge",
+      "id": 59,
+      "type": "table",
       "title": "Rule kêu nhiều nhất (7 ngày)",
       "datasource": {
         "type": "elasticsearch",
@@ -573,6 +674,7 @@
             "uid": "siem-rules"
           },
           "query": "origin:rule AND alerts.d7:>0",
+          "alias": "",
           "timeField": "@timestamp",
           "metrics": [
             {
@@ -597,25 +699,62 @@
         }
       ],
       "options": {
-        "reduceOptions": {
-          "values": true,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true
+        "showHeader": false,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
       },
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "continuous-YlRd"
+            "mode": "fixed",
+            "fixedColor": "#4f9dde"
           },
-          "min": 0
+          "min": 0,
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "number"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "string"
+            },
+            "properties": [
+              {
+                "id": "custom.minWidth",
+                "value": 50
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -755,7 +894,8 @@
       "fieldConfig": {
         "defaults": {
           "custom": {
-            "filterable": true
+            "filterable": true,
+            "minWidth": 90
           }
         },
         "overrides": [
@@ -768,7 +908,7 @@
               {
                 "id": "custom.cellOptions",
                 "value": {
-                  "type": "color-background"
+                  "type": "color-text"
                 }
               },
               {
@@ -777,20 +917,24 @@
                   {
                     "type": "value",
                     "options": {
-                      "low": {
-                        "color": "blue",
+                      "critical": {
+                        "text": "■ Nghiêm trọng",
+                        "color": "#ea5a5d",
                         "index": 0
                       },
-                      "medium": {
-                        "color": "yellow",
+                      "high": {
+                        "text": "■ Cao",
+                        "color": "#e7793a",
                         "index": 1
                       },
-                      "high": {
-                        "color": "orange",
+                      "medium": {
+                        "text": "■ Trung bình",
+                        "color": "#e0b93b",
                         "index": 2
                       },
-                      "critical": {
-                        "color": "red",
+                      "low": {
+                        "text": "■ Thấp",
+                        "color": "#4f9dde",
                         "index": 3
                       }
                     }
@@ -1030,7 +1174,8 @@
       "fieldConfig": {
         "defaults": {
           "custom": {
-            "filterable": true
+            "filterable": true,
+            "minWidth": 90
           }
         },
         "overrides": [
@@ -1043,7 +1188,7 @@
               {
                 "id": "custom.cellOptions",
                 "value": {
-                  "type": "color-background"
+                  "type": "color-text"
                 }
               },
               {
@@ -1052,20 +1197,24 @@
                   {
                     "type": "value",
                     "options": {
-                      "low": {
-                        "color": "blue",
+                      "critical": {
+                        "text": "■ Nghiêm trọng",
+                        "color": "#ea5a5d",
                         "index": 0
                       },
-                      "medium": {
-                        "color": "yellow",
+                      "high": {
+                        "text": "■ Cao",
+                        "color": "#e7793a",
                         "index": 1
                       },
-                      "high": {
-                        "color": "orange",
+                      "medium": {
+                        "text": "■ Trung bình",
+                        "color": "#e0b93b",
                         "index": 2
                       },
-                      "critical": {
-                        "color": "red",
+                      "low": {
+                        "text": "■ Thấp",
+                        "color": "#4f9dde",
                         "index": 3
                       }
                     }
@@ -1252,7 +1401,8 @@
       "fieldConfig": {
         "defaults": {
           "custom": {
-            "filterable": true
+            "filterable": true,
+            "minWidth": 90
           }
         },
         "overrides": [
@@ -1265,7 +1415,7 @@
               {
                 "id": "custom.cellOptions",
                 "value": {
-                  "type": "color-background"
+                  "type": "color-text"
                 }
               },
               {
@@ -1274,20 +1424,24 @@
                   {
                     "type": "value",
                     "options": {
-                      "low": {
-                        "color": "blue",
+                      "critical": {
+                        "text": "■ Nghiêm trọng",
+                        "color": "#ea5a5d",
                         "index": 0
                       },
-                      "medium": {
-                        "color": "yellow",
+                      "high": {
+                        "text": "■ Cao",
+                        "color": "#e7793a",
                         "index": 1
                       },
-                      "high": {
-                        "color": "orange",
+                      "medium": {
+                        "text": "■ Trung bình",
+                        "color": "#e0b93b",
                         "index": 2
                       },
-                      "critical": {
-                        "color": "red",
+                      "low": {
+                        "text": "■ Thấp",
+                        "color": "#4f9dde",
                         "index": 3
                       }
                     }
