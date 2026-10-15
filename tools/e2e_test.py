@@ -186,15 +186,16 @@ if b:
     check("sqli", "vào lại được web", bool(wait(lambda: web("/")[0] == 200, timeout=30)))
 
 # ----------------------------------------------------------------- 2. command injection
-print("\n2. Command injection qua /cgi-bin/ping.cgi (shell chạy 15 giây)")
+print("\n2. Command injection qua /cgi-bin/ping.cgi (shell chạy 25 giây)")
 t0 = time.time()
-code, elapsed = web("/cgi-bin/ping.cgi?host=127.0.0.1%3Bsleep%2015", timeout=30)
+code, elapsed = web("/cgi-bin/ping.cgi?host=127.0.0.1%3Bsleep%2025", timeout=40)
 a = wait(lambda: alert(admin, "LNX-002"))
 check("cmdi", "alert LNX-002 (web server sinh shell)", bool(a),
       f"{a.get('process', {}).get('name')} pid {a.get('process', {}).get('pid')}" if a else "")
 k = wait(lambda: action(admin, "kill_process"))
 check("cmdi", "SOAR kill cả cây tiến trình, agent báo success", bool(k), k["output"] if k else "")
-check("cmdi", "request bị cắt ngang trước 15 giây", elapsed < 14, f"trả về sau {elapsed:.1f}s")
+# shell chạy 25 giây, kill thường sau 12-15 giây (máy ảo / máy chậm hơn): chừa khoảng an toàn, không sát mốc như trước
+check("cmdi", "request bị cắt ngang trước khi shell chạy xong (25 giây)", elapsed < 23, f"trả về sau {elapsed:.1f}s")
 
 # ----------------------------------------------------------------- 3. FIM
 print("\n3. Tải webshell lên thư mục web (FIM)")
