@@ -103,7 +103,8 @@ def main():
             page.wait_for_url(re.compile(r"#/alerts"))
             page.wait_for_selector("#content table.list, #content .empty")
             check("đăng nhập xong quay về đúng #/alerts", page.url.endswith("#/alerts"), page.url)
-            check("menu có đủ mục (admin thấy Tài khoản, Nhật ký)", page.locator("#nav a").count() == 10)
+            check("menu có đủ mục (admin thấy Tài khoản, Nhật ký)", page.locator("#nav a").count() == 13,
+                  f"{page.locator('#nav a').count()} mục")
             shot(page, "01-alerts")
 
             print("2. Cảnh báo: lọc, mở chi tiết")
@@ -137,7 +138,7 @@ def main():
                 if page.locator("#drawer .items li.link").count():
                     page.locator("#drawer .items li.link").first.click()
                     page.wait_for_url(re.compile(r"#/alerts/\w+"))
-                    page.wait_for_function("!document.querySelector('#drawer').hidden && !document.querySelector('#drawer .prio')")
+                    page.wait_for_selector("#drawer:not([hidden]) h3:text-is('Sự kiện gốc')")
                     check("từ case bấm cảnh báo -> mở chi tiết cảnh báo", True)
             else:
                 check("có case để mở", False, "chưa có case nào")
@@ -217,12 +218,19 @@ def main():
                 check("có đề xuất AI để so sánh", False, "chưa có đề xuất nào")
 
             print("6. Các trang còn lại")
-            for view, sel in (("actions", "#content table.list, #content .empty"), ("agents", "#content table.list"),
+            for view, sel in (("handover", "#content dl.facts"), ("hunts", "#content table.list, #content .empty"),
+                              ("actions", "#content table.list, #content .empty"), ("agents", "#content table.list"),
                               ("ai", "#content p.sub"), ("users", "#content table.list"), ("audit", "#content table.list")):
                 page.goto(f"{BASE}/#/{view}")
                 page.wait_for_selector(sel)
                 check(f"trang {view} hiển thị", True)
                 shot(page, f"07-{view}")
+            page.goto(f"{BASE}/#/kpi")
+            frame = page.frame_locator("#frame-kpi iframe")
+            frame.locator("text=MTTD alert critical").first.wait_for(timeout=120000)
+            page.wait_for_timeout(3000)
+            check("dashboard KPI hiện trong console", frame.locator("text=Tuân thủ SLA").count() > 0)
+            shot(page, "07-kpi")
             # làm mới tự động 10 giây/lần từng vẽ lại form trống khi đang gõ (15/10/2026): không tạo được tài khoản.
             # Nay tạo tài khoản là trang riêng #/newuser, không tự làm mới
             page.goto(f"{BASE}/#/users")
