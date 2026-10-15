@@ -150,4 +150,7 @@ api PUT "/_slm/policy/daily-snapshots" "{\"schedule\": \"${SNAPSHOT_SCHEDULE:-0 
                \"ignore_unavailable\": true},
   \"retention\": {\"expire_after\": \"${SNAP_DAYS}d\", \"min_count\": 3, \"max_count\": 100}}"
 echo "[setup] snapshot hằng ngày (SLM daily-snapshots, lịch '${SNAPSHOT_SCHEDULE:-0 30 18 * * ?}' UTC), giữ ${SNAP_DAYS} ngày"
+
+# console-users tạo trước khi có template (store.py) mang 1 replica -> cụm 1 node luôn yellow: hạ về 0
+api PUT "/console-users*/_settings?allow_no_indices=true" '{"index.number_of_replicas": 0}'
 echo "[setup] hoàn tất"

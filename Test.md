@@ -7,6 +7,7 @@ Máy chạy: Windows 11, Docker Desktop 29.7.2, stack dựng lại bằng `docke
 
 **Tất cả các bộ test của repo đều đạt.** Toàn bộ chuỗi xử lý chạy đúng trên hệ thống thật: tấn công → event → alert → SOAR → Wazuh agent → phản ứng.
 Không có lỗi chức năng nào. Có **2 vấn đề bảo mật**, **2 lỗi nhỏ trong mã / cấu hình** và một số điểm yếu cần biết (mục 3).
+**Các lỗi này đã được sửa và kiểm chứng lại trên stack thật (mục 7).**
 
 | Hạng mục | Kết quả |
 |---|---|
@@ -132,3 +133,26 @@ pip install playwright && python tools/ui_test.py      # dùng Edge có sẵn
 # độ phủ rule trên dataset
 docker run --rm -v "$PWD:/repo:ro" -w /repo/server --entrypoint python siem-xdr-server:latest -m siem.ai.benchmark --datasets /repo/datasets/processed
 ```
+
+## 7. Đã sửa (15/10/2026) và kết quả kiểm chứng lại
+
+| Lỗi | Sửa ở đâu | Kiểm chứng trên stack thật |
+|---|---|---|
+| 3.1 kafka-ui ghi được không cần đăng nhập | `docker-compose.yml`: `KAFKA_CLUSTERS_0_READONLY: "true"` | `readOnly = True`; thử tạo topic qua kafka-ui nhận **405**, Kafka không có topic mới |
+| 3.2 `/docs`, `/redoc`, `/openapi.json` công khai | `server/siem/manager/api.py`: `docs_url=None, redoc_url=None, openapi_url=None`; thêm assertion trong `tests/test_api.py` | cả 3 đường dẫn trả **404**, `/health` vẫn 200 |
+| 3.3 `console-users` làm ES yellow | `server/siem/store.py`: template `console-users` 0 replica (cài mới); `security/setup.sh`: hạ replica của index đã có | cụm ES **green**, 0 shard chưa gán |
+| 3.4 worker không thoát êm | `docker-compose.yml` (anchor `x-app`): `stop_signal: SIGINT`; `analyzer.py`, `soar/__main__.py`, `ai/__main__.py`: bỏ qua `KeyboardInterrupt` khi thoát | analyzer và soar dừng sau **0,5 giây**, exit 0, không có traceback (trước: 10 giây, bị SIGKILL, mã 137) |
+| 3.6 thư viện không ghim phiên bản | `server/requirements.lock` (pip freeze của image đã qua test), `server/Dockerfile` cài với `-c requirements.lock` | image build lại cài đúng từng phiên bản trong lock |
+| 3.7 Grafana thiếu thư mục provisioning | thêm `grafana/provisioning/plugins/` và `alerting/` (`.gitkeep`) | có hiệu lực khi stack chạy từ mã đã gộp (lần này chưa mount) |
+| 4. snapshot repository `siem-backup` sót lại | dọn một lần trên ES (chỉ gỡ đăng ký, không xóa file snapshot) | `GET _snapshot` trả `{}` |
+
+Chạy lại sau khi sửa: unit test **180/180**, `docker compose config` hợp lệ, cú pháp các file đã sửa 0 lỗi,
+e2e **44/44** (83 giây), giao diện **26/26**, log của manager / analyzer / soar / kafka-ui / Elasticsearch không có lỗi.
+
+Không sửa (không phải lỗi mã hoặc cần quyết định của người dùng):
+- 3.5 tỷ lệ phát hiện thấp: cần viết thêm rule, là việc riêng.
+- Grafana `plugin xychart is already registered` và cảnh báo `indexer-connector` của Wazuh lúc khởi động: nằm trong image gốc, không ảnh hưởng chức năng.
+- Kênh thông báo SOAR (Telegram/webhook): điền trong `.env` khi cần.
+- Volume `siem-xdr_essnapshots` và image `soc-platform-server:latest` không còn dùng: xóa là thao tác không hoàn tác được, để người dùng tự quyết định
+  (`docker volume rm siem-xdr_essnapshots`, `docker image rm soc-platform-server:latest`).
+- Nhánh `origin/main` vẫn là mã soc-platform.

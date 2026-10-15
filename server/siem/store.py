@@ -107,6 +107,11 @@ _TEMPLATES = {
             },
         },
     },
+    # không có template thì ES tự tạo index với 1 replica -> cụm 1 node luôn yellow (index đã có: security/setup.sh)
+    "console-users": {
+        "index_patterns": [settings.IDX_USERS],
+        "template": {"settings": {"number_of_shards": 1, "number_of_replicas": 0}},
+    },
     "siem-state": {
         "index_patterns": ["siem-agents", "siem-actions", "siem-cases", "siem-sources", "siem-kpi", "siem-hunts",
                            "siem-intel", "siem-handovers"],

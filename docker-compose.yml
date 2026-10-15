@@ -33,6 +33,9 @@ x-app: &app
   build: ./server
   image: soc-platform-server:latest
   restart: unless-stopped
+  # python chạy làm PID 1 bỏ qua SIGTERM (không có handler) -> docker stop treo 10 giây rồi SIGKILL;
+  # SIGINT thì thoát ngay qua KeyboardInterrupt, kịp đóng consumer Kafka (commit offset đã xử lý)
+  stop_signal: SIGINT
   env_file: .env
   networks: [soc]
   depends_on:
@@ -111,6 +114,8 @@ services:
     environment:
       KAFKA_CLUSTERS_0_NAME: soc
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      # không đăng nhập -> chỉ cho xem: gửi được message vào siem.alerts là giả được alert, SOAR sẽ chặn IP / kill thật
+      KAFKA_CLUSTERS_0_READONLY: "true"
     networks: [soc]
 
   elasticsearch:

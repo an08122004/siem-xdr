@@ -1,4 +1,5 @@
 """Chạy SOAR service: python -m siem.soar"""
+import contextlib
 import logging
 import time
 
@@ -86,4 +87,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    with contextlib.suppress(KeyboardInterrupt):   # docker stop gửi SIGINT (stop_signal): thoát êm, không in traceback
+        main()

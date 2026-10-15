@@ -7,6 +7,7 @@ Vòng lặp: chờ yêu cầu chạy (analyst bấm trên console -> index ai-jo
 AI_INTERVAL_MINUTES thì chạy 1 chu kỳ đề xuất. Trạng thái worker ghi vào ai-jobs/_doc/worker.
 """
 import argparse
+import contextlib
 import json
 import logging
 import sys
@@ -96,4 +97,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    with contextlib.suppress(KeyboardInterrupt):   # docker stop gửi SIGINT (stop_signal): thoát êm, không in traceback
+        main()

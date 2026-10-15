@@ -217,8 +217,7 @@ Phần AI (`--profile ai`, xem mục 5) và máy web demo (`--profile demo`, xem
 |---|---|---|
 | https://localhost:8000 | Hệ thống chung: dashboard, cảnh báo, case, điều tra, lệnh phản ứng, agent, đề xuất AI, tài khoản | tài khoản riêng từng người (lần đầu: `admin` / `secrets/console_admin_password`) |
 | https://localhost:8000/grafana/ | Grafana đầy đủ: *Tổng quan SOC* (tổng quan, phát hiện, telemetry, **phiên đăng nhập**, phản ứng, case), *Điều tra thực thể*, *Thư viện rule*, *SOC KPI* | **cùng tài khoản và phiên với console** |
-| https://localhost:8000/docs | Swagger của Manager API | |
-| http://127.0.0.1:8088 | Kafka UI (chỉ từ máy chạy docker) | |
+| http://127.0.0.1:8088 | Kafka UI, chỉ xem (chỉ từ máy chạy docker) | |
 | https://127.0.0.1:9200 | Elasticsearch (chỉ từ máy chạy docker) | `analyst` / `secrets/analyst_es_password` (chỉ đọc) |
 | UDP/TCP 514 | Syslog từ firewall F001 / Suricata | |
 | TCP 1514, 1515 | Wazuh agent gửi event (AES) / enroll (TLS) | mật khẩu enroll: `secrets/enrollment_key` |

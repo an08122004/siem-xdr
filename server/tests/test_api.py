@@ -83,6 +83,7 @@ def test_console_redirects_to_login_page_and_api_needs_login(env):
                                                      "lock_minutes": 15, "min_password": 12, "min_distinct": 6}
     assert env.get("/api/v1/alerts").status_code == 401
     assert env.get("/api/v1/alerts", headers={"X-API-Key": "whatever"}).status_code == 401
+    assert [env.get(p).status_code for p in ("/docs", "/redoc", "/openapi.json")] == [404] * 3   # không lộ sơ đồ API
     login(env, "admin", ADMIN_TMP)
     r = env.get("/", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/login?change=1&next=%2F"   # mật khẩu tạm: đổi trước
