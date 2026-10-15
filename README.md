@@ -575,8 +575,8 @@ thành bản ghi trùng; id Wazuh một mình không dùng được vì mọi ev
 
 **Giới hạn còn lại**:
 - Kafka chạy plaintext trong mạng docker nội bộ.
-- Phiên đăng nhập console nằm trong bộ nhớ manager: khởi động lại manager thì mọi người phải đăng nhập lại. Chưa có
-  xác thực 2 lớp (2FA) hay đăng nhập qua LDAP/SSO.
+- Chưa có xác thực 2 lớp (2FA) hay đăng nhập qua LDAP/SSO. (Phiên đăng nhập console lưu cả trong index
+  `console-sessions`, chỉ SHA-256 của token: khởi động lại manager không đăng xuất ai.)
 - Đổi `elastic_password` sau lần chạy đầu phải đổi qua API của ES, hoặc xóa volume `esdata`.
 - Ollama gọi qua HTTP thường trong mạng docker nội bộ (không publish cổng ra ngoài).
 - Agent chưa kiểm tra chứng chỉ của wazuh-manager khi enroll (tùy chọn `server_ca_path` của Wazuh). Mật khẩu enroll lộ thì

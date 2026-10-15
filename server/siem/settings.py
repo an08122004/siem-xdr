@@ -37,6 +37,7 @@ IDX_CASES = "siem-cases"
 
 # Đăng nhập SOC console: tài khoản riêng từng người (manager/auth.py), không còn API key dùng chung
 IDX_USERS = "console-users"         # NGOÀI siem-* -> Grafana / tài khoản chỉ đọc không thấy hash mật khẩu
+IDX_SESSIONS = "console-sessions"   # phiên đăng nhập console (chỉ SHA-256 của token), cũng ngoài siem-*
 CONSOLE_ADMIN_PASSWORD = _secret("CONSOLE_ADMIN_PASSWORD")   # chỉ dùng tạo tài khoản admin đầu tiên
 CONSOLE_IDLE_MINUTES = int(os.getenv("CONSOLE_IDLE_MINUTES", "30"))      # không thao tác quá N phút -> đăng nhập lại
 CONSOLE_SESSION_HOURS = int(os.getenv("CONSOLE_SESSION_HOURS", "8"))     # phiên dài tối đa N giờ

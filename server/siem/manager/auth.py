@@ -3,7 +3,7 @@
 - Mật khẩu băm scrypt (salt ngẫu nhiên riêng từng tài khoản), lưu ở index Elasticsearch `console-users`. Index nằm
   NGOÀI `siem-*` nên Grafana và tài khoản chỉ đọc `analyst` (role siem_reader) không đọc được hash.
 - Phiên: token ngẫu nhiên 256 bit trong cookie HttpOnly + Secure + SameSite=Strict; phía server chỉ giữ SHA-256 của
-  token, trong bộ nhớ manager (manager khởi động lại = mọi người đăng nhập lại). Hết hạn sau CONSOLE_IDLE_MINUTES
+  token, trong bộ nhớ manager và index `console-sessions` (manager khởi động lại không đăng xuất ai). Hết hạn sau CONSOLE_IDLE_MINUTES
   không thao tác (request tự làm mới của console gửi header X-Auto-Refresh, không tính là thao tác) và tối đa
   CONSOLE_SESSION_HOURS kể từ lúc đăng nhập.
 - Chống CSRF: cookie SameSite=Strict, và request thay đổi dữ liệu phải có header X-Requested-With (trang web khác
@@ -32,7 +32,7 @@ import secrets
 import threading
 import time
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
 from elasticsearch import ConflictError, NotFoundError
@@ -244,10 +244,55 @@ class Session:
     must_mfa: bool = False         # vai trò bắt buộc MFA mà chưa bật: phiên chỉ dùng để bật MFA
 
 
+class SessionStore:
+    """Phiên trong Elasticsearch (index console-sessions, id = SHA-256 của token) để manager khởi động lại (deploy,
+    Docker restart) không đăng xuất mọi người."""
+
+    def __init__(self, es):
+        self.es = es
+
+    def save(self, s: Session) -> None:
+        self.es.index(index=settings.IDX_SESSIONS, id=s.key, document=asdict(s))
+
+    def load(self, key: str) -> Session | None:
+        try:
+            return Session(**self.es.get(index=settings.IDX_SESSIONS, id=key)["_source"])
+        except NotFoundError:
+            return None
+
+    def _delete(self, query: dict[str, Any]) -> None:
+        # không refresh (cần quyền maintenance); delete_by_query tìm gần thời gian thực -> phiên vừa ghi < 1 giây có thể
+        # sót: phiên đang có trong bộ nhớ luôn được xóa theo id trước (Sessions.drop_user)
+        try:
+            self.es.delete_by_query(index=settings.IDX_SESSIONS, query=query, conflicts="proceed")
+        except NotFoundError:
+            pass
+
+    def delete(self, key: str) -> None:
+        try:
+            self.es.delete(index=settings.IDX_SESSIONS, id=key)     # theo id: thời gian thực, không phụ thuộc refresh
+        except NotFoundError:
+            pass
+
+    def delete_user(self, username: str, keep: str | None = None) -> None:
+        self._delete({"bool": {"filter": [{"term": {"username": username}}],
+                               "must_not": [{"ids": {"values": [keep]}}] if keep else []}})
+
+    def purge(self, active_before: float, created_before: float) -> None:
+        self._delete({"bool": {"should": [{"range": {"last_active": {"lt": active_before}}},
+                                          {"range": {"created": {"lt": created_before}}}], "minimum_should_match": 1}})
+
+
 class Sessions:
-    def __init__(self):
+    """Bộ nhớ là chính; `store` (nếu có) giữ bản sao để nạp lại phiên sau khi manager khởi động lại. Lỗi của store chỉ
+    ghi log: đăng nhập vẫn chạy bằng bộ nhớ, chỉ không giữ được phiên qua lần khởi động lại."""
+    SAVE_EVERY = 60     # giây: last_active ghi xuống store tối đa 1 lần / phút / phiên, không phải mỗi request
+
+    def __init__(self, store: SessionStore | None = None):
         self._d: dict[str, Session] = {}
+        self._saved: dict[str, float] = {}       # key -> lúc ghi xuống store lần cuối
         self._lock = threading.Lock()
+        self.store = store
 
     @staticmethod
     def _key(token: str) -> str:
@@ -258,6 +303,15 @@ class Sessions:
         return now - s.last_active > settings.CONSOLE_IDLE_MINUTES * 60 or \
             now - s.created > settings.CONSOLE_SESSION_HOURS * 3600
 
+    def _persist(self, method: str, *args: Any) -> Any:
+        if self.store is None:
+            return None
+        try:
+            return getattr(self.store, method)(*args)
+        except Exception as e:  # noqa: BLE001
+            log.warning("kho phiên đăng nhập lỗi (%s): %s", method, e)
+            return None
+
     def create(self, user: dict[str, Any], ip: str) -> tuple[str, Session]:
         token = secrets.token_urlsafe(32)
         now = time.time()
@@ -267,33 +321,63 @@ class Sessions:
             # dọn phiên bỏ dở (đóng trình duyệt không đăng xuất) để bộ nhớ không phình theo thời gian
             for k in [k for k, x in self._d.items() if self._expired(x, now)]:
                 del self._d[k]
+                self._saved.pop(k, None)
             self._d[s.key] = s
+        self._persist("purge", now - settings.CONSOLE_IDLE_MINUTES * 60, now - settings.CONSOLE_SESSION_HOURS * 3600)
+        self.save(s)
         return token, s
+
+    def save(self, s: Session) -> None:
+        """Ghi phiên xuống store (gọi thêm khi đổi thuộc tính phiên, vd hết bị buộc đổi mật khẩu)."""
+        self._saved[s.key] = time.time()
+        self._persist("save", s)
 
     def __len__(self) -> int:
         return len(self._d)
 
     def get(self, token: str, touch: bool = True) -> Session | None:
-        now = time.time()
+        now, key = time.time(), self._key(token)
         with self._lock:
-            s = self._d.get(self._key(token))
-            if not s:
+            s = self._d.get(key)
+        if s is None:
+            s = self._persist("load", key)                # manager vừa khởi động lại: phiên còn trong store
+            if s is None:
                 return None
-            if self._expired(s, now):
-                del self._d[s.key]
-                return None
-            if touch:
+            with self._lock:
+                s = self._d.setdefault(key, s)
+            self._saved.setdefault(key, s.last_active)
+        with self._lock:
+            expired = self._expired(s, now)
+            if expired:
+                self._d.pop(key, None)
+                self._saved.pop(key, None)
+            elif touch:
                 s.last_active = now
-            return s
+        if expired:
+            self._persist("delete", key)
+            return None
+        # last_active trong store chậm tối đa SAVE_EVERY giây: sau khi khởi động lại, phiên có thể hết hạn sớm chừng đó
+        if touch and now - self._saved.get(key, 0) >= self.SAVE_EVERY:
+            self.save(s)
+        return s
 
     def drop(self, token: str) -> None:
+        key = self._key(token)
+        self._persist("delete", key)                      # xóa ở store trước: request song song không nạp lại được
         with self._lock:
-            self._d.pop(self._key(token), None)
+            self._d.pop(key, None)
+            self._saved.pop(key, None)
 
     def drop_user(self, username: str, keep: Session | None = None) -> None:
         with self._lock:
-            for k in [k for k, s in self._d.items() if s.username == username and s is not keep]:
-                del self._d[k]
+            keys = [k for k, s in self._d.items() if s.username == username and s is not keep]
+        for k in keys:
+            self._persist("delete", k)
+        self._persist("delete_user", username, keep.key if keep else None)   # phiên chưa nạp vào bộ nhớ từ lần trước
+        with self._lock:
+            for k in keys:
+                self._d.pop(k, None)
+                self._saved.pop(k, None)
 
 
 class Throttle:
@@ -362,9 +446,10 @@ audit: Callable[..., None] = Audit()
 
 
 def setup(es) -> None:
-    """Gọi khi manager khởi động: gắn kho tài khoản và tạo tài khoản admin đầu tiên nếu chưa có ai."""
+    """Gọi khi manager khởi động: gắn kho tài khoản, kho phiên và tạo tài khoản admin đầu tiên nếu chưa có ai."""
     global users
     users = UserStore(es)
+    sessions.store = SessionStore(es)
     bootstrap_admin()
 
 
@@ -564,6 +649,7 @@ def change_password(body: PasswordBody, request: Request, s: Session = Depends(s
     users.put(user)
     sessions.drop_user(s.username, keep=s)          # các phiên khác của tài khoản này phải đăng nhập lại
     s.must_change = False
+    sessions.save(s)
     audit("password_changed", "success", s.username, ip, role=s.role)
     return _me(s)
 
@@ -599,6 +685,7 @@ def mfa_enable(body: MfaCode, request: Request, s: Session = Depends(session)) -
     users.put(user)
     sessions.drop_user(s.username, keep=s)            # phiên cũ (chưa qua MFA) phải đăng nhập lại
     s.must_mfa = False
+    sessions.save(s)                                  # kho phiên: khởi động lại manager không đòi bật MFA lần nữa
     audit("mfa_enabled", "success", s.username, ip, role=s.role)
     return _me(s)
 

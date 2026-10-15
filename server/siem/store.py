@@ -112,6 +112,14 @@ _TEMPLATES = {
         "index_patterns": [settings.IDX_USERS],
         "template": {"settings": {"number_of_shards": 1, "number_of_replicas": 0}},
     },
+    "console-sessions": {
+        "index_patterns": [settings.IDX_SESSIONS],
+        "template": {"settings": {"number_of_shards": 1, "number_of_replicas": 0},
+                     "mappings": {"dynamic": False, "properties": {
+                         "key": {"type": "keyword"}, "username": {"type": "keyword"}, "role": {"type": "keyword"},
+                         "ip": {"type": "keyword"}, "created": {"type": "double"}, "last_active": {"type": "double"},
+                         "must_change": {"type": "boolean"}}}},
+    },
     "siem-state": {
         "index_patterns": ["siem-agents", "siem-actions", "siem-cases", "siem-sources", "siem-kpi", "siem-hunts",
                            "siem-intel", "siem-handovers"],

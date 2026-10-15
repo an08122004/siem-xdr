@@ -15,6 +15,29 @@ ADMIN_TMP = "Tam-Thoi-Bootstrap-2026"      # mật khẩu mẫu KHÔNG chứa t�
 ADMIN_PW = "Quan-Tri-Vien-2026!"
 
 
+class SessionDB:
+    """Thay index console-sessions: phiên sống qua lần 'manager khởi động lại' (Sessions mới, cùng kho)."""
+
+    def __init__(self):
+        self.d = {}
+
+    def save(self, s):
+        self.d[s.key] = dict(vars(s))
+
+    def load(self, key):
+        from siem.manager import auth
+        return auth.Session(**self.d[key]) if key in self.d else None
+
+    def delete(self, key):
+        self.d.pop(key, None)
+
+    def delete_user(self, username, keep=None):
+        self.d = {k: v for k, v in self.d.items() if v["username"] != username or k == keep}
+
+    def purge(self, active_before, created_before):
+        self.d = {k: v for k, v in self.d.items() if v["last_active"] >= active_before and v["created"] >= created_before}
+
+
 class Clock:
     def __init__(self):
         self.now = 1_000_000.0
@@ -29,10 +52,11 @@ def env(monkeypatch):
 
     class ES:
         pass
-    users = auth.MemoryUserStore()
+    users, sessiondb = auth.MemoryUserStore(), SessionDB()
     audit, actions, clock = [], {}, Clock()
     monkeypatch.setattr(store, "connect", lambda: ES())
     monkeypatch.setattr(auth, "UserStore", lambda es: users)
+    monkeypatch.setattr(auth, "SessionStore", lambda es: sessiondb)
     monkeypatch.setattr(auth, "sessions", auth.Sessions())
     monkeypatch.setattr(auth, "throttle", auth.Throttle())
     monkeypatch.setattr(auth, "audit", lambda action, outcome, user, ip, **kw: audit.append((action, outcome, user, kw)))
@@ -45,7 +69,7 @@ def env(monkeypatch):
         f"a{len(actions)}", {"agent_id": aid, "type": t, "params": p, "status": "pending", **kw}))
     monkeypatch.setattr(store, "list_agents", lambda es: [{"agent_id": "001", "hostname": "demo-web", "status": "online"}])
     with TestClient(api.app, base_url="https://testserver") as c:     # cookie Secure chỉ gửi qua https
-        c.users, c.audit, c.actions, c.clock = users, audit, actions, clock
+        c.users, c.audit, c.actions, c.clock, c.sessiondb = users, audit, actions, clock, sessiondb
         yield c
 
 
@@ -137,6 +161,35 @@ def test_csrf_header_required(env):
     body = {"agent_id": "001", "type": "block_ip", "params": {"ip": "1.2.3.4"}}
     assert env.post("/api/v1/actions", json=body).status_code == 403
     assert env.post("/api/v1/actions", json=body, headers=H).status_code == 200
+
+
+def test_sessions_survive_manager_restart(env, monkeypatch):
+    from siem.manager import auth
+    restart = lambda: monkeypatch.setattr(auth, "sessions", auth.Sessions(env.sessiondb))   # noqa: E731 - bộ nhớ trống
+    admin_login(env)                                          # gồm đổi mật khẩu tạm: must_change=False phải được lưu
+    restart()
+    me = env.get("/api/v1/auth/me")
+    assert me.status_code == 200 and me.json()["username"] == "admin" and me.json()["must_change"] is False
+    assert env.get("/api/v1/alerts").status_code != 401      # dùng tiếp được, không bị đẩy ra trang đăng nhập
+    env.clock.now += 31 * 60                                  # quá thời gian không thao tác
+    restart()
+    assert env.get("/api/v1/auth/me").status_code == 401 and not env.sessiondb.d   # hết hạn vẫn là hết hạn
+    admin_login(env)
+    assert env.post("/api/v1/auth/logout", headers=H).status_code == 200
+    restart()
+    assert env.get("/api/v1/auth/me").status_code == 401     # đã đăng xuất thì không sống lại sau khởi động lại
+
+
+def test_dropped_sessions_stay_dropped_after_restart():
+    from siem.manager import auth
+    db = SessionDB()
+    before = auth.Sessions(db)
+    ta, a = before.create({"username": "an", "role": "analyst"}, "10.0.0.1")
+    tb, _ = before.create({"username": "an", "role": "analyst"}, "10.0.0.2")
+    tc, _ = before.create({"username": "ld", "role": "lead"}, "10.0.0.3")
+    before.drop_user("an", keep=a)                            # vd "an" đổi mật khẩu ở phiên a
+    after = auth.Sessions(db)                                 # manager khởi động lại
+    assert after.get(ta) and after.get(tb) is None and after.get(tc)
 
 
 def test_abandoned_sessions_and_failure_counters_are_pruned(env, monkeypatch):

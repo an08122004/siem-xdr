@@ -5,25 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect x=%271%27 y=%271%27 width=%2714%27 height=%2714%27 rx=%273%27 fill=%27%23181b1f%27/%3E%3Crect x=%273%27 y=%2710%27 width=%272%27 height=%273%27 fill=%27%234f9dde%27/%3E%3Crect x=%276%27 y=%277%27 width=%272%27 height=%276%27 fill=%27%23e0b93b%27/%3E%3Crect x=%279%27 y=%275%27 width=%272%27 height=%278%27 fill=%27%23e7793a%27/%3E%3Crect x=%2712%27 y=%273%27 width=%272%27 height=%2710%27 fill=%27%23e2474b%27/%3E%3C/svg%3E">
 <meta name="robots" content="noindex">
-<title>Đăng nhập · SOC Platform</title>
+<title>Đăng nhập SOC Platform</title>
 <style>
-  /* Trang đăng nhập dùng chung cho SOC console và Grafana.
-     Điểm nhấn duy nhất: dải màu mức độ cảnh báo (low → critical) của chính hệ thống ở mép trái.
-     Chữ: Bahnschrift (DIN, có sẵn trên Windows) cho tên hệ thống và con số; Segoe UI cho tiếng Việt. */
+  /* Trang đăng nhập dùng chung cho SOC console và Grafana: là cái vỏ của console khi còn khóa. Cùng token màu, cùng
+     thanh bên trái (nền, dải màu mức độ cảnh báo low -> critical ở mép) như rail của console -> đăng nhập xong rail
+     nối liền sang console. Điểm nhấn duy nhất: tên hệ thống (Bahnschrift, có sẵn trên Windows) và dải mức độ. */
   :root {
     color-scheme: dark;
-    --bg: #0e1620; --field: #152029; --line: #28394b; --fg: #dde5ec; --mute: #8b9cad;
+    --bg: #111217; --surface: #181b1f; --field: #1f2329; --line: #2b3038; --line2: #3a404a;
+    --fg: #d8dce3; --mute: #8e95a3; --accent: #4f9dde; --error: #ff8a8d;
     --low: #4f9dde; --medium: #e0b93b; --high: #e7793a; --critical: #e2474b; --ok: #3fb27f;
     --display: "Bahnschrift", "DIN Alternate", "Segoe UI Variable Display", "Segoe UI", sans-serif;
     --text: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Noto Sans", sans-serif;
-    --gutter: clamp(20px, 11vw, 176px);
+    --rail: clamp(300px, 31vw, 430px);
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--text); }
 
-  /* ---- dải mức độ cảnh báo */
-  .spectrum { position: fixed; inset: 0 auto 0 0; width: 10px; display: flex; flex-direction: column-reverse; }
+  /* ---- vỏ: rail (tên hệ thống + quy định) | vùng chính (form) */
+  .app { min-height: 100%; display: grid; grid-template-columns: var(--rail) 1fr; grid-template-rows: 1fr auto; }
+  .app::before { content: ""; grid-area: 1 / 1 / 3 / 2; background: var(--surface); border-right: 1px solid var(--line); }
+  .brand { grid-area: 1 / 1; padding: clamp(40px, 11vh, 104px) 32px 32px 40px; }
+  .rules { grid-area: 2 / 1; margin: 0; padding: 0 32px 36px 40px; display: grid; gap: 14px; font-size: 13px; line-height: 1.5; }
+  .main { grid-area: 1 / 2 / 3 / 3; display: grid; align-content: center; padding: 48px clamp(28px, 7vw, 112px); }
+
+  /* ---- dải mức độ cảnh báo ở mép trái (như rail console) */
+  .spectrum { position: fixed; inset: 0 auto 0 0; width: 4px; display: flex; flex-direction: column-reverse; z-index: 1; }
   .spectrum i { flex: 1; transform-origin: bottom; animation: rise .5s cubic-bezier(.2,.7,.2,1) both; }
   .spectrum .s-low { background: var(--low); animation-delay: 0s; }
   .spectrum .s-medium { background: var(--medium); animation-delay: .09s; }
@@ -33,27 +41,32 @@
   @keyframes rise { from { transform: scaleY(0); } to { transform: scaleY(1); } }
   @keyframes alarm { 0%, 100% { filter: none; } 20% { filter: brightness(1.8) saturate(1.2); box-shadow: 0 0 22px var(--critical); } }
 
-  /* ---- bố cục: một cột neo lệch trái */
-  .shell { min-height: 100%; padding: clamp(40px, 12vh, 120px) 24px 40px var(--gutter);
-           display: flex; flex-direction: column; gap: 40px; max-width: calc(var(--gutter) + 440px); }
   .wordmark { margin: 0; font-family: var(--display); font-weight: 600; font-stretch: 85%;
-              font-variation-settings: "wdth" 85; font-size: clamp(44px, 6.4vw, 68px); line-height: .95;
-              letter-spacing: .01em; }
-  .org { margin: 10px 0 0; color: var(--mute); font-size: 15px; }
+              font-variation-settings: "wdth" 85; font-size: clamp(46px, 4.6vw, 64px); line-height: .95; letter-spacing: .01em; }
+  .org { margin: 12px 0 0; color: var(--mute); font-size: 15px; }
+  .rules div { display: grid; gap: 1px; }
+  .rules dt { font-weight: 600; color: var(--fg); }
+  .rules dd { margin: 0; color: var(--mute); text-wrap: pretty; }
 
-  h1 { margin: 0; font-size: 22px; font-weight: 600; line-height: 1.25; }
-  .dest { margin: 4px 0 0; color: var(--mute); font-size: 14px; }
-  .lead { margin: 6px 0 0; color: var(--mute); font-size: 14px; max-width: 44ch; }
-  .notice { margin: 18px 0 0; max-width: 360px; padding: 10px 12px; border-left: 3px solid var(--low); background: var(--field);
-            font-size: 14px; }
+  /* ---- form */
+  .panel { width: 100%; max-width: 380px; }
+  h1 { margin: 0; font-size: 24px; font-weight: 600; line-height: 1.2; }
+  .dest { margin: 6px 0 0; color: var(--mute); font-size: 14px; }
+  .lead { margin: 8px 0 0; color: var(--mute); font-size: 14px; max-width: 44ch; }
+  .notice { margin: 20px 0 0; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--surface);
+            border-radius: 0 4px 4px 0; font-size: 14px; }
   .notice:empty { display: none; }
+  .notice a { color: var(--accent); }
+  .steps { padding-left: 18px; display: grid; gap: 6px; }
+  .secret { font-size: 16px; letter-spacing: .06em; word-break: break-all; }
+  .notice small { display: block; margin-top: 2px; color: var(--mute); font-size: 13px; }
 
-  form { margin-top: 22px; display: grid; gap: 6px; max-width: 360px; }
+  form { margin-top: 24px; display: grid; gap: 6px; }
   label { font-size: 13px; font-weight: 600; margin-top: 10px; }
-  input { width: 100%; background: var(--field); color: var(--fg); border: 1px solid var(--line); border-radius: 4px;
-          padding: 10px 12px; font: 15px var(--text); }
-  input:hover { border-color: #3a5068; }
-  input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--low); outline-offset: 2px; }
+  input { width: 100%; height: 44px; background: var(--field); color: var(--fg); border: 1px solid var(--line2);
+          border-radius: 4px; padding: 0 12px; font: 15px var(--text); }
+  input:hover { border-color: #4a5260; }
+  input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   input[aria-invalid="true"] { border-color: var(--critical); }
   #curWrap { display: grid; gap: 6px; }
   .pw { position: relative; }
@@ -62,12 +75,12 @@
             color: var(--mute); font: 13px var(--text); padding: 6px 8px; cursor: pointer; border-radius: 3px; }
   .reveal:hover { color: var(--fg); }
   .caps { margin: 2px 0 0; font-size: 13px; color: var(--medium); }
-  .error { margin: 8px 0 0; min-height: 1.5em; font-size: 14px; color: #ff8a8d; }
-  .primary { margin-top: 6px; background: var(--low); color: #06121d; border: 0; border-radius: 4px;
-             padding: 11px 16px; font: 600 15px var(--text); cursor: pointer; }
-  .primary:hover { background: #69acE4; }
+  .error { margin: 8px 0 0; min-height: 1.5em; font-size: 14px; color: var(--error); }
+  .primary { margin-top: 4px; height: 44px; background: var(--accent); color: #06121d; border: 0; border-radius: 4px;
+             font: 600 15px var(--text); cursor: pointer; }
+  .primary:hover { background: #69ace4; }
   .primary:disabled { opacity: .6; cursor: progress; }
-  .quiet { justify-self: start; margin-top: 4px; color: var(--mute); font-size: 14px; }
+  .quiet { justify-self: start; margin-top: 6px; color: var(--mute); font-size: 14px; }
   .quiet:hover { color: var(--fg); }
   .clock { font-family: var(--display); font-variant-numeric: tabular-nums; }
 
@@ -79,17 +92,32 @@
   .checks li.ok { color: var(--fg); }
   .checks li.ok::before { background: var(--ok); border-color: var(--ok); }
 
-  .rules { margin-top: auto; max-width: 52ch; color: var(--mute); font-size: 13px; line-height: 1.6; }
-  .rules p { margin: 0 0 4px; }
+  /* ---- đăng ký: hai nhóm trường có tiêu đề */
+  fieldset { margin: 0; padding: 0; border: 0; display: grid; gap: 6px; min-width: 0; }
+  legend { padding: 0; margin: 14px 0 0; font-size: 14px; font-weight: 600; color: var(--fg); }
+  fieldset + fieldset { margin-top: 14px; }       /* margin trên legend không có tác dụng (legend vẽ riêng) */
+  .hint { margin: 0; font-size: 12.5px; color: var(--mute); }
+  .switch { margin: 18px 0 0; font-size: 14px; color: var(--mute); }
+  .lead b { color: var(--fg); }
+  .switch a { color: var(--accent); }
+  input[type="date"] { color-scheme: dark; }
+
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   [hidden] { display: none !important; }
 
-  @media (max-width: 640px) {
-    .spectrum { inset: 0 0 auto 0; width: auto; height: 6px; flex-direction: row; }
+  /* ---- điện thoại: rail thành dải đầu trang, quy định xuống cuối */
+  @media (max-width: 720px) {
+    .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
+    .app::before { grid-area: 1 / 1 / 2 / 2; border-right: 0; border-bottom: 1px solid var(--line); }
+    .brand { grid-area: 1 / 1; padding: 34px 16px 22px; }
+    .main { grid-area: 2 / 1; align-content: start; padding: 28px 16px 8px; }
+    .rules { grid-area: 3 / 1; padding: 20px 16px 28px; }
+    .wordmark { font-size: 40px; }
+    .org { margin-top: 8px; font-size: 14px; }
+    .panel { max-width: none; }
+    .spectrum { inset: 0 0 auto 0; width: auto; height: 4px; flex-direction: row; }
     .spectrum i { transform-origin: left; animation-name: rise-x; }
     @keyframes rise-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-    .shell { padding: 48px 16px 28px; gap: 32px; }
-    form { max-width: none; }
   }
   @media (prefers-reduced-motion: reduce) {
     .spectrum i, .spectrum.alarm .s-critical { animation: none; }
@@ -101,12 +129,13 @@
   <i class="s-low"></i><i class="s-medium"></i><i class="s-high"></i><i class="s-critical"></i>
 </div>
 
-<main class="shell">
-  <header>
+<div class="app">
+  <header class="brand">
     <p class="wordmark">SOC Platform</p>
     <p class="org">Trung tâm giám sát an ninh</p>
   </header>
 
+  <main class="main"><div class="panel">
   <!-- Bước 1: đăng nhập -->
   <section id="loginView" hidden aria-labelledby="loginTitle">
     <h1 id="loginTitle">Đăng nhập</h1>
@@ -125,22 +154,78 @@
         <label for="otp">Mã xác thực</label>
         <input id="otp" name="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="8" spellcheck="false"
                aria-describedby="otpHint">
-        <p class="caps" id="otpHint" style="color:var(--mute)">6 số đang hiện trong ứng dụng xác thực trên điện thoại.</p>
+        <p class="hint" id="otpHint">6 số đang hiện trong ứng dụng xác thực trên điện thoại.</p>
       </div>
       <p class="error" id="err" role="alert"></p>
       <button type="submit" class="primary" id="loginBtn">Đăng nhập</button>
     </form>
+    <p class="switch">Chưa có tài khoản? <a href="/register" id="toReg">Đăng ký</a></p>
   </section>
 
-  <!-- Bước 3: bật xác thực 2 lớp (TOTP) -->
+  <!-- Đăng ký: tạo yêu cầu, quản trị viên duyệt và cấp vai trò rồi mới đăng nhập được -->
+  <section id="regView" hidden aria-labelledby="regTitle">
+    <h1 id="regTitle">Đăng ký tài khoản</h1>
+    <p class="lead">Quản trị viên duyệt yêu cầu và cấp vai trò, sau đó bạn đăng nhập bằng tài khoản này.</p>
+    <p class="notice" id="regAs" role="status"></p>
+    <form id="regForm" novalidate>
+      <fieldset>
+        <legend>Thông tin cá nhân</legend>
+        <label for="rName">Họ và tên</label>
+        <input id="rName" autocomplete="name" maxlength="80" required>
+        <label for="rBirth">Ngày sinh</label>
+        <input id="rBirth" type="date" autocomplete="bday" required>
+        <label for="rHome">Quê quán</label>
+        <input id="rHome" maxlength="80" placeholder="vd Nghệ An" required>
+        <label for="rPhone">Số điện thoại</label>
+        <input id="rPhone" type="tel" inputmode="tel" autocomplete="tel" placeholder="vd 0912 345 678" required>
+        <label for="rPos">Chức vụ</label>
+        <input id="rPos" list="positions" maxlength="60" autocomplete="organization-title" required>
+        <datalist id="positions">
+          <option value="Chuyên viên phân tích L1"><option value="Chuyên viên phân tích L2">
+          <option value="Trưởng nhóm ứng cứu sự cố"><option value="Kỹ sư phát hiện"><option value="Quản trị hệ thống">
+        </datalist>
+      </fieldset>
+      <fieldset>
+        <legend>Tài khoản đăng nhập</legend>
+        <label for="rUser">Tên đăng nhập</label>
+        <input id="rUser" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" aria-describedby="rUserHint" required>
+        <p class="hint" id="rUserHint">2–32 ký tự: chữ thường không dấu, số và . _ -</p>
+        <label for="rPw">Mật khẩu</label>
+        <div class="pw">
+          <input id="rPw" type="password" autocomplete="new-password" aria-describedby="rChecks" required>
+          <button type="button" class="reveal" aria-controls="rPw" aria-pressed="false">Hiện</button>
+        </div>
+        <label for="rPw2">Nhập lại mật khẩu</label>
+        <input id="rPw2" type="password" autocomplete="new-password" required>
+        <p class="caps" data-caps hidden>Caps Lock đang bật</p>
+        <ul class="checks" id="rChecks">
+          <li data-rule="len">Từ <span data-min-password>12</span> ký tự trở lên<span class="sr"></span></li>
+          <li data-rule="user">Không chứa tên đăng nhập<span class="sr"></span></li>
+          <li data-rule="variety">Ít nhất <span data-min-distinct>6</span> ký tự khác nhau<span class="sr"></span></li>
+          <li data-rule="match">Hai lần nhập giống nhau<span class="sr"></span></li>
+        </ul>
+      </fieldset>
+      <p class="error" id="regErr" role="alert"></p>
+      <button type="submit" class="primary" id="regBtn">Gửi đăng ký</button>
+    </form>
+    <p class="switch">Đã có tài khoản? <a href="/login" class="toLogin">Đăng nhập</a></p>
+  </section>
+
+  <section id="regDone" hidden aria-labelledby="regDoneTitle">
+    <h1 id="regDoneTitle">Đã gửi yêu cầu đăng ký</h1>
+    <p class="lead">Tài khoản <b id="regUser"></b> đang chờ quản trị viên duyệt. Khi được duyệt, bạn đăng nhập bằng tên và mật khẩu vừa đặt.</p>
+    <p class="switch"><a href="/login" class="toLogin" id="regDoneLink">Về trang đăng nhập</a></p>
+  </section>
+
+  <!-- Bật xác thực 2 lớp (TOTP) -->
   <section id="mfaView" hidden aria-labelledby="mfaTitle">
     <h1 id="mfaTitle">Bật xác thực 2 lớp</h1>
     <p class="lead" id="mfaLead"></p>
-    <ol class="lead" style="padding-left:18px;display:grid;gap:6px">
+    <ol class="lead steps">
       <li>Mở ứng dụng xác thực trên điện thoại (Google Authenticator, Microsoft Authenticator...), chọn thêm tài khoản bằng
         <b>khóa thiết lập</b>.</li>
-      <li>Nhập khóa: <code id="mfaSecret" class="clock" style="font-size:16px;letter-spacing:.06em;word-break:break-all"></code>
-        (loại: theo thời gian). Trên điện thoại có thể <a id="mfaLink" href="#" style="color:var(--low)">mở thẳng bằng ứng dụng</a>.</li>
+      <li>Nhập khóa: <code id="mfaSecret" class="clock secret"></code> (loại: theo thời gian). Trên điện thoại có thể
+        <a id="mfaLink" href="#" style="color:var(--accent)">mở thẳng bằng ứng dụng</a>.</li>
       <li>Nhập mã 6 số ứng dụng đang hiện.</li>
     </ol>
     <form id="mfaForm" novalidate>
@@ -184,18 +269,21 @@
       <a href="/" class="quiet" id="pwBack" hidden>Quay lại</a>
     </form>
   </section>
+  </div></main>
 
-  <footer class="rules" id="rules">
-    <p>Một tài khoản dùng cho cả SOC console và Grafana.</p>
-    <p id="ruleSession">Phiên hết hạn sau 30 phút không thao tác, tối đa 8 giờ.</p>
-    <p id="ruleLock">Nhập sai mật khẩu 5 lần sẽ bị khóa 15 phút.</p>
-    <p>Quên mật khẩu hoặc mất điện thoại có ứng dụng xác thực thì nhờ quản trị viên đặt lại.</p>
-  </footer>
-</main>
+  <dl class="rules" id="rules" aria-label="Quy định đăng nhập">
+    <div><dt>Một tài khoản</dt><dd>Dùng chung cho SOC console và Grafana.</dd></div>
+    <div><dt>Phiên đăng nhập</dt><dd id="ruleSession">Hết hạn sau 30 phút không thao tác, tối đa 8 giờ.</dd></div>
+    <div><dt>Nhập sai mật khẩu</dt><dd id="ruleLock">Sai 5 lần trong 15 phút thì tạm khóa 15 phút.</dd></div>
+    <div><dt>Tài khoản mới</dt><dd>Đăng ký ở trang này, quản trị viên duyệt rồi mới đăng nhập được.</dd></div>
+    <div><dt>Quên mật khẩu, mất điện thoại</dt><dd>Nhờ quản trị viên đặt lại (cả ứng dụng xác thực 2 lớp).</dd></div>
+  </dl>
+</div>
 
 <script>
 const $ = s => document.querySelector(s);
 const params = new URLSearchParams(location.search);
+const REGISTER = location.pathname === '/register' || !!params.get('register');   // trang đăng ký riêng (/register)
 // chỉ cho chuyển tiếp tới đường dẫn nội bộ (chống open redirect: //evil.com, /\evil.com, http://...)
 // Hết phiên khi đang xem dashboard nhúng trong console: trang này được tải trong khung -> thoát ra cả cửa sổ
 if (window.top !== window.self) { try { window.top.location.replace(location.href); } catch (e) {} }
@@ -215,12 +303,11 @@ async function call(path, body) {
   return { status: r.status, data };
 }
 
+const VIEW_IDS = { login: '#loginView', pw: '#pwView', mfa: '#mfaView', reg: '#regView', regDone: '#regDone' };
 function show(view) {
-  $('#loginView').hidden = view !== 'login';
-  $('#pwView').hidden = view !== 'pw';
-  $('#mfaView').hidden = view !== 'mfa';
-  (view === 'mfa' ? $('#mfaCode') : view === 'login' ? ($('#u').value ? $('#p') : $('#u'))
-    : ($('#curWrap').hidden ? $('#pn') : $('#pc'))).focus();
+  for (const [v, id] of Object.entries(VIEW_IDS)) $(id).hidden = view !== v;
+  ({ login: () => $('#u').value ? $('#p') : $('#u'), pw: () => $('#curWrap').hidden ? $('#pn') : $('#pc'),
+     mfa: () => $('#mfaCode'), reg: () => $('#rName'), regDone: () => $('#regDoneLink') })[view]().focus();
 }
 // detail của API: chuỗi, hoặc {message, mfa} khi hỏi / sai mã xác thực 2 lớp
 const detailText = d => (d && typeof d.detail === 'object' && d.detail) ? d.detail.message : d && d.detail;
@@ -266,8 +353,11 @@ function alarm() {
 function showLogin() {
   $('#dest').textContent = NEXT.startsWith('/grafana') ? 'Tiếp tục tới Grafana' : 'Tiếp tục tới SOC console';
   const reason = params.get('reason');
-  $('#notice').textContent = reason === 'logged_out' ? 'Bạn đã đăng xuất.'
-    : reason === 'expired' ? `Phiên đã hết hạn sau ${POLICY.idle_minutes} phút không thao tác. Đăng nhập lại để tiếp tục.` : '';
+  // hết phiên có nhiều nguyên nhân (không thao tác, quá thời gian tối đa, mật khẩu / quyền vừa đổi): không đoán một cái
+  const why = Object.assign(document.createElement('small'), { textContent:
+    `Phiên kết thúc khi không thao tác ${POLICY.idle_minutes} phút, sau ${POLICY.session_hours} giờ, hoặc khi mật khẩu hay quyền của tài khoản thay đổi.` });
+  $('#notice').replaceChildren(...(reason === 'logged_out' ? ['Bạn đã đăng xuất.']
+    : reason === 'expired' ? ['Phiên đăng nhập đã kết thúc. Đăng nhập lại để tiếp tục.', why] : []));
   show('login');
 }
 
@@ -302,6 +392,7 @@ $('#loginForm').addEventListener('submit', async e => {
       $('#otpWrap').hidden = false; $('#otp').value = ''; $('#otp').focus();
       $('#err').textContent = ''; return;
     }
+    if (status === 403) { $('#err').textContent = sentence(detailText(data)); return; }   // đúng mật khẩu, chờ duyệt
     alarm();
     if (mfa === 'invalid') { $('#otp').value = ''; $('#otp').focus(); }
     else { $('#p').value = ''; $('#p').focus(); }
@@ -329,20 +420,74 @@ function openPassword(forced) {
   show('pw');
 }
 
-function checkRules() {
-  const n = $('#pn').value, n2 = $('#pn2').value;
+// điều kiện mật khẩu (đặt / đổi mật khẩu và đăng ký): đánh dấu từng dòng trong danh sách `list`
+function checkRules(list = '#checks', n = $('#pn').value, n2 = $('#pn2').value, user = USER) {
   const res = {
     len: n.length >= POLICY.min_password,
-    user: !!n && !(USER && n.toLowerCase().includes(USER.toLowerCase())),
+    user: !!n && !(user && n.toLowerCase().includes(user.toLowerCase())),
     variety: new Set(n).size >= POLICY.min_distinct,
     match: !!n && n === n2,
   };
-  document.querySelectorAll('#checks li').forEach(li => {
+  document.querySelectorAll(list + ' li').forEach(li => {
     const ok = res[li.dataset.rule]; li.classList.toggle('ok', ok); li.querySelector('.sr').textContent = ok ? ': đạt' : ': chưa đạt';
   });
   return Object.values(res).every(Boolean);
 }
-['#pn', '#pn2'].forEach(s => $(s).addEventListener('input', checkRules));
+['#pn', '#pn2'].forEach(s => $(s).addEventListener('input', () => checkRules()));
+
+// ---------- đăng ký
+const regRules = () => checkRules('#rChecks', $('#rPw').value, $('#rPw2').value, $('#rUser').value.trim().toLowerCase());
+['#rPw', '#rPw2', '#rUser'].forEach(s => $(s).addEventListener('input', regRules));
+function ageOk(d) {
+  const b = new Date(d + 'T00:00:00'), n = new Date();
+  const age = n.getFullYear() - b.getFullYear() - (n < new Date(n.getFullYear(), b.getMonth(), b.getDate()) ? 1 : 0);
+  return age >= 16 && age <= 100;
+}
+function openRegister(current) {
+  // đang đăng nhập (vd admin mở từ console): vẫn cho gửi yêu cầu cho người khác, nói rõ phiên hiện tại giữ nguyên
+  $('#regAs').replaceChildren(...(typeof current === 'string' ? ['Bạn đang đăng nhập với tài khoản ',
+    Object.assign(document.createElement('b'), { textContent: current }),
+    '. Gửi đăng ký tạo yêu cầu tài khoản mới (chờ duyệt), phiên của bạn giữ nguyên. ',
+    Object.assign(document.createElement('a'), { href: NEXT, textContent: 'Quay lại console' })] : []));
+  $('#regErr').textContent = ''; regRules();
+  history.replaceState(null, '', '/register');
+  show('reg');
+}
+$('#toReg').addEventListener('click', e => { e.preventDefault(); openRegister(); });
+document.querySelectorAll('.toLogin').forEach(a => a.addEventListener('click', e => {
+  e.preventDefault(); history.replaceState(null, '', '/login'); showLogin();
+}));
+
+$('#regForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const clean = id => $(id).value.split(/\s+/).filter(Boolean).join(' ');
+  const body = { full_name: clean('#rName'), birth_date: $('#rBirth').value, hometown: clean('#rHome'),
+                 phone: $('#rPhone').value.replace(/[\s.-]/g, ''), position: clean('#rPos'),
+                 username: $('#rUser').value.trim().toLowerCase(), password: $('#rPw').value };
+  document.querySelectorAll('#regForm input').forEach(i => i.removeAttribute('aria-invalid'));
+  const fail = (msg, id) => { $('#regErr').textContent = msg; if (id) { $(id).setAttribute('aria-invalid', 'true'); $(id).focus(); } };
+  // theo thứ tự trên form: báo trường sai đầu tiên và đưa con trỏ tới đó
+  const bad = [
+    [body.full_name.length < 2, 'Nhập họ và tên.', '#rName'],
+    [!body.birth_date, 'Chọn ngày sinh.', '#rBirth'],
+    [body.birth_date && !ageOk(body.birth_date), 'Ngày sinh không hợp lệ (tuổi từ 16 đến 100).', '#rBirth'],
+    [body.hometown.length < 2, 'Nhập quê quán.', '#rHome'],
+    [!/^(0|\+84)[0-9]{9,10}$/.test(body.phone), 'Số điện thoại gồm 10–11 chữ số, bắt đầu bằng 0 hoặc +84.', '#rPhone'],
+    [body.position.length < 2, 'Nhập chức vụ.', '#rPos'],
+    [!/^[a-z0-9][a-z0-9._-]{1,31}$/.test(body.username), 'Tên đăng nhập 2–32 ký tự: chữ thường không dấu, số và . _ - (bắt đầu bằng chữ hoặc số).', '#rUser'],
+    [!regRules(), 'Mật khẩu chưa đạt các điều kiện bên dưới.', '#rPw'],
+  ].find(([cond]) => cond);
+  if (bad) { fail(bad[1], bad[2]); return; }
+  const btn = $('#regBtn'); btn.disabled = true; btn.textContent = 'Đang gửi…'; $('#regErr').textContent = '';
+  try {
+    const { status, data } = await call('/api/v1/auth/register', body);
+    if (status === 200) { $('#regUser').textContent = data.username; $('#regForm').reset(); show('regDone'); return; }
+    if (status === 409) { fail('Tên đăng nhập này đã có người dùng, chọn tên khác.', '#rUser'); return; }
+    fail(status === 422 ? 'Thông tin chưa hợp lệ, kiểm tra lại các trường.' : sentence(data && data.detail) || `Lỗi ${status}.`);
+  } catch (err) {
+    fail('Không kết nối được tới manager. Thử lại.');
+  } finally { btn.disabled = false; btn.textContent = 'Gửi đăng ký'; }
+});
 
 $('#pwForm').addEventListener('submit', async e => {
   e.preventDefault();
@@ -378,8 +523,8 @@ document.querySelectorAll('input[type=password]').forEach(inp => ['keydown', 'ke
     const p = await call('/api/v1/auth/policy');
     if (p.status === 200) POLICY = p.data;
   } catch (e) {}
-  $('#ruleSession').textContent = `Phiên hết hạn sau ${POLICY.idle_minutes} phút không thao tác, tối đa ${POLICY.session_hours} giờ.`;
-  $('#ruleLock').textContent = `Nhập sai mật khẩu ${POLICY.max_failures} lần sẽ bị khóa ${POLICY.lock_minutes} phút.`;
+  $('#ruleSession').textContent = `Hết hạn sau ${POLICY.idle_minutes} phút không thao tác, tối đa ${POLICY.session_hours} giờ.`;
+  $('#ruleLock').textContent = `Sai ${POLICY.max_failures} lần trong 15 phút thì tạm khóa ${POLICY.lock_minutes} phút.`;
   document.querySelectorAll('[data-min-password]').forEach(e => e.textContent = POLICY.min_password);
   document.querySelectorAll('[data-min-distinct]').forEach(e => e.textContent = POLICY.min_distinct);
   try {
@@ -390,10 +535,12 @@ document.querySelectorAll('input[type=password]').forEach(inp => ['keydown', 'ke
       if (data.must_mfa) { openMfa(true); return; }
       if (params.get('change')) { openPassword(false); return; }
       if (params.get('mfa') && !data.mfa_enabled) { openMfa(false); return; }
+      // trước đây có phiên là chuyển về console ngay: mở trang đăng ký từ console bị đẩy ngược về dashboard
+      if (REGISTER) { openRegister(data.username); return; }
       location.replace(NEXT); return;
     }
   } catch (e) {}
-  showLogin();
+  if (REGISTER) openRegister(); else showLogin();
 })();
 </script>
 </body>

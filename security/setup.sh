@@ -108,7 +108,7 @@ META='"cluster": ["monitor", "manage_index_templates"]'
 role siem_manager  "{$META, \"indices\": [
   {\"names\": [\"siem-actions\", \"siem-alerts\", \"siem-cases\", \"siem-kpi\", \"siem-hunts\", \"siem-handovers\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]},
   {\"names\": [\"siem-events-*\", \"siem-agents\", \"siem-sources\", \"siem-intel\"], \"privileges\": [\"read\", \"view_index_metadata\"]},
-  {\"names\": [\"console-users\", \"siem-rules\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]},
+  {\"names\": [\"console-users\", \"console-sessions\", \"siem-rules\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]},
   {\"names\": [\"ai-*\"], \"privileges\": [\"read\", \"write\", \"create_index\", \"view_index_metadata\"]}]}"
 role siem_analyzer "{$META, \"indices\": [
   {\"names\": [\"siem-events-*\", \"siem-alerts\"], \"privileges\": [\"create_index\", \"create_doc\", \"write\", \"auto_configure\", \"view_index_metadata\"]}]}"
