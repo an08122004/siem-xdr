@@ -539,17 +539,28 @@ def parse_process(data: Doc, doc: Doc) -> None:
 
 
 def parse_console(data: Doc, doc: Doc) -> None:
-    """Đăng nhập / quản lý tài khoản của chính SOC console (manager/auth.py). Đăng nhập là event xác thực như SSH,
-    nên hiện ở mục Phiên đăng nhập trên Grafana và rule brute-force (AUTH-001) áp dụng được cho console."""
+    """Nhật ký của chính SOC console (manager/auth.py, manager/api.py). Đăng nhập là event xác thực như SSH, nên hiện ở
+    mục Phiên đăng nhập trên Grafana và rule brute-force (AUTH-001) áp dụng được cho console. Quản lý tài khoản (tạo,
+    đăng ký, duyệt, khóa, thu hồi phiên) là iam; thao tác trong console (cập nhật cảnh báo / case, gửi lệnh, duyệt AI)
+    là configuration, kèm phương thức, đường dẫn API và mã kết quả."""
     action, outcome = str(data.get("action") or ""), data.get("outcome") or "success"
     put(doc, "host.name", "soc-console")
     if action in ("login", "logout"):
         _auth(doc, f"console_{action}", outcome, data.get("user"), data.get("ip"), None)
         if action == "logout":
             put(doc, "event.type", "end")
-    else:     # password_changed, user_created, user_updated
-        put(doc, "event.category", "iam")
-        put(doc, "event.type", "creation" if action == "user_created" else "change")
+    else:
+        if action == "activity":
+            action = str(data.get("op") or action)
+            put(doc, "event.category", "configuration")
+            put(doc, "event.type", "change")
+            put(doc, "http.request.method", data.get("method"))
+            put(doc, "url.path", data.get("path"))
+            put(doc, "http.response.status_code", data.get("status"))
+        else:     # password_changed, user_created, user_updated, register, user_approved, user_rejected, session_revoked
+            put(doc, "event.category", "iam")
+            put(doc, "event.type", {"user_created": "creation", "register": "creation", "user_rejected": "deletion",
+                                    "session_revoked": "end"}.get(action, "change"))
         put(doc, "event.action", f"console_{action}")
         put(doc, "event.outcome", outcome)
         put(doc, "user.name", data.get("user"))
@@ -560,6 +571,7 @@ def parse_console(data: Doc, doc: Doc) -> None:
     put(doc, "event.reason", data.get("reason") or data.get("change"))
     put(doc, "message", f"console {action} {outcome}: {data.get('user')}"
                         + (f" -> {data['target']}" if data.get("target") else "")
+                        + (f" {data['method']} {data['path']}" if data.get("path") else "")
                         + (f" ({data.get('reason') or data.get('change')})" if data.get("reason") or data.get("change") else ""))
 
 

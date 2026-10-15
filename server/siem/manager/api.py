@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import json
 import logging
 import re
 from contextlib import asynccontextmanager
@@ -29,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from elasticsearch import ConflictError, NotFoundError
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -112,6 +113,46 @@ async def security_headers(request: Request, call_next):
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
     if request.url.path.startswith("/api/"):
         resp.headers.setdefault("Cache-Control", "no-store")           # dữ liệu nhạy cảm không nằm trong cache
+    return resp
+
+
+# Thao tác ghi dữ liệu trong console -> nhật ký hoạt động theo người dùng, cùng kênh với đăng nhập (auth.audit: Kafka ->
+# siem-events, event.module console). Đăng nhập / tài khoản / phiên tự ghi trong auth.py nên không có ở đây.
+ACTIVITY = [(re.compile(p), op) for p, op in (
+    (r"^/api/v1/alerts/[^/]+$", "alert_updated"), (r"^/api/v1/alerts/[^/]+/soar/decline$", "soar_declined"),
+    (r"^/api/v1/actions$", "action_requested"), (r"^/api/v1/cases/[^/]+$", "case_updated"),
+    (r"^/api/v1/ai/proposals/[^/]+/approve$", "ai_approved"), (r"^/api/v1/ai/proposals/[^/]+/reject$", "ai_rejected"),
+    (r"^/api/v1/ai/proposals/[^/]+/rollback$", "ai_rolled_back"), (r"^/api/v1/ai/run$", "ai_run"))]
+
+
+def activity_detail(body: bytes) -> str | None:
+    """Vài trường an toàn của body để nhật ký đọc được (vd "type=block_ip agent_id=001 ip=1.2.3.4"); không ghi ghi chú."""
+    try:
+        data = json.loads(body) if body and len(body) < 16384 else {}
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    params = data.get("params") if isinstance(data.get("params"), dict) else {}
+    parts = [f"{k}={data[k]}" for k in ("status", "type", "agent_id", "assignee", "priority") if data.get(k) not in (None, "")]
+    parts += [f"{k}={params[k]}" for k in ("ip", "pid", "name") if params.get(k) not in (None, "")]
+    return " ".join(str(p)[:80] for p in parts) or None
+
+
+@app.middleware("http")
+async def activity_log(request: Request, call_next):
+    op = request.method in ("POST", "PATCH", "PUT", "DELETE") and \
+        next((op for rx, op in ACTIVITY if rx.match(request.url.path)), None)
+    if not op:
+        return await call_next(request)
+    body = await request.body()
+    resp = await call_next(request)
+    token = request.cookies.get(auth.COOKIE)
+    s = auth.sessions.get(token, touch=False) if token else None
+    if s:
+        await asyncio.to_thread(auth.audit, "activity", "success" if resp.status_code < 400 else "failure", s.username,
+                                auth.client_ip(request), role=s.role, op=op, method=request.method,
+                                path=request.url.path, status=resp.status_code, change=activity_detail(body))
     return resp
 
 
@@ -644,6 +685,33 @@ def kpi_latest(fresh: bool = False) -> dict[str, Any]:
     """KPI mới nhất (fresh=true: tính lại ngay). Đích GĐ2 / GĐ4 và mức đạt nằm trong `targets` / `grade`."""
     doc = None if fresh else kpi.latest(es())
     return doc or compute_kpi()
+
+
+ACTIVITY_FIELDS = ["@timestamp", "event.action", "event.category", "event.outcome", "event.reason", "user.name",
+                   "user.target.name", "user.roles", "source.ip", "http.request.method", "url.path",
+                   "http.response.status_code"]
+
+
+@app.get("/api/v1/admin/activity")
+def activity(user: str | None = Query(None, max_length=64),
+             kind: str | None = Query(None, pattern="^(authentication|iam|configuration)$"),
+             since: str = "7d", size: int = Query(200, ge=1, le=500),
+             s: Session = Depends(require_perm("users"))) -> list[dict[str, Any]]:
+    """Nhật ký của console (admin): đăng nhập / đăng xuất (authentication), tài khoản (iam), thao tác (configuration).
+    `user`: việc người đó làm, và việc người khác làm trên tài khoản đó (vd admin khóa / duyệt)."""
+    flt: list[dict[str, Any]] = [{"term": {"event.module": "console"}},
+                                 {"range": {"@timestamp": {"gte": SINCE.get(since, "now-7d")}}}]
+    if user:
+        flt.append({"bool": {"should": [{"term": {"user.name": user}}, {"term": {"user.target.name": user}}],
+                             "minimum_should_match": 1}})
+    if kind:
+        flt.append({"term": {"event.category": kind}})
+    try:
+        res = es().search(index=f"{settings.IDX_EVENTS}-*", size=size, query={"bool": {"filter": flt}},
+                          sort=[{"@timestamp": "desc"}], source=ACTIVITY_FIELDS, ignore_unavailable=True)
+    except NotFoundError:
+        return []
+    return [h["_source"] for h in res["hits"]["hits"]]
 
 
 @app.get("/health")

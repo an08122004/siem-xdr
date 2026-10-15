@@ -34,6 +34,10 @@ class SessionDB:
     def delete_user(self, username, keep=None):
         self.d = {k: v for k, v in self.d.items() if v["username"] != username or k == keep}
 
+    def all(self):
+        from siem.manager import auth
+        return [auth.Session(**v) for v in self.d.values()]
+
     def purge(self, active_before, created_before):
         self.d = {k: v for k, v in self.d.items() if v["last_active"] >= active_before and v["created"] >= created_before}
 
@@ -600,6 +604,98 @@ def test_grafana_links_open_console_in_top_window(env):
     assert r.headers["x-frame-options"] == "SAMEORIGIN" and r.headers["content-security-policy"] == "frame-ancestors 'self'"
 
 
+# ------------------------------------------------------------------ tự đăng ký, phiên và nhật ký cho admin
+REG = {"username": "nv.an", "password": "Mat-Khau-Rieng-77", "full_name": "  Nguyễn   Văn An ", "birth_date": "2000-05-17",
+       "hometown": "Nghệ An", "phone": "0912345678", "position": "Chuyên viên phân tích L1"}
+
+
+def test_register_needs_admin_approval(env):
+    assert env.post("/api/v1/auth/register", json=REG).status_code == 403                       # thiếu header CSRF
+    r = env.post("/api/v1/auth/register", json=REG, headers=H)
+    assert r.status_code == 200 and r.json()["pending"] is True
+    assert env.post("/api/v1/auth/register", json=REG, headers=H).status_code == 409            # trùng tên
+    for bad, msg in (({"birth_date": "2020-01-01"}, "ngày sinh"), ({"full_name": "   "}, "họ và tên"),
+                     ({"password": "nv.khac-mat-khau"}, "tên đăng nhập")):
+        r = env.post("/api/v1/auth/register", json={**REG, "username": "nv.khac", **bad}, headers=H)
+        assert r.status_code == 400 and msg in r.json()["detail"], bad
+    assert env.post("/api/v1/auth/register", json={**REG, "username": "nv.khac", "phone": "12345"}, headers=H).status_code == 422
+    r = login(env, "nv.an", REG["password"])
+    assert r.status_code == 403 and "chờ quản trị viên duyệt" in r.json()["detail"]
+    assert login(env, "nv.an", "Sai-Mat-Khau-123").status_code == 401                          # sai mật khẩu: không lộ trạng thái
+    admin_login(env)
+    u = next(x for x in env.get("/api/v1/users").json() if x["username"] == "nv.an")
+    assert u["pending"] and u["disabled"] and "password_hash" not in u
+    assert (u["full_name"], u["birth_date"], u["phone"]) == ("Nguyễn Văn An", "2000-05-17", "0912345678")
+    assert env.patch("/api/v1/users/nv.an", json={"disabled": False}, headers=H).status_code == 400   # phải duyệt
+    env.post("/api/v1/auth/register", json={**REG, "username": "tam.thoi"}, headers=H)
+    assert env.delete("/api/v1/users/tam.thoi", headers=H).status_code == 200                  # từ chối = xóa yêu cầu
+    assert env.delete("/api/v1/users/admin", headers=H).status_code == 404                     # tài khoản đang dùng: không xóa
+    assert env.post("/api/v1/users/nv.an/approve", json={"role": "lead"}, headers=H).status_code == 200
+    env.post("/api/v1/auth/logout", headers=H)
+    r = login(env, "nv.an", REG["password"])
+    assert r.status_code == 200 and r.json()["role"] == "lead" and r.json()["must_change"] is False
+    assert env.get("/api/v1/admin/sessions").status_code == 403                               # chỉ admin
+    actions = [a[0] for a in env.audit]
+    assert {"register", "user_approved", "user_rejected"} <= set(actions)
+    assert all("0912345678" not in str(a) and "Nghệ An" not in str(a) for a in env.audit)     # thông tin cá nhân không vào nhật ký
+
+
+def test_admin_creates_user_with_profile(env):
+    admin_login(env)
+    body = {"username": "ld.binh", "role": "lead", "password": "Tam-Thoi-Ld-2026", "full_name": "Trần Bình",
+            "position": "Trưởng nhóm IR"}
+    r = env.post("/api/v1/users", json=body, headers=H)
+    assert r.status_code == 200 and r.json()["full_name"] == "Trần Bình" and "phone" not in r.json()
+    r = env.post("/api/v1/users", json={**body, "username": "ld.cuong", "birth_date": "1900-01-01"}, headers=H)
+    assert r.status_code == 400 and "ngày sinh" in r.json()["detail"]
+
+
+def test_admin_sees_and_revokes_sessions(env):
+    from siem.manager import auth
+    admin_login(env)
+    env.users.put(auth.new_user("an", "analyst", "Mat-Khau-An-2026", must_change=False))
+    other = auth.sessions.create({"username": "an", "role": "analyst"}, "10.0.0.7")[1]
+    ghost_token, _ = auth.sessions.create({"username": "da-xoa", "role": "analyst"}, "10.0.0.8")   # tài khoản không còn
+    rows = env.get("/api/v1/admin/sessions").json()
+    assert all(r["username"] != "da-xoa" for r in rows) and auth.sessions.get(ghost_token) is None
+    me = next(r for r in rows if r["current"])
+    assert me["username"] == "admin" and any(r["username"] == "an" and r["ip"] == "10.0.0.7" for r in rows)
+    assert env.delete("/api/v1/admin/sessions/" + me["id"], headers=H).status_code == 400     # phiên của mình: Đăng xuất
+    assert env.delete("/api/v1/admin/sessions/" + other.key, headers=H).status_code == 200
+    assert all(r["username"] != "an" for r in env.get("/api/v1/admin/sessions").json())
+    assert env.audit[-1][:3] == ("session_revoked", "success", "admin") and env.audit[-1][3]["target"] == "an"
+
+
+def test_console_actions_are_logged_per_user(env):
+    admin_login(env)
+    body = {"agent_id": "001", "type": "block_ip", "params": {"ip": "1.2.3.4"}}
+    assert env.post("/api/v1/actions", json=body, headers=H).status_code == 200
+    act = [a for a in env.audit if a[0] == "activity"]
+    assert act[-1][1:3] == ("success", "admin") and act[-1][3]["op"] == "action_requested"
+    assert act[-1][3]["path"] == "/api/v1/actions" and act[-1][3]["change"] == "type=block_ip agent_id=001 ip=1.2.3.4"
+    env.post("/api/v1/auth/logout", headers=H)
+    n = len(env.audit)
+    assert env.post("/api/v1/actions", json=body, headers=H).status_code == 401
+    assert not [a for a in env.audit[n:] if a[0] == "activity"]                               # không phiên: không ghi
+
+
+def test_admin_activity_query(env):
+    from siem.manager import api
+    seen = {}
+
+    class ES:
+        def search(self, **kw):
+            seen.update(kw)
+            return {"hits": {"hits": [{"_source": {"event": {"action": "console_login"}}}]}}
+    admin_login(env)
+    api._state["es"] = ES()
+    assert env.get("/api/v1/admin/activity?user=an&kind=iam&since=24h").json() == [{"event": {"action": "console_login"}}]
+    flt = seen["query"]["bool"]["filter"]
+    assert {"term": {"event.module": "console"}} in flt and {"term": {"event.category": "iam"}} in flt
+    assert {"range": {"@timestamp": {"gte": "now-24h"}}} in flt and seen["index"] == "siem-events-*"
+    assert env.get("/api/v1/admin/activity?kind=xyz").status_code == 422
+
+
 # ------------------------------------------------------------------ nhật ký đăng nhập thành event SIEM
 def test_console_auth_events_normalized():
     from siem.pipeline.normalize import get, normalize
@@ -616,6 +712,13 @@ def test_console_auth_events_normalized():
                         target_role="analyst"))
     assert get(doc, "event.category") == "iam" and get(doc, "user.target.name") == "an"
     assert get(doc, "user.roles") == "analyst"
+    doc = normalize(raw(action="activity", outcome="success", user="an", ip="10.0.0.9", role="analyst", op="alert_updated",
+                        method="PATCH", path="/api/v1/alerts/abc", status=200, change="status=closed"))
+    assert get(doc, "event.category") == "configuration" and get(doc, "event.action") == "console_alert_updated"
+    assert get(doc, "url.path") == "/api/v1/alerts/abc" and get(doc, "http.response.status_code") == 200
+    assert get(doc, "event.reason") == "status=closed" and get(doc, "user.name") == "an"
+    doc = normalize(raw(action="register", outcome="success", user="nv.an", ip="10.0.0.9"))
+    assert get(doc, "event.category") == "iam" and get(doc, "event.type") == "creation"
 
 
 # ------------------------------------------------------------------ Grafana sau manager (auth proxy, dùng chung phiên)

@@ -130,6 +130,14 @@
   .empty b { display: block; color: var(--fg); font-size: 15px; margin-bottom: 4px; }
   .notice { margin: 12px 20px 0; padding: 9px 12px; border-left: 3px solid var(--critical); background: var(--surface); }
   .inline-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 0 2px; }
+  /* trang có nhiều bảng (Tài khoản, Nhật ký): tiêu đề mục + số dòng */
+  .section-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin: 20px 20px 6px; }
+  .section-head h2 { margin: 0; font: 600 15px var(--text); }
+  .profile { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; margin: 0; font-size: 13px; }
+  .profile dt { color: var(--mute); }
+  .profile dd { margin: 0; }
+  .who { background: none; border: 0; padding: 0; color: var(--fg); font: inherit; font-weight: 600; cursor: pointer; }
+  .who:hover { text-decoration: underline; }
 
   /* ---------- ngăn chi tiết */
   .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(580px, 100vw); background: var(--surface);
@@ -364,7 +372,9 @@ const NAV = [
   ['rules', 'Thư viện rule', 'M3 2.5h8a1.5 1.5 0 0 1 1.5 1.5v9.5H4.5A1.5 1.5 0 0 1 3 12z|M3 12a1.5 1.5 0 0 1 1.5-1.5h8|M6 5.5h4'],
   ['ai', 'Đề xuất AI', 'M8 1.5v3|M8 11.5v3|M1.5 8h3|M11.5 8h3|M8 5.5 9 7l1.5 1L9 9l-1 1.5L7 9 5.5 8 7 7z'],
   ['users', 'Tài khoản', 'M8 2.5a3 3 0 1 0 0 6a3 3 0 1 0 0-6|M2.5 14c.8-2.6 3-4 5.5-4s4.7 1.4 5.5 4'],
+  ['audit', 'Nhật ký', 'M3.5 2h9v12h-9z|M6 5h4|M6 7.5h4|M6 10h2.5'],
 ];
+const ADMIN_VIEWS = ['users', 'audit'];
 function route() {
   const h = location.hash.replace(/^#\/?/, '');
   const [path, qs] = h.split('?');
@@ -377,7 +387,7 @@ function buildNav() {
   $('#nav').replaceChildren(...NAV.map(n => {
     if (!n) return el('div', { cls: 'sep' });
     const [key, label, path] = n;
-    if (key === 'users' && !can('users')) return null;
+    if (ADMIN_VIEWS.includes(key) && !can('users')) return null;
     return el('a', { href: '#/' + key, 'data-view': key }, icon(path), el('span', { cls: 'label' }, label),
       el('span', { cls: 'count', id: 'count-' + key }));
   }).filter(Boolean));
@@ -450,7 +460,8 @@ function paint(view, rows, build, auto) {
   if (auto && (listState[view] === sig || c.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) return;
   listState[view] = sig;
   const top = c.scrollTop, focused = document.activeElement && document.activeElement.closest && document.activeElement.closest('#content tr.row');
-  c.replaceChildren(...[].concat(build(rows)));
+  // như el(): bỏ null (vd form đang đóng) và làm phẳng mảng lồng nhau, không thì replaceChildren in ra chữ "null"
+  c.replaceChildren(...[build(rows)].flat(Infinity).filter(k => k != null && k !== false));
   c.scrollTop = top;
   markSelected();
   if (focused && focused.dataset.id) c.querySelector(`tr.row[data-id="${CSS.escape(focused.dataset.id)}"]`)?.focus({ preventScroll: true });
@@ -972,16 +983,28 @@ VIEWS.users = {
   tools() { return [button('Thêm tài khoản', () => { this.open = this.open === '+new' ? null : '+new'; this.load(); }, 'primary')]; },
   async load(auto) {
     if (!can('users')) { go('#/alerts'); return; }
-    const rows = await api('/api/v1/users', { auto });
+    const all = await api('/api/v1/users', { auto });
+    const pending = all.filter(u => u.pending), rows = all.filter(u => !u.pending);
     // onOk chạy TRƯỚC khi vẽ lại (vd đóng form đặt lại mật khẩu); lỗi thì giữ form để sửa
     const upd = (b, u, body, msg, onOk) => run(b, () => api('/api/v1/users/' + encodeURIComponent(u), { method: 'PATCH', body }), msg)
       .then(r => { if (r && onOk) onOk(); return this.load(); });
-    paint('users', { rows, open: this.open }, () => [
+    const toggle = key => { this.open = this.open === key ? null : key; this.load(); };
+    paint('users', { all, open: this.open }, () => [
       this.open === '+new' ? newUserForm() : null,
-      el('p', { cls: 'sub', style: 'margin:12px 20px 4px;max-width:110ch' }, 'Analyst (Tier 1) xử lý cảnh báo, case, chặn IP, kill tiến trình. Trưởng nhóm IR (Tier 2) làm thêm cô lập máy, đổi ưu tiên case, duyệt task của Trưởng nhóm IR. Threat Hunter (Tier 3) như Tier 2 và ghi nhật ký threat hunting. Detection Engineer duyệt rule, đề xuất AI, bật chính thức rule chạy bóng, nhưng không xử lý cảnh báo (người xử lý cảnh báo không tự duyệt rule mình dùng). SOC Manager như Tier 2, thêm tuyên bố sự cố lớn. Quản trị nền tảng có mọi quyền và quản lý tài khoản. Grafana: analyst chỉ xem, quản trị là Admin, các vai trò khác sửa được dashboard.'),
-      el('table', { cls: 'list' }, head(['Tài khoản', 'Vai trò', 'Trạng thái', 'Xác thực 2 lớp', 'Đăng nhập gần nhất', '']),
+      pending.length ? [sectionHead('Yêu cầu đăng ký chờ duyệt', pending.length),
+        el('table', { cls: 'list' }, head(['Người đăng ký', 'Thông tin', 'Gửi lúc', 'Duyệt với vai trò']),
+          el('tbody', {}, pending.map(u => el('tr', {},
+            el('td', {}, el('div', { cls: 'title' }, u.full_name || u.username), el('div', { cls: 'sub mono' }, u.username)),
+            el('td', {}, profileList(u)),
+            el('td', {}, when(u.created_at)),
+            el('td', {}, approveControls(u, () => this.load()))))))] : null,
+      sectionHead('Tài khoản', rows.length),
+      el('p', { cls: 'sub', style: 'margin:0 20px 6px;max-width:110ch' }, 'Analyst (Tier 1) xử lý cảnh báo, case, chặn IP, kill tiến trình. Trưởng nhóm IR (Tier 2) làm thêm cô lập máy, đổi ưu tiên case, duyệt task của Trưởng nhóm IR. Threat Hunter (Tier 3) như Tier 2 và ghi nhật ký threat hunting. Detection Engineer duyệt rule, đề xuất AI, bật chính thức rule chạy bóng, nhưng không xử lý cảnh báo (người xử lý cảnh báo không tự duyệt rule mình dùng). SOC Manager như Tier 2, thêm tuyên bố sự cố lớn. Quản trị nền tảng có mọi quyền và quản lý tài khoản. Grafana: analyst chỉ xem, quản trị là Admin, các vai trò khác sửa được dashboard.'),
+      el('table', { cls: 'list' }, head(['Tài khoản', 'Chức vụ', 'Vai trò', 'Trạng thái', 'Xác thực 2 lớp', 'Đăng nhập gần nhất', '']),
         el('tbody', {}, rows.map(u => [el('tr', {},
-          el('td', {}, el('span', { cls: 'title' }, u.username), u.username === ME.username ? el('span', { cls: 'sub' }, ' (bạn)') : null),
+          el('td', {}, el('span', { cls: 'title' }, u.full_name || u.username), u.username === ME.username ? el('span', { cls: 'sub' }, ' (bạn)') : null,
+            u.full_name ? el('div', { cls: 'sub mono' }, u.username) : null),
+          el('td', {}, u.position || el('span', { cls: 'sub' }, '—')),
           el('td', {}, u.username === ME.username ? (ROLE_LABEL[u.role] || u.role) : (() => {
             const s = el('select', { cls: 'field', 'aria-label': 'Vai trò của ' + u.username },
               ROLES.map(r => el('option', { value: r, selected: r === u.role }, ROLE_LABEL[r])));
@@ -992,15 +1015,38 @@ VIEWS.users = {
           el('td', {}, u.mfa_enabled ? el('span', { cls: 'st done' }, 'Đã bật') : el('span', { cls: 'sub' }, 'chưa bật')),
           el('td', {}, u.last_login ? when(u.last_login) : el('span', { cls: 'sub' }, 'chưa đăng nhập')),
           el('td', {}, el('div', { cls: 'btns' },
-            button('Đặt lại mật khẩu', () => { this.open = this.open === u.username ? null : u.username; this.load(); }),
+            button('Thông tin', () => toggle('info:' + u.username)),
+            button('Đặt lại mật khẩu', () => toggle(u.username)),
             u.mfa_enabled && u.username !== ME.username ? confirmButton('Đặt lại MFA', `Xóa MFA của ${u.username}?`,
               b => upd(b, u.username, { mfa_reset: true }, `Đã đặt lại xác thực 2 lớp của ${u.username}; người dùng bật lại ở lần đăng nhập sau.`)) : null,
+            el('a', { cls: 'btn', href: '#/audit?user=' + encodeURIComponent(u.username) }, 'Nhật ký'),
             u.username === ME.username ? null : (u.disabled
               ? button('Mở khóa', b => upd(b, u.username, { disabled: false }, `Đã mở khóa ${u.username}.`))
               : confirmButton('Khóa', `Khóa ${u.username}?`, b => upd(b, u.username, { disabled: true }, `Đã khóa ${u.username}, mọi phiên của tài khoản này bị đăng xuất.`)))))),
-          this.open === u.username ? el('tr', {}, el('td', { colspan: '6' }, resetForm(u.username, upd))) : null])))]);
+          this.open === u.username ? el('tr', {}, el('td', { colspan: '7' }, resetForm(u.username, upd))) : null,
+          this.open === 'info:' + u.username ? el('tr', {}, el('td', { colspan: '7' }, profileList(u))) : null])))]);
   },
 };
+const sectionHead = (title, n, extra) => el('div', { cls: 'section-head' }, el('h2', {}, title),
+  n == null ? null : el('span', { cls: 'sub' }, String(n)), extra || null);
+const dob = s => s ? new Date(s + 'T00:00:00').toLocaleDateString('vi-VN') : null;      // ngày, không lệch múi giờ
+function profileList(u) {
+  const items = [['Họ và tên', u.full_name], ['Ngày sinh', dob(u.birth_date)], ['Quê quán', u.hometown],
+    ['Số điện thoại', u.phone], ['Chức vụ', u.position], ['Gửi đăng ký từ IP', u.requested_ip],
+    ['Duyệt bởi', u.approved_by && `${u.approved_by}, ${fmt(u.approved_at)}`]].filter(([, v]) => v);
+  return items.length ? el('dl', { cls: 'profile' }, items.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)]))
+    : el('span', { cls: 'sub' }, 'Chưa có thông tin cá nhân.');
+}
+function approveControls(u, reload) {
+  const role = el('select', { cls: 'field', 'aria-label': 'Vai trò cấp cho ' + u.username },
+    ROLES.map(r => el('option', { value: r }, ROLE_LABEL[r])));
+  const path = '/api/v1/users/' + encodeURIComponent(u.username);
+  return el('div', { cls: 'btns' }, role,
+    button('Duyệt', b => run(b, () => api(path + '/approve', { method: 'POST', body: { role: role.value } }),
+      `Đã duyệt ${u.username} với vai trò ${role.value}. Người dùng đăng nhập được ngay.`).then(reload), 'primary'),
+    confirmButton('Từ chối', `Từ chối ${u.username}?`, b => run(b, () => api(path, { method: 'DELETE' }),
+      `Đã từ chối và xóa yêu cầu của ${u.username}.`).then(reload)));
+}
 // cùng chính sách với máy chủ (manager/auth.py: USERNAME_PATTERN, password_problem) -> báo lỗi tiếng Việt ngay tại chỗ
 // thay vì lỗi 422 của pydantic ("String should match pattern ...")
 const USERNAME_RE = /^[a-z0-9][a-z0-9._-]{1,31}$/;
@@ -1010,25 +1056,134 @@ function passwordProblem(pw, username) {
   if (new Set(pw).size < 6) return 'Mật khẩu quá đơn giản (cần ít nhất 6 ký tự khác nhau).';
   return null;
 }
+// thông tin cá nhân: cùng kiểm tra với máy chủ (auth.ProfileFields.problem)
+const PROFILE_LABEL = { full_name: 'họ và tên', birth_date: 'ngày sinh', hometown: 'quê quán', phone: 'số điện thoại', position: 'chức vụ' };
+const POSITIONS = ['Chuyên viên phân tích L1', 'Chuyên viên phân tích L2', 'Trưởng nhóm ứng cứu sự cố', 'Kỹ sư phát hiện', 'Quản trị hệ thống'];
+function profileProblem(p, required) {
+  const miss = Object.keys(PROFILE_LABEL).filter(k => !p[k]);
+  if (required && miss.length) return 'Chưa nhập ' + miss.map(k => PROFILE_LABEL[k]).join(', ') + '.';
+  if (['full_name', 'hometown', 'position'].some(k => p[k] && p[k].length < 2)) return 'Họ tên, quê quán, chức vụ tối thiểu 2 ký tự.';
+  if (p.phone && !/^(0|\+84)[0-9]{9,10}$/.test(p.phone)) return 'Số điện thoại gồm 10–11 chữ số, bắt đầu bằng 0 hoặc +84.';
+  if (p.birth_date) {
+    const b = new Date(p.birth_date + 'T00:00:00'), n = new Date();
+    const age = n.getFullYear() - b.getFullYear() - (n < new Date(n.getFullYear(), b.getMonth(), b.getDate()) ? 1 : 0);
+    if (!(age >= 16 && age <= 100)) return 'Ngày sinh không hợp lệ (tuổi từ 16 đến 100).';
+  }
+  return null;
+}
+function profileInputs() {
+  const f = {
+    full_name: el('input', { cls: 'field', placeholder: 'họ và tên', 'aria-label': 'Họ và tên', autocomplete: 'off' }),
+    birth_date: el('input', { cls: 'field', type: 'date', 'aria-label': 'Ngày sinh', title: 'Ngày sinh' }),
+    hometown: el('input', { cls: 'field', placeholder: 'quê quán', 'aria-label': 'Quê quán', autocomplete: 'off' }),
+    phone: el('input', { cls: 'field', type: 'tel', placeholder: 'số điện thoại', 'aria-label': 'Số điện thoại', autocomplete: 'off' }),
+    position: el('input', { cls: 'field', placeholder: 'chức vụ', 'aria-label': 'Chức vụ', list: 'positions', autocomplete: 'off' }),
+  };
+  // giá trị đã chuẩn hóa, bỏ trường trống (máy chủ không nhận chuỗi rỗng cho số điện thoại / ngày)
+  const value = () => Object.fromEntries(Object.entries({
+    full_name: f.full_name.value, birth_date: f.birth_date.value, hometown: f.hometown.value,
+    phone: f.phone.value.replace(/[\s.-]/g, ''), position: f.position.value,
+  }).map(([k, v]) => [k, v.split(/\s+/).filter(Boolean).join(' ')]).filter(([, v]) => v));
+  return { fields: [...Object.values(f), el('datalist', { id: 'positions' }, POSITIONS.map(p => el('option', { value: p })))], value };
+}
 function newUserForm() {
   const name = el('input', { cls: 'field', placeholder: 'tên đăng nhập', 'aria-label': 'Tên đăng nhập', autocomplete: 'off' });
   const role = el('select', { cls: 'field', 'aria-label': 'Vai trò' }, ROLES.map(r => el('option', { value: r }, ROLE_LABEL[r])));
   const pw = el('input', { cls: 'field', type: 'password', placeholder: 'mật khẩu tạm, từ 12 ký tự', 'aria-label': 'Mật khẩu tạm', autocomplete: 'new-password' });
+  const prof = profileInputs();
   setTimeout(() => name.focus());
-  return el('div', { cls: 'inline-form', style: 'margin:12px 20px 0' }, name, role, pw,
-    button('Tạo tài khoản', b => {
+  return el('div', { style: 'margin:12px 20px 0' },
+    el('div', { cls: 'inline-form' }, name, role, pw),
+    el('div', { cls: 'inline-form' }, el('span', { cls: 'sub' }, 'Thông tin cá nhân (không bắt buộc):'), ...prof.fields),
+    el('div', { cls: 'inline-form' }, button('Tạo tài khoản', b => {
       const username = name.value.trim().toLowerCase();
       if (!USERNAME_RE.test(username)) {
         toast('Tên đăng nhập 2–32 ký tự, chỉ gồm chữ thường không dấu, số và . _ - (bắt đầu bằng chữ hoặc số).', true);
         name.focus(); return;
       }
-      const problem = passwordProblem(pw.value, username);
-      if (problem) { toast(problem, true); pw.focus(); return; }
-      run(b, () => api('/api/v1/users', { method: 'POST', body: { username, role: role.value, password: pw.value } }),
+      const problem = passwordProblem(pw.value, username) || profileProblem(prof.value(), false);
+      if (problem) { toast(problem, true); return; }
+      run(b, () => api('/api/v1/users', { method: 'POST', body: { username, role: role.value, password: pw.value, ...prof.value() } }),
         `Đã tạo ${username}. Người dùng phải đổi mật khẩu ở lần đăng nhập đầu.`).then(r => { if (r) { VIEWS.users.open = null; VIEWS.users.load(); } });
     }, 'primary'),
-    button('Hủy', () => { VIEWS.users.open = null; VIEWS.users.load(); }));
+    button('Hủy', () => { VIEWS.users.open = null; VIEWS.users.load(); })));
 }
+// ---------------------------------------------------------------- Nhật ký (admin): phiên đăng nhập + hoạt động
+const AUDIT_ACTION = {
+  console_login: 'Đăng nhập', console_logout: 'Đăng xuất', console_password_changed: 'Đổi mật khẩu',
+  console_register: 'Gửi đăng ký tài khoản', console_user_created: 'Tạo tài khoản', console_user_updated: 'Sửa tài khoản',
+  console_user_approved: 'Duyệt đăng ký', console_user_rejected: 'Từ chối đăng ký', console_session_revoked: 'Đăng xuất phiên của',
+  console_alert_updated: 'Cập nhật cảnh báo', console_soar_declined: 'Từ chối bước SOAR', console_action_requested: 'Gửi lệnh phản ứng',
+  console_case_updated: 'Cập nhật case', console_ai_approved: 'Duyệt đề xuất AI', console_ai_rejected: 'Từ chối đề xuất AI',
+  console_ai_rolled_back: 'Gỡ rule AI', console_ai_run: 'Chạy AI' };
+const AUDIT_REASON = { bad_credentials: 'sai tên đăng nhập hoặc mật khẩu', locked: 'đang bị tạm khóa',
+  pending: 'tài khoản chờ duyệt', bad_current_password: 'sai mật khẩu hiện tại' };
+const AUDIT_KIND = [['', 'Tất cả'], ['authentication', 'Đăng nhập'], ['configuration', 'Thao tác'], ['iam', 'Tài khoản']];
+const DETAIL_KEY = { status: 'trạng thái', type: 'lệnh', agent_id: 'agent', assignee: 'giao cho', priority: 'ưu tiên',
+  ip: 'IP', pid: 'PID', name: 'tiến trình' };
+// "type=block_ip agent_id=001 ip=1.2.3.4" (manager/api.py activity_detail) -> "lệnh Chặn IP, agent 001, IP 1.2.3.4"
+const auditDetail = s => String(s).split(' ').map(kv => {
+  const i = kv.indexOf('='), k = kv.slice(0, i), v = kv.slice(i + 1);
+  if (i < 0 || !DETAIL_KEY[k]) return kv;
+  return DETAIL_KEY[k] + ' ' + (k === 'type' ? ACT_TYPE[v] || v : k === 'status' ? (ALERT_ST[v] || CASE_ST[v] || [v])[0] : v);
+}).join(', ');
+function auditLink(path) {
+  const m = /^\/api\/v1\/(alerts|cases|ai\/proposals)\/([^/]+)/.exec(path || '');
+  return m ? el('a', { cls: 'sub', href: `#/${{ alerts: 'alerts', cases: 'cases', 'ai/proposals': 'ai' }[m[1]]}/${m[2]}` }, 'mở') : null;
+}
+VIEWS.audit = {
+  title: 'Nhật ký', list: true, f: { kind: '', since: '7d', user: '' },
+  fromRoute(r) { this.f.user = r.params.get('user') || ''; },             // từ trang Tài khoản: nút Nhật ký của một người
+  tools() {
+    const f = this.f;
+    const q = el('input', { cls: 'field search', type: 'search', placeholder: 'Lọc theo tài khoản', value: f.user, 'aria-label': 'Lọc theo tài khoản' });
+    let t; q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { f.user = q.value.trim().toLowerCase(); this.load(); }, 300); });
+    return [
+      el('div', { cls: 'seg', role: 'group', 'aria-label': 'Loại hoạt động' }, AUDIT_KIND.map(([v, l]) =>
+        el('button', { type: 'button', 'aria-pressed': String(f.kind === v), onClick: () => { f.kind = v; render(true); } }, l))),
+      el('select', { cls: 'field', 'aria-label': 'Thời gian', onChange: e => { f.since = e.target.value; this.load(); } },
+        [['24h', '24 giờ qua'], ['7d', '7 ngày qua'], ['30d', '30 ngày qua']].map(([v, l]) => el('option', { value: v, selected: v === f.since }, l))),
+      q];
+  },
+  async load(auto) {
+    if (!can('users')) { go('#/alerts'); return; }
+    const f = this.f, p = new URLSearchParams({ since: f.since, size: '300' });
+    if (f.kind) p.set('kind', f.kind);
+    if (f.user) p.set('user', f.user);
+    const [sess, logs] = await Promise.all([api('/api/v1/admin/sessions', { auto }), api('/api/v1/admin/activity?' + p, { auto })]);
+    const pick = u => { f.user = u; render(true); };
+    const who = u => u ? el('button', { type: 'button', cls: 'who', title: 'Xem nhật ký của ' + u, onClick: () => pick(u) }, u) : '—';
+    paint('audit', { sess, logs, user: f.user }, () => [
+      sectionHead('Đang đăng nhập', sess.length),
+      el('table', { cls: 'list' }, head(['Tài khoản', 'IP', 'Đăng nhập lúc', 'Thao tác gần nhất', '']),
+        el('tbody', {}, sess.map(x => el('tr', {},
+          el('td', {}, who(x.username), el('div', { cls: 'sub' }, x.role + (x.must_change ? ', chờ đổi mật khẩu' : ''))),
+          el('td', { cls: 'mono' }, x.ip),
+          el('td', {}, when(x.created)),
+          el('td', {}, when(x.last_active)),
+          el('td', {}, x.current ? el('span', { cls: 'sub' }, 'phiên của bạn')
+            : confirmButton('Đăng xuất phiên', `Đăng xuất ${x.username}?`, b => run(b,
+                () => api('/api/v1/admin/sessions/' + encodeURIComponent(x.id), { method: 'DELETE' }),
+                `Đã đăng xuất một phiên của ${x.username}.`).then(() => this.load()))))))),
+      sectionHead(f.user ? `Hoạt động của ${f.user}` : 'Hoạt động', logs.length,
+        f.user ? button('Xem mọi tài khoản', () => pick('')) : null),
+      logs.length ? el('table', { cls: 'list' }, head(['Thời điểm', 'Tài khoản', 'Hoạt động', 'IP', 'Kết quả']),
+        el('tbody', {}, logs.map(e => {
+          const action = g(e, 'event.action'), reason = g(e, 'event.reason'), path = g(e, 'url.path');
+          const ok = g(e, 'event.outcome') !== 'failure', target = g(e, 'user.target.name');
+          const detail = !reason ? null : AUDIT_REASON[reason] || (g(e, 'event.category') === 'configuration' ? auditDetail(reason) : reason);
+          return el('tr', {},
+            el('td', {}, when(g(e, '@timestamp'))),
+            el('td', {}, who(g(e, 'user.name'))),
+            el('td', {}, el('div', {}, AUDIT_ACTION[action] || action, target ? [' ', who(target)] : null),
+              detail || path ? el('div', { cls: 'sub' }, detail, detail && auditLink(path) ? ' ' : null, auditLink(path)) : null),
+            el('td', { cls: 'mono' }, g(e, 'source.ip') || '—'),
+            el('td', {}, el('span', { cls: 'st ' + (ok ? 'done' : 'bad') }, ok ? 'Thành công' : 'Thất bại')));
+        })))
+        : empty('Không có hoạt động nào trong khoảng này.', 'Đăng nhập, quản lý tài khoản và mọi thao tác thay đổi dữ liệu trong console đều được ghi lại theo tài khoản.')], auto);
+  },
+};
+
 function resetForm(username, upd) {
   const pw = el('input', { cls: 'field', type: 'password', placeholder: 'mật khẩu tạm mới, từ 12 ký tự', 'aria-label': 'Mật khẩu tạm mới', autocomplete: 'new-password' });
   setTimeout(() => pw.focus());

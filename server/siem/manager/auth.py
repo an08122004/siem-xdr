@@ -13,6 +13,8 @@
 - Vai trò theo cơ cấu SOC (SOC-OPERATIONS.md mục 1): analyst (Tier 1), lead (Tier 2 IR), hunter (Tier 3), detection
   (Detection Engineer), manager (SOC Manager), admin. Quyền tính theo năng lực (PERMISSIONS), không theo thang:
   Detection Engineer duyệt rule nhưng không cô lập máy; người xử lý cảnh báo không tự duyệt rule mình dùng.
+- Tự đăng ký từ trang đăng nhập (kèm họ tên, ngày sinh, quê quán, số điện thoại, chức vụ): tài khoản chờ duyệt, bị
+  khóa tới khi admin duyệt và gán vai trò; admin từ chối thì yêu cầu bị xóa. Admin xem / thu hồi được mọi phiên.
 - Người thực hiện mọi thao tác lấy từ phiên (không tự khai) -> lịch sử case / duyệt AI đáng tin, và quy định
   "ngoại lệ AI cần 2 người KHÁC NHAU duyệt" có hiệu lực thật.
 - Đăng nhập / đăng xuất / đổi mật khẩu / quản lý tài khoản được gửi vào Kafka thành event của chính SIEM
@@ -33,6 +35,7 @@ import threading
 import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass
+from datetime import date, datetime, timezone
 from typing import Any, Callable
 
 from elasticsearch import ConflictError, NotFoundError
@@ -73,6 +76,10 @@ COOKIE = "siem_session"
 CSRF_HEADER, CSRF_VALUE = "x-requested-with", "siem-console"
 MIN_PASSWORD = 12
 MIN_DISTINCT = 6          # số ký tự khác nhau tối thiểu trong mật khẩu
+PHONE_PATTERN = r"^(0|\+84)[0-9]{9,10}$"
+# thông tin cá nhân của tài khoản (chỉ nằm trong console-users: Grafana / analyst không đọc được, không ghi vào nhật ký)
+PROFILE = {"full_name": "họ và tên", "birth_date": "ngày sinh", "hometown": "quê quán", "phone": "số điện thoại",
+           "position": "chức vụ"}
 
 
 # --------------------------------------------------------------------------- mật khẩu
@@ -204,6 +211,12 @@ class UserStore:
         except NotFoundError:
             return 0
 
+    def delete(self, username: str) -> None:
+        try:
+            self.es.delete(index=settings.IDX_USERS, id=username, refresh="wait_for")
+        except NotFoundError:
+            pass
+
 
 class MemoryUserStore(UserStore):
     """Dùng cho test."""
@@ -229,6 +242,9 @@ class MemoryUserStore(UserStore):
 
     def count(self):
         return len(self.users)
+
+    def delete(self, username):
+        self.users.pop(username, None)
 
 
 # --------------------------------------------------------------------------- phiên
@@ -259,6 +275,13 @@ class SessionStore:
             return Session(**self.es.get(index=settings.IDX_SESSIONS, id=key)["_source"])
         except NotFoundError:
             return None
+
+    def all(self) -> list[Session]:
+        try:
+            res = self.es.search(index=settings.IDX_SESSIONS, size=1000, query={"match_all": {}})
+        except NotFoundError:
+            return []
+        return [Session(**h["_source"]) for h in res["hits"]["hits"]]
 
     def _delete(self, query: dict[str, Any]) -> None:
         # không refresh (cần quyền maintenance); delete_by_query tìm gần thời gian thực -> phiên vừa ghi < 1 giây có thể
@@ -361,8 +384,17 @@ class Sessions:
             self.save(s)
         return s
 
+    def active(self) -> list[Session]:
+        """Mọi phiên còn hạn, kể cả phiên chưa nạp lại vào bộ nhớ sau khi manager khởi động lại; thao tác gần nhất trước."""
+        now, found = time.time(), {s.key: s for s in (self._persist("all") or [])}
+        with self._lock:
+            found.update(self._d)                         # bộ nhớ mới hơn: last_active trong store chậm tới SAVE_EVERY giây
+        return sorted((s for s in found.values() if not self._expired(s, now)), key=lambda s: -s.last_active)
+
     def drop(self, token: str) -> None:
-        key = self._key(token)
+        self.drop_key(self._key(token))
+
+    def drop_key(self, key: str) -> None:
         self._persist("delete", key)                      # xóa ở store trước: request song song không nạp lại được
         with self._lock:
             self._d.pop(key, None)
@@ -527,10 +559,45 @@ class PasswordBody(BaseModel):
     new: str = Field(min_length=1, max_length=256)
 
 
-class NewUser(BaseModel):
+class ProfileFields(BaseModel):
+    full_name: str | None = Field(None, max_length=80)
+    birth_date: date | None = None
+    hometown: str | None = Field(None, max_length=80)
+    phone: str | None = Field(None, pattern=PHONE_PATTERN)
+    position: str | None = Field(None, max_length=60)
+
+    def profile(self) -> dict[str, str]:
+        """Các trường đã điền (chữ bỏ khoảng trắng thừa, ngày dạng YYYY-MM-DD)."""
+        out = {k: v.isoformat() if isinstance(v, date) else " ".join(str(v).split()) for k in PROFILE if (v := getattr(self, k))}
+        return {k: v for k, v in out.items() if v}
+
+    def problem(self, required: bool) -> str | None:
+        p = self.profile()
+        if required and (missing := [label for k, label in PROFILE.items() if k not in p]):
+            return "chưa nhập " + ", ".join(missing)
+        if any(len(p.get(k, "xx")) < 2 for k in ("full_name", "hometown", "position")):
+            return "họ tên, quê quán, chức vụ tối thiểu 2 ký tự"
+        if self.birth_date:
+            today = date.today()
+            age = today.year - self.birth_date.year - ((today.month, today.day) < (self.birth_date.month, self.birth_date.day))
+            if not 16 <= age <= 100:
+                return "ngày sinh không hợp lệ (tuổi từ 16 đến 100)"
+        return None
+
+
+class NewUser(ProfileFields):
     username: str = Field(pattern=USERNAME_PATTERN)
     role: str = Field(pattern=ROLE_PATTERN)
     password: str = Field(min_length=1, max_length=256)
+
+
+class Registration(ProfileFields):
+    username: str = Field(pattern=USERNAME_PATTERN)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class Approval(BaseModel):
+    role: str = Field(pattern=ROLE_PATTERN)
 
 
 class UserUpdate(BaseModel):
@@ -572,6 +639,9 @@ def login(body: LoginBody, request: Request, response: Response) -> dict[str, An
         raise HTTPException(429, f"đăng nhập sai quá nhiều lần, thử lại sau {int(wait // 60) + 1} phút")
     user = users.get(username)
     valid = verify_password(body.password, user["password_hash"] if user else _DUMMY_HASH)
+    if valid and user and user.get("pending"):          # đúng mật khẩu mới báo: không lộ tài khoản chờ duyệt cho người đoán
+        audit("login", "failure", username, ip, reason="pending")
+        raise HTTPException(403, "tài khoản đang chờ quản trị viên duyệt")
     if not (valid and user and not user.get("disabled")):
         locked = throttle.failure(*keys)
         audit("login", "failure", username, ip, reason="locked" if locked else "bad_credentials")
@@ -593,6 +663,24 @@ def login(body: LoginBody, request: Request, response: Response) -> dict[str, An
                         max_age=settings.CONSOLE_SESSION_HOURS * 3600)
     audit("login", "success", username, ip, role=user["role"])
     return _me(s)
+
+
+@router.post("/api/v1/auth/register")
+def register(body: Registration, request: Request) -> dict[str, Any]:
+    """Tự đăng ký từ trang đăng nhập: tài khoản ở trạng thái chờ duyệt (bị khóa) tới khi admin duyệt và gán vai trò."""
+    _check_csrf(request)
+    ip, key = client_ip(request), f"register:{client_ip(request)}"
+    if (wait := throttle.wait(key)):
+        raise HTTPException(429, f"gửi quá nhiều yêu cầu đăng ký, thử lại sau {int(wait // 60) + 1} phút")
+    if (problem := body.problem(required=True) or password_problem(body.password, body.username)):
+        raise HTTPException(400, problem)
+    throttle.failure(key)                  # không phải lỗi: dùng bộ đếm để giới hạn số yêu cầu mỗi IP trong 15 phút
+    user = new_user(body.username, "analyst", body.password, must_change=False) | body.profile() | {
+        "disabled": True, "pending": True, "requested_ip": ip}
+    if not users.create(user):
+        raise HTTPException(409, f"tên đăng nhập {body.username} đã có người dùng")
+    audit("register", "success", body.username, ip)
+    return {"ok": True, "username": body.username, "pending": True}
 
 
 @router.post("/api/v1/auth/logout")
@@ -711,9 +799,9 @@ def list_users(s: Session = Depends(require_perm("users"))) -> list[dict[str, An
 
 @router.post("/api/v1/users")
 def create_user(body: NewUser, request: Request, s: Session = Depends(require_perm("users"))) -> dict[str, Any]:
-    if (problem := password_problem(body.password, body.username)):
+    if (problem := body.problem(required=False) or password_problem(body.password, body.username)):
         raise HTTPException(400, problem)
-    user = new_user(body.username, body.role, body.password, must_change=True)
+    user = new_user(body.username, body.role, body.password, must_change=True) | body.profile()
     if not users.create(user):
         raise HTTPException(409, f"tài khoản {body.username} đã tồn tại")
     audit("user_created", "success", s.username, client_ip(request), target=body.username, target_role=body.role)
@@ -726,6 +814,8 @@ def update_user(username: str, body: UserUpdate, request: Request,
     user = users.get(username)
     if not user:
         raise HTTPException(404, "không có tài khoản này")
+    if user.get("pending"):
+        raise HTTPException(400, "tài khoản đang chờ duyệt: duyệt hoặc từ chối yêu cầu đăng ký trước")
     demote = body.role is not None and body.role != "admin" and user["role"] == "admin"
     if username == s.username and (body.disabled or demote):
         raise HTTPException(400, "không tự khóa hoặc tự hạ quyền chính mình")
@@ -753,3 +843,60 @@ def update_user(username: str, body: UserUpdate, request: Request,
         sessions.drop_user(username)                 # quyền / mật khẩu đổi -> đăng nhập lại
         audit("user_updated", "success", s.username, client_ip(request), target=username, change="; ".join(changes))
     return public(user)
+
+
+def _pending(username: str) -> dict[str, Any]:
+    user = users.get(username)
+    if not user or not user.get("pending"):
+        raise HTTPException(404, f"không có yêu cầu đăng ký chờ duyệt của {username}")
+    return user
+
+
+@router.post("/api/v1/users/{username}/approve")
+def approve_user(username: str, body: Approval, request: Request,
+                 s: Session = Depends(require_perm("users"))) -> dict[str, Any]:
+    user, now = _pending(username), store.now_iso()
+    user.update(pending=False, disabled=False, role=body.role, approved_by=s.username, approved_at=now, updated_at=now)
+    users.put(user)
+    audit("user_approved", "success", s.username, client_ip(request), target=username, target_role=body.role)
+    return public(user)
+
+
+@router.delete("/api/v1/users/{username}")
+def reject_user(username: str, request: Request, s: Session = Depends(require_perm("users"))) -> dict[str, bool]:
+    """Chỉ xóa yêu cầu đăng ký chưa duyệt; tài khoản đã dùng thì khóa (giữ nguyên ai đã làm gì trong nhật ký)."""
+    _pending(username)
+    users.delete(username)
+    audit("user_rejected", "success", s.username, client_ip(request), target=username)
+    return {"ok": True}
+
+
+def _iso(t: float) -> str:
+    return datetime.fromtimestamp(t, timezone.utc).isoformat()
+
+
+@router.get("/api/v1/admin/sessions")
+def list_sessions(s: Session = Depends(require_perm("users"))) -> list[dict[str, Any]]:
+    """Phiên đăng nhập đang còn hạn của mọi tài khoản (id = SHA-256 của token, không dùng làm cookie được).
+    Phiên của tài khoản không còn / đã khóa mà không qua API (vd xóa thẳng trong Elasticsearch) bị thu hồi luôn."""
+    known = {u["username"]: u for u in users.list()}
+    out = []
+    for x in sessions.active():
+        if x.username not in known or known[x.username].get("disabled"):
+            sessions.drop_key(x.key)
+            continue
+        out.append({"id": x.key, "username": x.username, "role": x.role, "ip": x.ip, "created": _iso(x.created),
+                    "last_active": _iso(x.last_active), "must_change": x.must_change, "current": x.key == s.key})
+    return out
+
+
+@router.delete("/api/v1/admin/sessions/{key}")
+def revoke_session(key: str, request: Request, s: Session = Depends(require_perm("users"))) -> dict[str, bool]:
+    target = next((x for x in sessions.active() if x.key == key), None)
+    if not target:
+        raise HTTPException(404, "phiên không còn tồn tại")
+    if target.key == s.key:
+        raise HTTPException(400, "đây là phiên của chính bạn: dùng Đăng xuất")
+    sessions.drop_key(key)
+    audit("session_revoked", "success", s.username, client_ip(request), target=target.username, reason=target.ip)
+    return {"ok": True}

@@ -103,7 +103,7 @@ def main():
             page.wait_for_url(re.compile(r"#/alerts"))
             page.wait_for_selector("#content table.list, #content .empty")
             check("đăng nhập xong quay về đúng #/alerts", page.url.endswith("#/alerts"), page.url)
-            check("menu có đủ mục (admin thấy Tài khoản)", page.locator("#nav a").count() == 9)
+            check("menu có đủ mục (admin thấy Tài khoản, Nhật ký)", page.locator("#nav a").count() == 10)
             shot(page, "01-alerts")
 
             print("2. Cảnh báo: lọc, mở chi tiết")
@@ -218,7 +218,7 @@ def main():
 
             print("6. Các trang còn lại")
             for view, sel in (("actions", "#content table.list, #content .empty"), ("agents", "#content table.list"),
-                              ("ai", "#content p.sub"), ("users", "#content table.list")):
+                              ("ai", "#content p.sub"), ("users", "#content table.list"), ("audit", "#content table.list")):
                 page.goto(f"{BASE}/#/{view}")
                 page.wait_for_selector(sel)
                 check(f"trang {view} hiển thị", True)
