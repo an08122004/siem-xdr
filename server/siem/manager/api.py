@@ -653,8 +653,8 @@ def case_incident(case_id: str, body: IncidentAction, s: Session = Depends(decla
     return case | changes
 
 
-@app.get("/api/v1/stats", dependencies=[Depends(current_user)])
-def stats() -> dict[str, Any]:
+@app.get("/api/v1/stats")
+def stats(s: Session = Depends(current_user)) -> dict[str, Any]:
     def count(index: str, query: dict | None = None) -> int:
         try:
             return es().count(index=index, query=query or {"match_all": {}})["count"]
@@ -663,7 +663,9 @@ def stats() -> dict[str, Any]:
     last24 = {"range": {"@timestamp": {"gte": "now-24h"}}}
     ag = store.list_agents(es())
     open_cases = {"terms": {"status": ["open", "in_progress", "contained"]}}
-    return {
+    # số yêu cầu đăng ký chờ duyệt: chỉ người có quyền quản lý tài khoản (người duyệt) cần, hiện trên menu Tài khoản
+    pending = {"users_pending": sum(bool(u.get("pending")) for u in auth.users.list())} if has(s.role, "users") else {}
+    return pending | {
         "events_24h": count(f"{settings.IDX_EVENTS}-*", last24),
         "alerts_24h": count(settings.IDX_ALERTS, {"bool": {"filter": [last24], "must_not": [NOT_SHADOW]}}),
         # cùng tập trạng thái với mục "Đang mở" của console (trước đây thiếu acknowledged: số trên menu nhỏ hơn danh sách)

@@ -406,6 +406,7 @@ async function loadStats(auto) {
   set('actions', s.actions_pending);
   set('agents', s.agents_total ? `${s.agents_online}/${s.agents_total}` : '', s.agents_total && s.agents_online < s.agents_total);
   set('ai', s.ai_pending);
+  set('users', s.users_pending, s.users_pending > 0);          // yêu cầu đăng ký chờ admin duyệt
   return s;
 }
 function syncOk() { const s = $('#sync'); s.classList.remove('bad'); s.textContent = 'Cập nhật ' + new Date().toLocaleTimeString('vi-VN'); }
@@ -980,7 +981,10 @@ function aiDetail(p) {
 // ---------------------------------------------------------------- Tài khoản (admin)
 VIEWS.users = {
   title: 'Tài khoản', list: true, open: null,
-  tools() { return [button('Thêm tài khoản', () => { this.open = this.open === '+new' ? null : '+new'; this.load(); }, 'primary')]; },
+  tools() {
+    return [button('Thêm tài khoản', () => { this.open = this.open === '+new' ? null : '+new'; this.load(); }, 'primary'),
+      el('a', { cls: 'btn', href: '/login?register=1', target: '_blank', rel: 'noopener' }, 'Mở trang đăng ký (tab mới)')];
+  },
   async load(auto) {
     if (!can('users')) { go('#/alerts'); return; }
     const all = await api('/api/v1/users', { auto });
@@ -998,6 +1002,8 @@ VIEWS.users = {
             el('td', {}, profileList(u)),
             el('td', {}, when(u.created_at)),
             el('td', {}, approveControls(u, () => this.load()))))))] : null,
+      pending.length ? null : el('p', { cls: 'sub', style: 'margin:14px 20px 0' },
+        'Chưa có yêu cầu đăng ký nào. Người mới tự đăng ký ở trang đăng nhập (liên kết Đăng ký); yêu cầu hiện ở đây để bạn duyệt và cấp vai trò.'),
       sectionHead('Tài khoản', rows.length),
       el('p', { cls: 'sub', style: 'margin:0 20px 6px;max-width:110ch' }, 'Analyst (Tier 1) xử lý cảnh báo, case, chặn IP, kill tiến trình. Trưởng nhóm IR (Tier 2) làm thêm cô lập máy, đổi ưu tiên case, duyệt task của Trưởng nhóm IR. Threat Hunter (Tier 3) như Tier 2 và ghi nhật ký threat hunting. Detection Engineer duyệt rule, đề xuất AI, bật chính thức rule chạy bóng, nhưng không xử lý cảnh báo (người xử lý cảnh báo không tự duyệt rule mình dùng). SOC Manager như Tier 2, thêm tuyên bố sự cố lớn. Quản trị nền tảng có mọi quyền và quản lý tài khoản. Grafana: analyst chỉ xem, quản trị là Admin, các vai trò khác sửa được dashboard.'),
       el('table', { cls: 'list' }, head(['Tài khoản', 'Chức vụ', 'Vai trò', 'Trạng thái', 'Xác thực 2 lớp', 'Đăng nhập gần nhất', '']),

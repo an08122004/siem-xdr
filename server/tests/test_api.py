@@ -623,6 +623,7 @@ def test_register_needs_admin_approval(env):
     assert r.status_code == 403 and "chờ quản trị viên duyệt" in r.json()["detail"]
     assert login(env, "nv.an", "Sai-Mat-Khau-123").status_code == 401                          # sai mật khẩu: không lộ trạng thái
     admin_login(env)
+    assert env.get("/api/v1/stats").json()["users_pending"] == 1                              # số trên menu Tài khoản
     u = next(x for x in env.get("/api/v1/users").json() if x["username"] == "nv.an")
     assert u["pending"] and u["disabled"] and "password_hash" not in u
     assert (u["full_name"], u["birth_date"], u["phone"]) == ("Nguyễn Văn An", "2000-05-17", "0912345678")
@@ -635,6 +636,7 @@ def test_register_needs_admin_approval(env):
     r = login(env, "nv.an", REG["password"])
     assert r.status_code == 200 and r.json()["role"] == "lead" and r.json()["must_change"] is False
     assert env.get("/api/v1/admin/sessions").status_code == 403                               # chỉ admin
+    assert "users_pending" not in env.get("/api/v1/stats").json()
     actions = [a[0] for a in env.audit]
     assert {"register", "user_approved", "user_rejected"} <= set(actions)
     assert all("0912345678" not in str(a) and "Nghệ An" not in str(a) for a in env.audit)     # thông tin cá nhân không vào nhật ký
