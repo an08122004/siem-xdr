@@ -933,7 +933,7 @@ VIEWS.ai = {
           tr.addEventListener('click', toggle); tr.addEventListener('keydown', e => { if (e.key === 'Enter') toggle(); });
           return [tr, open ? el('tr', {}, el('td', { colspan: '5' }, aiDetail(p))) : null];
         })))
-        : empty('Không có đề xuất nào ở mục này.', 'AI chỉ đề xuất; mọi rule hay ngoại lệ đều phải qua kiểm định tự động và người duyệt.')]);
+        : empty('Không có đề xuất nào ở mục này.', 'AI chỉ đề xuất; mọi rule hay ngoại lệ đều phải qua kiểm định tự động và người duyệt.')], auto);
     if (this.scrollTo && !auto) {     // mở từ liên kết: đưa đề xuất đó vào giữa màn hình
       document.querySelector(`#content tr[data-id="${CSS.escape(this.scrollTo)}"]`)?.scrollIntoView({ block: 'center' });
       this.scrollTo = null;
@@ -987,6 +987,8 @@ VIEWS.users = {
   },
   async load(auto) {
     if (!can('users')) { go('#/alerts'); return; }
+    // đang mở form (thêm tài khoản / đặt lại mật khẩu): làm mới tự động 10 giây/lần không được vẽ lại form trống
+    if (auto && this.open && !this.open.startsWith('info:')) return;
     const all = await api('/api/v1/users', { auto });
     const pending = all.filter(u => u.pending), rows = all.filter(u => !u.pending);
     // onOk chạy TRƯỚC khi vẽ lại (vd đóng form đặt lại mật khẩu); lỗi thì giữ form để sửa
@@ -1030,7 +1032,7 @@ VIEWS.users = {
               ? button('Mở khóa', b => upd(b, u.username, { disabled: false }, `Đã mở khóa ${u.username}.`))
               : confirmButton('Khóa', `Khóa ${u.username}?`, b => upd(b, u.username, { disabled: true }, `Đã khóa ${u.username}, mọi phiên của tài khoản này bị đăng xuất.`)))))),
           this.open === u.username ? el('tr', {}, el('td', { colspan: '7' }, resetForm(u.username, upd))) : null,
-          this.open === 'info:' + u.username ? el('tr', {}, el('td', { colspan: '7' }, profileList(u))) : null])))]);
+          this.open === 'info:' + u.username ? el('tr', {}, el('td', { colspan: '7' }, profileList(u))) : null])))], auto);
   },
 };
 const sectionHead = (title, n, extra) => el('div', { cls: 'section-head' }, el('h2', {}, title),

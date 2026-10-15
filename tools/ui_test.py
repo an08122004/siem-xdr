@@ -223,6 +223,16 @@ def main():
                 page.wait_for_selector(sel)
                 check(f"trang {view} hiển thị", True)
                 shot(page, f"07-{view}")
+            # làm mới tự động 10 giây/lần từng vẽ lại form trống khi đang gõ (15/10/2026): không tạo được tài khoản
+            page.goto(f"{BASE}/#/users")
+            page.click("button:text-is('Thêm tài khoản')")
+            page.fill("input[aria-label='Tên đăng nhập']", "giu-chu-khi-lam-moi")
+            page.fill("input[aria-label='Họ và tên']", "Không Bị Xóa")
+            page.click("#title")                                   # rời ô nhập: chốt chặn không dựa vào con trỏ
+            page.wait_for_timeout(11500)
+            check("form Thêm tài khoản giữ nguyên chữ qua lần tự làm mới 10 giây",
+                  page.input_value("input[aria-label='Tên đăng nhập']") == "giu-chu-khi-lam-moi")
+            page.click("button:text-is('Hủy')")
             page.goto(f"{BASE}/#/agents")
             page.wait_for_selector("#content table.list")
             page.click("text=Chặn IP…")
