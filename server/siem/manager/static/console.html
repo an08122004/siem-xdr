@@ -137,6 +137,15 @@
   .profile dt { color: var(--mute); }
   .profile dd { margin: 0; }
   .who { background: none; border: 0; padding: 0; color: var(--fg); font: inherit; font-weight: 600; cursor: pointer; }
+  /* trang form riêng (Tạo tài khoản) */
+  .form-page { max-width: 640px; padding: 20px; display: grid; gap: 22px; }
+  .form-page fieldset { margin: 0; padding: 0; border: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; min-width: 0; }
+  .form-page legend { padding: 0; margin-bottom: 10px; font: 600 15px var(--text); }
+  .form-page label { display: grid; gap: 5px; font-size: 13px; color: var(--mute); }
+  .form-page .wide { grid-column: 1 / -1; }
+  .form-page .field { width: 100%; }
+  .form-error { margin: 0; min-height: 1.4em; color: #ff8a8d; font-size: 14px; }
+  @media (max-width: 640px) { .form-page fieldset { grid-template-columns: 1fr; } }
   .who:hover { text-decoration: underline; }
 
   /* ---------- ngăn chi tiết */
@@ -982,12 +991,12 @@ function aiDetail(p) {
 VIEWS.users = {
   title: 'Tài khoản', list: true, open: null,
   tools() {
-    return [button('Thêm tài khoản', () => { this.open = this.open === '+new' ? null : '+new'; this.load(); }, 'primary'),
-      el('a', { cls: 'btn', href: '/login?register=1', target: '_blank', rel: 'noopener' }, 'Mở trang đăng ký (tab mới)')];
+    return [el('a', { cls: 'btn primary', href: '#/newuser' }, 'Thêm tài khoản'),
+      el('a', { cls: 'btn', href: '/register', target: '_blank', rel: 'noopener' }, 'Mở trang đăng ký (tab mới)')];
   },
   async load(auto) {
     if (!can('users')) { go('#/alerts'); return; }
-    // đang mở form (thêm tài khoản / đặt lại mật khẩu): làm mới tự động 10 giây/lần không được vẽ lại form trống
+    // đang mở form đặt lại mật khẩu: làm mới tự động 10 giây/lần không được vẽ lại form trống (tạo tài khoản: #/newuser)
     if (auto && this.open && !this.open.startsWith('info:')) return;
     const all = await api('/api/v1/users', { auto });
     const pending = all.filter(u => u.pending), rows = all.filter(u => !u.pending);
@@ -996,7 +1005,6 @@ VIEWS.users = {
       .then(r => { if (r && onOk) onOk(); return this.load(); });
     const toggle = key => { this.open = this.open === key ? null : key; this.load(); };
     paint('users', { all, open: this.open }, () => [
-      this.open === '+new' ? newUserForm() : null,
       pending.length ? [sectionHead('Yêu cầu đăng ký chờ duyệt', pending.length),
         el('table', { cls: 'list' }, head(['Người đăng ký', 'Thông tin', 'Gửi lúc', 'Duyệt với vai trò']),
           el('tbody', {}, pending.map(u => el('tr', {},
@@ -1079,42 +1087,56 @@ function profileProblem(p, required) {
   }
   return null;
 }
-function profileInputs() {
-  const f = {
-    full_name: el('input', { cls: 'field', placeholder: 'họ và tên', 'aria-label': 'Họ và tên', autocomplete: 'off' }),
-    birth_date: el('input', { cls: 'field', type: 'date', 'aria-label': 'Ngày sinh', title: 'Ngày sinh' }),
-    hometown: el('input', { cls: 'field', placeholder: 'quê quán', 'aria-label': 'Quê quán', autocomplete: 'off' }),
-    phone: el('input', { cls: 'field', type: 'tel', placeholder: 'số điện thoại', 'aria-label': 'Số điện thoại', autocomplete: 'off' }),
-    position: el('input', { cls: 'field', placeholder: 'chức vụ', 'aria-label': 'Chức vụ', list: 'positions', autocomplete: 'off' }),
-  };
-  // giá trị đã chuẩn hóa, bỏ trường trống (máy chủ không nhận chuỗi rỗng cho số điện thoại / ngày)
-  const value = () => Object.fromEntries(Object.entries({
-    full_name: f.full_name.value, birth_date: f.birth_date.value, hometown: f.hometown.value,
-    phone: f.phone.value.replace(/[\s.-]/g, ''), position: f.position.value,
-  }).map(([k, v]) => [k, v.split(/\s+/).filter(Boolean).join(' ')]).filter(([, v]) => v));
-  return { fields: [...Object.values(f), el('datalist', { id: 'positions' }, POSITIONS.map(p => el('option', { value: p })))], value };
-}
-function newUserForm() {
-  const name = el('input', { cls: 'field', placeholder: 'tên đăng nhập', 'aria-label': 'Tên đăng nhập', autocomplete: 'off' });
-  const role = el('select', { cls: 'field', 'aria-label': 'Vai trò' }, ROLES.map(r => el('option', { value: r }, ROLE_LABEL[r])));
-  const pw = el('input', { cls: 'field', type: 'password', placeholder: 'mật khẩu tạm, từ 12 ký tự', 'aria-label': 'Mật khẩu tạm', autocomplete: 'new-password' });
-  const prof = profileInputs();
-  setTimeout(() => name.focus());
-  return el('div', { style: 'margin:12px 20px 0' },
-    el('div', { cls: 'inline-form' }, name, role, pw),
-    el('div', { cls: 'inline-form' }, el('span', { cls: 'sub' }, 'Thông tin cá nhân (không bắt buộc):'), ...prof.fields),
-    el('div', { cls: 'inline-form' }, button('Tạo tài khoản', b => {
-      const username = name.value.trim().toLowerCase();
-      if (!USERNAME_RE.test(username)) {
-        toast('Tên đăng nhập 2–32 ký tự, chỉ gồm chữ thường không dấu, số và . _ - (bắt đầu bằng chữ hoặc số).', true);
-        name.focus(); return;
-      }
-      const problem = passwordProblem(pw.value, username) || profileProblem(prof.value(), false);
-      if (problem) { toast(problem, true); return; }
-      run(b, () => api('/api/v1/users', { method: 'POST', body: { username, role: role.value, password: pw.value, ...prof.value() } }),
-        `Đã tạo ${username}. Người dùng phải đổi mật khẩu ở lần đăng nhập đầu.`).then(r => { if (r) { VIEWS.users.open = null; VIEWS.users.load(); } });
-    }, 'primary'),
-    button('Hủy', () => { VIEWS.users.open = null; VIEWS.users.load(); })));
+// ---------------------------------------------------------------- Tạo tài khoản (admin): trang riêng, không tự làm mới
+// (form nằm trong trang danh sách thì lần làm mới 10 giây/lần dễ vẽ lại form trống khi đang gõ; trang không phải
+// danh sách -> refreshNow() không gọi load())
+VIEWS.newuser = {
+  title: 'Tạo tài khoản', nav: 'users',
+  tools() { return [el('a', { cls: 'btn', href: '#/users' }, 'Về danh sách tài khoản')]; },
+  async load() {
+    if (!can('users')) { go('#/alerts'); return; }
+    showList();
+    $('#content').replaceChildren(newUserPage());
+    $('#nuUser').focus();
+  },
+};
+function newUserPage() {
+  const input = (id, label, props = {}, wide = false) =>
+    el('label', { cls: wide ? 'wide' : null }, label, el('input', { id, cls: 'field', autocomplete: 'off', ...props }));
+  const err = el('p', { cls: 'form-error', role: 'alert' });
+  const submit = el('button', { type: 'submit', cls: 'btn primary' }, 'Tạo tài khoản');
+  const form = el('form', { cls: 'form-page', novalidate: true },
+    el('fieldset', {}, el('legend', {}, 'Tài khoản đăng nhập'),
+      input('nuUser', 'Tên đăng nhập (2–32 ký tự: chữ thường không dấu, số, . _ -)', { autocapitalize: 'none', spellcheck: 'false', maxlength: '32' }),
+      el('label', {}, 'Vai trò', el('select', { id: 'nuRole', cls: 'field' }, ROLES.map(r => el('option', { value: r }, ROLE_LABEL[r])))),
+      input('nuPw', 'Mật khẩu tạm, từ 12 ký tự (người dùng phải đổi ở lần đăng nhập đầu)', { type: 'password', autocomplete: 'new-password' }, true),
+      el('p', { cls: 'sub wide', style: 'margin:0' }, 'Analyst (Tier 1) xử lý cảnh báo, case, chặn IP, kill tiến trình. Trưởng nhóm IR (Tier 2) làm thêm cô lập máy, đổi ưu tiên case, duyệt task của Trưởng nhóm IR. Threat Hunter (Tier 3) như Tier 2 và ghi nhật ký threat hunting. Detection Engineer duyệt rule, đề xuất AI, bật chính thức rule chạy bóng, nhưng không xử lý cảnh báo (người xử lý cảnh báo không tự duyệt rule mình dùng). SOC Manager như Tier 2, thêm tuyên bố sự cố lớn. Quản trị nền tảng có mọi quyền và quản lý tài khoản. Grafana: analyst chỉ xem, quản trị là Admin, các vai trò khác sửa được dashboard.')),
+    el('fieldset', {}, el('legend', {}, 'Thông tin cá nhân ', el('span', { cls: 'sub' }, '(không bắt buộc)')),
+      input('nuName', 'Họ và tên', { maxlength: '80' }, true),
+      input('nuBirth', 'Ngày sinh', { type: 'date' }),
+      input('nuPhone', 'Số điện thoại', { type: 'tel', inputmode: 'tel' }),
+      input('nuHome', 'Quê quán', { maxlength: '80' }),
+      input('nuPos', 'Chức vụ', { list: 'positions', maxlength: '60' }),
+      el('datalist', { id: 'positions' }, POSITIONS.map(p => el('option', { value: p })))),
+    err,
+    el('div', { cls: 'btns' }, submit, el('a', { cls: 'btn', href: '#/users' }, 'Hủy')));
+  const text = id => $('#' + id).value.split(/\s+/).filter(Boolean).join(' ');
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const username = $('#nuUser').value.trim().toLowerCase(), password = $('#nuPw').value;
+    // bỏ trường trống: máy chủ không nhận chuỗi rỗng cho số điện thoại / ngày sinh
+    const profile = Object.fromEntries(Object.entries({ full_name: text('nuName'), birth_date: $('#nuBirth').value,
+      hometown: text('nuHome'), phone: $('#nuPhone').value.replace(/[\s.-]/g, ''), position: text('nuPos') }).filter(([, v]) => v));
+    const bad = [[!USERNAME_RE.test(username), 'Tên đăng nhập 2–32 ký tự, chỉ gồm chữ thường không dấu, số và . _ - (bắt đầu bằng chữ hoặc số).', 'nuUser'],
+                 [passwordProblem(password, username), null, 'nuPw'],
+                 [profileProblem(profile, false), null, null]].find(([c]) => c);
+    if (bad) { err.textContent = bad[1] || bad[0]; if (bad[2]) $('#' + bad[2]).focus(); return; }
+    err.textContent = '';
+    const r = await run(submit, () => api('/api/v1/users', { method: 'POST', body: { username, role: $('#nuRole').value, password, ...profile } }),
+      `Đã tạo ${username}. Người dùng phải đổi mật khẩu ở lần đăng nhập đầu.`);
+    if (r) go('#/users');
+  });
+  return form;
 }
 // ---------------------------------------------------------------- Nhật ký (admin): phiên đăng nhập + hoạt động
 const AUDIT_ACTION = {
@@ -1472,7 +1494,7 @@ async function render(force = false) {
   const sameView = CURRENT_KEY === key && listState[r.view] != null;
   if (!sameView && v.fromRoute) v.fromRoute(r);       // tham số trên địa chỉ (vd liên kết từ Grafana) -> bộ lọc của trang
   for (const a of document.querySelectorAll('#nav a')) {
-    if (a.dataset.view === r.view) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    if (a.dataset.view === (v.nav || r.view)) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   }
   $('#title').textContent = v.title;
   document.title = v.title + ' – SOC Platform';

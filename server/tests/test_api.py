@@ -107,6 +107,8 @@ def test_console_redirects_to_login_page_and_api_needs_login(env):
     r = env.get("/login")
     assert r.status_code == 200 and "Đăng nhập" in r.text and r.headers["x-frame-options"] == "SAMEORIGIN"
     assert "localStorage" not in r.text                                                # không lưu gì phía trình duyệt
+    r = env.get("/register")                                                           # trang đăng ký riêng
+    assert r.status_code == 200 and 'id="regForm"' in r.text and "location.pathname === '/register'" in r.text
     assert env.get("/api/v1/auth/policy").json() == {"idle_minutes": 30, "session_hours": 8, "max_failures": 5,
                                                      "lock_minutes": 15, "min_password": 12, "min_distinct": 6}
     assert env.get("/api/v1/alerts").status_code == 401

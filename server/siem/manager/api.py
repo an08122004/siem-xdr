@@ -736,6 +736,7 @@ def console(request: Request) -> FileResponse | RedirectResponse:
 
 
 @app.get("/login", include_in_schema=False)
+@app.get("/register", include_in_schema=False)          # trang đăng ký riêng: cùng file, login.html mở form theo đường dẫn
 def login_page() -> FileResponse:
     return FileResponse(STATIC / "login.html")
 
