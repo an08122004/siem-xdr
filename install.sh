@@ -305,6 +305,8 @@ info() {
 $(say "8/8 Xong")
   Console + Grafana : https://$ip:8000
   Đăng nhập lần đầu : admin / $pw   (mật khẩu tạm, console buộc đổi ngay; đã đổi thì dùng mật khẩu mới)
+  Tài khoản khác    : admin tạo ở tab Tài khoản > Thêm tài khoản, hoặc người dùng tự đăng ký ở
+                      https://$ip:8000/register rồi admin duyệt (tab Tài khoản)
   CA nội bộ         : $ROOT/ca.crt  -> import vào máy quản trị để hết cảnh báo chứng chỉ:
                       scp ${SUDO_USER:-<user>}@$ip:$ROOT/ca.crt .
                       Import-Certificate -FilePath .\\ca.crt -CertStoreLocation Cert:\\LocalMachine\\Root   (PowerShell Admin)
