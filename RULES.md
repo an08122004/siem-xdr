@@ -15,7 +15,7 @@ Tài liệu về phần **phát hiện bằng luật** của SOC Platform: rule 
 4. [Độ phủ](#4-độ-phủ)
 5. [Điểm mạnh](#5-điểm-mạnh)
 6. [Điểm yếu](#6-điểm-yếu)
-7. [Hướng cải thiện](#7-hướng-cải-thiện)
+7. [Kế hoạch bổ sung độ phủ](#7-kế-hoạch-bổ-sung-độ-phủ-16102026)
 8. [Đo lại](#8-đo-lại)
 
 ## 1. Tổng quan
@@ -347,32 +347,74 @@ Impairment (0/24), Collection (0/17), Exfiltration (0/9) và Discovery (2/35) g�
   vẫn là 5 alert medium.
 - **Mức độ tĩnh, không có tầng "săn tìm".** SOAR mở case cho mọi alert từ medium, nên không thêm được rule rộng mức thấp (tạo
   tài khoản, tạo dịch vụ, dò tài khoản domain: những hành vi giống hệt quản trị viên). `risk_score` có tính tài sản và IOC nhưng
-  không dùng để quyết định mở case.
+  không dùng để quyết định mở case. Từ 13/10 RBA-001 cộng điểm theo máy / tài khoản; còn thiếu rule mức `low` làm tín hiệu
+  (mục 7, việc 1.3).
 - **Danh sách loại trừ có thể bị lợi dụng.** WIN-005 bỏ qua đúng chuỗi tham số của Ansible, LNX-003 bỏ qua một số URL bộ cài;
   kẻ tấn công chép đúng những dạng đó sẽ lọt. Danh sách phải chỉnh theo công cụ tổ chức thật sự dùng.
 - **Tập bình thường do người soạn.** Kết luận "0 báo nhầm" chỉ đúng với 671 lệnh Windows, 200 lệnh Linux và 36.000 request của
   một website mẫu; chưa có log vài tuần của chính tổ chức. Mỗi lần mở rộng tập này (8/10, 11/10) đều lộ thêm báo nhầm.
 - **Trạng thái tương quan nằm trong bộ nhớ.** Cửa sổ đếm của rule ngưỡng / chuỗi mất khi analyzer khởi động lại, và không chia
   sẻ được nếu chạy nhiều analyzer song song.
-- **Rule viết tay không được kiểm tra ReDoS khi nạp.** Hàm `regex_risk` chỉ áp cho rule AI; một regex viết tay có lượng từ lồng
-  nhau có thể làm chậm analyzer.
 - **Bỏ qua một phần phát hiện của Wazuh.** Rule tấn công web của Wazuh ở level 6 (vd SQLi 31164) không bao giờ thành alert vì
   cầu nối chỉ lấy từ level 7 trong các nhóm đã chọn; 124 mẫu SQLi Wazuh bắt được mà rule viết tay bỏ sót đang bị bỏ qua.
 - **Chưa có rule AI nào chạy thật.** 28 đề xuất đang chờ duyệt; AI chưa đóng góp vào độ phủ.
 
-## 7. Hướng cải thiện
+## 7. Kế hoạch bổ sung độ phủ (16/10/2026)
 
-Theo mức tác động:
-1. **Điểm rủi ro theo thực thể** (máy, tài khoản, IP): cộng dồn khi nhiều rule khác nhau cùng bắn trong một khoảng thời gian,
-   cộng thêm khi tài sản quan trọng / trùng IOC / tài khoản đặc quyền; mở case theo ngưỡng điểm thay vì theo từng alert. Đi kèm
-   một tầng `low` chỉ ghi nhận, không mở case, để thêm được rule săn tìm.
-2. **Thu log tiến trình thật của lab vài tuần** làm tập bình thường, thay cho danh sách tự soạn.
-3. **Lấp chỗ trống lớn nhất**: Linux (auditd, `siem-procs`), Collection / Exfiltration, 4 loại tấn công web đang 0%. Có thể duyệt
-   các đề xuất AI đang chờ, hoặc nhập rule SigmaHQ cùng kỹ thuật (bộ biên dịch Sigma đã có trong `server/siem/ai/sigma.py`).
-4. **Chuyển cảnh báo web của Wazuh** (nhóm `web`, `attack` từ level 6) thành alert mức thấp, để không bỏ phí các mẫu SQLi chỉ
-   Wazuh bắt được.
-5. **Kiểm tra ReDoS cho mọi rule** khi nạp, không chỉ rule AI.
-6. **Đo rule ngưỡng / chuỗi** bằng cách phát lại log theo thời gian (replay) thay vì đo từng event.
+Cách rẻ nhất để tăng độ phủ là **dùng lại rule có sẵn** (SigmaHQ, ruleset Wazuh) trước khi viết mới bằng tay hay bằng AI. Bộ
+biên dịch Sigma đã có (`server/siem/ai/sigma.py`), và 341 rule SigmaHQ `process_creation` vừa khớp ít nhất một mẫu tấn công vừa
+không khớp mẫu bình thường nào (đo 8/10, `AI-README.md` mục 11). Chỉ viết tay cho chỗ SigmaHQ không có; phần AI theo kế hoạch ở
+`AI-README.md` mục 15.
+
+**Hiện trạng và đích**
+
+| Thước đo | 16/10/2026 | Đích |
+|---|---|---|
+| Kỹ thuật ưu tiên (`config/threat_profile.yml`) có rule chạy chính thức | 10/12: thiếu T1547 (FIM-001 đang chạy bóng) và T1486 (chưa có rule) | 12/12 trước 05/11 (`ROADMAP.md`) |
+| Windows, dataset (mục 4.2) | 6,5% mẫu, 39/134 kỹ thuật | ≥ 20% |
+| Linux, dataset | 0,8% mẫu, 7/78 kỹ thuật; log ghi thật 0/22 | ≥ 10% |
+| Web, CSIC 2010 | 11,0%; 4/7 loại tấn công dùng chung chưa có rule | ≥ 15%; 7/7 loại có rule |
+| Loại log có rule | dòng lệnh, URL, xác thực, firewall / IDS, FIM | thêm file, registry, kết nối mạng của tiến trình, DNS, PowerShell script block |
+
+Đích dataset là đích tạm, chốt lại sau khi đo việc 2.1. Đã xong từ danh sách cũ: điểm rủi ro theo thực thể (RBA-001, 13/10), kiểm
+ReDoS cho mọi rule khi nạp (13/10), rule FIM-001 cho registry / file dùng để duy trì truy cập (14/10; chỉ thật sự chạy bóng khi stack chạy code mới, `ROADMAP.md` tuần 1).
+
+**Đợt 1 — trước demo (16/10–02/11).** Chỉ việc nhỏ, vì code đóng băng ngày 07/11.
+
+| # | Việc | Làm ở đâu | Xong khi |
+|---|---|---|---|
+| 1.1 | Bật FIM-001 chính thức sau 7 ngày chạy bóng không báo nhầm trên stack chạy code mới | `server/rules/fim.yml` (`mode: active`) | khoảng 29/10; T1547 được tính vào KPI |
+| 1.2 | Rule T1486: chữ ký dòng lệnh mã hóa hàng loạt (gpg, openssl, 7z có mật khẩu, `cipher /e` như các bài thử Atomic) và rule ngưỡng "một tiến trình tạo ≥ 100 file cùng một đuôi lạ trong 60 giây" (Sysmon 11) | `windows.yml`, `linux.yml`, `rules/cases` | chạy bóng 23/10, chính thức 30/10 sau khi đo báo nhầm trên log lab (1.4) |
+| 1.3 | Chuyển cảnh báo web của Wazuh từ level 6 (nhóm `web`, `attack`) thành alert `low`: chỉ cộng điểm RBA, không mở case | `detection/wazuh.py` (ngưỡng level theo nhóm), test | 124 mẫu SQLi chỉ Wazuh bắt được thành tín hiệu |
+| 1.4 | Thu log hoạt động bình thường của lab (PC-01, Ubuntu-01, Web-01) liên tục ≥ 7 ngày | lab tuần 2–4 | có tập bình thường thật cho đợt 2 |
+
+**Đợt 2 — dùng lại rule có sẵn.** Trước 16/11 chỉ làm 2.1, 2.2 và lô đầu (≤ 30 rule) của 2.4 (`ROADMAP.md` tuần 3); phần còn lại
+17/11–30/11.
+
+| # | Việc | Làm ở đâu | Xong khi |
+|---|---|---|---|
+| 2.1 | Đo trước khi nhập: chạy mọi rule SigmaHQ `process_creation`, `webserver` biên dịch được trên dataset, tính độ phủ nếu nhập | `python -m siem.ai.benchmark` thêm tùy chọn chạy bộ rule SigmaHQ | có số để chốt đích ở bảng trên |
+| 2.2 | Bộ biên dịch Sigma hiểu thêm 6 loại log mà parser đã chuẩn hóa: `file_event` (Sysmon 11), `registry_*` (12–14), `network_connection` (3), `dns_query` (22), `process_access` (10), `ps_script` (PowerShell 4104) | bảng trường trong `ai/sigma.py`, test | các loại log này có rule; mở thêm phần lớn rule SigmaHQ cho Windows |
+| 2.3 | Chuyển dataset giữ lại các event trên (hiện chỉ giữ event tạo tiến trình) | `ai/endpoint_logs.py`, `tools/convert_datasets.py` | đo được rule của 2.2 |
+| 2.4 | Công cụ nhập SigmaHQ: chọn rule biên dịch được, `status` stable / test, `level` ≥ medium, khớp ≥ 1 mẫu tấn công, 0 mẫu bình thường (kể cả log lab 1.4), kỹ thuật có case playbook. Ghi `rules/sigmahq/*.yml` ở chế độ chạy bóng, giữ `id`, tác giả và giấy phép DRL 1.1; sinh ca test dương (mẫu khớp) và âm (mẫu bình thường gần nhất). Nhập theo lô 20–30 rule | `tools/sigmahq_import.py` (mới), lint | ≥ 100 rule chạy bóng, lint đạt |
+| 2.5 | Bật chính thức từng rule đạt tiêu chí chạy bóng (mục 2.11) | Thư viện rule | theo từng rule |
+| 2.6 | Linux: tìm vì sao log ghi thật đạt 0/22 (parser thiếu trường hay thiếu rule); bật auditd `execve` trên Ubuntu-01, Web-01 bên cạnh `siem-procs`; nhập SigmaHQ Linux (biên dịch được 97%) | `endpoint_logs.py`, `DEPLOY-VM.md` mục 3 | Linux ≥ 10% |
+
+**Đợt 3 — viết mới cho chỗ còn trống (12/2026).**
+
+| # | Việc | Làm ở đâu | Xong khi |
+|---|---|---|---|
+| 3.1 | 4 loại tấn công web đang 0%: dò file sao lưu (`.bak`, `.old`, `~`, `.swp`), tài nguyên nhạy cảm (`/.git/`, `/.env`, `web.config`, `phpinfo`), CRLF (`%0d%0a` trong URL), mã hóa né tránh (mã hóa hai lần `%25..`, UTF-8 dài `%c0%af`) | `web.yml` hoặc luồng AI web | 7/7 loại có rule, 0 báo nhầm trên 36.000 request |
+| 3.2 | Collection, Exfiltration: nén hàng loạt có mật khẩu, `rclone`, `curl -T`; lượng dữ liệu ra ngoài lớn bất thường (log firewall) | rule viết tay + SigmaHQ | 2 chiến thuật có rule |
+| 3.3 | 3 case playbook cho nhóm đang rơi về PB-00 (mục 4.4): né tránh phòng thủ, khám phá, thu thập / đánh cắp dữ liệu | `config/case_playbooks.yml` | rule SigmaHQ của các nhóm này nhập được ở 2.4 |
+| 3.4 | Đo rule ngưỡng / chuỗi bằng phát lại log theo thời gian | `siem.ai.benchmark` | 22/40 rule chưa đo có số |
+| 3.5 | Mở rộng hồ sơ mối đe dọa từ 12 lên khoảng 20 kỹ thuật theo bản tin CTI | `config/threat_profile.yml` | KPI độ phủ tính trên hồ sơ mới |
+
+Mỗi đợt đo lại bằng `python -m siem.ai.benchmark` và `python tools/rule_lint.py`, ghi kết quả vào mục 4. Rủi ro:
+- **Ngập alert khi nhập hàng trăm rule:** chạy bóng, nhập theo lô, trần alert / ngày (mục 2.11); trước 16/11 chỉ nhập lô đầu.
+- **Độ phủ ảo:** nhiều rule SigmaHQ viết dựa trên chính bài thử Atomic, nên tỉ lệ trên phần dựng lại từ Atomic cao hơn thực tế.
+  Báo cáo riêng kết quả trên log ghi thật (Splunk, OTRF) và trên lab.
+- **Lint đòi case playbook cho mọi rule:** làm 3.3 sớm nếu 2.4 bị chặn nhiều vì kỹ thuật chưa có playbook.
 
 ## 8. Đo lại
 

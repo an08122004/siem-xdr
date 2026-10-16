@@ -4,7 +4,7 @@ Nền tảng cho một trung tâm điều hành an ninh (SOC) của môn GSANM. 
 (phản ứng trên endpoint qua Wazuh agent), SOAR và quản lý case, cùng quy trình vận hành SOC: vai trò, mức ưu tiên và SLA,
 detection-as-code, giám sát sức khỏe, KPI, threat intelligence, threat hunting. Dựng theo kiến trúc trong `BTL/SIEM.txt`,
 danh mục tài sản `BTL/asset.txt` và *Kế hoạch xây dựng hệ thống SOC chuyên nghiệp* (10/2026). Toàn bộ backend đóng gói bằng
-Docker. Quy trình vận hành: **[SOC-OPERATIONS.md](SOC-OPERATIONS.md)**.
+Docker. Quy trình vận hành: **[SOC-OPERATIONS.md](SOC-OPERATIONS.md)**. Lộ trình hoàn thiện đến 16/11/2026: [ROADMAP.md](ROADMAP.md).
 
 > Trước 14/10/2026 project tên là **siem-xdr**. Với hệ thống đã cài từ trước, xem *Nâng cấp từ siem-xdr* ở mục 2 (vẫn giữ dữ liệu).
 > Một số tên giữ nguyên để không phải cài lại agent hay đổi dữ liệu đã lưu: lệnh phản ứng trên agent (`siem-xdr`,

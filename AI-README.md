@@ -30,6 +30,7 @@ dùng JSON schema và DSL của SIEM.
 12. [Lệnh chạy và cấu hình](#12-lệnh-chạy-và-cấu-hình)
 13. [Nhật ký thay đổi pipeline](#13-nhật-ký-thay-đổi-pipeline)
 14. [Nghiên cứu: phương án dùng AI tự động sinh bộ rule](#14-nghiên-cứu-phương-án-dùng-ai-tự-động-sinh-bộ-rule-14102026)
+15. [Kế hoạch phát triển AI sinh rule](#15-kế-hoạch-phát-triển-ai-sinh-rule-16102026)
 
 ## 1. AI làm gì và không làm gì
 
@@ -1208,3 +1209,50 @@ tương ứng làm "đáp án", chạy 3 lần mỗi cấu hình (mục 9.9 cho 
 - [Qwen2.5-7B Sigma generation LoRA (model card)](https://huggingface.co/jjhoada/qwen2.5-7b-sigma-generation-lora)
 - [OWASP LLM01:2025 Prompt Injection](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)
 - [Autograph: Toward Automated, Distributed Worm Signature Detection](https://static.usenix.org/events/sec04/tech/kim.html) — USENIX Security 2004
+
+## 15. Kế hoạch phát triển AI sinh rule (16/10/2026)
+
+Kế hoạch này chi tiết hóa lộ trình 14.7 thành việc cụ thể. Nguyên tắc không đổi (mục 1, 14.5): AI chỉ đề xuất, code kiểm mọi thứ,
+người duyệt, rule mới chạy bóng ≥ 7 ngày rồi mới bật. Phần nhập rule SigmaHQ làm chung với kế hoạch độ phủ (`RULES.md` mục 7,
+đợt 2): kỹ thuật nào SigmaHQ đã phủ thì AI không cần viết.
+
+**Hiện trạng.** Model `qwen3.5:9b` chạy nội bộ (GPU 8 GB, 20–60 phút mỗi chu kỳ). 9/16 nhóm cũ qua ít nhất 2/3 lần, 0/4 nhóm kiểm
+chứng độc lập (mục 9.9). Chưa rule AI nào chạy thật; 28 đề xuất chờ duyệt (11/10). Rule AI chưa có ca test trong `rules/cases`.
+
+| Giai đoạn | Thời gian | Việc | Xong khi |
+|---|---|---|---|
+| 0. Hoàn thiện repo | 16/10–16/11 (`ROADMAP.md`) | Detection Engineer duyệt hoặc loại hết hàng chờ (worker đã tự kiểm lại đề xuất cũ mỗi chu kỳ). Chọn 1 đề xuất đã qua kiểm định để demo: đề xuất → so với rule hiện có → duyệt → chạy bóng. Không thêm tính năng | hàng chờ về 0; demo chạy được luồng duyệt |
+| 1. Luồng A gọn và đo được | 17/11–12/2026 | Các việc A1–A5, C1, M1 bên dưới | ≥ 5 rule (AI hoặc nhập SigmaHQ) qua chạy bóng và được bật; tỉ lệ người duyệt chấp nhận ≥ 50%; đo lại bench trên 20 nhóm |
+| 2. Luồng B: CTI → rule, model nội bộ | 12/2026–01/2027 | Các việc B1–B5 | báo cáo độ phủ khớp đáp án ở ≥ 80% cơ hội phát hiện của bộ đo; từ báo cáo tới chạy bóng < 1 ngày làm việc |
+| 3. Model lớn qua API | 02/2027 | Chỉ cho bước dùng dữ liệu công khai hoặc tổng hợp (B2–B4 với CTI công khai). Biến cấu hình tắt mặc định, ghi nhật ký nội dung đã gửi, không bao giờ gửi log hay alert thật. So với model nội bộ trên bộ đo B5 | quyết định giữ hay bỏ dựa trên số đo (chỉ số 14.6, chi phí mỗi rule) |
+| 4. Fine-tune QLoRA | khi có ≥ 300 cặp (báo cáo hoặc mẫu, rule) đã duyệt và đã bật | Thuê GPU 24 GB vài giờ, gộp LoRA, chuyển GGUF Q4 chạy bằng Ollama (mục 11, việc 7) | tốt hơn model gốc trên bộ đo B5 mà không tăng báo nhầm |
+
+**Giai đoạn 1**
+
+| Việc | Nội dung | Làm ở đâu |
+|---|---|---|
+| A1 | Đề xuất "nhập rule SigmaHQ" riêng, không trộn vế SigmaHQ vào rule của model (14.5, luồng A) | `ai/golden.py` (`sigmahq_for`), `ai/worker.py`, `ai/deploy.py`, mục Đề xuất AI trên console; bộ lọc dùng chung với `tools/sigmahq_import.py` |
+| A2 | Rule AI được duyệt kèm ca test dương / âm, sinh từ mẫu train / test và mẫu bình thường gần nhất; lint tính như rule viết tay | `ai/deploy.py` ghi `rules/cases/ai-<id>.yml` |
+| A3 | Đổi đơn vị bài toán sang "cách làm" (kỹ thuật con + công cụ); báo cáo tách độ phủ cách làm đã thấy / chưa thấy (mục 11, việc 4) | `ai/dataset.py`, `ai/benchmark.py` |
+| A4 | Kỹ thuật bản chất là thao tác quản trị (tạo tài khoản, tạo dịch vụ, dò tài khoản domain): đề xuất mức `low` làm tín hiệu cho RBA-001 | `ai/validate.py`, `ai/prompts.py` |
+| A5 | Thay tập bình thường tự soạn bằng log lab ≥ 7 ngày (`RULES.md` mục 7, việc 1.4) | `ai/baseline.py` đọc thêm log lab |
+| C1 | Luồng tối ưu bộ rule: rule trùng (hai rule cùng bắt ≥ 80% alert của nhau), rule giòn (vế chỉ là IP, domain, hash, đường dẫn bài thử) | `rules_catalog.py`, Thư viện rule |
+| M1 | Đưa chỉ số 14.6 vào Thư viện rule: độ chính xác khi chạy bóng, alert đúng mà rule khác không bắt, độ giòn, chi phí để qua | `rules_catalog.py`, dashboard `siem-rules` |
+
+**Giai đoạn 2**
+
+| Việc | Nội dung | Làm ở đâu |
+|---|---|---|
+| B1 | Ô "Báo cáo CTI" trên console (dán văn bản hoặc đường dẫn); nội dung đặt trong khối `<data>` như `ai/triage.py` | `ai/cti.py` (mới), `manager/api.py` |
+| B2 | Trích cơ hội phát hiện; chỉ nhận ID kỹ thuật tra được trong bản MITRE ATT&CK ghim phiên bản; nguồn log SOC chưa thu thì ghi "khoảng trống dữ liệu" | `ai/cti.py`, `datasets/enterprise-attack.json` |
+| B3 | Model viết sự kiện tổng hợp theo định dạng ca test, chạy toàn bộ rule hiện có (`detection/ruletest.py`), ra báo cáo độ phủ cho từng báo cáo CTI | `ai/cti.py` |
+| B4 | Khoảng trống chuyển sang luồng A (SigmaHQ trước, model sau); rule chỉ khớp IOC chuyển IOC sang `config/intel` | `ai/worker.py` |
+| B5 | Bộ đo 10–20 báo cáo công khai, mỗi báo cáo có bài thử Atomic tương ứng làm đáp án; chạy 3 lần mỗi cấu hình | `tools/bench_cti.py` (mới) |
+
+**Không làm:** AI tự triển khai rule; gửi log hay alert thật ra API; fine-tune trước giai đoạn 4; mài thêm prompt cho model 9B khi
+chưa có tập bình thường thật (mục 10: điểm nghẽn là dữ liệu, không phải câu chữ của prompt).
+
+**Rủi ro riêng:**
+- GPU laptop nóng, một chu kỳ có lúc 60 phút; máy ngủ từng làm bench treo 20 giờ (mục 9.9). Chạy đo ban đêm, tắt chế độ ngủ.
+- Người duyệt quá tải khi thêm đề xuất SigmaHQ và CTI: tối đa 10 đề xuất mỗi chu kỳ, đề xuất kèm báo cáo, rule gọn.
+- Các rủi ro chung ở 14.8.
