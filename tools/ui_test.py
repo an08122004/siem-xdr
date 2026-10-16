@@ -196,8 +196,13 @@ def main():
             shot(page, "06b-rules")
             check("Thư viện rule hiện trong console, có ô lọc (Hiển thị, MITRE tactic, Tag, Trường log)",
                   all(frame.locator(f"text={t}").count() for t in ("Hiển thị", "MITRE tactic", "Trường log")))
-            found = scroll_frame(page, "#frame-rules iframe", "text=WEB-001")
-            check("bảng danh mục liệt kê rule (vd WEB-001)", found)
+            # tìm qua ô Tìm (Lucene), không cuộn: bảng xếp theo Mã, gần 180 đề xuất AI-xxx đứng trước WEB-001 (16/10/2026).
+            # Grafana 11 gán id ngẫu nhiên cho ô nhập (label `for` không khớp) nên chọn theo nhãn hiển thị
+            search = frame.locator("[data-testid='data-testid template variable']:has(label:text-is('Tìm (Lucene)')) input")
+            search.fill('rule.id:"WEB-001"')
+            search.press("Enter")
+            frame.locator("text=WEB-001").first.wait_for(timeout=15000)
+            check("ô Tìm lọc bảng danh mục tới đúng rule (vd WEB-001)", frame.locator("text=WEB-002").count() == 0)
             page.goto(f"{BASE}/#/ai")
             page.wait_for_selector("#content p.sub")
             page.click("#tools button:text-is('Tất cả')")
