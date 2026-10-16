@@ -1145,17 +1145,22 @@ const AUDIT_ACTION = {
   console_user_approved: 'Duyệt đăng ký', console_user_rejected: 'Từ chối đăng ký', console_session_revoked: 'Đăng xuất phiên của',
   console_alert_updated: 'Cập nhật cảnh báo', console_soar_declined: 'Từ chối bước SOAR', console_action_requested: 'Gửi lệnh phản ứng',
   console_case_updated: 'Cập nhật case', console_ai_approved: 'Duyệt đề xuất AI', console_ai_rejected: 'Từ chối đề xuất AI',
-  console_ai_rolled_back: 'Gỡ rule AI', console_ai_run: 'Chạy AI' };
+  console_ai_rolled_back: 'Gỡ rule AI', console_ai_run: 'Chạy AI', console_mfa_enabled: 'Bật xác thực 2 lớp',
+  console_mfa_disabled: 'Tắt xác thực 2 lớp', console_case_incident: 'Sự cố lớn', console_rule_promoted: 'Bật chính thức rule chạy bóng',
+  console_hunt_created: 'Tạo cuộc hunt', console_hunt_updated: 'Cập nhật cuộc hunt', console_handover_saved: 'Lưu biên bản giao ca',
+  console_ai_assist: 'Hỏi AI hỗ trợ', console_ai_assist_feedback: 'Đánh giá câu trả lời AI' };
 const AUDIT_REASON = { bad_credentials: 'sai tên đăng nhập hoặc mật khẩu', locked: 'đang bị tạm khóa',
-  pending: 'tài khoản chờ duyệt', bad_current_password: 'sai mật khẩu hiện tại' };
+  pending: 'tài khoản chờ duyệt', bad_current_password: 'sai mật khẩu hiện tại', bad_otp: 'sai mã xác thực 2 lớp' };
 const AUDIT_KIND = [['', 'Tất cả'], ['authentication', 'Đăng nhập'], ['configuration', 'Thao tác'], ['iam', 'Tài khoản']];
 const DETAIL_KEY = { status: 'trạng thái', type: 'lệnh', agent_id: 'agent', assignee: 'giao cho', priority: 'ưu tiên',
-  ip: 'IP', pid: 'PID', name: 'tiến trình' };
+  ip: 'IP', pid: 'PID', name: 'tiến trình', action: 'việc', task: 'yêu cầu', to: 'bàn giao cho' };
+const INCIDENT_ACT = { declare: 'tuyên bố sự cố lớn', notified: 'đã thông báo cơ quan / người bị ảnh hưởng' };
 // "type=block_ip agent_id=001 ip=1.2.3.4" (manager/api.py activity_detail) -> "lệnh Chặn IP, agent 001, IP 1.2.3.4"
 const auditDetail = s => String(s).split(' ').map(kv => {
   const i = kv.indexOf('='), k = kv.slice(0, i), v = kv.slice(i + 1);
   if (i < 0 || !DETAIL_KEY[k]) return kv;
-  return DETAIL_KEY[k] + ' ' + (k === 'type' ? ACT_TYPE[v] || v : k === 'status' ? (ALERT_ST[v] || CASE_ST[v] || [v])[0] : v);
+  return DETAIL_KEY[k] + ' ' + (k === 'type' ? ACT_TYPE[v] || v : k === 'status' ? (ALERT_ST[v] || CASE_ST[v] || HUNT_ST[v] || [v])[0]
+    : k === 'task' ? AI_TASK[v] || v : k === 'action' ? INCIDENT_ACT[v] || v : v);
 }).join(', ');
 function auditLink(path) {
   const m = /^\/api\/v1\/(alerts|cases|ai\/proposals)\/([^/]+)/.exec(path || '');

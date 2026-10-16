@@ -971,6 +971,9 @@ def test_threat_hunting_log(env):
     doc = fake.docs[("siem-hunts", h["id"])]
     assert r.status_code == 200 and doc["status"] == "completed" and doc["completed_at"] and doc["data_gaps"] == ["chưa thu 4769 từ DC2"]
     assert [n["text"] for n in doc["notes"]][-1] == "trạng thái: in_progress -> completed"
+    ops = [(a[3]["op"], a[1], a[2], a[3]["change"]) for a in env.audit if a[0] == "activity"]   # trang Nhật ký của admin
+    assert ("hunt_created", "failure", "an", None) in ops and ("hunt_created", "success", "hu", None) in ops
+    assert ("hunt_updated", "success", "hu", "status=in_progress") in ops
 
 
 def test_shift_handover_summary_and_saved_record(env, monkeypatch):
@@ -1001,6 +1004,8 @@ def test_shift_handover_summary_and_saved_record(env, monkeypatch):
     r = env.post("/api/v1/handover", json={"note": "Ca đêm: theo dõi case c1", "to": "binh"}, headers=H).json()
     saved = fake.docs[("siem-handovers", r["_id"])]
     assert saved["by"] == "an" and saved["to"] == "binh" and saved["cases_overdue"] == 1
+    act = [a for a in env.audit if a[0] == "activity"][-1]
+    assert act[3]["op"] == "handover_saved" and act[3]["change"] == "to=binh"       # ghi chú bàn giao không vào nhật ký
 
 
 def test_ai_assist_jobs_and_feedback(env):

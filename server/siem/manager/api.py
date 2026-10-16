@@ -122,7 +122,11 @@ ACTIVITY = [(re.compile(p), op) for p, op in (
     (r"^/api/v1/alerts/[^/]+$", "alert_updated"), (r"^/api/v1/alerts/[^/]+/soar/decline$", "soar_declined"),
     (r"^/api/v1/actions$", "action_requested"), (r"^/api/v1/cases/[^/]+$", "case_updated"),
     (r"^/api/v1/ai/proposals/[^/]+/approve$", "ai_approved"), (r"^/api/v1/ai/proposals/[^/]+/reject$", "ai_rejected"),
-    (r"^/api/v1/ai/proposals/[^/]+/rollback$", "ai_rolled_back"), (r"^/api/v1/ai/run$", "ai_run"))]
+    (r"^/api/v1/ai/proposals/[^/]+/rollback$", "ai_rolled_back"), (r"^/api/v1/ai/run$", "ai_run"),
+    (r"^/api/v1/cases/[^/]+/incident$", "case_incident"), (r"^/api/v1/rules/[^/]+/promote$", "rule_promoted"),
+    (r"^/api/v1/hunts$", "hunt_created"), (r"^/api/v1/hunts/[^/]+$", "hunt_updated"),
+    (r"^/api/v1/handover$", "handover_saved"), (r"^/api/v1/ai/assist$", "ai_assist"),
+    (r"^/api/v1/ai/assist/[^/]+/feedback$", "ai_assist_feedback"))]
 
 
 def activity_detail(body: bytes) -> str | None:
@@ -134,7 +138,8 @@ def activity_detail(body: bytes) -> str | None:
     if not isinstance(data, dict):
         return None
     params = data.get("params") if isinstance(data.get("params"), dict) else {}
-    parts = [f"{k}={data[k]}" for k in ("status", "type", "agent_id", "assignee", "priority") if data.get(k) not in (None, "")]
+    parts = [f"{k}={data[k]}" for k in ("status", "type", "agent_id", "assignee", "priority", "action", "task", "to")
+             if data.get(k) not in (None, "")]
     parts += [f"{k}={params[k]}" for k in ("ip", "pid", "name") if params.get(k) not in (None, "")]
     return " ".join(str(p)[:80] for p in parts) or None
 
