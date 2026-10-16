@@ -58,7 +58,8 @@
   .notice:empty { display: none; }
   .notice a { color: var(--accent); }
   .steps { padding-left: 18px; display: grid; gap: 6px; }
-  .secret { font-size: 16px; letter-spacing: .06em; word-break: break-all; }
+  .secret { font-size: 16px; letter-spacing: .06em; }          /* xuống dòng giữa các nhóm 4 ký tự, không cắt nhóm */
+  #otpWrap { display: contents; }                               /* nhãn, ô, gợi ý là ô của grid form như các trường khác */
   .notice small { display: block; margin-top: 2px; color: var(--mute); font-size: 13px; }
 
   form { margin-top: 24px; display: grid; gap: 6px; }
