@@ -69,14 +69,17 @@ env_set() {   # env_set KHÓA GIÁ_TRỊ: sửa dòng có sẵn (kể cả dòng
   elif grep -q "^# *$k=" .env; then sed -i "0,/^# *$k=.*/s||$k=$v|" .env
   else printf '%s=%s\n' "$k" "$v" >> .env; fi
 }
-compose() { docker compose "$@"; }   # COMPOSE_FILE / COMPOSE_PROFILES / COMPOSE_PROJECT_NAME lấy từ .env
+# COMPOSE_FILE / COMPOSE_PROFILES lấy từ .env. Tên project truyền thẳng (pick_project): lúc .env chưa ghi tên, compose
+# dùng name: soc-platform trong docker-compose.yml và thao tác nhầm hệ thống mới thay vì hệ thống siem-xdr đang chạy.
+compose() { docker compose -p "$PROJECT" "$@"; }
 
 # ------------------------------------------------------------------------------------------------ kiểm tra
 check_system() {
   say "1/8 Kiểm tra máy"
   [ "$(id -u)" = 0 ] || die "cần quyền root: chạy lại bằng  sudo ./install.sh"
   [ -f docker-compose.yml ] && [ -f tools/init_secrets.py ] || die "không thấy mã nguồn soc-platform trong $ROOT"
-  if grep -q $'\r' install.sh security/setup.sh 2>/dev/null; then
+  # install.sh mà là CRLF thì hỏng ngay dòng đầu, không chạy tới đây: kiểm các script khác chép cùng đợt
+  if grep -q $'\r' security/setup.sh wazuh/manager/entrypoint/*.sh 2>/dev/null; then
     die "file có ký tự xuống dòng Windows (CRLF). Chép mã bằng tools/deploy-vm.ps1 hoặc git, không chép thẳng thư mục từ Windows"
   fi
   # shellcheck disable=SC1091
@@ -187,15 +190,12 @@ pick_project() {
   if [ -n "$cur" ]; then PROJECT=$cur
   elif docker volume inspect "${OLD_PROJECT}_certs" >/dev/null 2>&1; then PROJECT=$OLD_PROJECT
   fi
-  if [ "$PROJECT" = "$OLD_PROJECT" ]; then
-    warn "hệ thống cài trước khi đổi tên: vẫn chạy với tên project $OLD_PROJECT (dữ liệu trong volume ${OLD_PROJECT}_*)"
-    warn "muốn chuyển dữ liệu sang tên mới: sudo python3 tools/migrate_project.py --apply && sudo ./install.sh --update"
-  fi
 }
 
 configure() {
   say "4/8 Bí mật và cấu hình"
-  python3 tools/init_secrets.py | grep "đã tạo" | sed 's/^/    /' || true
+  local out; out=$(python3 tools/init_secrets.py) || die "không sinh được bí mật (tools/init_secrets.py, lỗi ở trên)"
+  printf '%s\n' "$out" | grep "đã tạo" | sed 's/^/    /' || true
   chown -R root:root secrets
   chmod 700 secrets && chmod 644 secrets/*          # xem tools/init_secrets.py: container đọc qua bind mount
   ok "bí mật trong secrets/ (chỉ root vào được thư mục)"
@@ -207,6 +207,10 @@ configure() {
 
   [ -f .env ] || { cp .env.example .env; ok "tạo .env từ .env.example"; }
   pick_project
+  if [ "$PROJECT" = "$OLD_PROJECT" ]; then
+    warn "hệ thống cài trước khi đổi tên: vẫn chạy với tên project $OLD_PROJECT (dữ liệu trong volume ${OLD_PROJECT}_*)"
+    warn "muốn chuyển dữ liệu sang tên mới: sudo python3 tools/migrate_project.py --apply && sudo ./install.sh --update"
+  fi
   local old_ip; old_ip=$(env_get MANAGER_TLS_IPS | cut -d, -f1)
   if [ -z "$IP" ]; then IP=${old_ip:-$(detect_ip)}; fi
   valid_ipv4 "$IP" || die "IP không hợp lệ: $IP"
@@ -272,15 +276,16 @@ wait_until() {   # wait_until GIÂY lệnh...
   done
 }
 service_state() { compose ps -a --format '{{.Service}} {{.State}} {{.ExitCode}}' | awk -v s="$1" '$1==s {print $2, $3}'; }
-es_setup_done() { [ "$(service_state es-setup)" = "exited 0" ]; }
+es_setup_exited() { [[ $(service_state es-setup) == exited* ]]; }
 healthy() { [ "$(docker inspect -f '{{.State.Health.Status}}' "$(compose ps -q "$1")")" = healthy ]; }
 console_up() { curl -sf --cacert ca.crt "https://127.0.0.1:8000/health" >/dev/null; }
 
 wait_ready() {
   say "6/8 Chờ hệ thống sẵn sàng"
-  if ! wait_until 600 es_setup_done; then
+  # es-setup chạy một lần: thoát mã khác 0 thì báo ngay, không chờ hết 10 phút
+  if ! wait_until 600 es_setup_exited || [ "$(service_state es-setup)" != "exited 0" ]; then
     compose logs --tail 30 es-setup elasticsearch >&2 || true
-    die "es-setup chưa xong sau 10 phút (log ở trên). Thường do thiếu RAM hoặc vm.max_map_count"
+    die "es-setup lỗi hoặc chưa xong sau 10 phút (log ở trên). Thường do thiếu RAM hoặc vm.max_map_count"
   fi
   ok "Elasticsearch + tài khoản RBAC"
   compose cp elasticsearch:/usr/share/elasticsearch/config/certs/ca/ca.crt ./ca.crt >/dev/null
@@ -325,6 +330,7 @@ EOF
 
 status() {
   [ -f .env ] || die "chưa cài: chạy  sudo ./install.sh"
+  pick_project
   compose ps -a --format 'table {{.Service}}\t{{.State}}\t{{.Status}}'
   if [ -f ca.crt ] && console_up; then ok "console trả lời: https://$(env_get MANAGER_TLS_IPS | cut -d, -f1):8000"
   else warn "console chưa trả lời trên cổng 8000"; fi
