@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect x=%271%27 y=%271%27 width=%2714%27 height=%2714%27 rx=%273%27 fill=%27%23181b1f%27/%3E%3Crect x=%273%27 y=%2710%27 width=%272%27 height=%273%27 fill=%27%234f9dde%27/%3E%3Crect x=%276%27 y=%277%27 width=%272%27 height=%276%27 fill=%27%23e0b93b%27/%3E%3Crect x=%279%27 y=%275%27 width=%272%27 height=%278%27 fill=%27%23e7793a%27/%3E%3Crect x=%2712%27 y=%273%27 width=%272%27 height=%2710%27 fill=%27%23e2474b%27/%3E%3C/svg%3E">
-<title>SOC Platform</title>
+<title>SIEM/XDR</title>
 <style>
   /* Một hệ thống chung: SOC console là khung, dashboard Grafana (cùng tài khoản, cùng phiên) nhúng vào trang Tổng quan
      và Điều tra. Màu nền theo Grafana dark để dashboard nhúng liền mạch; màu chỉ dùng cho mức độ cảnh báo. */
@@ -219,7 +219,7 @@
 <div class="app">
   <aside class="rail" aria-label="Điều hướng">
     <div class="spectrum" aria-hidden="true"><i class="s1"></i><i class="s2"></i><i class="s3"></i><i class="s4"></i></div>
-    <div class="brand">SOC Platform<small>Trung tâm giám sát an ninh</small></div>
+    <div class="brand">SIEM/XDR<small>Trung tâm giám sát an ninh</small></div>
     <nav class="nav" id="nav"></nav>
     <div class="me" id="me"></div>
   </aside>
@@ -1502,7 +1502,7 @@ async function render(force = false) {
     if (a.dataset.view === (v.nav || r.view)) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   }
   $('#title').textContent = v.title;
-  document.title = v.title + ' – SOC Platform';
+  document.title = v.title + ' – SIEM/XDR';
   if (!sameView || force || !v.list) $('#tools').replaceChildren(...[].concat(v.tools ? v.tools() : []));
   try {
     if (v.list) { showList(); if (CURRENT !== r.view) { $('#content').replaceChildren(); listState[r.view] = null; } }

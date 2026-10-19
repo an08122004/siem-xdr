@@ -1,6 +1,6 @@
 {
   "uid": "siem-investigate",
-  "title": "SOC Platform — Điều tra thực thể",
+  "title": "SIEM/XDR — Điều tra thực thể",
   "tags": [
     "siem",
     "xdr",

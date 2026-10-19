@@ -1,4 +1,4 @@
-# Triển khai SOC Platform trên máy ảo
+# Triển khai SIEM/XDR trên máy ảo
 
 Hướng dẫn dựng toàn bộ hệ thống trên các máy ảo VMware Workstation (VirtualBox / Hyper-V làm tương tự): một firewall chia
 mạng thành 4 vùng, một VM chạy backend bằng Docker và các VM endpoint cài Wazuh agent theo đúng danh mục tài sản
@@ -206,7 +206,7 @@ Chuẩn bị trên VM `siem-server`: Ubuntu 24.04 (hoặc 22.04 / Debian 12), đ
 ```bash
 sudo apt-get install -y openssh-server
 ```
-Trên máy Windows, mở PowerShell trong thư mục mã nguồn (`soc-platform`, trước 14/10/2026 là `siem-xdr`):
+Trên máy Windows, mở PowerShell trong thư mục mã nguồn (`siem-xdr`):
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\deploy-vm.ps1 <user>@10.10.40.10      # thêm -Demo: máy web demo, -AI: AI
 ```
@@ -218,12 +218,7 @@ cho Linux, không mang theo `.venv`, `datasets`, `secrets`, `.env`) sang VM và 
 5–20 phút (cài Docker, tải image, build image Python).
 
 Màn hình cuối in sẵn: địa chỉ console, mật khẩu `admin` tạm, đường dẫn file CA, lệnh cài agent Linux / Windows **đã điền IP
-và mật khẩu enroll**. In lại lúc nào cũng được: `sudo ./install.sh info` (trong thư mục `~/soc-platform` trên VM).
-
-VM đã cài trước 14/10/2026 (mã nguồn ở `~/siem-xdr`): script cập nhật vào đúng thư mục đó, `install.sh` giữ tên project
-Compose `siem-xdr` ghi trong `.env`, nên dữ liệu và agent đã enroll còn nguyên. Muốn chuyển sang tên mới, chạy trên VM:
-`cd ~/siem-xdr && sudo python3 tools/migrate_project.py --apply && sudo ./install.sh --update` (xem README mục 2,
-*Nâng cấp từ siem-xdr*). Các lệnh dưới đây ghi `~/soc-platform`; VM cũ thay bằng `~/siem-xdr`.
+và mật khẩu enroll**. In lại lúc nào cũng được: `sudo ./install.sh info` (trong thư mục `~/siem-xdr` trên VM).
 
 ### 2.2 Hoặc chạy ngay trên VM (tự tải mã nguồn từ GitHub)
 
@@ -268,7 +263,7 @@ sau firewall của tài liệu này.
 
 ### 2.4 Lệnh thường dùng sau khi cài
 
-| Việc | Lệnh (trên VM, thư mục `~/soc-platform`) |
+| Việc | Lệnh (trên VM, thư mục `~/siem-xdr`) |
 |---|---|
 | Xem trạng thái | `sudo ./install.sh status` |
 | In lại địa chỉ, mật khẩu tạm, lệnh cài agent | `sudo ./install.sh info` |
@@ -299,7 +294,7 @@ Chặn nhầm cổng firewall làm máy mất DNS, NTP và đường ra Internet
    được máy), 1 `detection` (duyệt rule và đề xuất AI).
 2. Hết cảnh báo chứng chỉ: chép CA về máy host rồi import (lệnh in sẵn ở màn hình cuối):
    ```powershell
-   scp <user>@10.10.40.10:~/soc-platform/ca.crt .
+   scp <user>@10.10.40.10:~/siem-xdr/ca.crt .
    Import-Certificate -FilePath .\ca.crt -CertStoreLocation Cert:\LocalMachine\Root            # PowerShell Administrator
    ```
 3. Kafka UI và Elasticsearch chỉ nghe trên `127.0.0.1` của VM. Xem từ host bằng SSH tunnel:
@@ -547,15 +542,15 @@ Chỉ cần khi không dùng `install.sh` (vd máy không phải Ubuntu / Debian
    ```
 2. Tham số kernel:
    ```bash
-   printf 'vm.max_map_count=262144\nnet.core.rmem_max=33554432\n' | sudo tee /etc/sysctl.d/99-soc-platform.conf
+   printf 'vm.max_map_count=262144\nnet.core.rmem_max=33554432\n' | sudo tee /etc/sysctl.d/99-siem-xdr.conf
    sudo sysctl --system
    ```
 3. Đưa mã nguồn lên VM bằng `git archive` (giữ ký tự xuống dòng LF), không chép thẳng thư mục từ Windows:
    ```powershell
-   git archive --format=tar.gz --prefix=soc-platform/ -o soc-platform.tgz HEAD
-   scp soc-platform.tgz <user>@10.10.40.10:~
+   git archive --format=tar.gz --prefix=siem-xdr/ -o siem-xdr.tgz HEAD
+   scp siem-xdr.tgz <user>@10.10.40.10:~
    ```
-   Trên VM: `tar -xzf soc-platform.tgz && cd soc-platform`.
+   Trên VM: `tar -xzf siem-xdr.tgz && cd siem-xdr`.
 4. Bí mật và quyền. Container chạy bằng user riêng (uid 10001, Grafana 472) nên file bí mật phải đọc được (644), bảo vệ ở
    cấp thư mục (700); manager ghi rule AI đã duyệt vào 2 thư mục rules:
    ```bash
@@ -576,7 +571,7 @@ Chỉ cần khi không dùng `install.sh` (vd máy không phải Ubuntu / Debian
    COMPOSE_PROFILES=            # demo, ai (cách nhau bằng dấu phẩy) nếu cần
    ```
    Đã khởi động rồi mới đổi `MANAGER_TLS_IPS` thì phải sinh lại chứng chỉ: `docker compose down`, xóa volume `certs`
-   (`docker volume rm soc-platform_certs`; hệ thống cũ chưa chuyển tên: `siem-xdr_certs`), rồi khởi động lại.
+   (`docker volume rm siem-xdr_certs`), rồi khởi động lại.
 6. Khởi động và lấy CA:
    ```bash
    sudo docker compose up -d --build

@@ -1,4 +1,4 @@
-"""Rule Sigma do AI viết <-> rule engine của soc-platform.
+"""Rule Sigma do AI viết <-> rule engine của siem-xdr.
 
 AI viết rule mới ở định dạng Sigma (YAML) — định dạng model đã gặp hàng nghìn lần qua SigmaHQ — thay vì DSL riêng
 của SIEM (danh sách mệnh đề {field, op, value} trong JSON). Chạy thử 4-7/10 với DSL: model 7-9B chép nguyên lệnh,

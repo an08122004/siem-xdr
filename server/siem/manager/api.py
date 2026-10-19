@@ -98,7 +98,7 @@ def refresh_catalog() -> None:
 
 
 # tắt /docs, /redoc, /openapi.json: các trang này không qua đăng nhập, làm lộ sơ đồ API trên cổng 8000 mở ra ngoài
-app = FastAPI(title="SOC Platform Manager", version="1.0.0", lifespan=lifespan,
+app = FastAPI(title="SIEM/XDR Manager", version="1.0.0", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(auth.router)
 

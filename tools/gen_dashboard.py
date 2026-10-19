@@ -1,4 +1,4 @@
-"""Sinh Grafana dashboard JSON cho SOC Platform (chạy lại khi muốn chỉnh bố cục):
+"""Sinh Grafana dashboard JSON cho SIEM/XDR (chạy lại khi muốn chỉnh bố cục):
     python tools/gen_dashboard.py
 
   siem-overview     Tổng quan SOC (trang Tổng quan của console nhúng dashboard này)
@@ -488,10 +488,10 @@ kpi_panels = [
 ]
 
 for uid, title, body, extra in (
-        ("siem-overview", "SOC Platform — Tổng quan SOC", panels, {}),
-        ("siem-investigate", "SOC Platform — Điều tra thực thể", investigate, {"templating": [q_var], "time_from": "now-24h"}),
-        ("siem-rules", "SOC Platform — Thư viện rule", rules_lib, {"templating": rules_vars, "time_from": "now-20y", "refresh": "1m"}),
-        ("soc-kpi", "SOC Platform — SOC KPI", kpi_panels, {"time_from": "now-7d", "refresh": "5m"})):
+        ("siem-overview", "SIEM/XDR — Tổng quan SOC", panels, {}),
+        ("siem-investigate", "SIEM/XDR — Điều tra thực thể", investigate, {"templating": [q_var], "time_from": "now-24h"}),
+        ("siem-rules", "SIEM/XDR — Thư viện rule", rules_lib, {"templating": rules_vars, "time_from": "now-20y", "refresh": "1m"}),
+        ("soc-kpi", "SIEM/XDR — SOC KPI", kpi_panels, {"time_from": "now-7d", "refresh": "5m"})):
     out = DIR / f"{uid}.json"
     out.write_text(json.dumps(dashboard(uid, title, body, **extra), ensure_ascii=False, indent=2),
                    encoding="utf-8", newline="\n")

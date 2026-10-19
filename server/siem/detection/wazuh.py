@@ -1,9 +1,9 @@
-"""Cầu nối cảnh báo của ruleset Wazuh -> alert của soc-platform.
+"""Cầu nối cảnh báo của ruleset Wazuh -> alert của siem-xdr.
 
-soc-platform tự phát hiện bằng rule YAML của mình (server/rules) trên MỌI event lấy từ archives.json. Ruleset Wazuh
+siem-xdr tự phát hiện bằng rule YAML của mình (server/rules) trên MỌI event lấy từ archives.json. Ruleset Wazuh
 (hơn 3.000 rule) phần lớn trùng việc với rule tự viết (tấn công web, SSH, đăng nhập Windows...), nên KHÔNG chuyển
 hết sang, tránh mỗi sự cố thành 2 alert. Chỉ lấy:
-  - các nhóm rule mà soc-platform không có rule tương đương (mặc định: FIM `syscheck`, `rootcheck`...),
+  - các nhóm rule mà siem-xdr không có rule tương đương (mặc định: FIM `syscheck`, `rootcheck`...),
     từ level WAZUH_ALERT_MIN_LEVEL trở lên. SCA (đánh giá CIS) không nằm trong mặc định: đó là tư thế cấu hình;
 
   - mọi cảnh báo có level >= WAZUH_ALERT_ANY_LEVEL (Wazuh coi là rất nghiêm trọng), bất kể nhóm.

@@ -826,8 +826,8 @@ def test_grafana_folder_permissions_set_once():
     def upstream(req):
         assert req.headers["x-webauth-user"] == "admin"
         if req.url.path == "/grafana/api/folders":
-            return httpx.Response(200, json=[{"uid": "abc", "title": "SOC Platform"}, {"uid": "old1", "title": "SIEM-XDR"},
-                                             {"uid": "old2", "title": "SIEM-XDR"}, {"uid": "x", "title": "Khác"}])
+            return httpx.Response(200, json=[{"uid": "abc", "title": "SIEM-XDR"}, {"uid": "old1", "title": "SOC Platform"},
+                                             {"uid": "old2", "title": "SOC Platform"}, {"uid": "x", "title": "Khác"}])
         if req.url.path == "/grafana/api/search":
             return httpx.Response(200, json=legacy[req.url.params["folderUIDs"]])
         if req.method == "DELETE":
@@ -883,7 +883,7 @@ def test_mfa_enroll_login_and_replay(env):
     login(env, "an", pw)
     r = env.post("/api/v1/auth/mfa/setup", json={}, headers=H)
     secret = r.json()["secret"]
-    assert r.status_code == 200 and r.json()["otpauth_uri"].startswith("otpauth://totp/SOC%20Platform:an?secret=")
+    assert r.status_code == 200 and r.json()["otpauth_uri"].startswith("otpauth://totp/SIEM-XDR:an?secret=")
     assert env.post("/api/v1/auth/mfa/enable", json={"code": "000000"}, headers=H).status_code == 400
     r = env.post("/api/v1/auth/mfa/enable", json={"code": _code(env, secret)}, headers=H)
     assert r.status_code == 200 and r.json()["mfa_enabled"] is True

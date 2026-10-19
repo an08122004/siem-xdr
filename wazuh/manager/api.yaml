@@ -1,4 +1,4 @@
-# Wazuh API (55000) — chỉ SOAR của SOC Platform gọi, trong mạng docker, KHÔNG publish ra ngoài.
+# Wazuh API (55000) — chỉ SOAR của SIEM/XDR gọi, trong mạng docker, KHÔNG publish ra ngoài.
 # Chứng chỉ do CA nội bộ của lab ký (security/setup.sh), nên SOAR kiểm tra được chứng chỉ bằng /certs/ca/ca.crt.
 # API chỉ nhận TÊN FILE trong api/configuration/ssl -> entrypoint/10-siem-setup.sh chép chứng chỉ vào đó mỗi lần khởi động.
 host: ['0.0.0.0']

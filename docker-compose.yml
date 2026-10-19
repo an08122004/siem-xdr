@@ -1,11 +1,10 @@
-# SOC Platform (trước 14/10/2026 tên là siem-xdr) — pipeline theo BTL/SIEM.txt:
+# SIEM/XDR — pipeline theo BTL/SIEM.txt:
 #   Wazuh agent -> wazuh-manager -> (archives/alerts.json) -> Vector -> Kafka (KRaft) -> Analyzer (Rule) -> Elasticsearch -> Grafana
 #   Syslog (firewall, Suricata) -> Vector ------------------------------------------^
-#   SOAR -> Wazuh API (active response) -> script siem-xdr trên agent (XDR; tên lệnh giữ nguyên để agent đã cài không phải cài lại)
+#   SOAR -> Wazuh API (active response) -> script siem-xdr trên agent (XDR)
 #
-# Tên project cố định (không phụ thuộc tên thư mục): volume soc-platform_esdata, soc-platform_wazuh_etc... Hệ thống cài trước
-# 14/10/2026 có dữ liệu trong volume siem-xdr_*: chạy `python tools/migrate_project.py` một lần trước khi `up` (chép sang tên
-# mới, hoặc --keep-name để giữ tên cũ qua COMPOSE_PROJECT_NAME trong .env; biến này được ưu tiên hơn `name:`).
+# Tên project cố định (không phụ thuộc tên thư mục): volume siem-xdr_esdata, siem-xdr_wazuh_etc... COMPOSE_PROJECT_NAME
+# trong .env (install.sh tự ghi) được ưu tiên hơn `name:`.
 #
 # Bảo mật nội bộ:
 #   - TLS: CA nội bộ do es-certs sinh (volume certs). Elasticsearch HTTPS + transport TLS; manager HTTPS.
@@ -14,7 +13,7 @@
 #     KHÔNG nằm trong .env / biến môi trường. Mật khẩu superuser `elastic` nằm trong keystore của Elasticsearch.
 # Giới hạn còn lại: Kafka chạy plaintext trong mạng docker nội bộ `soc-lab` (không publish ra ngoài).
 
-name: soc-platform
+name: siem-xdr
 
 x-app-env: &app-env
   KAFKA_BOOTSTRAP: kafka:9092
@@ -201,7 +200,7 @@ services:
         ipv4_address: 10.250.30.11
         aliases: [grafana-internal]
 
-  # ---------------------------------------------------------------- SOC Platform
+  # ---------------------------------------------------------------- SIEM/XDR
   # SOC console + API cho analyst (alert, case, lệnh phản ứng thủ công, duyệt đề xuất AI). Không còn nhận agent:
   # agent là Wazuh agent, kết nối tới wazuh-manager.
   manager:

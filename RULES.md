@@ -1,6 +1,6 @@
 # Hệ thống rule phát hiện
 
-Tài liệu về phần **phát hiện bằng luật** của SOC Platform: rule chạy thế nào, có bao nhiêu rule, phủ được tới đâu, điểm mạnh và
+Tài liệu về phần **phát hiện bằng luật** của SIEM/XDR: rule chạy thế nào, có bao nhiêu rule, phủ được tới đâu, điểm mạnh và
 điểm yếu. Số liệu đo ngày 12/10/2026 trên mã nguồn hiện tại. Tài liệu liên quan:
 - `README.md` mục 3: tóm tắt phần phát hiện, ML, so sánh với ruleset Wazuh.
 - `PLAYBOOKS.md`: quy trình xử lý sự cố (case playbook) gắn vào case khi rule bắn.
@@ -137,7 +137,7 @@ liên quan (tối đa 50) và:
 ### 2.8 Cảnh báo từ ruleset Wazuh
 
 Rule viết tay chạy trên **mọi** event Wazuh thu về (`archives.json`). Ruleset gốc của Wazuh phần lớn trùng việc với rule viết
-tay, nên chỉ chuyển sang alert những cảnh báo trong `alerts.json` mà SOC Platform không có rule tương đương:
+tay, nên chỉ chuyển sang alert những cảnh báo trong `alerts.json` mà SIEM/XDR không có rule tương đương:
 - nhóm `syscheck`, `rootcheck`, `vulnerability-detector`, `virustotal`, `yara` (`WAZUH_ALERT_GROUPS`) từ level 7;
 - mọi cảnh báo level ≥ 12, bất kể nhóm.
 

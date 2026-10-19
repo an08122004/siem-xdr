@@ -6,7 +6,7 @@ S=/run/secrets
 
 # 1. Không dùng Wazuh indexer -> không chạy filebeat (dịch vụ s6 của image). Sửa trong filesystem của container,
 #    s6 chép /etc/services.d sang thư mục chạy SAU bước cont-init này, nên có hiệu lực ngay lần khởi động này.
-printf '#!/bin/sh\n# filebeat bị tắt: soc-platform đọc archives/alerts bằng Vector\nexec sleep infinity\n' > /etc/services.d/filebeat/run
+printf '#!/bin/sh\n# filebeat bị tắt: siem-xdr đọc archives/alerts bằng Vector\nexec sleep infinity\n' > /etc/services.d/filebeat/run
 echo "[siem-setup] đã tắt filebeat"
 
 # 2. Mật khẩu enroll agent (auth/use_password=yes): cùng giá trị với secrets/enrollment_key

@@ -61,7 +61,7 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "hunter": frozenset({"triage", "contain", "hunt"}),                     # Tier 3 Threat Hunter / DFIR
     "detection": frozenset({"rules", "hunt"}),                              # Detection Engineer
     "manager": frozenset({"triage", "contain", "hunt", "declare"}),         # SOC Manager
-    "admin": frozenset({"triage", "contain", "hunt", "rules", "declare", "users"}),   # SOC Platform Engineer
+    "admin": frozenset({"triage", "contain", "hunt", "rules", "declare", "users"}),   # Platform Engineer
 }
 ROLES = tuple(PERMISSIONS)
 ROLE_LABELS = {"analyst": "Analyst (Tier 1)", "lead": "Trưởng nhóm IR (Tier 2)", "hunter": "Threat Hunter (Tier 3)",
@@ -110,7 +110,7 @@ _DUMMY_HASH = hash_password(secrets.token_hex(16))   # tên không tồn tại v
 
 # --------------------------------------------------------------------------- TOTP (RFC 6238)
 TOTP_STEP, TOTP_DIGITS, TOTP_WINDOW = 30, 6, 1       # chấp nhận lệch ±1 bước (đồng hồ điện thoại lệch tới 30 giây)
-MFA_ISSUER = "SOC Platform"
+MFA_ISSUER = "SIEM-XDR"
 
 
 def totp_secret() -> str:

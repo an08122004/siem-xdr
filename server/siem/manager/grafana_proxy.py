@@ -67,8 +67,8 @@ async def close() -> None:
         await _client.aclose()
 
 
-FOLDER = "SOC Platform"                                # = folder trong grafana/provisioning/dashboards
-LEGACY_FOLDERS = ("SIEM-XDR",)                         # tên thư mục trước khi đổi tên project (14/10/2026)
+FOLDER = "SIEM-XDR"                                    # = folder trong grafana/provisioning/dashboards
+LEGACY_FOLDERS = ("SOC Platform",)                     # tên thư mục dùng 14–19/10/2026: xóa khi đã rỗng
 DEFAULT_PERMS = [{"role": "Viewer", "permission": 1}, {"role": "Editor", "permission": 2}]   # 1 = xem, 2 = sửa
 
 

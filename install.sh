@@ -23,8 +23,7 @@ cd "$(dirname "$(readlink -f "$0")")"
 ROOT=$PWD
 ARGV=("$@")
 REPO=an08122004/siem-xdr            # GitHub: nơi tải mã nguồn khi máy chưa có / --fetch (nhánh main)
-PROJECT=siem-xdr                    # tên project Compose; máy đang chạy bằng tên khác: xem pick_project
-OLD_PROJECT=soc-platform            # tên cũ (bản cài từ 14/10/2026), chỉ để nhận ra hệ thống đang chạy
+PROJECT=siem-xdr                    # tên project Compose (= name: trong docker-compose.yml); .env ghi tên khác: xem pick_project
 APP_UID=10001                       # user "siem" trong image server (server/Dockerfile)
 APP_IMAGE=siem-xdr-server:latest    # image server (= image: trong docker-compose.yml), chỉ build tại chỗ
 WAZUH_VERSION=4.14.7
@@ -81,8 +80,8 @@ env_set() {   # env_set KHÓA GIÁ_TRỊ: sửa dòng có sẵn (kể cả dòng
   elif grep -q "^# *$k=" .env; then sed -i "0,/^# *$k=.*/s||$k=$v|" .env
   else printf '%s=%s\n' "$k" "$v" >> .env; fi
 }
-# COMPOSE_FILE / COMPOSE_PROFILES lấy từ .env. Tên project truyền thẳng (pick_project): lúc .env chưa ghi tên, compose
-# dùng name: trong docker-compose.yml (chưa đổi tên) và thao tác nhầm sang hệ thống khác với hệ thống đang chạy.
+# COMPOSE_FILE / COMPOSE_PROFILES lấy từ .env. Tên project truyền thẳng (pick_project): lệnh compose luôn nhắm đúng hệ thống
+# đang chạy, kể cả khi .env ghi COMPOSE_PROJECT_NAME khác name: trong docker-compose.yml.
 compose() { docker compose -p "$PROJECT" "$@"; }
 
 # ------------------------------------------------------------------------------------------------ mã nguồn
@@ -186,7 +185,6 @@ install_docker() {
 
 tune_kernel() {
   say "3/8 Tham số kernel"
-  rm -f "/etc/sysctl.d/99-$OLD_PROJECT.conf"          # file của bản cài dùng tên cũ
   cat > /etc/sysctl.d/99-siem-xdr.conf <<'EOF'
 # siem-xdr (install.sh)
 vm.max_map_count=262144
@@ -223,13 +221,10 @@ detect_ip() {
 }
 
 # ------------------------------------------------------------------------------------------------ cấu hình
-# Tên project Compose: giữ tên đang dùng, không tự đổi (đổi tên mà không chép volume = hệ thống mới rỗng). Bản cài từ
-# 14/10/2026 có thể chạy bằng tên cũ: COMPOSE_PROJECT_NAME trong .env, hoặc có volume ${OLD_PROJECT}_*.
+# Tên project Compose: giữ tên ghi trong .env, không tự đổi (đổi tên mà không chép volume = hệ thống mới rỗng).
 pick_project() {
   local cur; cur=$(env_get COMPOSE_PROJECT_NAME)
-  if [ -n "$cur" ]; then PROJECT=$cur
-  elif docker volume inspect "${OLD_PROJECT}_certs" >/dev/null 2>&1; then PROJECT=$OLD_PROJECT
-  fi
+  [ -z "$cur" ] || PROJECT=$cur
 }
 
 configure() {
@@ -247,9 +242,7 @@ configure() {
 
   [ -f .env ] || { cp .env.example .env; ok "tạo .env từ .env.example"; }
   pick_project
-  if [ "$PROJECT" = "$OLD_PROJECT" ]; then
-    warn "hệ thống đang chạy bằng tên cũ: giữ tên project $OLD_PROJECT để không mất dữ liệu (volume ${OLD_PROJECT}_*)"
-  fi
+  [ "$PROJECT" = siem-xdr ] || warn "giữ tên project $PROJECT ghi trong .env (dữ liệu trong volume ${PROJECT}_*)"
   local old_ip; old_ip=$(env_get MANAGER_TLS_IPS | cut -d, -f1)
   if [ -z "$IP" ]; then IP=${old_ip:-$(detect_ip)}; fi
   valid_ipv4 "$IP" || die "IP không hợp lệ: $IP"

@@ -1,4 +1,4 @@
-"""Tạo / cập nhật user Wazuh API `siem-soar` với quyền TỐI THIỂU cho SOAR của SOC Platform (idempotent).
+"""Tạo / cập nhật user Wazuh API `siem-soar` với quyền TỐI THIỂU cho SOAR của SIEM/XDR (idempotent).
 
     python3 siem_api_user.py /run/secrets/wazuh_api_password
 

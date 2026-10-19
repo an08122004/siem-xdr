@@ -5,7 +5,7 @@
     python tools/fetch_datasets.py csic     # chỉ tải dataset có tên file chứa "csic"
     python tools/fetch_datasets.py splunk otrf   # bộ sưu tập lớn (log endpoint ghi thật, vài GB) — chỉ tải khi gọi tên
 
-Sau đó chuyển đổi sang định dạng event của soc-platform:
+Sau đó chuyển đổi sang định dạng event của siem-xdr:
     python tools/convert_datasets.py
 
 Dữ liệu bên thứ ba KHÔNG đưa vào repo (datasets/ đã gitignore). Nguồn, giấy phép và
@@ -132,7 +132,7 @@ MAX_FILE_MB = 300          # bỏ qua file lớn hơn (ghi vào manifest) để 
 
 
 def _get_json(url: str):
-    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "soc-platform"}), timeout=120) as r:
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "siem-xdr"}), timeout=120) as r:
         return json.load(r)
 
 
@@ -144,7 +144,7 @@ def _download(url: str, dest: Path, force: bool) -> tuple[str, int, str]:
     tmp = dest.with_name(dest.name + ".part")
     for attempt in range(3):
         try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "soc-platform"}),
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "siem-xdr"}),
                                         timeout=300) as r:
                 size = int(r.headers.get("Content-Length") or 0)
                 if size > MAX_FILE_MB * 1_000_000:

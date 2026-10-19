@@ -1,4 +1,4 @@
-"""Dựng lab máy ảo VMware Workstation cho SOC Platform: biến thể "SIEM chạy trên Docker của máy host" (DEPLOY-VM.md).
+"""Dựng lab máy ảo VMware Workstation cho SIEM/XDR: biến thể "SIEM chạy trên Docker của máy host" (DEPLOY-VM.md).
 
 Không cần quyền admin trên máy host: 3 vùng là VMware LAN segment (khai báo trong .vmx), vùng SOC là VMnet1 host-only có sẵn.
 

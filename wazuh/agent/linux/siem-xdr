@@ -1,6 +1,5 @@
 #!/bin/sh
-# Script active response của SOC Platform cho Wazuh agent Linux (tên lệnh siem-xdr giữ từ trước khi đổi
-# tên project, để agent đã cài không phải cài lại).
+# Script active response của SIEM/XDR cho Wazuh agent Linux.
 # Cài vào /var/ossec/active-response/bin/siem-xdr (root:wazuh, 750). SOAR gọi qua Wazuh API:
 #   PUT /active-response?agents_list=<id>  {"command": "!siem-xdr", "arguments": [<loại>, <đích>, <action_id>]}
 # wazuh-execd đưa 1 dòng JSON vào stdin: {..., "command": "add", "parameters": {"extra_args": [...], ...}}

@@ -229,7 +229,7 @@ def _coverage(rep: Report, config_dir: Path | None) -> None:
                              "rules": active, "shadow": shadow})
 
 
-def attack_layer(rep: Report, name: str = "SOC Platform - độ phủ rule") -> dict[str, Any]:
+def attack_layer(rep: Report, name: str = "SIEM/XDR - độ phủ rule") -> dict[str, Any]:
     """Layer cho MITRE ATT&CK Navigator: điểm = số rule chạy chính thức; kỹ thuật ưu tiên chưa có rule tô đỏ."""
     by_tech: dict[str, list[str]] = {}
     for r in rep.rules.values():

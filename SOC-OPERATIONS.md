@@ -1,6 +1,6 @@
-# Vận hành SOC trên SOC Platform
+# Vận hành SOC trên SIEM/XDR
 
-Tài liệu này là quy trình vận hành của SOC chạy trên SOC Platform, cập nhật ngày 14/10/2026. Mỗi mục ghi quy định, thao tác
+Tài liệu này là quy trình vận hành của SOC chạy trên SIEM/XDR, cập nhật ngày 14/10/2026. Mỗi mục ghi quy định, thao tác
 trên console, nơi thực thi trong mã và biến cấu hình. Các mục được đánh số giống chỗ mã nguồn tham chiếu (vd "SOC-OPERATIONS.md
 mục 4"), nên khi thêm mục mới thì đặt ở cuối, không đánh số lại. Kiến trúc và cài đặt: [README.md](README.md). Phát hiện:
 [RULES.md](RULES.md). Case playbook: [PLAYBOOKS.md](PLAYBOOKS.md). AI viết rule: [AI-README.md](AI-README.md).
@@ -31,7 +31,7 @@ Mỗi người có tài khoản riêng. Quyền tính theo năng lực, không t
 | `hunter` | Threat Hunter / DFIR (Tier 3) | triage, contain, hunt | Editor |
 | `detection` | Detection Engineer | rules, hunt | Editor |
 | `manager` | SOC Manager | triage, contain, hunt, declare | Editor |
-| `admin` | Quản trị nền tảng (SOC Platform Engineer) | tất cả, thêm users | Admin |
+| `admin` | Quản trị nền tảng (Platform Engineer) | tất cả, thêm users | Admin |
 
 | Quyền | Được làm |
 |---|---|

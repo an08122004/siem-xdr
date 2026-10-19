@@ -49,7 +49,7 @@ class Analyzer:
         doc = self.enricher.enrich(normalize(raw))
         if raw.get("event_type") == "wazuh_alert":
             # cảnh báo từ alerts.json của Wazuh: event gốc đã đến qua archives.json (được lưu + chạy rule ở đó),
-            # ở đây chỉ chuyển cảnh báo thuộc nhóm rule mà soc-platform không tự viết thành alert
+            # ở đây chỉ chuyển cảnh báo thuộc nhóm rule mà siem-xdr không tự viết thành alert
             if (alert := wazuh_bridge.to_alert(doc)):
                 if (own := wazuh_bridge.covered_by(doc, self.engine.rules)):
                     log.debug("bỏ cảnh báo Wazuh %s: event FIM đã thành alert %s", get(doc, "wazuh.rule.id"), own)

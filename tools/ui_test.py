@@ -5,7 +5,7 @@
 
 Tự tạo quản trị viên tạm `ui-admin` (xóa khi xong, cả bên Grafana), đi qua mọi trang, mở chi tiết alert / case,
 bấm liên kết trong dashboard Grafana nhúng, đo lỗi JavaScript và chụp màn hình (máy tính + điện thoại).
-Chạy từ thư mục mã nguồn (soc-platform) khi stack đang chạy.
+Chạy từ thư mục mã nguồn (siem-xdr) khi stack đang chạy.
 """
 import re
 import subprocess

@@ -1,6 +1,6 @@
 # AI hỗ trợ viết rule: pipeline, dữ liệu và đánh giá
 
-Tài liệu này mô tả toàn bộ phần AI của SOC Platform (`server/siem/ai/`): AI làm gì, dữ liệu lấy từ đâu, rule được sinh và kiểm
+Tài liệu này mô tả toàn bộ phần AI của SIEM/XDR (`server/siem/ai/`): AI làm gì, dữ liệu lấy từ đâu, rule được sinh và kiểm
 định ra sao, kết quả đo các model, và vì sao tỉ lệ đạt còn thấp. Mọi thay đổi về pipeline AI và kết quả thử nghiệm ghi vào
 file này; `README.md` chỉ giữ phần tóm tắt.
 
@@ -981,7 +981,7 @@ Khi đã dùng GPU thì mọi lệnh `up` sau đó đều phải kèm `-f docker
 
 **Kết luận.** Trong 15 nguồn đã đọc (bài báo 2024–2026, tài liệu sản phẩm, báo cáo của đội SOC), không hệ thống dùng LLM nào tự
 triển khai rule. Tất cả theo cùng một khuôn: AI soạn bản nháp, code kiểm tra, người duyệt; hệ thống có vận hành thật thì còn đo
-trước khi bật. Với SOC Platform, nên làm như sau:
+trước khi bật. Với SIEM/XDR, nên làm như sau:
 1. giữ luồng sinh rule từ dữ liệu đang có (mục 2–10), chỉnh ba chỗ;
 2. thêm luồng **CTI → rule**, dùng lại khung ca test của detection-as-code;
 3. thêm luồng **tối ưu bộ rule**: rule trùng, rule giòn, rule báo nhầm nhiều;
@@ -1019,7 +1019,7 @@ Các phương án được so theo năm tiêu chí:
 | Tối ưu bộ rule có sẵn | RuleGenie (5/2025); thử nghiệm với Wazuh ở SBSeg 2026 | Danh mục rule → gợi ý gộp / sửa; hồ sơ tổ chức → rule mức độ riêng | RuleGenie: không công bố số liệu. SBSeg: có (1.000 event SSH thật) | SBSeg: rule do LLM viết **kém hơn** rule gốc của Wazuh (độ chính xác thấp hơn 4,4 điểm, F1 thấp hơn 3,1 điểm), vì nâng nhầm mức của đăng nhập sai từ bên ngoài |
 | Fine-tune model riêng | SigmaGen (FPT Software, 3/2025); các LoRA cộng đồng trên Qwen2.5-7B, Qwen3-1.7B | Cặp (mô tả hoặc CTI, rule Sigma) | Không | SigmaGen fine-tune GPT-4o-mini trên 200 rule, chi phí khoảng 29 USD/tháng. LoRA Qwen2.5-7B đạt 0,96 trên các chỉ số định dạng, không đo trên log |
 
-Pipeline hiện tại của SOC Platform (mục 2–10) thuộc hướng "lấp lỗ hổng từ dữ liệu" có dùng LLM: model đọc mẫu tấn công và mẫu bình
+Pipeline hiện tại của SIEM/XDR (mục 2–10) thuộc hướng "lấp lỗ hổng từ dữ liệu" có dùng LLM: model đọc mẫu tấn công và mẫu bình
 thường; code đo từng vế, kiểm định trên tập kiểm tra model chưa thấy và replay log thật.
 
 ### 14.3 Bài học từ các nguồn
@@ -1078,7 +1078,7 @@ thường; code đo từng vế, kiểm định trên tập kiểm tra model ch�
 
 ### 14.4 So với pipeline hiện tại
 
-| Thực tiễn tốt từ các nguồn | SOC Platform hiện có | Còn thiếu |
+| Thực tiễn tốt từ các nguồn | SIEM/XDR hiện có | Còn thiếu |
 |---|---|---|
 | Đầu vào là CTI (Google, mnemonic, CTI-REALM, các bài CTI → Sigma) | Chưa có. Feed MISP chỉ lấy IOC (`pipeline/misp.py`) | Luồng đọc báo cáo, trích cơ hội phát hiện |
 | Kiểm độ phủ bằng sự kiện tổng hợp trước khi sinh (Google) | Có khung ca test `rules/cases` và `detection/ruletest.py`; có báo cáo độ phủ trên dataset (`ai/benchmark.py`) | Chạy toàn bộ rule trên sự kiện tổng hợp sinh từ CTI |

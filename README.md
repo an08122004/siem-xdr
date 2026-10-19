@@ -1,4 +1,4 @@
-# SOC Platform — nền tảng SOC tự xây dựng
+# SIEM/XDR — nền tảng SOC tự xây dựng
 
 Nền tảng cho một trung tâm điều hành an ninh (SOC) của môn GSANM. Hệ thống gồm SIEM (thu thập, chuẩn hóa, phát hiện), XDR
 (phản ứng trên endpoint qua Wazuh agent), SOAR và quản lý case, cùng quy trình vận hành SOC: vai trò, mức ưu tiên và SLA,
@@ -55,7 +55,7 @@ Docker. Quy trình vận hành: **[SOC-OPERATIONS.md](SOC-OPERATIONS.md)**. Lộ
 Endpoint dùng **Wazuh agent** chính thức, thay cho agent Go tự viết trước đây (thiếu FIM thời gian thực, SCA, rootcheck,
 kiểm kê, cấu hình tập trung, bộ cài chính thức). Agent kết nối tới **wazuh-manager** trong stack. Manager chỉ làm trạm thu:
 nhận event, chạy ruleset Wazuh, chuyển lệnh phản ứng xuống agent. Phân tích bằng rule riêng, lưu trữ, AI, SOAR và console
-vẫn là phần tự xây của SOC Platform. Không dùng Wazuh indexer, dashboard hay filebeat.
+vẫn là phần tự xây của SIEM/XDR. Không dùng Wazuh indexer, dashboard hay filebeat.
 
 | Chức năng | Agent Go cũ | Wazuh agent |
 |---|---|---|
@@ -175,20 +175,10 @@ docker compose ps              # es-setup phải Exited (0); kafka, elasticsearc
 Hệ thống đã chạy từ trước thì chạy lại `python tools/init_secrets.py` (sinh thêm các bí mật mới, vd `misp_api_key` rỗng),
 rồi `docker compose up -d --force-recreate es-certs es-setup` để cập nhật chứng chỉ, quyền RBAC và chính sách snapshot.
 
-**Nâng cấp từ siem-xdr (hệ thống cài trước 14/10/2026)**: `docker-compose.yml` giờ đặt `name: soc-platform` (không còn phụ
-thuộc tên thư mục), nên volume mới là `soc-platform_*`. Dữ liệu cũ (Elasticsearch, khóa agent Wazuh, chứng chỉ, Grafana, Kafka)
-vẫn nằm trong `siem-xdr_*`. Nếu cứ `up` thì sẽ ra một hệ thống mới rỗng, agent phải enroll lại. Trước lần `up` đầu tiên với mã mới:
-```bash
-python tools/migrate_project.py               # xem hiện trạng, không đổi gì
-python tools/migrate_project.py --apply       # dừng hệ thống cũ, chép từng volume sang soc-platform_* (kiểm số file)
-docker compose up -d --build                  # build image siem-xdr-server từ mã hiện tại, chạy hệ thống mới
-# hoặc giữ tên cũ, không chép gì: python tools/migrate_project.py --keep-name  (ghi COMPOSE_PROJECT_NAME=siem-xdr vào .env)
-```
-Công cụ không xóa volume cũ. Kiểm tra console, alert, agent còn đủ rồi mới xóa bằng lệnh mà công cụ in ra. Trên máy chủ cài
-bằng `install.sh`, script đọc `COMPOSE_PROJECT_NAME` trong `.env` và tiếp tục dùng tên `siem-xdr` cho tới khi bạn chạy
-`sudo python3 tools/migrate_project.py --apply && sudo ./install.sh --update`. `tools/deploy-vm.ps1` thấy máy chủ đã có
-`~/siem-xdr` (chưa có `~/soc-platform`) thì cập nhật vào thư mục cũ. Grafana chuyển dashboard sang thư mục *SOC Platform*;
-manager xóa thư mục *SIEM-XDR* cũ khi nó đã rỗng.
+**Tên project**: `docker-compose.yml` đặt `name: siem-xdr` (không phụ thuộc tên thư mục), dữ liệu nằm trong volume `siem-xdr_*`;
+`COMPOSE_PROJECT_NAME` trong `.env` (install.sh tự ghi) được ưu tiên hơn. Image server là `siem-xdr-server:latest`, chỉ build
+tại chỗ: sau khi lấy mã mới luôn chạy `docker compose up -d --build`. Dashboard Grafana nằm trong thư mục *SIEM-XDR*; manager
+xóa thư mục *SOC Platform* (tên dùng 14–19/10/2026) khi nó đã rỗng.
 
 **Đăng nhập lần đầu**: mở https://localhost:8000, tài khoản `admin`, mật khẩu tạm trong `secrets/console_admin_password`.
 Trang đăng nhập bắt đặt mật khẩu mới ngay, sau đó vào tab *Tài khoản* để tạo tài khoản riêng cho từng người (xem mục 7).
@@ -329,9 +319,9 @@ model bắt được tấn công nhưng **báo nhầm khoảng 32%** lưu lượ
 Nguyên nhân chính: baseline tổng hợp và một model chung cho mọi nguồn. Code được giữ lại trong `server/siem/detection/ml.py`.
 Trước khi bật lại cần: giai đoạn học trên dữ liệu thật, tách model theo nguồn, hiệu chỉnh ngưỡng, chống lặp alert.
 
-**Cảnh báo từ ruleset Wazuh** (`server/siem/detection/wazuh.py`): rule của SOC Platform chạy trên MỌI event lấy từ
+**Cảnh báo từ ruleset Wazuh** (`server/siem/detection/wazuh.py`): rule của SIEM/XDR chạy trên MỌI event lấy từ
 `archives.json`. Ruleset Wazuh (hơn 3.000 rule) phần lớn trùng việc với rule tự viết (web, SSH, đăng nhập Windows...), nên
-không chuyển hết sang để tránh mỗi sự cố thành 2 alert. Chỉ lấy cảnh báo trong `alerts.json` thuộc các nhóm mà SOC Platform không
+không chuyển hết sang để tránh mỗi sự cố thành 2 alert. Chỉ lấy cảnh báo trong `alerts.json` thuộc các nhóm mà SIEM/XDR không
 có rule tương đương (`WAZUH_ALERT_GROUPS`, mặc định `syscheck`, `rootcheck`, `vulnerability-detector`, `virustotal`, `yara`) từ level 7,
 cộng mọi cảnh báo level ≥ 12. Alert có `rule.id = WZH-<id rule Wazuh>`, `alert.source = wazuh`. Level ánh xạ sang severity:
 7–9 medium, 10–11 high, ≥ 12 critical. Kết quả SCA (CIS) KHÔNG chuyển thành alert: máy demo có 83 mục không đạt ngay khi khởi động,
@@ -541,7 +531,7 @@ IP nguồn, máy, hình thức) và đăng nhập form web (POST tới đường
 | **Telemetry của agent** | Dòng tiến trình `siem-proc:` chỉ được tin khi đến từ nguồn `siem-procs`, dòng kết quả lệnh `siem-xdr:` chỉ khi đến từ `active-responses.log`, và phải khớp từ đầu dòng (`server/siem/pipeline/normalize.py`). Nguồn (location) do cấu hình agent đặt, kẻ tấn công không đổi được. Trước 11/10/2026 hai dòng này được tìm ở mọi log: chỉ cần User-Agent hay tên user SSH chứa `siem-proc: pid=...` là có event tiến trình giả → LNX-002 → SOAR tự kill PID do kẻ tấn công chọn; chứa `siem-xdr: ...` thì request tấn công thành "kết quả lệnh" và thoát mọi rule web. |
 | **Wazuh API** | Không publish cổng 55000. SOAR dùng user `siem-soar` chỉ có 2 quyền: `active-response:command` và `agent:read` (đọc rule hay sửa cấu hình → 403). Hai user mặc định `wazuh` / `wazuh-wui` (mật khẩu mặc định công khai) bị đổi sang mật khẩu ngẫu nhiên mỗi lần khởi động. |
 | **Đăng nhập console** | Trang đăng nhập chung `/login` cho console và Grafana (`server/siem/manager/static/login.html`). Tài khoản riêng từng người thay cho API key dùng chung (`server/siem/manager/auth.py`). Mật khẩu băm scrypt, tối thiểu 12 ký tự, không chứa tên đăng nhập. Phiên nằm trong cookie `HttpOnly` + `Secure` + `SameSite=Strict`, JavaScript không đọc được, không lưu gì vào localStorage. Hết hạn sau 30 phút không thao tác (lần tự làm mới 5 giây/lần của console không được tính) và tối đa 8 giờ. Sai mật khẩu 5 lần / 15 phút (theo tài khoản hoặc IP) thì khóa 15 phút. Request thay đổi dữ liệu phải có header `X-Requested-With` (chống CSRF). Cấu hình: `CONSOLE_IDLE_MINUTES`, `CONSOLE_SESSION_HOURS`, `CONSOLE_MAX_FAILURES`. |
-| **Grafana dùng chung phiên** | Grafana không mở cổng ra ngoài. Mọi request đi qua manager (`server/siem/manager/grafana_proxy.py`), nên Grafana có cùng chính sách phiên, khóa tài khoản và nhật ký đăng nhập với console. Manager kiểm tra phiên (chưa đăng nhập → `/login`), xóa header `X-WEBAUTH-*` do trình duyệt gửi, rồi gửi tên và vai trò sang Grafana ở chế độ *auth proxy*. Form đăng nhập, basic auth và phiên riêng của Grafana đều tắt. Grafana chỉ tin header từ IP của manager (`10.250.30.10`) trên mạng riêng `grafana-auth`, và chỉ lắng nghe trên mạng đó, nên container khác trong lab (vd. máy web demo bị chiếm) không gọi thẳng được. Vai trò: `admin` → Admin; `manager`, `lead`, `hunter`, `detection` → Editor (sửa dashboard, Explore); `analyst` → Viewer (chỉ xem). Dashboard tự làm mới 10 giây/lần không gia hạn phiên. Bấm *Sign out* trong Grafana là đăng xuất cả console. Lúc khởi động, manager gán quyền mặc định (Viewer xem, Editor sửa) cho thư mục SOC Platform, vì Grafana 11 tạo thư mục provisioning mà không kèm quyền nào. |
+| **Grafana dùng chung phiên** | Grafana không mở cổng ra ngoài. Mọi request đi qua manager (`server/siem/manager/grafana_proxy.py`), nên Grafana có cùng chính sách phiên, khóa tài khoản và nhật ký đăng nhập với console. Manager kiểm tra phiên (chưa đăng nhập → `/login`), xóa header `X-WEBAUTH-*` do trình duyệt gửi, rồi gửi tên và vai trò sang Grafana ở chế độ *auth proxy*. Form đăng nhập, basic auth và phiên riêng của Grafana đều tắt. Grafana chỉ tin header từ IP của manager (`10.250.30.10`) trên mạng riêng `grafana-auth`, và chỉ lắng nghe trên mạng đó, nên container khác trong lab (vd. máy web demo bị chiếm) không gọi thẳng được. Vai trò: `admin` → Admin; `manager`, `lead`, `hunter`, `detection` → Editor (sửa dashboard, Explore); `analyst` → Viewer (chỉ xem). Dashboard tự làm mới 10 giây/lần không gia hạn phiên. Bấm *Sign out* trong Grafana là đăng xuất cả console. Lúc khởi động, manager gán quyền mặc định (Viewer xem, Editor sửa) cho thư mục SIEM/XDR, vì Grafana 11 tạo thư mục provisioning mà không kèm quyền nào. |
 | **Vai trò console** | 6 vai trò theo cơ cấu SOC, quyền theo năng lực ([SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 1): `analyst` (Tier 1) xử lý alert / case, chặn IP, kill; `lead` (Tier 2) thêm cô lập máy; `hunter` (Tier 3) thêm threat hunting; `detection` (Detection Engineer) duyệt đề xuất AI và bật chính thức rule, không xử lý cảnh báo; `manager` (SOC Manager) thêm tuyên bố sự cố lớn; `admin` thêm quản lý tài khoản (tab *Tài khoản*). Người xử lý cảnh báo không tự duyệt rule mình dùng (trước 13/10/2026 analyst duyệt được đề xuất AI). Xác thực 2 lớp TOTP, bắt buộc với vai trò trong `CONSOLE_MFA_REQUIRED_ROLES`. Tài khoản mới và mật khẩu vừa đặt lại luôn phải đổi ở lần đăng nhập đầu. Không tự khóa được chính mình, và luôn phải còn ít nhất 1 admin. |
 | **Đăng ký tài khoản** | Trang đăng ký riêng `/register` (liên kết *Đăng ký* ở trang đăng nhập) (họ và tên, ngày sinh, quê quán, số điện thoại, chức vụ, tên đăng nhập, mật khẩu). Tài khoản tạo ra ở trạng thái chờ duyệt, bị khóa tới khi admin duyệt và chọn vai trò ở tab *Tài khoản*; từ chối thì yêu cầu bị xóa. Mỗi IP gửi tối đa 5 yêu cầu / 15 phút. Thông tin cá nhân chỉ nằm ở `console-users`, không ghi vào nhật ký. Admin tạo tài khoản ở trang riêng *Tạo tài khoản* (`#/newuser`, không tự làm mới nên không mất chữ đang gõ), nhập được các trường này (không bắt buộc). |
 | **Nhật ký cho admin** | Tab *Nhật ký*: các phiên đang đăng nhập của mọi tài khoản (IP, lúc đăng nhập, thao tác gần nhất; đăng xuất từ xa được) và lịch sử hoạt động: đăng nhập, quản lý tài khoản, mọi thao tác thay đổi dữ liệu trong console (cập nhật cảnh báo / case, gửi lệnh phản ứng, duyệt AI...), lọc theo loại, thời gian, tài khoản. Phiên lưu ở index `console-sessions` (chỉ SHA-256 của token) nên manager khởi động lại không đăng xuất ai. |

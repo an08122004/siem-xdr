@@ -1,7 +1,7 @@
 apiVersion: 1
 providers:
   - name: siem
-    folder: SOC Platform              # = FOLDER trong server/siem/manager/grafana_proxy.py (trước 14/10/2026: SIEM-XDR)
+    folder: SIEM-XDR                  # = FOLDER trong server/siem/manager/grafana_proxy.py
     type: file
     disableDeletion: false
     allowUiUpdates: true
