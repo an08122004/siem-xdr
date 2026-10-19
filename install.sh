@@ -38,7 +38,8 @@ Tùy chọn:
   --demo, --ai      bật thêm máy web demo / AI (được nhớ trong .env cho các lần chạy sau)
   --gpu, --no-gpu   ép bật / tắt GPU cho Ollama (mặc định: bật nếu có nvidia-container-toolkit)
   --update          build lại image (dùng sau khi chép mã nguồn mới)
-  --fetch           tải mã mới nhất từ GitHub đè lên mã hiện có (giữ secrets/, .env, rule AI đã duyệt), rồi như --update
+  --fetch           tải mã mới nhất từ GitHub đè lên mã hiện có (giữ secrets/, .env, rule AI đã duyệt; bản cũ của
+                    server/config lưu ở server/config.bak-<ngày giờ>), rồi như --update
   -y, --yes         không hỏi lại (vd khi đổi IP phải sinh lại chứng chỉ)
 EOF
 }
@@ -100,6 +101,12 @@ fetch_source() {
     # tar chạy bằng user gọi sudo: mã nguồn thuộc user đó, như khi chép bằng tools/deploy-vm.ps1
     local -a as=(); [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ] && as=(sudo -u "$SUDO_USER")
     "${as[@]}" mkdir -p "$dir"
+    # tải đè cả file người dùng sửa trên máy (vd server/config/assets.yml, DEPLOY-VM.md mục 1): giữ bản cũ để so / chép lại
+    if [ -d "$dir/server/config" ]; then
+      local bak; bak=server/config.bak-$(date +%Y%m%d-%H%M%S)
+      cp -a "$dir/server/config" "$dir/$bak" || die "không lưu được bản cũ của server/config: dừng, chưa tải đè gì"
+      ok "bản cũ của server/config lưu ở $bak (so lại: diff -r $bak server/config)"
+    fi
     # token qua stdin (-K -: cấu hình curl) thay vì tham số dòng lệnh: không lộ trong ps. Rule AI đã duyệt + ngoại lệ: không ghi đè
     { [ -z "$token" ] || printf 'header = "Authorization: Bearer %s"\n' "$token"; } \
       | curl -fsSL -K - "https://api.github.com/repos/$REPO/tarball/main" \
@@ -130,7 +137,7 @@ check_system() {
   [ "$(uname -m)" = x86_64 ] || warn "kiến trúc $(uname -m): mới thử trên x86_64"
   local mem_gb disk_gb
   mem_gb=$(awk '/^MemTotal/ {printf "%d", $2/1024/1024 + 0.5}' /proc/meminfo)
-  disk_gb=$(df -Pk "$ROOT" | awk 'NR==2 {printf "%d", $4/1024/1024}')
+  disk_gb=$(df -Pk /var/lib | awk 'NR==2 {printf "%d", $4/1024/1024}')    # dữ liệu Docker (ES, Wazuh) ở /var/lib/docker
   if [ "$mem_gb" -lt 7 ]; then warn "RAM ${mem_gb} GB: nên có 8 GB (Elasticsearch ~1,8 GB, cả hệ thống ~3,6 GB lúc rảnh)"
   else ok "RAM ${mem_gb} GB"; fi
   [ "$AI" = 1 ] && [ "$mem_gb" -lt 15 ] && warn "bật AI nên có 16 GB RAM (model ~6,6 GB)"
@@ -243,7 +250,7 @@ configure() {
   [ -f .env ] || { cp .env.example .env; ok "tạo .env từ .env.example"; }
   pick_project
   [ "$PROJECT" = siem-xdr ] || warn "giữ tên project $PROJECT ghi trong .env (dữ liệu trong volume ${PROJECT}_*)"
-  local old_ip; old_ip=$(env_get MANAGER_TLS_IPS | cut -d, -f1)
+  local tls_ips old_ip; tls_ips=$(env_get MANAGER_TLS_IPS); old_ip=${tls_ips%%,*}
   if [ -z "$IP" ]; then IP=${old_ip:-$(detect_ip)}; fi
   valid_ipv4 "$IP" || die "IP không hợp lệ: $IP"
   if [ -n "$old_ip" ] && [ "$old_ip" != "$IP" ] && docker volume inspect "${PROJECT}_certs" >/dev/null 2>&1; then
@@ -255,7 +262,7 @@ configure() {
     warn "agent đã cài vẫn trỏ $old_ip: sửa <address> trong ossec.conf của agent thành $IP rồi khởi động lại agent"
   fi
   env_set COMPOSE_PROJECT_NAME "$PROJECT"
-  env_set MANAGER_TLS_IPS "$IP"
+  env_set MANAGER_TLS_IPS "$IP${tls_ips#"$old_ip"}"     # chỉ thay IP đầu, giữ các IP người dùng thêm sau dấu phẩy
   env_set GRAFANA_ROOT_URL "https://$IP:8000/grafana/"
 
   # Không bao giờ để SOAR chặn chính máy SIEM / máy quản trị. Giữ mục người dùng đã thêm.
@@ -265,7 +272,7 @@ configure() {
   if [ -n "$ADMIN_IP" ] && ! valid_ipv4 "$ADMIN_IP"; then ADMIN_IP=""; fi
   local wl item; wl=$(env_get SOAR_WHITELIST)
   if [ -n "$old_ip" ] && [ "$old_ip" != "$IP" ]; then   # IP cũ của máy chủ có thể được cấp cho máy khác
-    wl=$(printf '%s' "$wl" | tr ',' '\n' | grep -vxF "$old_ip/32" | paste -sd, -)
+    wl=$(printf '%s' "$wl" | tr ',' '\n' | { grep -vxF "$old_ip/32" || true; } | paste -sd, -)   # không còn dòng nào: grep trả 1
   fi
   for item in 127.0.0.0/8 "$IP/32" ${ADMIN_IP:+"$ADMIN_IP/32"}; do
     case ",$wl," in *",$item,"*) ;; *) wl=${wl:+$wl,}$item ;; esac
@@ -297,7 +304,12 @@ start_stack() {
   docker image inspect "$APP_IMAGE" >/dev/null 2>&1 || compose build manager
   local -a args=(up -d --remove-orphans)
   [ "$UPDATE" = 1 ] && args+=(--build)
-  compose "${args[@]}"
+  # up chờ Elasticsearch healthy và es-setup xong rồi mới chạy service app: một trong hai lỗi thì up thoát mã khác 0
+  if ! compose "${args[@]}"; then
+    compose ps -a >&2 || true
+    compose logs --tail 30 es-setup elasticsearch >&2 || true
+    die "khởi động lỗi (trạng thái và log ở trên). Thường do thiếu RAM hoặc vm.max_map_count; service khác: docker compose logs <tên>"
+  fi
 }
 
 # ------------------------------------------------------------------------------------------------ chờ sẵn sàng
@@ -309,19 +321,12 @@ wait_until() {   # wait_until GIÂY lệnh...
     sleep 5
   done
 }
-service_state() { compose ps -a --format '{{.Service}} {{.State}} {{.ExitCode}}' | awk -v s="$1" '$1==s {print $2, $3}'; }
-es_setup_exited() { [[ $(service_state es-setup) == exited* ]]; }
 healthy() { [ "$(docker inspect -f '{{.State.Health.Status}}' "$(compose ps -q "$1")")" = healthy ]; }
 console_up() { curl -sf --cacert ca.crt "https://127.0.0.1:8000/health" >/dev/null; }
 
 wait_ready() {
   say "6/8 Chờ hệ thống sẵn sàng"
-  # es-setup chạy một lần: thoát mã khác 0 thì báo ngay, không chờ hết 10 phút
-  if ! wait_until 600 es_setup_exited || [ "$(service_state es-setup)" != "exited 0" ]; then
-    compose logs --tail 30 es-setup elasticsearch >&2 || true
-    die "es-setup lỗi hoặc chưa xong sau 10 phút (log ở trên). Thường do thiếu RAM hoặc vm.max_map_count"
-  fi
-  ok "Elasticsearch + tài khoản RBAC"
+  ok "Elasticsearch + tài khoản RBAC"         # start_stack: up chỉ thành công khi ES healthy và es-setup đã xong
   compose cp elasticsearch:/usr/share/elasticsearch/config/certs/ca/ca.crt ./ca.crt >/dev/null
   chmod 644 ca.crt
   wait_until 300 healthy wazuh-manager || die "wazuh-manager chưa healthy (docker compose logs wazuh-manager)"
@@ -336,6 +341,7 @@ wait_ready() {
 # ------------------------------------------------------------------------------------------------ tóm tắt
 info() {
   [ -f .env ] || die "chưa cài: chạy  sudo ./install.sh"
+  [ "$(id -u)" = 0 ] || die "cần quyền root (đọc secrets/): chạy  sudo ./install.sh info"
   local ip key pw
   ip=$(env_get MANAGER_TLS_IPS | cut -d, -f1)
   key=$(cat secrets/enrollment_key); pw=$(cat secrets/console_admin_password)

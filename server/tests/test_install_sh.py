@@ -1,6 +1,6 @@
-"""install.sh: chạy tools/test_install_sh.sh (thử các hàm với docker / python3 giả: đổi IP trên hệ thống chưa ghi tên
-project, init_secrets lỗi, status, giữ tên project ghi trong .env, es-setup thoát lỗi, CRLF, tự tải mã nguồn / --fetch,
-build image server trước khi up)."""
+"""install.sh: chạy tools/test_install_sh.sh (thử các hàm với docker / python3 giả, giữ set -euo pipefail như khi chạy
+thật: đổi IP trên hệ thống chưa ghi tên project, init_secrets lỗi, status, giữ tên project ghi trong .env, up lỗi thì in
+log, nhiều IP trong MANAGER_TLS_IPS, info không sudo, CRLF, tự tải mã nguồn / --fetch, build image server trước khi up)."""
 from __future__ import annotations
 
 import re

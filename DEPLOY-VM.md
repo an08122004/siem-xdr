@@ -267,7 +267,7 @@ sau firewall của tài liệu này.
 |---|---|
 | Xem trạng thái | `sudo ./install.sh status` |
 | In lại địa chỉ, mật khẩu tạm, lệnh cài agent | `sudo ./install.sh info` |
-| Cập nhật mã nguồn mới | trên Windows: `powershell -ExecutionPolicy Bypass -File .\tools\deploy-vm.ps1 <user>@10.10.40.10 -Update` (gửi bản commit mới, build lại image; rule AI đã duyệt trên VM giữ nguyên); hoặc trên VM: `sudo --preserve-env=GITHUB_TOKEN ./install.sh --fetch` (tải nhánh `main` từ GitHub; file đã xóa trên GitHub không tự xóa trên VM) |
+| Cập nhật mã nguồn mới | trên Windows: `powershell -ExecutionPolicy Bypass -File .\tools\deploy-vm.ps1 <user>@10.10.40.10 -Update` (gửi bản commit mới, build lại image; rule AI đã duyệt trên VM giữ nguyên); hoặc trên VM: `sudo --preserve-env=GITHUB_TOKEN ./install.sh --fetch` (tải nhánh `main` từ GitHub; file đã sửa trên VM bị đè, riêng `server/config` được lưu bản cũ ở `server/config.bak-<ngày giờ>`; file đã xóa trên GitHub không tự xóa trên VM) |
 | Đổi IP máy chủ | `sudo ./install.sh --ip <IP mới>`: script hỏi, sinh lại chứng chỉ (CA mới: import lại `ca.crt`), giữ dữ liệu; agent đã cài phải sửa `<address>` trong `ossec.conf` |
 | Bật thêm máy demo / AI | `sudo ./install.sh --demo` / `sudo ./install.sh --ai` (GPU NVIDIA tự dùng nếu có nvidia-container-toolkit) |
 | Mọi lệnh compose | `docker compose ps`, `docker compose logs -f analyzer`... — **không cần** `-f` hay `--profile`: `.env` đã ghi `COMPOSE_FILE`, `COMPOSE_PROFILES` |
