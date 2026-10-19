@@ -57,4 +57,32 @@ t6() { eval "$stubs"; check_system; }
 run "không CRLF thì không báo nhầm" t6
 check "không báo CRLF" '! grep -q "CRLF" <<<"$OUT"'
 
+mkpkg() {   # tarball giả của GitHub (thư mục gốc r-1/); install.sh trong gói in nơi chạy, tham số, nội dung rules/ai
+  mkdir -p pkg/r-1/server/rules/ai
+  cat > pkg/r-1/install.sh <<'EOF'
+cd "$(dirname "$0")"; echo "CHẠY $(basename "$PWD")/install.sh: $*; rules/ai: $(ls server/rules/ai 2>/dev/null)"
+EOF
+  touch pkg/r-1/docker-compose.yml pkg/r-1/server/rules/ai/tu-github.yml
+  tar -czf pkg.tgz -C pkg r-1
+  curl() { echo "CURL $*" >> docker.log; echo "CẤU HÌNH: $(cat)" >> docker.log; cat pkg.tgz; }
+  unset SUDO_USER
+}
+t9() { eval "$stubs"; mkpkg; rm docker-compose.yml; GITHUB_TOKEN=tok; ARGV=(--demo -y); fetch_source; echo "KHÔNG CHẠY BẢN TẢI VỀ"; }
+run "máy chỉ có install.sh" t9
+check "tải vào ./siem-xdr, chạy install.sh trong đó cùng tham số" 'grep -q "CHẠY siem-xdr/install.sh: --demo -y;" <<<"$OUT"'
+check "token qua stdin, không nằm trên dòng lệnh" 'grep -q "CẤU HÌNH: header = \"Authorization: Bearer tok\"" <<<"$OUT" && ! grep -q "CURL .*tok" <<<"$OUT"'
+check "không lấy rules/ai từ gói" '! grep -q "tu-github" <<<"$OUT"'
+
+t10() { eval "$stubs"; mkpkg; mkdir -p server/rules/ai; touch server/rules/ai/da-duyet.yml; FETCH=1; ARGV=(--fetch -y); fetch_source; }
+run "--fetch trên mã nguồn có sẵn" t10
+check "chạy lại với --update, bỏ --fetch, giữ rule AI đã duyệt" 'grep -q "install.sh: -y --update; rules/ai: da-duyet.yml$" <<<"$OUT"'
+
+t11() { eval "$stubs"; mkpkg; fetch_source; echo "CÀI TIẾP"; }
+run "đã có mã nguồn, không --fetch" t11
+check "không tải, cài tiếp tại chỗ" 'grep -q "CÀI TIẾP" <<<"$OUT" && ! grep -q "CURL" <<<"$OUT"'
+
+t12() { eval "$stubs"; mkpkg; curl() { cat >/dev/null; echo "curl: (22) 404" >&2; return 22; }; rm docker-compose.yml; fetch_source; echo "VẪN CHẠY TIẾP"; }
+run "không tải được (repo private, thiếu token)" t12
+check "dừng với thông báo cần token" 'grep -q "không tải được mã nguồn.*token" <<<"$OUT" && ! grep -q "VẪN CHẠY TIẾP" <<<"$OUT"'
+
 rm -f "$LIB"; echo "Kết quả: $pass đạt, $fail hỏng"; [ "$fail" = 0 ]

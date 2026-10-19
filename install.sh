@@ -5,30 +5,40 @@
 #   sudo ./install.sh --demo          # thêm máy web demo (có lỗ hổng cố ý, chỉ dùng trong lab)
 #   sudo ./install.sh --ai            # thêm AI đề xuất rule (Ollama, tự dùng GPU NVIDIA nếu có)
 #   sudo ./install.sh --update        # sau khi chép mã mới: build lại image và khởi động lại
+#   sudo ./install.sh --fetch         # tải mã mới nhất (nhánh main) từ GitHub, build lại và khởi động lại
 #   sudo ./install.sh status          # trạng thái các service
 #   sudo ./install.sh info            # in lại địa chỉ, mật khẩu tạm, lệnh cài agent
 #
-# Script tự làm: kiểm tra máy, cài Docker, tham số kernel, phát hiện IP, sinh bí mật, viết .env, khởi động,
-# chờ hệ thống sẵn sàng, xuất CA. Chạy lại bao nhiêu lần cũng được: giữ nguyên bí mật, .env và dữ liệu.
+# Máy chưa có mã nguồn: chỉ cần file này, script tự tải repo vào ./siem-xdr (repo private: cần token GitHub đọc được repo):
+#   read -rsp 'Token GitHub: ' GITHUB_TOKEN; echo; export GITHUB_TOKEN
+#   curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -H 'Accept: application/vnd.github.raw' \
+#     https://api.github.com/repos/an08122004/siem-xdr/contents/install.sh -o install.sh
+#   sudo --preserve-env=GITHUB_TOKEN bash install.sh          # thêm --demo / --ai như trên
+#
+# Script tự làm: tải mã nguồn (nếu chưa có), kiểm tra máy, cài Docker, tham số kernel, phát hiện IP, sinh bí mật, viết .env,
+# khởi động, chờ hệ thống sẵn sàng, xuất CA. Chạy lại bao nhiêu lần cũng được: giữ nguyên bí mật, .env và dữ liệu.
 set -euo pipefail
 
 cd "$(dirname "$(readlink -f "$0")")"
 ROOT=$PWD
+ARGV=("$@")
+REPO=an08122004/siem-xdr            # GitHub: nơi tải mã nguồn khi máy chưa có / --fetch (nhánh main)
 PROJECT=siem-xdr                    # tên project Compose; máy đang chạy bằng tên khác: xem pick_project
 OLD_PROJECT=soc-platform            # tên cũ (bản cài từ 14/10/2026), chỉ để nhận ra hệ thống đang chạy
 APP_UID=10001                       # user "siem" trong image server (server/Dockerfile)
 WAZUH_VERSION=4.14.7
 MIN_DOCKER=26                       # docker-compose.yml dùng volume subpath (Docker Engine >= 26)
 
-IP=""; ADMIN_IP=""; DEMO=0; AI=0; GPU=auto; UPDATE=0; ASSUME_YES=0; CMD=install
+IP=""; ADMIN_IP=""; DEMO=0; AI=0; GPU=auto; UPDATE=0; FETCH=0; ASSUME_YES=0; CMD=install
 
-usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; cat <<'EOF'
+usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; cat <<'EOF'
 Tùy chọn:
   --ip IP           IP của máy chủ mà agent / trình duyệt dùng (mặc định: tự phát hiện)
   --admin-ip IP     IP máy quản trị: thêm vào SOAR_WHITELIST để SOAR không bao giờ chặn nhầm
   --demo, --ai      bật thêm máy web demo / AI (được nhớ trong .env cho các lần chạy sau)
   --gpu, --no-gpu   ép bật / tắt GPU cho Ollama (mặc định: bật nếu có nvidia-container-toolkit)
   --update          build lại image (dùng sau khi chép mã nguồn mới)
+  --fetch           tải mã mới nhất từ GitHub đè lên mã hiện có (giữ secrets/, .env, rule AI đã duyệt), rồi như --update
   -y, --yes         không hỏi lại (vd khi đổi IP phải sinh lại chứng chỉ)
 EOF
 }
@@ -49,6 +59,7 @@ while [ $# -gt 0 ]; do
     --gpu) GPU=1; shift ;;
     --no-gpu) GPU=0; shift ;;
     --update) UPDATE=1; shift ;;
+    --fetch) FETCH=1; shift ;;
     -y|--yes) ASSUME_YES=1; shift ;;
     install|status|info) CMD=$1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -72,6 +83,34 @@ env_set() {   # env_set KHÓA GIÁ_TRỊ: sửa dòng có sẵn (kể cả dòng
 # COMPOSE_FILE / COMPOSE_PROFILES lấy từ .env. Tên project truyền thẳng (pick_project): lúc .env chưa ghi tên, compose
 # dùng name: trong docker-compose.yml (chưa đổi tên) và thao tác nhầm sang hệ thống khác với hệ thống đang chạy.
 compose() { docker compose -p "$PROJECT" "$@"; }
+
+# ------------------------------------------------------------------------------------------------ mã nguồn
+# Máy chỉ có install.sh: tải repo vào ./siem-xdr (đã có thì dùng luôn) rồi chạy install.sh trong đó, cùng tham số.
+# --fetch: tải đè lên mã hiện có rồi chạy lại với --update; secrets/, .env, ca.crt không nằm trong repo nên giữ nguyên.
+# shortcut: file đã xóa trên GitHub vẫn còn trên máy (như tools/deploy-vm.ps1); xóa rule thì xóa tay file trong server/rules.
+fetch_source() {
+  local dir=$ROOT token=${GITHUB_TOKEN:-} a
+  if [ ! -f docker-compose.yml ]; then dir=$ROOT/siem-xdr
+  elif [ "$FETCH" != 1 ]; then return 0; fi
+  [ "$(id -u)" = 0 ] || die "cần quyền root: chạy lại bằng  sudo ./install.sh"
+  if [ "$FETCH" = 1 ] || [ ! -f "$dir/docker-compose.yml" ]; then
+    say "Tải mã nguồn $REPO (nhánh main) vào $dir"
+    command -v curl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq ca-certificates curl >/dev/null; }
+    if [ -z "$token" ] && [ -t 0 ]; then read -rsp "    Token GitHub (đọc được $REPO): " token; echo; fi
+    # tar chạy bằng user gọi sudo: mã nguồn thuộc user đó, như khi chép bằng tools/deploy-vm.ps1
+    local -a as=(); [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ] && as=(sudo -u "$SUDO_USER")
+    "${as[@]}" mkdir -p "$dir"
+    # token qua stdin (-K -: cấu hình curl) thay vì tham số dòng lệnh: không lộ trong ps. Rule AI đã duyệt + ngoại lệ: không ghi đè
+    { [ -z "$token" ] || printf 'header = "Authorization: Bearer %s"\n' "$token"; } \
+      | curl -fsSL -K - "https://api.github.com/repos/$REPO/tarball/main" \
+      | "${as[@]}" tar -xz -C "$dir" --strip-components=1 --exclude='*/server/rules/ai' --exclude='*/server/rules/exceptions' \
+      || die "không tải được mã nguồn (lỗi ở trên). Repo private: cần token GitHub đọc được $REPO (GITHUB_TOKEN hoặc nhập khi được hỏi)"
+    ok "đã tải vào $dir"
+  fi
+  local -a args=(); for a in "${ARGV[@]}"; do [ "$a" = --fetch ] || args+=("$a"); done
+  [ "$FETCH" = 1 ] && args+=(--update)
+  exec bash "$dir/install.sh" "${args[@]}"
+}
 
 # ------------------------------------------------------------------------------------------------ kiểm tra
 check_system() {
@@ -341,6 +380,7 @@ case "$CMD" in
   status) status ;;
   info) info ;;
   install)
+    fetch_source
     check_system
     install_docker
     tune_kernel

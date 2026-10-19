@@ -225,11 +225,22 @@ Compose `siem-xdr` ghi trong `.env`, nên dữ liệu và agent đã enroll còn
 `cd ~/siem-xdr && sudo python3 tools/migrate_project.py --apply && sudo ./install.sh --update` (xem README mục 2,
 *Nâng cấp từ siem-xdr*). Các lệnh dưới đây ghi `~/soc-platform`; VM cũ thay bằng `~/siem-xdr`.
 
-### 2.2 Hoặc chạy ngay trên VM
+### 2.2 Hoặc chạy ngay trên VM (tự tải mã nguồn từ GitHub)
 
-Nếu mã nguồn đã có trên VM (vd `git clone` bằng token GitHub, repo đang riêng tư):
+Không cần chép mã từ Windows: chỉ cần file `install.sh`, script tự tải repo (nhánh `main`) vào `~/siem-xdr` rồi cài. Repo
+đang riêng tư nên cần token GitHub đọc được repo (fine-grained token, quyền *Contents: Read-only* trên `an08122004/siem-xdr`):
 ```bash
-cd soc-platform
+cd ~
+read -rsp 'Token GitHub: ' GITHUB_TOKEN; echo; export GITHUB_TOKEN
+curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -H 'Accept: application/vnd.github.raw' \
+  https://api.github.com/repos/an08122004/siem-xdr/contents/install.sh -o install.sh
+sudo --preserve-env=GITHUB_TOKEN bash install.sh --demo --admin-ip 10.10.40.1    # tham số như bên dưới
+```
+Không có `GITHUB_TOKEN` thì script hỏi token (không hiện ký tự). Các lần sau chạy trong `~/siem-xdr`.
+
+Nếu mã nguồn đã có trên VM (vd `git clone` bằng token GitHub):
+```bash
+cd siem-xdr
 sudo ./install.sh                      # tự phát hiện IP; máy nhiều IP thì hỏi, hoặc chỉ định --ip 10.10.40.10
 sudo ./install.sh --demo --admin-ip 10.10.40.1       # kèm máy web demo, khai IP máy quản trị
 ```
@@ -261,7 +272,7 @@ sau firewall của tài liệu này.
 |---|---|
 | Xem trạng thái | `sudo ./install.sh status` |
 | In lại địa chỉ, mật khẩu tạm, lệnh cài agent | `sudo ./install.sh info` |
-| Cập nhật mã nguồn mới | trên Windows: `powershell -ExecutionPolicy Bypass -File .\tools\deploy-vm.ps1 <user>@10.10.40.10 -Update` (gửi bản commit mới, build lại image; rule AI đã duyệt trên VM giữ nguyên) |
+| Cập nhật mã nguồn mới | trên Windows: `powershell -ExecutionPolicy Bypass -File .\tools\deploy-vm.ps1 <user>@10.10.40.10 -Update` (gửi bản commit mới, build lại image; rule AI đã duyệt trên VM giữ nguyên); hoặc trên VM: `sudo --preserve-env=GITHUB_TOKEN ./install.sh --fetch` (tải nhánh `main` từ GitHub; file đã xóa trên GitHub không tự xóa trên VM) |
 | Đổi IP máy chủ | `sudo ./install.sh --ip <IP mới>`: script hỏi, sinh lại chứng chỉ (CA mới: import lại `ca.crt`), giữ dữ liệu; agent đã cài phải sửa `<address>` trong `ossec.conf` |
 | Bật thêm máy demo / AI | `sudo ./install.sh --demo` / `sudo ./install.sh --ai` (GPU NVIDIA tự dùng nếu có nvidia-container-toolkit) |
 | Mọi lệnh compose | `docker compose ps`, `docker compose logs -f analyzer`... — **không cần** `-f` hay `--profile`: `.env` đã ghi `COMPOSE_FILE`, `COMPOSE_PROFILES` |
