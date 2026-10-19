@@ -181,7 +181,7 @@ vẫn nằm trong `siem-xdr_*`. Nếu cứ `up` thì sẽ ra một hệ thống 
 ```bash
 python tools/migrate_project.py               # xem hiện trạng, không đổi gì
 python tools/migrate_project.py --apply       # dừng hệ thống cũ, chép từng volume sang soc-platform_* (kiểm số file)
-docker compose up -d --build                  # build image soc-platform-server, chạy hệ thống mới
+docker compose up -d --build                  # build image siem-xdr-server từ mã hiện tại, chạy hệ thống mới
 # hoặc giữ tên cũ, không chép gì: python tools/migrate_project.py --keep-name  (ghi COMPOSE_PROJECT_NAME=siem-xdr vào .env)
 ```
 Công cụ không xóa volume cũ. Kiểm tra console, alert, agent còn đủ rồi mới xóa bằng lệnh mà công cụ in ra. Trên máy chủ cài

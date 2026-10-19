@@ -10,8 +10,8 @@ project lấy tên thư mục (siem-xdr): dữ liệu nằm trong volume siem-xd
   python tools/migrate_project.py --keep-name   # không chép gì: ghi COMPOSE_PROJECT_NAME=siem-xdr vào .env (giữ tên cũ)
 
 --apply KHÔNG xóa volume cũ. Chạy hệ thống mới, kiểm tra thấy đủ dữ liệu rồi mới xóa bằng lệnh mà công cụ in ra ở cuối.
-Image không được gắn tag sang tên mới: thiếu image soc-platform-server thì `docker compose up` tự build từ mã hiện tại, không
-chạy nhầm code cũ dưới tên mới. Chạy từ thư mục mã nguồn (nơi có docker-compose.yml và .env).
+Image server tên cố định siem-xdr-server (không theo tên project); công cụ không gắn tag image nào, sau khi chuyển chạy
+`docker compose up -d --build` để chắc image được build từ mã hiện tại. Chạy từ thư mục mã nguồn (nơi có docker-compose.yml và .env).
 """
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Callable
 
 OLD, NEW = "siem-xdr", "soc-platform"
+APP_IMAGE = "siem-xdr-server:latest"                 # image: trong docker-compose.yml, đang dùng: không phải image cũ
 ROOT = Path(__file__).resolve().parent.parent
 PROJECT = "com.docker.compose.project"
 VOLUME = "com.docker.compose.volume"
@@ -94,7 +95,8 @@ class Migrator:
         return {"old": self.volumes(OLD), "new": self.volumes(NEW), "old_containers": self.containers(OLD),
                 "new_containers": self.containers(NEW), "old_networks": self.networks(OLD),
                 "env": get_env(self.env_file, "COMPOSE_PROJECT_NAME"), "images": imgs,
-                "old_images": sorted(i for i in imgs if i.startswith(OLD + "-") and not i.endswith(":<none>"))}
+                "old_images": sorted(i for i in imgs if i.startswith(OLD + "-") and not i.endswith(":<none>")
+                                     and i != APP_IMAGE)}
 
     def report(self, p: dict) -> None:
         self.out(f"COMPOSE_PROJECT_NAME trong .env: {p['env'] or '(không đặt -> dùng name: trong docker-compose.yml = ' + NEW + ')'}")
@@ -106,7 +108,7 @@ class Migrator:
     def keep_name(self, p: dict) -> None:
         set_env(self.env_file, "COMPOSE_PROJECT_NAME", OLD)
         self.out(f"đã ghi COMPOSE_PROJECT_NAME={OLD} vào {self.env_file.name}: hệ thống tiếp tục dùng volume {OLD}_*"
-                 f" (image mới tên {NEW}-server: `docker compose up -d --build` tự build).")
+                 f" (`docker compose up -d --build` build image từ mã hiện tại).")
 
     def helper_image(self, p: dict) -> str:
         for img in (f"{NEW}-server:latest", f"{OLD}-server:latest"):
@@ -164,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
             m.keep_name(p)
         elif args.apply:
             old = m.apply(p)
-            print(f"\nXong. Khởi động hệ thống mới (build image {NEW}-server từ mã hiện tại):\n  docker compose up -d --build"
+            print(f"\nXong. Khởi động hệ thống mới (build image {APP_IMAGE} từ mã hiện tại):\n  docker compose up -d --build"
                   f"\nKiểm tra console, alert, agent đều còn rồi mới xóa dữ liệu cũ:\n  docker volume rm {' '.join(old)}")
             if p["old_images"]:
                 print("  docker image rm " + " ".join(p["old_images"]))

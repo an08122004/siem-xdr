@@ -26,6 +26,7 @@ REPO=an08122004/siem-xdr            # GitHub: nơi tải mã nguồn khi máy ch
 PROJECT=siem-xdr                    # tên project Compose; máy đang chạy bằng tên khác: xem pick_project
 OLD_PROJECT=soc-platform            # tên cũ (bản cài từ 14/10/2026), chỉ để nhận ra hệ thống đang chạy
 APP_UID=10001                       # user "siem" trong image server (server/Dockerfile)
+APP_IMAGE=siem-xdr-server:latest    # image server (= image: trong docker-compose.yml), chỉ build tại chỗ
 WAZUH_VERSION=4.14.7
 MIN_DOCKER=26                       # docker-compose.yml dùng volume subpath (Docker Engine >= 26)
 
@@ -299,6 +300,8 @@ configure() {
 
 start_stack() {
   say "5/8 Khởi động (lần đầu tải image và build mất 5–20 phút)"
+  # image server không có trên Docker Hub: chưa có thì build trước, nếu không `up` thử pull và báo "pull access denied"
+  docker image inspect "$APP_IMAGE" >/dev/null 2>&1 || compose build manager
   local -a args=(up -d --remove-orphans)
   [ "$UPDATE" = 1 ] && args+=(--build)
   compose "${args[@]}"

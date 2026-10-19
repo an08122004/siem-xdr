@@ -31,7 +31,7 @@ x-ca-mount: &ca-mount
 
 x-app: &app
   build: ./server
-  image: soc-platform-server:latest
+  image: siem-xdr-server:latest
   restart: unless-stopped
   # python chạy làm PID 1 bỏ qua SIGTERM (không có handler) -> docker stop treo 10 giây rồi SIGKILL;
   # SIGINT thì thoát ngay qua KeyboardInterrupt, kịp đóng consumer Kafka (commit offset đã xử lý)

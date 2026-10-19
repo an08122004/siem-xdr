@@ -85,4 +85,13 @@ t12() { eval "$stubs"; mkpkg; curl() { cat >/dev/null; echo "curl: (22) 404" >&2
 run "không tải được (repo private, thiếu token)" t12
 check "dừng với thông báo cần token" 'grep -q "không tải được mã nguồn.*token" <<<"$OUT" && ! grep -q "VẪN CHẠY TIẾP" <<<"$OUT"'
 
+t13() { eval "$stubs"; docker() { echo "DOCKER $*" >> docker.log; [ "$1 $2" = "image inspect" ] && return 1; return 0; }; start_stack; }
+run "lần đầu: chưa có image server" t13
+check "build image server trước rồi mới up (up không phải thử pull)" \
+  'sed -n "/DOCKER compose -p siem-xdr build manager/,\$p" <<<"$OUT" | grep -q "DOCKER compose -p siem-xdr up -d"'
+
+t14() { eval "$stubs"; start_stack; }
+run "đã có image server, không --update" t14
+check "không build lại" 'grep -q "DOCKER compose -p siem-xdr up -d" <<<"$OUT" && ! grep -q "DOCKER compose.*build" <<<"$OUT"'
+
 rm -f "$LIB"; echo "Kết quả: $pass đạt, $fail hỏng"; [ "$fail" = 0 ]

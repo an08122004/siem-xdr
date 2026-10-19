@@ -62,11 +62,11 @@ def make(tmp_path, env="", **kw):
 
 
 def test_plan_only_reads(tmp_path):
-    fake, m, _ = make(tmp_path, volumes=OLD_VOLS, images=["siem-xdr-server:latest"],
+    fake, m, _ = make(tmp_path, volumes=OLD_VOLS, images=["siem-xdr-server:latest", "siem-xdr-demo-web:latest"],
                       containers=[("c1", "siem-xdr-elasticsearch-1", "running")])
     p = m.plan()
     assert set(p["old"]) == {"esdata", "wazuh_etc", "certs"} and p["new"] == {}
-    assert p["old_images"] == ["siem-xdr-server:latest"]
+    assert p["old_images"] == ["siem-xdr-demo-web:latest"]        # siem-xdr-server là image đang dùng: không gợi ý xóa
     assert fake.calls == []                                   # không thay đổi gì khi chưa --apply
 
 
@@ -115,4 +115,4 @@ def test_keep_name_and_env_editing(tmp_path):
 
 def test_compose_project_is_renamed():
     compose = (TOOL.parents[1] / "docker-compose.yml").read_text(encoding="utf-8")
-    assert "\nname: soc-platform\n" in compose and "image: soc-platform-server:latest" in compose
+    assert "\nname: soc-platform\n" in compose and f"image: {mp.APP_IMAGE}\n" in compose
