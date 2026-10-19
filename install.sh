@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cài SOC Platform (soc-platform, trước 14/10/2026 tên là siem-xdr) trên máy chủ Ubuntu / Debian bằng MỘT lệnh:
+# Cài SIEM/XDR (siem-xdr) trên máy chủ Ubuntu / Debian bằng MỘT lệnh:
 #
 #   sudo ./install.sh                 # cài / cập nhật cấu hình, khởi động toàn bộ hệ thống
 #   sudo ./install.sh --demo          # thêm máy web demo (có lỗ hổng cố ý, chỉ dùng trong lab)
@@ -14,8 +14,8 @@ set -euo pipefail
 
 cd "$(dirname "$(readlink -f "$0")")"
 ROOT=$PWD
-PROJECT=soc-platform                # tên project Compose (= name: trong docker-compose.yml); hệ thống cũ: xem pick_project
-OLD_PROJECT=siem-xdr
+PROJECT=siem-xdr                    # tên project Compose; máy đang chạy bằng tên khác: xem pick_project
+OLD_PROJECT=soc-platform            # tên cũ (bản cài từ 14/10/2026), chỉ để nhận ra hệ thống đang chạy
 APP_UID=10001                       # user "siem" trong image server (server/Dockerfile)
 WAZUH_VERSION=4.14.7
 MIN_DOCKER=26                       # docker-compose.yml dùng volume subpath (Docker Engine >= 26)
@@ -70,14 +70,14 @@ env_set() {   # env_set KHÓA GIÁ_TRỊ: sửa dòng có sẵn (kể cả dòng
   else printf '%s=%s\n' "$k" "$v" >> .env; fi
 }
 # COMPOSE_FILE / COMPOSE_PROFILES lấy từ .env. Tên project truyền thẳng (pick_project): lúc .env chưa ghi tên, compose
-# dùng name: soc-platform trong docker-compose.yml và thao tác nhầm hệ thống mới thay vì hệ thống siem-xdr đang chạy.
+# dùng name: trong docker-compose.yml (chưa đổi tên) và thao tác nhầm sang hệ thống khác với hệ thống đang chạy.
 compose() { docker compose -p "$PROJECT" "$@"; }
 
 # ------------------------------------------------------------------------------------------------ kiểm tra
 check_system() {
   say "1/8 Kiểm tra máy"
   [ "$(id -u)" = 0 ] || die "cần quyền root: chạy lại bằng  sudo ./install.sh"
-  [ -f docker-compose.yml ] && [ -f tools/init_secrets.py ] || die "không thấy mã nguồn soc-platform trong $ROOT"
+  [ -f docker-compose.yml ] && [ -f tools/init_secrets.py ] || die "không thấy mã nguồn siem-xdr trong $ROOT"
   # install.sh mà là CRLF thì hỏng ngay dòng đầu, không chạy tới đây: kiểm các script khác chép cùng đợt
   if grep -q $'\r' security/setup.sh wazuh/manager/entrypoint/*.sh 2>/dev/null; then
     die "file có ký tự xuống dòng Windows (CRLF). Chép mã bằng tools/deploy-vm.ps1 hoặc git, không chép thẳng thư mục từ Windows"
@@ -146,13 +146,13 @@ install_docker() {
 
 tune_kernel() {
   say "3/8 Tham số kernel"
-  rm -f /etc/sysctl.d/99-siem-xdr.conf               # tên file trước khi đổi tên project
-  cat > /etc/sysctl.d/99-soc-platform.conf <<'EOF'
-# soc-platform (install.sh)
+  rm -f "/etc/sysctl.d/99-$OLD_PROJECT.conf"          # file của bản cài dùng tên cũ
+  cat > /etc/sysctl.d/99-siem-xdr.conf <<'EOF'
+# siem-xdr (install.sh)
 vm.max_map_count=262144
 net.core.rmem_max=33554432
 EOF
-  sysctl -q -p /etc/sysctl.d/99-soc-platform.conf >/dev/null 2>&1 || warn "không đặt được sysctl (đang chạy trong container?)"
+  sysctl -q -p /etc/sysctl.d/99-siem-xdr.conf >/dev/null 2>&1 || warn "không đặt được sysctl (đang chạy trong container?)"
   ok "vm.max_map_count=$(sysctl -n vm.max_map_count) (Elasticsearch), net.core.rmem_max (buffer UDP syslog)"
   if command -v timedatectl >/dev/null 2>&1; then timedatectl set-ntp true >/dev/null 2>&1 || true; fi
 }
@@ -183,8 +183,8 @@ detect_ip() {
 }
 
 # ------------------------------------------------------------------------------------------------ cấu hình
-# Tên project Compose: giữ tên đang dùng, không tự đổi (đổi tên mà không chép volume = hệ thống mới rỗng). Bản cài trước
-# 14/10/2026 ghi COMPOSE_PROJECT_NAME=siem-xdr vào .env, dữ liệu nằm trong volume siem-xdr_*.
+# Tên project Compose: giữ tên đang dùng, không tự đổi (đổi tên mà không chép volume = hệ thống mới rỗng). Bản cài từ
+# 14/10/2026 có thể chạy bằng tên cũ: COMPOSE_PROJECT_NAME trong .env, hoặc có volume ${OLD_PROJECT}_*.
 pick_project() {
   local cur; cur=$(env_get COMPOSE_PROJECT_NAME)
   if [ -n "$cur" ]; then PROJECT=$cur
@@ -208,8 +208,7 @@ configure() {
   [ -f .env ] || { cp .env.example .env; ok "tạo .env từ .env.example"; }
   pick_project
   if [ "$PROJECT" = "$OLD_PROJECT" ]; then
-    warn "hệ thống cài trước khi đổi tên: vẫn chạy với tên project $OLD_PROJECT (dữ liệu trong volume ${OLD_PROJECT}_*)"
-    warn "muốn chuyển dữ liệu sang tên mới: sudo python3 tools/migrate_project.py --apply && sudo ./install.sh --update"
+    warn "hệ thống đang chạy bằng tên cũ: giữ tên project $OLD_PROJECT để không mất dữ liệu (volume ${OLD_PROJECT}_*)"
   fi
   local old_ip; old_ip=$(env_get MANAGER_TLS_IPS | cut -d, -f1)
   if [ -z "$IP" ]; then IP=${old_ip:-$(detect_ip)}; fi

@@ -35,6 +35,15 @@ t3() { eval "$stubs"; printf 'X=1\n' > .env; status; }
 run "status trên máy chưa ghi tên project" t3
 check "status xem project siem-xdr" 'grep -q "DOCKER compose -p siem-xdr ps" <<<"$OUT"'
 
+t7() { eval "$stubs"; docker() { echo "DOCKER $*" >> docker.log; [ "$1 $2" = "volume inspect" ] && [ "$3" != soc-platform_certs ] && return 1; return 0; }
+       printf 'X=1\n' > .env; status; }
+run "máy đang chạy bằng tên cũ soc-platform, .env chưa ghi tên" t7
+check "giữ project soc-platform" 'grep -q "DOCKER compose -p soc-platform ps" <<<"$OUT"'
+
+t8() { eval "$stubs"; printf 'COMPOSE_PROJECT_NAME=soc-platform\n' > .env; status; }
+run ".env ghi tên cũ soc-platform" t8
+check "giữ tên trong .env" 'grep -q "DOCKER compose -p soc-platform ps" <<<"$OUT"'
+
 t4() { eval "$stubs"; n=0; service_state() { n=$((n+1)); echo "exited 1"; }; wait_ready; echo "SỐ LẦN HỎI $n"; }
 run "es-setup thoát lỗi" t4
 check "báo lỗi es-setup" 'grep -q "es-setup lỗi" <<<"$OUT"'
@@ -44,6 +53,7 @@ t5() { eval "$stubs"; printf 'set -e\r\n' > security/setup.sh; check_system; }
 run "script bị đổi sang CRLF" t5
 check "phát hiện CRLF" 'grep -q "CRLF" <<<"$OUT"'
 
+t6() { eval "$stubs"; check_system; }
 run "không CRLF thì không báo nhầm" t6
 check "không báo CRLF" '! grep -q "CRLF" <<<"$OUT"'
 

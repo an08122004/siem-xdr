@@ -1,5 +1,5 @@
 """install.sh: chạy tools/test_install_sh.sh (thử các hàm với docker / python3 giả: đổi IP trên hệ thống chưa ghi tên
-project, init_secrets lỗi, status, es-setup thoát lỗi, CRLF)."""
+project, init_secrets lỗi, status, giữ tên project cũ soc-platform, es-setup thoát lỗi, CRLF)."""
 from __future__ import annotations
 
 import subprocess
