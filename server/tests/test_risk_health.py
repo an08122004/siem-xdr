@@ -43,9 +43,28 @@ def test_rba_fires_when_score_from_several_rules_crosses_threshold():
     assert rba["risk"]["total"] == 150 and rba["risk"]["rules"] == {"WIN-003": 1, "WIN-009": 1, "WIN-013": 1}
     assert [c["alert_id"] for c in rba["contributions"]] == ["a1", "a2", "a3"]
     assert set(rba["rule"]["mitre"]["technique"]) == {"T1003", "T1009", "T1013"} and rba["priority"] == "P2"
-    assert rt.add(alert("a4", "WIN-003", 50)) == []                            # chưa tới bội số tiếp theo
-    lvl2 = rt.add(alert("a5", "WIN-004", 100))                                 # 300 -> bắn lại, nâng critical
+    assert rt.add(alert("a4", "WIN-003", 50)) == []                            # rule đã tính: không cộng thêm
+    assert rt.add(alert("a5", "WIN-004", 100)) == []                           # 250: chưa tới bội số tiếp theo
+    lvl2 = rt.add(alert("a6", "WIN-005", 50))                                  # 300 -> bắn lại, nâng critical
     assert len(lvl2) == 1 and lvl2[0]["severity"] == "critical" and lvl2[0]["risk"]["level"] == 2
+
+
+def test_rba_event_matching_several_rules_counts_once():
+    # rule phân bậc (rộng/low -> hẹp/high) cùng khớp một event: một bằng chứng, chỉ tính điểm cao nhất
+    rt = RiskTracker(threshold=150, min_rules=2, clock=Clock())
+    same = {"trigger_event": {"event": {"id": "e1"}}}
+    for aid, rule, score in (("t1", "WIN-005-L", 25), ("t2", "WIN-005-M", 50), ("t3", "WIN-005-H", 75)):
+        assert rt.add(alert(aid, rule, score, **same)) == []                   # trước 22/10/2026: 150 từ 3 "rule" -> bắn
+    out = rt.add(alert("t4", "AUTH-005", 75, trigger_event={"event": {"id": "e2"}}))
+    assert len(out) == 1 and out[0]["risk"]["total"] == 150                    # 75 (e1) + 75 (e2)
+
+
+def test_rba_noisy_rule_counts_once_per_window():
+    # rule ồn (vd lớp vỏ Ansible khớp rule low 100 lần/ngày) không tự đẩy thực thể qua ngưỡng
+    rt = RiskTracker(threshold=150, min_rules=2, clock=Clock())
+    for i in range(100):
+        assert rt.add(alert(f"n{i}", "WIN-005-L", 25)) == []
+    assert rt.add(alert("o1", "AUTH-005-L", 25)) == []                         # trước 22/10/2026: 2525 -> critical
 
 
 def test_rba_needs_distinct_rules_ignores_duplicates_shadow_and_health():

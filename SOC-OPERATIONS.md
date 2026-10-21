@@ -135,6 +135,9 @@ Impact) chưa có rule. Layer cho MITRE ATT&CK Navigator: `python tools/rule_lin
 (150) và đến từ ≥ `RBA_MIN_RULES` (2) rule khác nhau, SOAR sinh RBA-001 (high; critical khi gấp đôi ngưỡng) gom mọi alert góp
 điểm. Nhờ vậy rule mức low (không mở case) dùng được làm tín hiệu: một lần tạo tài khoản không đáng mở case, nhưng nhiều tín
 hiệu khác loại trên cùng một máy trong một ngày thì đáng. Alert chạy bóng, alert RBA và alert sức khỏe không góp điểm.
+Từ 22/10/2026 tổng điểm tính hai lớp gộp: nhiều rule khớp **cùng một event** chỉ tính điểm cao nhất (rule phân bậc rộng → hẹp
+cùng khớp một lệnh là một bằng chứng), và **mỗi rule chỉ tính một lần** trong cửa sổ (rule ồn khớp 100 lần vẫn là 25 điểm).
+Trước đó một event khớp 3 bậc tự sinh RBA-001, và 100 alert low của một rule cộng 1 alert khác sinh RBA-001 critical.
 
 ## 5. Giám sát sức khỏe nền tảng, sao lưu và khôi phục
 
