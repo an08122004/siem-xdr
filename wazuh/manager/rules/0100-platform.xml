@@ -8,20 +8,20 @@
   <rule id="100100" level="10">
     <if_sid>554</if_sid>
     <field name="file" type="pcre2">(?i)/(htdocs|www|html|cgi-bin|wwwroot)/</field>
-    <description>File mới trong thư mục web: $(file) (có thể là webshell)</description>
+    <description>WEB-010 File mới trong thư mục web: $(file) (có thể là webshell)</description>
     <mitre>
       <id>T1505.003</id>
     </mitre>
-    <group>web,webshell,</group>
+    <group>siem,web,webshell,</group>
   </rule>
 
   <rule id="100101" level="10">
     <if_sid>550</if_sid>
     <field name="file" type="pcre2">(?i)/(htdocs|www|html|cgi-bin|wwwroot)/</field>
-    <description>Nội dung web bị sửa: $(file)</description>
+    <description>WEB-011 Nội dung web bị sửa: $(file)</description>
     <mitre>
       <id>T1505.003</id>
     </mitre>
-    <group>web,webshell,</group>
+    <group>siem,web,webshell,</group>
   </rule>
 </group>
