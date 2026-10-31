@@ -18,6 +18,7 @@ NAMES = [
     "enrollment_key",         # mật khẩu enroll Wazuh agent (wazuh-manager: etc/authd.pass)
     "console_admin_password", # mật khẩu tạm của tài khoản console `admin` đầu tiên (phải đổi khi đăng nhập lần đầu)
     "wazuh_api_password",     # user Wazuh API `siem-soar` (SOAR ra lệnh active response)
+    "wazuh_rules_api_password",  # user Wazuh API `siem-rules` (console nạp lại / thử rule)
 ]
 # Bí mật TÙY CHỌN do người dùng tự điền (không sinh ngẫu nhiên): tạo file rỗng để docker compose chạy được khi chưa dùng
 OPTIONAL = [
@@ -25,7 +26,7 @@ OPTIONAL = [
 ]
 ALPHABET = string.ascii_letters + string.digits  # không ký tự đặc biệt -> an toàn khi nhúng JSON/shell
 # Wazuh API bắt buộc mật khẩu có chữ thường, chữ hoa, số và ký tự đặc biệt -> thêm đủ 4 loại (ký tự an toàn với shell)
-NEEDS_SYMBOL = {"wazuh_api_password"}
+NEEDS_SYMBOL = {"wazuh_api_password", "wazuh_rules_api_password"}
 
 
 def generate(name: str) -> str:

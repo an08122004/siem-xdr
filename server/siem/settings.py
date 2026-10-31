@@ -52,6 +52,8 @@ GRAFANA_URL = os.getenv("GRAFANA_URL", "http://grafana-internal:3000")
 WAZUH_API_URL = os.getenv("WAZUH_API_URL", "https://wazuh-manager:55000")
 WAZUH_API_USER = os.getenv("WAZUH_API_USER", "siem-soar")
 WAZUH_API_PASSWORD = _secret("WAZUH_API_PASSWORD")
+WAZUH_RULES_API_USER = os.getenv("WAZUH_RULES_API_USER", "siem-rules")   # nạp lại / thử rule (wazuh_rules.py)
+WAZUH_RULES_API_PASSWORD = _secret("WAZUH_RULES_API_PASSWORD")
 WAZUH_API_CA = os.getenv("WAZUH_API_CA", os.getenv("ES_CA_CERT", ""))   # cùng CA nội bộ với Elasticsearch
 WAZUH_AR_SCRIPT = os.getenv("WAZUH_AR_SCRIPT", "siem-xdr")              # script phản ứng cài sẵn trên agent
 # Cảnh báo của ruleset Wazuh chuyển thành alert (xem detection/wazuh.py)

@@ -19,8 +19,8 @@ install -m 600 -o wazuh -g wazuh /certs/wazuh/wazuh-manager.key "$SSL/server.key
 install -m 644 -o wazuh -g wazuh /certs/wazuh/wazuh-manager.crt "$SSL/server.crt"
 echo "[siem-setup] đã cài chứng chỉ Wazuh API"
 
-# 4. User Wazuh API quyền tối thiểu cho SOAR + vô hiệu hóa 2 user mặc định (wazuh / wazuh-wui)
-/var/ossec/framework/python/bin/python3 /entrypoint-scripts/siem_api_user.py "$S/wazuh_api_password"
+# 4. User Wazuh API quyền tối thiểu cho SOAR (siem-soar) và nạp rule (siem-rules) + vô hiệu hóa 2 user mặc định (wazuh / wazuh-wui)
+/var/ossec/framework/python/bin/python3 /entrypoint-scripts/siem_api_user.py "$S/wazuh_api_password" "$S/wazuh_rules_api_password"
 
 # 5. Bao lâu không có keepalive thì Wazuh đánh dấu agent "disconnected". HLT-001 (soar/health.py) chỉ báo khi agent đã ở
 #    trạng thái này VÀ keepalive cũ hơn AGENT_DOWN_MINUTES, nên tổng thời gian ≈ giá trị lớn hơn trong hai mốc. Mặc định
@@ -32,4 +32,20 @@ if [[ "$T" =~ ^[1-9][0-9]*[smhd]?$ ]]; then
   echo "[siem-setup] agents_disconnection_time = $T"
 else
   echo "[siem-setup] WAZUH_AGENTS_DISCONNECTION_TIME không hợp lệ ('$T', vd 1m, 10m): giữ giá trị trong ossec.conf"
+fi
+
+# 6. Thư mục rule động (volume mới là root 0755): uid 10001 = user của container `manager` (siem-xdr-server) phải ghi
+#    được, group wazuh để analysisd đọc. Làm mỗi lần khởi động, không làm ở install.sh (volume có tên, không phải thư mục host).
+D=/var/ossec/etc/rules-dynamic
+install -d -o 10001 -g wazuh -m 0755 "$D"
+# 7. File rule hỏng còn trên đĩa thì wazuh-analysisd không lên, kéo theo remoted và apid. Kiểm tra cả ruleset trước khi
+#    start; hỏng thì cách ly file động (AI / ngoại lệ) để manager vẫn khởi động được.
+if ! /var/ossec/bin/wazuh-analysisd -t >/tmp/analysisd-test.log 2>&1; then
+  Q=/var/ossec/etc/rules-dynamic.quarantine/$(date +%Y%m%d-%H%M%S)
+  mkdir -p "$Q"
+  find "$D" -mindepth 1 -maxdepth 1 -exec mv -t "$Q" {} +
+  echo "[siem-setup] CẢNH BÁO: ruleset lỗi (wazuh-analysisd -t), đã chuyển file rule động sang $Q:"
+  tail -n 5 /tmp/analysisd-test.log | sed 's/^/[siem-setup]   /'
+else
+  echo "[siem-setup] ruleset hợp lệ (wazuh-analysisd -t)"
 fi

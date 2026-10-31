@@ -3,7 +3,7 @@
 #  - ruleset Wazuh chấm "file mới" (554) và "giá trị registry mới" level 5, dưới ngưỡng chuyển alert (level 7), nên
 #    trước rule này một file thả vào thư mục Startup / cron.d hay một giá trị mới ở khóa Run không thành alert nào;
 #  - bỏ thư mục nhị phân (/usr/bin, System32) và known_hosts của rule cũ: đổi sau mỗi lần cập nhật gói / mỗi lần SSH ra
-#    ngoài, báo nhầm hàng loạt; webshell trong thư mục web do rule Wazuh 100100 / 100101 lo (wazuh/manager/local_rules.xml).
+#    ngoài, báo nhầm hàng loạt; webshell trong thư mục web do rule Wazuh 100100 / 100101 lo (wazuh/manager/rules/0100-platform.xml).
 # Khi FIM-001 chạy chính thức, cảnh báo chung 550 / 553 của Wazuh cho cùng event không chuyển thành alert nữa
 # (detection/wazuh.py covered_by), để một thay đổi file không thành 2 alert.
 - id: FIM-001

@@ -142,7 +142,7 @@ tay, nên chỉ chuyển sang alert những cảnh báo trong `alerts.json` mà 
 - mọi cảnh báo level ≥ 12, bất kể nhóm.
 
 Level Wazuh (0–15) đổi sang mức độ: 7–9 medium, 10–11 high, ≥ 12 critical. Kết quả đánh giá cấu hình SCA (CIS) không thành
-alert. Hai rule Wazuh riêng trong `wazuh/manager/local_rules.xml`: 100100 (file mới trong thư mục web, có thể là webshell) và
+alert. Hai rule Wazuh riêng trong `wazuh/manager/rules/0100-platform.xml`: 100100 (file mới trong thư mục web, có thể là webshell) và
 100101 (nội dung web bị sửa), cùng level 10.
 
 Cùng một thay đổi file đến 2 lần: event trong `archives.json` chạy qua rule viết tay, cảnh báo trong `alerts.json` qua cầu nối.

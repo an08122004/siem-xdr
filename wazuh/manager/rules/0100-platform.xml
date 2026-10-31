@@ -1,5 +1,6 @@
 <!--
-  Rule Wazuh riêng của SIEM/XDR (đè etc/rules/local_rules.xml mặc định). ID 100000-120000 dành cho rule tự viết.
+  Rule Wazuh riêng của SIEM/XDR (nền tảng). Cả thư mục wazuh/manager/rules được mount chỉ đọc vào etc/rules; ID 100000-110999 dành
+  cho rule tự viết, dải theo file xem server/siem/wazuh_rules.py (ID_RANGES). File này: 100000-100999.
   Ruleset gốc chấm "file mới" (554) level 5, "file bị sửa" (550) level 7 cho MỌI thư mục. Trong thư mục web, file mới
   hay file bị sửa thường là webshell vừa tải lên -> nâng lên level 10 (SIEM/XDR chuyển thành alert high, rule WZH-1001xx).
 -->

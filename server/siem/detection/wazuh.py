@@ -19,7 +19,7 @@ from ..pipeline.normalize import Doc, get
 from . import alerts as alert_builder
 from .rules import Rule, RuleEngine
 
-LOCAL_RULE_MIN_ID = 100000          # rule Wazuh tự viết (wazuh/manager/local_rules.xml): luôn chuyển, không coi là chung
+LOCAL_RULE_MIN_ID = 100000          # rule Wazuh tự viết (wazuh/manager/rules/0100-platform.xml): luôn chuyển, không coi là chung
 
 
 def severity_for(level: int) -> str:
