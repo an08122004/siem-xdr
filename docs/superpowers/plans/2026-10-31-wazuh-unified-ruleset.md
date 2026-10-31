@@ -502,16 +502,30 @@ Task 0 đo ngày 31/10/2026 trên project `wzhdev` (bản chép volume Wazuh th�
 
 Lệnh: `python tools/wazuh_noise.py --data D:/GSANM/BTL/siem-xdr/datasets/processed` (image `wazuh/wazuh-manager:4.14.8`, `ossec.conf` + `rules/` của nhánh, `--network none`, container `wazuh-noise` xóa sau khi chạy).
 
-- Tổng event bình thường: **36.305** (CSIC 2010 normal 36.000 + lệnh endpoint bình thường 305). analysisd xử lý 36.306, bỏ 0.
-- Alert level ≥ 7: **5** → **0,014 alert / 100 event**. Cổng ≤ 1 alert / 100 event: **ĐẠT**.
-- Mỗi event tính 1 alert (rule level cao nhất khớp event đó). Chỉ có 3 rule lên top (không đủ 20):
+Tập bình thường: web CSIC 2010 (36.000), Windows: lệnh bình thường tự soạn `baseline-endpoint` (153) + `splunk-background` (112, `realdata_normal`) + `scenario-background` (406, lệnh nền lặp ở nhiều kỹ thuật trong `realdata_scenario`), Linux: `baseline-endpoint` (152) + `scenario-background` (48). Windows dựng thành Sysmon EventID 1, Linux thành auditd EXECVE như event tấn công. analysisd xử lý 36.872, bỏ 0.
+
+| Lĩnh vực / nguồn | Event | Alert ≥ 7 | Alert / 100 event | Cổng ≤ 1 |
+|---|---|---|---|---|
+| **Tổng** | 36.871 | 9 | 0,024 | đạt |
+| web (csic2010) | 36.000 | 0 | 0 | đạt |
+| **Windows** | 671 | 9 | **1,341** | **KHÔNG ĐẠT** |
+| - windows/baseline-endpoint | 153 | 5 | 3,268 | không đạt |
+| - windows/scenario-background | 406 | 4 | 0,985 | đạt (sát ngưỡng) |
+| - windows/splunk-background | 112 | 0 | 0 | đạt |
+| Linux | 200 | 0 | 0 | đạt |
+
+Mỗi event tính 1 alert (rule level cao nhất khớp). Chỉ có 7 rule (không đủ 20), tất cả ở Windows:
 
 | Rule | Level | Mô tả | Số alert |
 |---|---|---|---|
 | 92041 | 10 | Value added to registry key has Base64-like pattern | 3 |
 | 92043 | 10 | Netsh used to add firewall rule | 1 |
 | 92074 | 12 | curl.exe launched with commands to create a binary file | 1 |
+| 92057 | 12 | Powershell.exe spawned a powershell process which executed a base64 encoded command | 1 |
+| 61627 | 12 | Sysmon - Suspicious Process - lsass.exe is a Parent Image | 1 |
+| 61640 | 12 | Sysmon - Suspicious Process - explorer.exe | 1 |
+| 61618 | 12 | Sysmon - Suspicious Process - svchost.exe | 1 |
 
-- Cả 5 alert là lệnh endpoint bình thường (92041 là regex quá rộng đã ghi ở `GENERIC` của `wazuh_coverage.py`); web CSIC normal không sinh alert ≥ 7. Chưa chỉnh gì; nếu Task 12 muốn giảm thêm thì xem 3 rule trên.
-- Giới hạn: tập bình thường chủ yếu là web (36.000/36.305) và chỉ có event Sysmon EventID 1 / auditd EXECVE, nên rule Windows khác (đăng nhập, dịch vụ, registry...) chưa được thử với dữ liệu bình thường.
-- Sửa kèm: `tools/wazuh_coverage.py` `load_items` lấy web normal chỉ từ `csic2010` (dataset đã có thêm `scenario-background`, `splunk-background` nên assert độ dài cũ vỡ).
+- Kết luận: web và Linux sạch; Windows **không đạt** cổng (1,34 / 100 event) nên 7 rule trên đưa vào Task 12 (chưa chỉnh gì). 92041 là regex quá rộng đã ghi ở `GENERIC` của `wazuh_coverage.py`.
+- Giới hạn: tập Windows chỉ có Sysmon EventID 1 (671 event, nhỏ), chưa có đăng nhập / dịch vụ / registry bình thường. 3 rule `Suspicious Process` (61618/61627/61640) có thể do cách dựng event (ParentImage lấy từ dữ liệu ghi thật, các trường khác để trống) nên nên kiểm lại ở Task 12 trước khi sửa.
+- Sửa kèm: `tools/wazuh_coverage.py` `load_items` lấy web normal chỉ từ `csic2010` (assert độ dài cũ vỡ vì dataset có thêm normal endpoint) và có tham số `extra_normal` (chỉ `wazuh_noise.py` dùng; báo cáo độ phủ giữ số liệu cũ).

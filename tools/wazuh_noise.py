@@ -58,7 +58,7 @@ def main() -> None:
     a = ap.parse_args()
     cov.DATA, cov.CONTAINER = Path(a.data), NAME
     only = set(re.findall(r'<rule\s+id="(\d+)"', Path(a.rules).read_text(encoding="utf-8"))) if a.rules else None
-    items = [it for it in cov.load_items() if it["class"] == "normal"]
+    items = [it for it in cov.load_items(extra_normal=True) if it["class"] == "normal"]
     with tempfile.TemporaryDirectory() as tmp:
         try:
             start(Path(tmp))
@@ -71,13 +71,22 @@ def main() -> None:
     meta = {h["id"]: h for h in hits.values()}
     count = Counter(h["id"] for h in hits.values())
     total, n = len(items), sum(count.values())
-    per100 = 100 * n / total if total else 0.0
-    print(f"\nevent bình thường: {total:,} | alert level >= {MIN_LEVEL}: {n:,} | {per100:.3f} alert / 100 event "
-          f"(cổng <= {GATE}: {'ĐẠT' if per100 <= GATE else 'KHÔNG ĐẠT'})")
-    print("| Rule | Level | Mô tả | Số alert |\n|---|---|---|---|")
-    for rid, c in count.most_common(20):
-        print(f"| {rid} | {meta[rid]['level']} | {meta[rid]['description'][:80]} | {c:,} |")
 
+    def verdict(k: int, t: int) -> str:
+        return f"{k:,} alert / {t:,} event = {100 * k / t if t else 0:.3f} / 100 event (cổng <= {GATE}: " f"{'ĐẠT' if t and 100 * k / t <= GATE else 'KHÔNG ĐẠT'})"
+
+    print(f"\nTỔNG: {verdict(n, total)}")
+    src = lambda it: it.get("dataset") or ("csic2010" if it["domain"] == "web" else "baseline-endpoint")  # noqa: E731
+    for label, key in (("Theo lĩnh vực", lambda it: it["domain"]), ("Theo nguồn", lambda it: f"{it['domain']}/{src(it)}")):
+        print(f"\n{label}:")
+        for k in sorted({key(it) for it in items}):
+            xs = [it for it in items if key(it) == k]
+            print(f"- {k}: {verdict(sum(it['i'] in hits for it in xs), len(xs))}")
+    print("\n| Rule | Level | Mô tả | Số alert | Lĩnh vực |\n|---|---|---|---|---|")
+    for rid, c in count.most_common(20):
+        doms = Counter(it["domain"] for it in items if hits.get(it["i"], {}).get("id") == rid)
+        print(f"| {rid} | {meta[rid]['level']} | {meta[rid]['description'][:80]} | {c:,} | "
+              f"{', '.join(f'{d} {v}' for d, v in doms.items())} |")
 
 if __name__ == "__main__":
     main()

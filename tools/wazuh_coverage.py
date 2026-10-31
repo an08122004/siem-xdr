@@ -120,8 +120,10 @@ def audit_message(aid: int, exe: str, cmd: str, ppid: int = 3999, uid: int = 0) 
 
 
 # ---------------------------------------------------------------- dataset
-def load_items() -> list[dict]:
-    """Mỗi item: domain, class (attack / normal), group, msg (gửi Wazuh), doc (đã chuẩn hóa, cho rule tự viết)."""
+def load_items(extra_normal: bool = False) -> list[dict]:
+    """extra_normal: thêm lệnh endpoint bình thường ghi thật (splunk-background, scenario-background) cho tools/wazuh_noise.py;
+    báo cáo độ phủ không dùng (giữ nguyên số liệu của nó).
+    Mỗi item: domain, class (attack / normal), group, msg (gửi Wazuh), doc (đã chuẩn hóa, cho rule tự viết)."""
     from siem import settings
     from siem.ai.baseline import LINUX, WINDOWS, ordinary_processes
     from siem.ai.golden import PublicDatasets
@@ -164,6 +166,21 @@ def load_items() -> list[dict]:
             it = {"domain": platform, "class": "normal", "group": "normal", "doc": doc}
             it["build"] = (("windows", image, cmd, parent, parent, "COMPANY\\lan") if platform == "windows"
                            else ("linux", image, cmd))
+            items.append(it)
+    if extra_normal:
+        for x in g.normal:
+            ds = x.label.get("dataset")
+            if ds not in ("splunk-background", "scenario-background"):
+                continue
+            d, platform = x.doc, x.label["platform"]
+            cmd = str(get(d, "process.command_line") or "")
+            exe = str(get(d, "process.executable") or get(d, "process.name") or "")
+            if not exe:
+                continue
+            it = {"domain": platform, "class": "normal", "group": "normal", "dataset": ds, "doc": d}
+            it["build"] = (("windows", exe, cmd, str(get(d, "process.parent.executable") or get(d, "process.parent.name") or ""),
+                            str(get(d, "process.parent.command_line") or ""), str(get(d, "user.name") or "COMPANY\\lan"))
+                           if platform == "windows" else ("linux", exe, cmd))
             items.append(it)
     for i, it in enumerate(items):
         it["i"] = i

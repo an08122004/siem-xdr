@@ -226,7 +226,14 @@ def test_bridge_selects_groups_and_levels():
 
 def test_any_group_level7_bridged_by_default():
     assert bridge.should_bridge({"id": "60122", "level": 10, "groups": ["windows", "authentication_failures"]})
-    assert bridge.should_bridge({"id": "5710", "level": 7, "groups": ["sca"]})
+    assert bridge.should_bridge({"id": "5710", "level": 7, "groups": ["sshd"]})
+
+
+def test_sca_not_bridged_by_default():
+    sca = {"id": "19007", "level": 7, "groups": ["sca"]}
+    assert not bridge.should_bridge(sca) and not bridge.should_bridge({**sca, "level": 12})
+    assert bridge.should_bridge(sca, exclude_groups=set())
+    assert bridge.should_bridge({"id": "100500", "level": 7, "groups": ["sca"]})      # rule tự viết luôn chuyển
 
 
 def test_level6_not_bridged():

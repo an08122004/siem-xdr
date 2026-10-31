@@ -33,15 +33,20 @@ def severity_for(level: int) -> str:
 
 
 def should_bridge(rule: dict, groups: set[str] | None = None, min_level: int | None = None,
-                  any_level: int | None = None) -> bool:
+                  any_level: int | None = None, exclude_groups: set[str] | None = None) -> bool:
     groups = settings.WAZUH_ALERT_GROUPS if groups is None else groups
+    exclude = settings.WAZUH_ALERT_EXCLUDE_GROUPS if exclude_groups is None else exclude_groups
     min_level = settings.WAZUH_ALERT_MIN_LEVEL if min_level is None else min_level
     any_level = settings.WAZUH_ALERT_ANY_LEVEL if any_level is None else any_level
     try:
         level = int(rule.get("level") or 0)
     except (TypeError, ValueError):
         return False
-    if level >= any_level or _is_local(rule):
+    if _is_local(rule):
+        return True
+    if exclude & {str(g) for g in rule.get("groups") or []}:
+        return False
+    if level >= any_level:
         return True
     # groups rỗng = mọi nhóm (ruleset Wazuh là nguồn phát hiện duy nhất)
     return level >= min_level and (not groups or bool(groups & {str(g) for g in rule.get("groups") or []}))
