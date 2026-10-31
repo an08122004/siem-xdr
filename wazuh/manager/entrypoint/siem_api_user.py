@@ -16,6 +16,10 @@ import secrets
 import string
 import sys
 
+# Một file mật khẩu cho mỗi user trong ACCOUNTS, theo thứ tự: thiếu thì dừng ngay (không âm thầm bỏ qua user)
+if len(sys.argv) != 3:
+    sys.exit("usage: siem_api_user.py <siem-soar password file> <siem-rules password file>")
+
 sys.path.append("/var/ossec/framework")
 
 from wazuh.rbac.orm import (AuthenticationManager, PoliciesManager, RolesManager,  # noqa: E402
@@ -88,6 +92,7 @@ def setup(user: str, role: str, policies: dict, password: str) -> None:
 
 
 def main() -> None:
+    assert len(sys.argv) == len(ACCOUNTS) + 1, "ACCOUNTS và số file mật khẩu lệch nhau"
     check_database_integrity()
     for (user, (role, policies)), pw_file in zip(ACCOUNTS.items(), sys.argv[1:]):
         setup(user, role, policies, open(pw_file, encoding="utf-8").read().strip())

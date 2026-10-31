@@ -41,11 +41,19 @@ install -d -o 10001 -g wazuh -m 0755 "$D"
 # 7. File rule hỏng còn trên đĩa thì wazuh-analysisd không lên, kéo theo remoted và apid. Kiểm tra cả ruleset trước khi
 #    start; hỏng thì cách ly file động (AI / ngoại lệ) để manager vẫn khởi động được.
 if ! /var/ossec/bin/wazuh-analysisd -t >/tmp/analysisd-test.log 2>&1; then
-  Q=/var/ossec/etc/rules-dynamic.quarantine/$(date +%Y%m%d-%H%M%S)
-  mkdir -p "$Q"
-  find "$D" -mindepth 1 -maxdepth 1 -exec mv -t "$Q" {} +
-  echo "[siem-setup] CẢNH BÁO: ruleset lỗi (wazuh-analysisd -t), đã chuyển file rule động sang $Q:"
-  tail -n 5 /tmp/analysisd-test.log | sed 's/^/[siem-setup]   /'
+  if [ -n "$(ls -A "$D")" ]; then
+    Q=/var/ossec/etc/rules-dynamic.quarantine/$(date +%Y%m%d-%H%M%S)
+    mkdir -p "$Q"
+    find "$D" -mindepth 1 -maxdepth 1 -exec mv -t "$Q" {} +
+    echo "[siem-setup] CẢNH BÁO: ruleset lỗi (wazuh-analysisd -t), đã chuyển file rule động sang $Q:"
+    tail -n 5 /tmp/analysisd-test.log | sed 's/^/[siem-setup]   /'
+  fi
+  # kiểm lại: lỗi có thể nằm ngoài rules-dynamic (vd file hỏng trong wazuh/manager/rules), cách ly không sửa được
+  if /var/ossec/bin/wazuh-analysisd -t >/tmp/analysisd-test.log 2>&1; then
+    echo "[siem-setup] ruleset hợp lệ sau khi cách ly rules-dynamic"
+  else
+    echo "[siem-setup] ruleset VẪN lỗi sau khi cách ly — lỗi nằm ngoài rules-dynamic: $(grep -m1 -iE 'error|critical' /tmp/analysisd-test.log || head -n 1 /tmp/analysisd-test.log)"
+  fi
 else
   echo "[siem-setup] ruleset hợp lệ (wazuh-analysisd -t)"
 fi

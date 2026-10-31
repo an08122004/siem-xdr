@@ -140,3 +140,13 @@ def test_warning_msg_restores_file(tmp_path, monkeypatch):
         wazuh_rules.write_dynamic("ai.xml", GOOD.replace("109001", "109005"), api, root=tmp_path)
     assert (tmp_path / "ai.xml").read_text() == GOOD
     assert calls == [("PUT", "/manager/analysisd/reload")] * 2
+
+
+@pytest.mark.parametrize("args", [[], ["only-one"], ["a", "b", "c"]])
+def test_api_user_script_fails_loudly_on_wrong_argc(args):
+    import subprocess
+    import sys
+    from pathlib import Path
+    script = Path(__file__).resolve().parents[2] / "wazuh/manager/entrypoint/siem_api_user.py"
+    r = subprocess.run([sys.executable, str(script), *args], capture_output=True, text=True)
+    assert r.returncode != 0 and "usage" in r.stderr
