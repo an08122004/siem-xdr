@@ -54,6 +54,7 @@ def check(files: dict[str, str], cases: list[dict]) -> list[str]:
         except ET.ParseError as e:
             err("-", f"XML sai cú pháp: {e}")
             continue
+        # Đọc XML phản chiếu wazuh_rules.parse (nhóm hiệu lực, overwrite, level), không gọi nó vì cần phần tử thô và không được ném lỗi.
         parent = {c: p for p in root.iter() for c in p}
         for el in root.iter("rule"):
             outer, p = [], parent.get(el)
@@ -99,7 +100,7 @@ def check(files: dict[str, str], cases: list[dict]) -> list[str]:
             if not tuning:
                 if not CODE.match(desc):
                     err(lab, "description thiếu mã ở đầu (vd WEB-010 )")
-                if not el.findall("mitre/id"):
+                if not any((i.text or "").strip() for i in el.findall("mitre/id")):
                     err(lab, "thiếu <mitre>")
                 if "siem" not in groups:       # rule gốc bị ghi đè (tuning) không phải "rule riêng"
                     err(lab, "thiếu nhóm siem")

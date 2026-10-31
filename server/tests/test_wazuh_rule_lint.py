@@ -106,10 +106,13 @@ def test_malformed_rules_never_crash():
 
 
 def test_duplicate_id_in_one_file_still_checks_first_element():
-    bad = '<rule id="101001" level="5"><field name="a" type="pcre2">admin</field></rule>'
-    xml = f'<group name="siem,">{bad}{bad}</group>'
-    out = run(xml)
-    assert has(out, "trùng") and sum("từ trần" in o for o in out) == 2
+    tpl = '<rule id="101001" level="5"><field name="a" type="pcre2">{}</field></rule>'
+    out = run(f'<group name="siem,">{tpl.format("admin")}{tpl.format("^admin$")}</group>')
+    assert has(out, "trùng") and sum("từ trần" in o for o in out) == 1
+
+
+def test_empty_mitre_id_is_an_error():
+    assert has(run(rule(mitre="<mitre><id/></mitre>")), "mitre")
 
 
 def test_tuning_exempt_from_siem_and_dynamic_from_cases():
