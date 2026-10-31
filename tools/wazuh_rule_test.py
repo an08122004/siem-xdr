@@ -11,6 +11,7 @@ Thoát mã 1 khi có ca sai, mã 2 khi bơm hàng đợi hỏng (InjectionError)
       legacy: WEB-001         # (tùy chọn) mã rule cũ, để tra
       log_format: apache      # syslog | json | apache | eventchannel | syscheck
       location: /var/log/apache2/access.log
+      delay: 16               # (tùy chọn, syslog/json/apache) giây nghỉ sau mỗi dòng, để thử timeframe thật
       events:                 # NHIỀU DÒNG = CÙNG MỘT session logtest (rule đếm ngưỡng frequency/timeframe)
         - '203.0.113.5 - - [31/Oct/2026:10:00:00 +0700] "GET /p.php?id=1%27 HTTP/1.1" 200 12 "-" "curl/8"'
 
@@ -80,6 +81,7 @@ def fired(case: dict, api) -> set[int]:
         for ev in case["events"]:
             res = _retry(lambda: api.logtest(ev, case["log_format"], case["location"], token))
             token = res.get("token") or token
+            time.sleep(case.get("delay", 0))     # giây giữa các dòng: timeframe tính theo giờ thật lúc nhận, không theo giờ trong log
             if (rid := ((res.get("output") or {}).get("rule") or {}).get("id")):
                 ids.add(int(rid))
     finally:

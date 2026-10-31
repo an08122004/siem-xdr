@@ -29,16 +29,6 @@
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.13 port 4444 ssh2'
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.14 port 4444 ssh2'
 
-- rule: 101011   # AUTH-001: 5 lần sai user không tồn tại
-  log_format: syslog
-  location: /var/log/auth.log
-  events:
-    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.6 port 4444 ssh2'
-    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.6 port 4444 ssh2'
-    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.6 port 4444 ssh2'
-    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.6 port 4444 ssh2'
-    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.6 port 4444 ssh2'
-
 - rule: 101002   # AUTH-002: 5 lần sai rồi đăng nhập được từ cùng IP
   log_format: syslog
   location: /var/log/auth.log
@@ -176,7 +166,7 @@
   events:
     - 'Oct 31 10:00:00 host sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/ssh-keygen'
 
-- rule: 101012   # AUTH-002: 5 lần sai user không tồn tại rồi thành công
+- rule: 101001   # AUTH-001: 5 lần sai user không tồn tại
   log_format: syslog
   location: /var/log/auth.log
   events:
@@ -185,19 +175,8 @@
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.30 port 4444 ssh2'
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.30 port 4444 ssh2'
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.30 port 4444 ssh2'
-    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for ghost from 203.0.113.30 port 4444 ssh2'
 
-- rule: 101013   # AUTH-003: 5 user không tồn tại khác nhau từ một IP
-  log_format: syslog
-  location: /var/log/auth.log
-  events:
-    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user a from 203.0.113.31 port 4444 ssh2'
-    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user b from 203.0.113.31 port 4444 ssh2'
-    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user c from 203.0.113.31 port 4444 ssh2'
-    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user d from 203.0.113.31 port 4444 ssh2'
-    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user e from 203.0.113.31 port 4444 ssh2'
-
-- none: [101011]   # AUTH-001 (user không tồn tại): 4 lần sai, dưới ngưỡng
+- none: [101001]   # AUTH-001: 4 lần sai user không tồn tại (dưới ngưỡng)
   log_format: syslog
   location: /var/log/auth.log
   events:
@@ -206,7 +185,18 @@
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.40 port 4444 ssh2'
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.40 port 4444 ssh2'
 
-- none: [101012]   # AUTH-002 (user không tồn tại): sai từ một IP, thành công từ IP khác
+- rule: 101002   # AUTH-002: 5 lần sai user không tồn tại rồi thành công
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.32 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.32 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.32 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.32 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.32 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for ghost from 203.0.113.32 port 4444 ssh2'
+
+- none: [101002]   # AUTH-002: sai từ một IP, thành công từ IP khác (user không tồn tại)
   log_format: syslog
   location: /var/log/auth.log
   events:
@@ -217,12 +207,158 @@
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.41 port 4444 ssh2'
     - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for ghost from 10.0.0.26 port 4444 ssh2'
 
-- none: [101013]   # AUTH-003 (user không tồn tại): một tên gõ 5 lần, không phải spraying
+- none: [101002]   # AUTH-002: 4 lần sai rồi thành công (N-1)
   log_format: syslog
   location: /var/log/auth.log
   events:
-    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.42 port 4444 ssh2'
-    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.42 port 4444 ssh2'
-    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.42 port 4444 ssh2'
-    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.42 port 4444 ssh2'
-    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.42 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.42 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.42 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.42 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.42 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for deploy from 203.0.113.42 port 4444 ssh2'
+
+- rule: 101003   # AUTH-003: 5 user không tồn tại khác nhau từ một IP
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user a from 203.0.113.31 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user b from 203.0.113.31 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user c from 203.0.113.31 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user d from 203.0.113.31 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user e from 203.0.113.31 port 4444 ssh2'
+
+- none: [101003]   # AUTH-003: 4 user không tồn tại khác nhau (N-1)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user a from 203.0.113.43 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user b from 203.0.113.43 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user c from 203.0.113.43 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user d from 203.0.113.43 port 4444 ssh2'
+
+- none: [101003]   # AUTH-003: một tên không tồn tại gõ 5 lần, không phải spraying
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.44 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.44 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.44 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.44 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.44 port 4444 ssh2'
+
+- rule: 101002   # AUTH-002: 5 user khác nhau (spraying) rồi thành công -> vẫn phải báo (rule cũ báo AUTH-001+003+002)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.45 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for b from 203.0.113.45 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for c from 203.0.113.45 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for d from 203.0.113.45 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for e from 203.0.113.45 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for a from 203.0.113.45 port 4444 ssh2'
+
+- rule: 101002   # AUTH-002: như trên với user không tồn tại
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user a from 203.0.113.46 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user b from 203.0.113.46 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user c from 203.0.113.46 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user d from 203.0.113.46 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user e from 203.0.113.46 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for a from 203.0.113.46 port 4444 ssh2'
+
+- rule: 101001   # AUTH-001: 3 user thật + 3 user giả cùng IP vẫn cộng dồn (bộ đếm chung 101000); 101003 cũng báo vì 6 tên khác nhau
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.47 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.47 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.47 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.47 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.47 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.47 port 4444 ssh2'
+
+- rule: 101003   # AUTH-003: 3 user thật + 3 user giả khác nhau cùng IP
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.48 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for b from 203.0.113.48 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for c from 203.0.113.48 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user d from 203.0.113.48 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user e from 203.0.113.48 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user f from 203.0.113.48 port 4444 ssh2'
+
+- rule: 101001   # AUTH-001: 2 user xen kẽ, 7 dòng từ một IP: AUTH-001 báo (>=5 lần sai), AUTH-003 không (xem ca 101003 âm)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.49 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for b from 203.0.113.49 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.49 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for b from 203.0.113.49 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.49 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for b from 203.0.113.49 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.49 port 4444 ssh2'
+
+- rule: 101002   # AUTH-002: root đăng nhập sau brute-force ra 101002 (critical), không phải 101004
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for root from 203.0.113.50 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for root from 203.0.113.50 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for root from 203.0.113.50 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for root from 203.0.113.50 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for root from 203.0.113.50 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for root from 203.0.113.50 port 4444 ssh2'
+
+- none: [101006]   # AUTH-006: sudo thất bại qua PAM (authentication failure) chưa phủ - giới hạn đã ghi trong XML
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sudo: pam_unix(sudo:auth): authentication failure; logname=deploy uid=1000 euid=0 tty=/dev/pts/0 ruser=deploy rhost=  user=deploy'
+
+- rule: 101000   # AUTH-000: một lần sai SSH vào bộ đếm chung
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.60 port 4444 ssh2'
+
+- none: [101000]   # AUTH-000: đăng nhập thành công không vào bộ đếm
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for admin from 203.0.113.60 port 4444 ssh2'
+
+- rule: 101010   # AUTH-002 bộ đếm 600s: 5 lần sai cách nhau 16s (64s > 60s nên 101001 không báo), bộ đếm 600s báo
+  log_format: syslog
+  location: /var/log/auth.log
+  delay: 16
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.61 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.61 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.61 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.61 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.61 port 4444 ssh2'
+
+- rule: 101002   # AUTH-002: brute-force CHẬM (5 lần sai cách nhau 16s) rồi đăng nhập được
+  log_format: syslog
+  location: /var/log/auth.log
+  delay: 16
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.63 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.63 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.63 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.63 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.63 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for admin from 203.0.113.63 port 4444 ssh2'
+
+- none: [101010]   # AUTH-002 bộ đếm 600s: 4 lần sai chưa đủ
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.62 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.62 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.62 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.62 port 4444 ssh2'

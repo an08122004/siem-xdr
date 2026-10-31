@@ -1,78 +1,70 @@
 <!--
   Rule xác thực (AUTH-001..006 của bộ rule cũ), chạy BÓNG. Dải ID 101000-101999. AUTH-005 dùng thẳng rule gốc 5902 (không viết lại).
   Phạm vi: chỉ các log đi qua Wazuh (sshd/sudo qua syslog); sự kiện đăng nhập console không qua Wazuh nên AUTH-002/003 không phủ chúng.
+  Thứ tự file quan trọng: các rule dùng cùng event chỉ rule đứng trước báo, nên AUTH-003 > AUTH-001 > bộ đếm 600s (101010).
 -->
 <group name="local,siem-xdr,">
-  <!-- Thứ tự file quan trọng: AUTH-003 đứng TRƯỚC AUTH-001 vì cả hai khớp cùng event, chỉ rule đứng trước báo. -->
-  <!-- AUTH-003: password spraying, 5 tài khoản khác nhau từ một IP trong 2 phút. -->
-  <!-- Giới hạn (spike S4): different_user (dstuser của sshd; user không tồn tại dùng srcuser, xem 101013) đếm "event trước có user khác event hiện tại", không đếm số user phân biệt; 2 user xen kẽ vẫn báo sau ~2N event. -->
+  <!-- AUTH-000: bộ đếm chung cho mọi thất bại SSH (5760 user có thật, 5710 user không tồn tại), nên 3 user thật + 3 user giả vẫn cộng dồn.
+       Level 2 < log_alert_level (3) nên không ra alert. Từ đây, event bị ghi nhận là 101000 (không còn là 5760/5710) -> mọi bộ đếm dùng if_matched_sid 101000. -->
+  <rule id="101000" level="2">
+    <if_sid>5760, 5710</if_sid>
+    <description>AUTH-000 Thất bại đăng nhập SSH (bộ đếm chung cho AUTH-001/002/003)</description>
+    <mitre>
+      <id>T1110.001</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,auth,shadow,legacy_AUTH-001,</group>
+  </rule>
+
+  <!-- AUTH-003: password spraying, 5 tài khoản khác nhau từ một IP trong 2 phút. user của sshd nằm ở dstuser (user thật) hoặc srcuser (user không tồn tại):
+       khai cả hai different_*; trường vắng mặt luôn tính là "khác" nên chỉ trường có giá trị quyết định. -->
+  <!-- Giới hạn (spike S4): đếm "event trước có user khác event hiện tại", không đếm số user phân biệt; 2 user xen kẽ vẫn báo sau ~2N event.
+       Cũng vì vậy user thật "a" và user giả "a" xen nhau được tính là khác nhau. -->
   <rule id="101003" level="10" frequency="5" timeframe="120" ignore="120">
-    <if_matched_sid>5760</if_matched_sid>
+    <if_matched_sid>101000</if_matched_sid>
     <same_source_ip />
     <different_user />
+    <different_srcuser />
     <description>AUTH-003 Password spraying: $(srcip) thử &gt;= 5 tài khoản khác nhau trong 2 phút</description>
     <mitre>
       <id>T1110.003</id>
     </mitre>
     <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,auth,shadow,legacy_AUTH-003,</group>
+    <group>siem,auth,shadow,legacy_AUTH-003,auth_bf_stage,</group>
   </rule>
 
-  <rule id="101013" level="10" frequency="5" timeframe="120" ignore="120">
-    <if_matched_sid>5710</if_matched_sid>
-    <same_source_ip />
-    <different_srcuser />
-    <description>AUTH-003 Password spraying (user không tồn tại): $(srcip) thử &gt;= 5 tài khoản khác nhau trong 2 phút</description>
-    <mitre>
-      <id>T1110.003</id>
-    </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,auth,shadow,legacy_AUTH-003,</group>
-  </rule>
-
-  <!-- AUTH-001: >= 5 lần sai từ cùng IP trong 60s. Đếm 5760 (user có thật); user không tồn tại (5710) do biến thể 101011. if_matched_group + frequency không chạy được (spike). -->
+  <!-- AUTH-001: >= 5 lần sai (user thật hoặc không tồn tại) từ cùng IP trong 60s. -->
   <rule id="101001" level="10" frequency="5" timeframe="60" ignore="60">
-    <if_matched_sid>5760</if_matched_sid>
+    <if_matched_sid>101000</if_matched_sid>
     <same_source_ip />
     <description>AUTH-001 Brute-force đăng nhập: &gt;= 5 lần thất bại từ $(srcip) trong 60 giây</description>
     <mitre>
       <id>T1110.001</id>
     </mitre>
     <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,auth,shadow,legacy_AUTH-001,</group>
+    <group>siem,auth,shadow,legacy_AUTH-001,auth_bf_stage,</group>
   </rule>
 
-  <!-- Biến thể cho user không tồn tại (5710): cùng mã cũ, vì rule cũ đếm mọi thất bại. Không đếm chung 5760+5710 trong một ngưỡng (giới hạn). -->
-  <rule id="101011" level="10" frequency="5" timeframe="60" ignore="60">
-    <if_matched_sid>5710</if_matched_sid>
+  <!-- Bộ đếm riêng cho AUTH-002: >= 5 lần sai trong 600s (rule cũ cho phép brute-force chậm). Level 2, không ra alert. Đứng sau 101001 nên khi 5 lần sai
+       dồn trong 60s thì 101001 báo; AUTH-002 nối theo nhóm auth_bf_stage (có ở 101001, 101003, 101010) nên chuỗi nào cũng đủ. -->
+  <rule id="101010" level="2" frequency="5" timeframe="600">
+    <if_matched_sid>101000</if_matched_sid>
     <same_source_ip />
-    <description>AUTH-001 Brute-force đăng nhập (user không tồn tại): &gt;= 5 lần thất bại từ $(srcip) trong 60 giây</description>
-    <mitre>
-      <id>T1110.001</id>
-    </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,auth,shadow,legacy_AUTH-001,</group>
-  </rule>
-
-  <!-- AUTH-002: nối sau AUTH-001, đăng nhập thành công (5715) cùng IP trong 10 phút. -->
-  <rule id="101002" level="12" timeframe="600">
-    <if_sid>5715</if_sid>
-    <if_matched_sid>101001</if_matched_sid>
-    <same_source_ip />
-    <description>AUTH-002 Brute-force THÀNH CÔNG: đăng nhập được từ $(srcip) sau chuỗi thất bại (khả năng cao tài khoản bị chiếm)</description>
+    <description>AUTH-002 Chuỗi thất bại đăng nhập &gt;= 5 lần trong 10 phút (bước đầu của brute-force thành công)</description>
     <mitre>
       <id>T1110</id>
-      <id>T1078</id>
     </mitre>
     <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,auth,shadow,legacy_AUTH-002,</group>
+    <group>siem,auth,shadow,legacy_AUTH-002,auth_bf_stage,</group>
   </rule>
 
-  <rule id="101012" level="12" timeframe="600">
+  <!-- AUTH-002: đăng nhập thành công (5715) cùng IP trong 10 phút sau chuỗi thất bại (brute-force, spraying hoặc chậm). Nối bằng nhóm, không dùng frequency
+       nên không dính giới hạn if_matched_group của spike. Đứng trước AUTH-004: root đăng nhập sau brute-force ra 101002 (critical), không ra 101004; chấp nhận được vì mức nặng hơn. -->
+  <rule id="101002" level="12" timeframe="600">
     <if_sid>5715</if_sid>
-    <if_matched_sid>101011</if_matched_sid>
+    <if_matched_group>auth_bf_stage</if_matched_group>
     <same_source_ip />
-    <description>AUTH-002 Brute-force THÀNH CÔNG: đăng nhập được từ $(srcip) sau chuỗi thất bại user không tồn tại</description>
+    <description>AUTH-002 Brute-force THÀNH CÔNG: đăng nhập được từ $(srcip) sau chuỗi thất bại (khả năng cao tài khoản bị chiếm)</description>
     <mitre>
       <id>T1110</id>
       <id>T1078</id>
@@ -93,7 +85,9 @@
     <group>siem,auth,shadow,legacy_AUTH-004,</group>
   </rule>
 
-  <!-- AUTH-006: sudo mở shell/su, hoặc sudo thất bại. Con của các rule sudo gốc (đứng sau chúng mới thấy được). -->
+  <!-- AUTH-006: sudo mở shell/su, hoặc sudo thất bại. Con của các rule sudo gốc (đứng sau chúng mới thấy được).
+       Giới hạn: sudo thất bại qua PAM ("pam_unix(sudo:auth): authentication failure") đi vào nhóm PAM gốc (5503), không phải rule sudo -> chưa phủ;
+       trường hợp phổ biến còn lại "incorrect password attempt" thì có. -->
   <rule id="101006" level="7">
     <if_sid>5401, 5402, 5403, 5405, 5406, 5407</if_sid>
     <regex type="pcre2">incorrect password attempt|NOT in sudoers|command not allowed|COMMAND=\S*/(ba|z|da)?sh(\s|$)|COMMAND=(\S*/)?su(\s+-?)?\s*$|COMMAND=.*\s-i$</regex>
