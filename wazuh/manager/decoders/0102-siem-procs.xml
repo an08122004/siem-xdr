@@ -1,0 +1,12 @@
+<!--
+  Telemetry tiến trình của chính dự án: script agent wazuh/agent/linux/siem-procs (localfile command, alias siem-procs) in mỗi tiến trình mới một dòng
+    siem-proc: pid=<pid> ppid=<ppid> uid=<uid> name=<tên> parent=<tên cha> exe=<đường dẫn> cmd=<dòng lệnh>
+  và Wazuh thêm tiền tố "ossec: output: 'siem-procs': ". Cùng định dạng với _SIEM_PROC ở server/siem/pipeline/normalize.py.
+  Decoder KHÔNG biết location; việc chỉ tin dòng đến từ nguồn siem-procs làm ở rule gốc 102000 (kẻ tấn công ghi được chuỗi này vào log web/sshd).
+  name/parent đã đổi khoảng trắng thành "_" bởi script, exe vắng thì là "-"; cmd lấy đến hết dòng.
+-->
+<decoder name="siem-proc">
+  <prematch type="pcre2">^ossec: output: '[^']*': siem-proc: pid=\d+ ppid=</prematch>
+  <regex type="pcre2">siem-proc: pid=(\d+) ppid=(\d+) uid=(\d*) name=(\S*) parent=(\S*) exe=(\S*) cmd=(.*)$</regex>
+  <order>pid,ppid,uid,name,parent,exe,cmd</order>
+</decoder>

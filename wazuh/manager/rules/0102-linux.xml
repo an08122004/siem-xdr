@@ -1,0 +1,118 @@
+<!--
+  Rule tiến trình Linux (LNX-001..006 của bộ rule cũ), chạy BÓNG. Dải ID 102000-102999. Decoder: decoders/0102-siem-procs.xml.
+  File này giữ nguồn siem-proc (con của 102000: nhìn trường cmd/name/parent do decoder tách). Nguồn auditd EXECVE (R35) nằm ở 0851-linux-audit.xml, cùng dải ID,
+  vì file rule nạp theo thứ tự TÊN FILE trên cả hai thư mục và rule nối vào 80792 phải nằm SAU 0365-auditd_rules.xml (xem đầu file đó).
+  Mã -> id (siem-proc / auditd): LNX-001 102001/102011, LNX-002 102002/-, LNX-003 102003/102013, LNX-004 102004/102014, LNX-005 102005/102015, LNX-006 102006/102016.
+  Thứ tự file quan trọng: một event khớp nhiều rule cùng cấp chỉ rule đứng trước báo (nặng trước: 001 > 002 > 003 > 004 > 006), và bộ đếm LNX-005 (102090) đứng CUỐI
+  để không nuốt event của các rule kia. Hệ quả: event đã báo LNX-001..004/006 không cộng vào bộ đếm LNX-005 (đã có alert mức cao hơn).
+  Tin cậy nguồn: kẻ tấn công ghi được chuỗi "siem-proc: ..." vào log web/sshd; decoder không biết location nên rule gốc 102000 chỉ nhận location kết thúc bằng "siem-procs"
+  (giống _SIEM_PROC_LOC ở normalize.py) và mọi rule siem-proc là con của 102000.
+-->
+<group name="local,siem-xdr,">
+  <!-- LNX-000: nền cho dòng siem-proc đáng tin (decoder siem-proc + location siem-procs). Level 0, không ra alert. -->
+  <rule id="102000" level="0">
+    <decoded_as>siem-proc</decoded_as>
+    <location type="pcre2">(^|/)siem-procs$</location>
+    <description>LNX-000 Dòng telemetry tiến trình siem-proc từ nguồn siem-procs</description>
+    <mitre>
+      <id>T1059.004</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,linux,shadow,</group>
+  </rule>
+
+  <!-- LNX-001: reverse shell. -->
+  <rule id="102001" level="12">
+    <if_sid>102000</if_sid>
+    <field name="cmd" type="pcre2">bash\s+-i\s+>\x26\s*/dev/tcp/|/dev/tcp/\d+\.\d+\.\d+\.\d+/\d+|\bnc(at)?\b.*\s-e\s+/bin/(ba)?sh|socat.*exec:|python[23]?\s+-c.*socket.*connect|pty\.spawn|mkfifo\s+/tmp/</field>
+    <description>LNX-001 Reverse shell trên tiến trình Linux: $(cmd)</description>
+    <mitre>
+      <id>T1059.004</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,linux,shadow,legacy_LNX-001,</group>
+  </rule>
+
+  <!-- LNX-002: web server sinh ra shell/công cụ. CHỈ chạy trên siem-proc: auditd không ghi tên tiến trình cha (chỉ ppid), nên không diễn đạt được điều kiện cha-con. -->
+  <rule id="102002" level="12">
+    <if_sid>102000</if_sid>
+    <field name="parent" type="pcre2">^(apache2|httpd|nginx|php-fpm|php|lighttpd|tomcat|java)$</field>
+    <field name="name" type="pcre2">^(sh|bash|dash|zsh|nc|ncat|python|python3|perl|curl|wget|whoami|id|uname)$</field>
+    <description>LNX-002 Web server $(parent) sinh ra $(name) (khả năng webshell / RCE)</description>
+    <mitre>
+      <id>T1505.003</id>
+      <id>T1059.004</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,linux,shadow,legacy_LNX-002,</group>
+  </rule>
+
+  <!-- LNX-003: tải script rồi chạy qua shell, trừ bộ cài chính thức (cùng danh sách loại trừ với YAML cũ). -->
+  <rule id="102003" level="10">
+    <if_sid>102000</if_sid>
+    <field name="cmd" type="pcre2">(curl|wget)\s+(?![^|]*://(get\.docker\.com|sh\.rustup\.rs|get\.k3s\.io|install\.python-poetry\.org|deb\.nodesource\.com/|raw\.githubusercontent\.com/(nvm-sh/nvm|homebrew/install|ohmyzsh/ohmyzsh|helm/helm)/))[^|]*\|\s*(ba)?sh|(curl|wget).*(-O|-o)\s*/tmp/.*\x26\x26\s*chmod\s+\+x</field>
+    <description>LNX-003 Tải script từ mạng rồi chạy thẳng qua shell: $(cmd)</description>
+    <mitre>
+      <id>T1105</id>
+      <id>T1059.004</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,linux,shadow,legacy_LNX-003,</group>
+  </rule>
+
+  <!-- LNX-004: crypto miner theo tên tiến trình (siem-proc name=, auditd comm=) hoặc dòng lệnh. Nhánh tên neo chính xác (xmrigtool không khớp). -->
+  <rule id="102004" level="10">
+    <if_sid>102000</if_sid>
+    <regex type="pcre2">\sname=(?:xmrig|minerd|cpuminer|kdevtmpfsi|kinsing)\s+parent=|\scmd=.*(?:stratum\+tcp://|--donate-level|pool\.(?:minexmr|supportxmr))</regex>
+    <description>LNX-004 Tiến trình / dòng lệnh khai thác tiền ảo: $(name)</description>
+    <mitre>
+      <id>T1496</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,linux,shadow,legacy_LNX-004,</group>
+  </rule>
+
+  <!-- LNX-006: can thiệp cơ chế duy trì (authorized_keys, cron, systemd). -->
+  <rule id="102006" level="10">
+    <if_sid>102000</if_sid>
+    <field name="cmd" type="pcre2">>>?\s*\S*\.ssh/authorized_keys|crontab\s+-[lr]?\s*\S*/tmp|echo.*>>?\s*/etc/cron|systemctl\s+enable\s+\S+.*/tmp</field>
+    <description>LNX-006 Can thiệp cơ chế duy trì (crontab / authorized_keys / systemd): $(cmd)</description>
+    <mitre>
+      <id>T1053.003</id>
+      <id>T1098.004</id>
+      <id>T1543.002</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,linux,shadow,legacy_LNX-006,</group>
+  </rule>
+
+  <!-- LNX-005: bộ đếm lệnh trinh sát, đứng sau mọi rule trên (xem đầu file). siem-proc: level 2 (trước đây chỉ là rule 530 level 0, không alert).
+       auditd: rule gốc level 3 thay 80792 cho đúng 12 lệnh này, nên alert level 3 "Audit: Command" của chúng vẫn còn (chỉ đổi mô tả). -->
+  <rule id="102090" level="2">
+    <if_sid>102000</if_sid>
+    <field name="name" type="pcre2">^(whoami|id|uname|hostname|ifconfig|ip|netstat|ss|ps|w|last|cat)$</field>
+    <description>LNX-005 Lệnh trinh sát $(name) (bộ đếm)</description>
+    <mitre>
+      <id>T1082</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,linux,shadow,legacy_LNX-005,</group>
+  </rule>
+
+  <!-- LNX-005: >= 4 lệnh trinh sát KHÁC TÊN trong 60s trên một máy. Mặc định analysisd đếm theo agent (global_frequency mới đếm chéo agent); same_location phân
+       biệt thêm nguồn (production: luôn là siem-procs / audit.log nên không đổi gì; ca test dùng location riêng để lịch sử không trộn).
+       Giới hạn (spike S4): Wazuh đếm "event trước có tên khác event hiện tại", không đếm số tên phân biệt; 2 tên xen kẽ vẫn báo sau ~2N-2 dòng (dòng 6). -->
+  <rule id="102005" level="7" frequency="4" timeframe="60" ignore="60">
+    <if_matched_sid>102090</if_matched_sid>
+    <same_location />
+    <different_field>name</different_field>
+    <description>LNX-005 Trinh sát hệ thống sau xâm nhập: &gt;= 4 lệnh trinh sát khác nhau trong 60 giây</description>
+    <mitre>
+      <id>T1082</id>
+      <id>T1033</id>
+      <id>T1016</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,linux,shadow,legacy_LNX-005,</group>
+  </rule>
+</group>

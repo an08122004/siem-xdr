@@ -1,0 +1,104 @@
+<!--
+  Rule tiến trình Linux, nguồn auditd EXECVE (key audit-wazuh-c) của LNX-001/003/004/005/006, chạy BÓNG. Dải ID 102000-102999 (cùng 0102-linux.xml; id dạng 1020x1 / 102015).
+  LNX-002 (web server sinh shell) KHÔNG có bản auditd: auditd chỉ ghi ppid, không có tên tiến trình cha, nên điều kiện cha-con chỉ diễn đạt được trên siem-proc (0102-linux.xml).
+  TẠI SAO FILE RIÊNG VÀ TÊN 0851: analysisd nạp rule theo thứ tự TÊN FILE trên cả hai thư mục; if_sid trỏ vào rule nạp SAU bị BỎ ("Signature ID 80792 was not found"). 0102 < 0365-auditd
+  nên không nối được vào 80792; rule gốc (decoded_as auditd) ở 0102 cũng không thắng cây 80700 (đã thử). Rule cần nối cả vào 92600 (0850-audit_rules, "Executed python script", level 0,
+  nối vào nhóm audit nên đứng trước các con khác của 80792): event có exe python đi 80700 -> 92600 -> con của 92600, không bao giờ tới con của 80792. Vì vậy 0851 (> 0850).
+  Rule khai if_sid 80792 (+ 92600 cho 4 rule regex) và key audit-wazuh-c: event khớp thì rule mình báo thay cho 80792 / 92600 (level cao hơn); không khớp thì vẫn là rule gốc.
+  Hệ quả với rule gốc: 80792 (level 3 "Audit: Command") không có rule nào phụ thuộc; 92601/92602 (python từ /tmp, Impacket) đứng trước rule mình nên vẫn báo trước nếu khớp.
+  Giới hạn: lệnh ps/ls có đối số làm khớp 92604/92605 (level 6, ví dụ `ps aux`) đi qua rule gốc đó, không vào bộ đếm LNX-005 auditd (đếm nó sẽ thay alert level 6 bằng level 3).
+  Điều kiện trên full_log vì decoder gốc chỉ tách a0..a7; đối số cách nhau bằng `" aN="`, nên dấu cách giữa hai đối số viết là (?:\s+|"\s+a\d+=").
+  Thứ tự: nặng trước (001 > 003 > 004 > 006), bộ đếm LNX-005 (102091) cuối, như 0102-linux.xml.
+-->
+<group name="local,siem-xdr,">
+  <rule id="102011" level="12">
+    <if_sid>80792, 92600</if_sid>
+    <field name="audit.key" type="pcre2">^audit-wazuh-c$</field>
+    <regex type="pcre2">bash(?:\s+|"\s+a\d+=")-i(?:\s+|"\s+a\d+=")>\x26(?:\s*|"\s+a\d+=")/dev/tcp/|/dev/tcp/\d+\.\d+\.\d+\.\d+/\d+|\bnc(?:at)?\b.*[\s"]-e(?:\s+|"\s+a\d+=")/bin/(?:ba)?sh|socat.*exec:|python[23]?(?:\s+|"\s+a\d+=")-c.*socket.*connect|pty\.spawn|mkfifo(?:\s+|"\s+a\d+=")/tmp/</regex>
+    <description>LNX-001 Reverse shell (auditd): $(audit.exe)</description>
+    <mitre>
+      <id>T1059.004</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,linux,shadow,legacy_LNX-001,</group>
+  </rule>
+
+  <rule id="102013" level="10">
+    <if_sid>80792, 92600</if_sid>
+    <field name="audit.key" type="pcre2">^audit-wazuh-c$</field>
+    <regex type="pcre2">(curl|wget)(\s+|"\s+a\d+=")(?![^|]*://(get\.docker\.com|sh\.rustup\.rs|get\.k3s\.io|install\.python-poetry\.org|deb\.nodesource\.com/|raw\.githubusercontent\.com/(nvm-sh/nvm|homebrew/install|ohmyzsh/ohmyzsh|helm/helm)/))[^|]*\|(\s*|"\s+a\d+=")(ba)?sh</regex>
+    <description>LNX-003 Tải script từ mạng rồi chạy thẳng qua shell (auditd): $(audit.exe)</description>
+    <mitre>
+      <id>T1105</id>
+      <id>T1059.004</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,linux,shadow,legacy_LNX-003,</group>
+  </rule>
+
+  <!-- LNX-003, nhánh 2 (tải vào /tmp rồi chmod +x): tách rule riêng vì lint giới hạn regex 300 ký tự; siem-proc gộp hai nhánh trong 102003. -->
+  <rule id="102023" level="10">
+    <if_sid>80792, 92600</if_sid>
+    <field name="audit.key" type="pcre2">^audit-wazuh-c$</field>
+    <regex type="pcre2">(curl|wget).*(-O|-o)(\s*|"\s+a\d+=")/tmp/.*\x26\x26(\s*|"\s+a\d+=")chmod(\s+|"\s+a\d+=")\+x</regex>
+    <description>LNX-003 Tải script vào /tmp rồi chmod +x (auditd): $(audit.exe)</description>
+    <mitre>
+      <id>T1105</id>
+      <id>T1059.004</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,linux,shadow,legacy_LNX-003,</group>
+  </rule>
+
+  <rule id="102014" level="10">
+    <if_sid>80792, 92600</if_sid>
+    <field name="audit.key" type="pcre2">^audit-wazuh-c$</field>
+    <regex type="pcre2">\scomm="(?:xmrig|minerd|cpuminer|kdevtmpfsi|kinsing)"\s|stratum\+tcp://|--donate-level|pool\.(?:minexmr|supportxmr)</regex>
+    <description>LNX-004 Tiến trình / dòng lệnh khai thác tiền ảo (auditd): $(audit.exe)</description>
+    <mitre>
+      <id>T1496</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,linux,shadow,legacy_LNX-004,</group>
+  </rule>
+
+  <rule id="102016" level="10">
+    <if_sid>80792, 92600</if_sid>
+    <field name="audit.key" type="pcre2">^audit-wazuh-c$</field>
+    <regex type="pcre2">>>?(?:\s*|"\s+a\d+=")\S*\.ssh/authorized_keys|crontab(?:\s+|"\s+a\d+=")-[lr]?(?:\s*|"\s+a\d+=")\S*/tmp|echo.*>>?(?:\s*|"\s+a\d+=")/etc/cron|systemctl(?:\s+|"\s+a\d+=")enable(?:\s+|"\s+a\d+=")\S+.*/tmp</regex>
+    <description>LNX-006 Can thiệp cơ chế duy trì (auditd): $(audit.exe)</description>
+    <mitre>
+      <id>T1053.003</id>
+      <id>T1098.004</id>
+      <id>T1543.002</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,linux,shadow,legacy_LNX-006,</group>
+  </rule>
+
+  <rule id="102091" level="3">
+    <if_sid>80792</if_sid>
+    <field name="audit.key" type="pcre2">^audit-wazuh-c$</field>
+    <field name="audit.command" type="pcre2">^(whoami|id|uname|hostname|ifconfig|ip|netstat|ss|ps|w|last|cat)$</field>
+    <description>LNX-005 Lệnh trinh sát $(audit.command) (bộ đếm auditd)</description>
+    <mitre>
+      <id>T1082</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,linux,shadow,legacy_LNX-005,</group>
+  </rule>
+
+  <rule id="102015" level="7" frequency="4" timeframe="60" ignore="60">
+    <if_matched_sid>102091</if_matched_sid>
+    <same_location />
+    <different_field>audit.command</different_field>
+    <description>LNX-005 Trinh sát hệ thống sau xâm nhập (auditd): &gt;= 4 lệnh trinh sát khác nhau trong 60 giây</description>
+    <mitre>
+      <id>T1082</id>
+      <id>T1033</id>
+      <id>T1016</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,linux,shadow,legacy_LNX-005,</group>
+  </rule>
+</group>

