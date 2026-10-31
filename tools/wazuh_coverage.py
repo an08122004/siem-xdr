@@ -137,7 +137,7 @@ def load_items() -> list[dict]:
         assert get(x.doc, "source.ip") == line.split(" ", 1)[0]
         items.append({"domain": "web", "class": "attack", "group": g.attack_type(x), "line": line,
                       "msg": "1:/var/log/apache2/access.log:" + line, "doc": x.doc})
-    web_normal = [x for x in g.normal if x.label.get("dataset") != "baseline-endpoint"]
+    web_normal = [x for x in g.normal if x.label.get("dataset") == "csic2010"]
     raw_normal = list(_read("csic_normal.jsonl.gz"))
     assert len(web_normal) == len(raw_normal)
     for x, r in zip(web_normal, raw_normal):

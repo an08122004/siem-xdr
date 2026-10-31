@@ -500,4 +500,18 @@ Task 0 đo ngày 31/10/2026 trên project `wzhdev` (bản chép volume Wazuh th�
 
 ### Task 2 — rule ồn
 
-*(điền khi làm Task 2)*
+Lệnh: `python tools/wazuh_noise.py --data D:/GSANM/BTL/siem-xdr/datasets/processed` (image `wazuh/wazuh-manager:4.14.8`, `ossec.conf` + `rules/` của nhánh, `--network none`, container `wazuh-noise` xóa sau khi chạy).
+
+- Tổng event bình thường: **36.305** (CSIC 2010 normal 36.000 + lệnh endpoint bình thường 305). analysisd xử lý 36.306, bỏ 0.
+- Alert level ≥ 7: **5** → **0,014 alert / 100 event**. Cổng ≤ 1 alert / 100 event: **ĐẠT**.
+- Mỗi event tính 1 alert (rule level cao nhất khớp event đó). Chỉ có 3 rule lên top (không đủ 20):
+
+| Rule | Level | Mô tả | Số alert |
+|---|---|---|---|
+| 92041 | 10 | Value added to registry key has Base64-like pattern | 3 |
+| 92043 | 10 | Netsh used to add firewall rule | 1 |
+| 92074 | 12 | curl.exe launched with commands to create a binary file | 1 |
+
+- Cả 5 alert là lệnh endpoint bình thường (92041 là regex quá rộng đã ghi ở `GENERIC` của `wazuh_coverage.py`); web CSIC normal không sinh alert ≥ 7. Chưa chỉnh gì; nếu Task 12 muốn giảm thêm thì xem 3 rule trên.
+- Giới hạn: tập bình thường chủ yếu là web (36.000/36.305) và chỉ có event Sysmon EventID 1 / auditd EXECVE, nên rule Windows khác (đăng nhập, dịch vụ, registry...) chưa được thử với dữ liệu bình thường.
+- Sửa kèm: `tools/wazuh_coverage.py` `load_items` lấy web normal chỉ từ `csic2010` (dataset đã có thêm `scenario-background`, `splunk-background` nên assert độ dài cũ vỡ).
