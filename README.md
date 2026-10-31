@@ -35,7 +35,7 @@ Docker. Quy trình vận hành: **[SOC-OPERATIONS.md](SOC-OPERATIONS.md)**. Lộ
 | Thành phần | Công nghệ | Thư mục |
 |---|---|---|
 | Agent đa nền tảng (Windows/Linux) | **Wazuh agent 4.14.7** (bộ cài chính thức) + script phản ứng `siem-xdr` | `wazuh/agent/`, `demo/web/` |
-| Trạm thu của agent | **Wazuh manager 4.14.7** (chỉ manager, không indexer/dashboard) | `wazuh/manager/` |
+| Trạm thu của agent | **Wazuh manager 4.14.8** (chỉ manager, không indexer/dashboard) | `wazuh/manager/` |
 | Chuyển dữ liệu Wazuh vào Kafka | **Vector** 0.58, end-to-end acknowledgement | `vector/wazuh.yaml` |
 | Manager API + giao diện chung (SOC console + Grafana nhúng) | FastAPI | `server/siem/manager/` |
 | Syslog collector (UDP/TCP 514) | **Vector** 0.58 (Rust), hàng đợi trên đĩa | `vector/vector.yaml` (bản Python cũ `server/siem/collector/` chỉ giữ để đối chiếu) |
@@ -79,7 +79,7 @@ vẫn là phần tự xây của SIEM/XDR. Không dùng Wazuh indexer, dashboard
 | `wazuh/agent/linux/siem-xdr`, `wazuh/agent/windows/siem-xdr.cmd` + `.ps1` | Script phản ứng trên agent |
 | `wazuh/agent/linux/siem-procs` | Telemetry tiến trình mới mỗi giây cho máy không có auditd (rule LNX-*) |
 
-**Cài agent.** Phiên bản agent phải ≤ manager (4.14.7). Mật khẩu enroll là nội dung `secrets/enrollment_key`.
+**Cài agent.** Phiên bản agent phải ≤ manager (4.14.8). Mật khẩu enroll là nội dung `secrets/enrollment_key`.
 Máy agent cần tới được cổng 1514 và 1515 của máy chạy docker. Tên agent phải khớp `hostname` trong
 `server/config/assets.yml` để event được gắn đúng tài sản.
 

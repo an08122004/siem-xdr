@@ -326,7 +326,7 @@ scp wazuh/agent/linux/siem-xdr wazuh/agent/linux/siem-procs demo/web/cgi-bin/pin
 
 ### 3.1 Cài Wazuh agent 4.14.7
 
-**Phiên bản agent không được mới hơn manager (4.14.7)**, nên phải ghim phiên bản và chặn tự nâng cấp:
+**Phiên bản agent không được mới hơn manager (4.14.8)**, nên phải ghim phiên bản và chặn tự nâng cấp:
 
 ```bash
 curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH | sudo gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import
@@ -505,7 +505,7 @@ Kết quả đúng: không có alert LNX-002 và không có lệnh *Kill tiến 
 | VM không ra được Internet để cài gói | Gateway và DNS phải là `.254` của vùng (mục 1.4); luật TCP 80/443 ra đích ngoài `PRIVATE` còn bật; WAN của firewall có IP từ VMnet8. |
 | Máy host không SSH được tới VM ở DMZ / LAN | Thiếu route qua 10.10.40.254 (mục 1.5), hoặc máy host đang nối thẳng vào VMnet3 / VMnet4 (phải bỏ *Connect a host virtual adapter*). |
 | `Invalid password` khi enroll | Sai `WAZUH_REGISTRATION_PASSWORD`; sửa `/var/ossec/etc/authd.pass` (Windows: `authd.pass` trong thư mục agent) rồi khởi động lại agent. |
-| `Agent version must be lower or equal to manager version` | Agent mới hơn 4.14.7: gỡ, cài lại đúng `4.14.7-1`, `apt-mark hold`. |
+| `Agent version must be lower or equal to manager version` | Agent mới hơn manager (4.14.8): gỡ, cài lại đúng `4.14.7-1`, `apt-mark hold`. |
 | `Duplicate agent name` | Agent cũ cùng tên còn trên manager: `docker compose exec wazuh-manager /var/ossec/bin/manage_agents -l`, xóa bằng `manage_agents -r <id>`. |
 | Lệnh phản ứng *Quá hạn* / *Thất bại* | Script đúng chỗ, quyền `root:wazuh 750`, không CRLF; `iptables` đã cài; agent đọc `active-responses.log` (mục 3.2). Lỗi ghi trong cột kết quả của lệnh. |
 | WEB-001 có IP nguồn là IP firewall, SOAR chặn nhầm | Outbound NAT của firewall đang NAT cả cổng DMZ: để *Automatic* (chỉ NAT khi ra WAN). Gỡ chặn, và kiểm tra IP firewall có trong `SOAR_WHITELIST` (mục 2.5). |

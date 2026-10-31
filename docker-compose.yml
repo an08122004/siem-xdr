@@ -250,13 +250,13 @@ services:
       retries: 10
     networks: [soc]
 
-  # Wazuh manager 4.14.7: trạm thu của Wazuh agent (Windows/Linux). Chỉ dùng manager (không indexer/dashboard/filebeat):
+  # Wazuh manager 4.14.8: trạm thu của Wazuh agent (Windows/Linux). Chỉ dùng manager (không indexer/dashboard/filebeat):
   # event + cảnh báo đi tiếp qua wazuh-forwarder vào Kafka. Cấu hình: wazuh/manager/ (xem README mục 1).
   #   1514/tcp  agent gửi event (mã hóa AES)       1515/tcp  enroll agent (TLS + mật khẩu secrets/enrollment_key)
   #   55000     Wazuh API: KHÔNG publish, chỉ SOAR gọi trong mạng docker (user siem-soar, quyền tối thiểu)
-  # Agent không được mới hơn manager: dùng bộ cài agent 4.14.7 trở xuống.
+  # Agent không được mới hơn manager: dùng bộ cài agent 4.14.8 trở xuống.
   wazuh-manager:
-    image: wazuh/wazuh-manager:4.14.7
+    image: wazuh/wazuh-manager:4.14.8
     hostname: wazuh-manager
     restart: unless-stopped
     depends_on:

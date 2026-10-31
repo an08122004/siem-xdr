@@ -25,7 +25,7 @@ Alert trong hệ thống đến từ 4 nguồn:
 | Nguồn | Số lượng | Mã alert | Trạng thái |
 |---|---|---|---|
 | Rule viết tay (`server/rules/*.yml`) | 41 rule: 40 chạy chính thức, FIM-001 chạy bóng từ 14/10 | `WEB-`, `WIN-`, `LNX-`, `AUTH-`, `NET-`, `TI-`, `FIM-` | Đang chạy |
-| Ruleset gốc của Wazuh 4.14.7 (hơn 3.000 rule) + 2 rule riêng | Chỉ chuyển một phần thành alert (mục 2.8) | `WZH-<id rule Wazuh>` | Đang chạy |
+| Ruleset gốc của Wazuh 4.14.8 (hơn 3.000 rule) + 2 rule riêng | Chỉ chuyển một phần thành alert (mục 2.8) | `WZH-<id rule Wazuh>` | Đang chạy |
 | Rule do AI đề xuất (`server/rules/ai/`) | 0 rule đã triển khai; 28 đề xuất chờ duyệt (11/10) | `AI-xxx` | Chờ người duyệt |
 | ML (Isolation Forest) | — | `ML-001` | Tắt (`ML_ENABLED=false`, báo nhầm khoảng 32%) |
 
