@@ -84,6 +84,25 @@ def test_other_http_error_is_not_swallowed():
         wrt.run([case(rule=1)], Boom(lambda n, e: 1))
 
 
+def test_delay_sleeps_between_lines_only(monkeypatch):
+    naps = []
+    monkeypatch.setattr(wrt.time, "sleep", naps.append)
+    wrt.fired(case(events=["l"] * 4, delay=16), FakeApi(lambda n, e: 1))
+    assert naps == [16, 16, 16]                       # 4 dòng -> 3 lần nghỉ, không nghỉ sau dòng cuối
+    naps.clear()
+    wrt.fired(case(events=["l"] * 4), FakeApi(lambda n, e: 1))
+    assert naps == []
+
+
+@pytest.mark.parametrize("fmt", ["eventchannel", "syscheck"])
+def test_delay_ignored_by_injection_formats(monkeypatch, fmt):
+    naps = []
+    monkeypatch.setattr(wrt.time, "sleep", naps.append)
+    monkeypatch.setattr(wrt, "inject", lambda cases: [{1}] * len(cases))
+    assert wrt.fired(case(log_format=fmt, events=["a", "b"], delay=16), FakeApi(lambda n, e: None)) == {1}
+    assert naps == []
+
+
 @pytest.mark.parametrize("fmt", ["eventchannel", "syscheck"])
 def test_injection_formats_bypass_logtest(monkeypatch, fmt):
     seen = []

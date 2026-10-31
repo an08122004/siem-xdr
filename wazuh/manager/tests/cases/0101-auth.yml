@@ -362,3 +362,17 @@
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.62 port 4444 ssh2'
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.62 port 4444 ssh2'
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.62 port 4444 ssh2'
+
+- none: [5763, 5712]   # GIỚI HẠN GHI NHẬN: 8 lần sai cách 16s trước đây báo 5763 (gốc); nay 101000 nhận thay nên không báo (xem comment 0101-auth.xml)
+  log_format: syslog
+  location: /var/log/auth.log
+  delay: 16
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'

@@ -2,15 +2,15 @@
 AUTH-001:
   wazuh: []
   decision: convert
-  note: 'chỉ trúng rule chung 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7'
+  note: 'chỉ trúng rule chung 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7; LƯU Ý: rule dự án 101000 (0101-auth.xml) nhận thay 5760/5710 nên alert từng lần thất bại là 101000 level 2 (không vào alerts.json),; hệ quả: 5763/5712 gốc (8 lần/120 s) không còn báo, hở nhịp 4-5 lần/phút (xem comment 0101-auth.xml)'
 AUTH-002:
   wazuh: []
   decision: convert
-  note: 'chỉ trúng rule chung 5715 (sshd: authentication success.), 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7'
+  note: 'chỉ trúng rule chung 5715 (sshd: authentication success.), 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7; LƯU Ý: rule dự án 101000 (0101-auth.xml) nhận thay 5760/5710 nên alert từng lần thất bại là 101000 level 2 (không vào alerts.json),; hệ quả: 5763/5712 gốc (8 lần/120 s) không còn báo, hở nhịp 4-5 lần/phút (xem comment 0101-auth.xml)'
 AUTH-003:
   wazuh: []
   decision: convert
-  note: 'chỉ trúng rule chung 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7'
+  note: 'chỉ trúng rule chung 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7; LƯU Ý: rule dự án 101000 (0101-auth.xml) nhận thay 5760/5710 nên alert từng lần thất bại là 101000 level 2 (không vào alerts.json),; hệ quả: 5763/5712 gốc (8 lần/120 s) không còn báo, hở nhịp 4-5 lần/phút (xem comment 0101-auth.xml)'
 AUTH-004:
   wazuh: []
   decision: convert

@@ -78,10 +78,11 @@ def fired(case: dict, api) -> set[int]:
         return inject([case])[0]
     ids, token = set(), None
     try:
-        for ev in case["events"]:
+        for n, ev in enumerate(case["events"]):
+            if n and case.get("delay"):
+                time.sleep(case["delay"])        # giây GIỮA các dòng (không nghỉ sau dòng cuối): timeframe tính theo giờ thật lúc nhận, không theo giờ trong log
             res = _retry(lambda: api.logtest(ev, case["log_format"], case["location"], token))
             token = res.get("token") or token
-            time.sleep(case.get("delay", 0))     # giây giữa các dòng: timeframe tính theo giờ thật lúc nhận, không theo giờ trong log
             if (rid := ((res.get("output") or {}).get("rule") or {}).get("id")):
                 ids.add(int(rid))
     finally:

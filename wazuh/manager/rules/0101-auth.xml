@@ -5,7 +5,13 @@
 -->
 <group name="local,siem-xdr,">
   <!-- AUTH-000: bộ đếm chung cho mọi thất bại SSH (5760 user có thật, 5710 user không tồn tại), nên 3 user thật + 3 user giả vẫn cộng dồn.
-       Level 2 < log_alert_level (3) nên không ra alert. Từ đây, event bị ghi nhận là 101000 (không còn là 5760/5710) -> mọi bộ đếm dùng if_matched_sid 101000. -->
+       Level 2 < log_alert_level (3) nên không ra alert.
+       HỆ QUẢ: alert từng lần thất bại của rule gốc (5760/5710, level 5) nay được ghi là 101000 level 2 (không vào alerts.json); các rule gốc đếm if_matched_sid 5760/5710
+       (5763, 5712; 8 lần/120s, level 10) mất lịch sử đếm và KHÔNG còn báo.
+       Đã thử khôi phục trên 4.14.8, không được: (1) đếm 8/120s trên 101000 song song 101001/101010 không chạy vì rule frequency khi báo "tiêu" các event đã đếm;
+       (2) rule nối vào 101010 bằng if_matched_sid làm 101002 hết nhận 101010 hoặc chính nó không báo. Phần hở: nhịp 4-5 lần sai/phút từ một IP (dưới 5/60s của AUTH-001 cũ,
+       trên 8/120s của gốc): chỉ còn 101010 (level 2, im) và 101002 nếu sau đó đăng nhập được. Rule YAML cũ không có ngưỡng này nên không thua rule cũ, chỉ thua ruleset gốc;
+       Task 12 (tuning) cân nhắc lại. Từ đây, event bị ghi nhận là 101000 (không còn là 5760/5710) -> mọi bộ đếm dùng if_matched_sid 101000. -->
   <rule id="101000" level="2">
     <if_sid>5760, 5710</if_sid>
     <description>AUTH-000 Thất bại đăng nhập SSH (bộ đếm chung cho AUTH-001/002/003)</description>
@@ -98,4 +104,5 @@
     <info type="text">shadow_since=2026-10-31</info>
     <group>siem,auth,shadow,legacy_AUTH-006,</group>
   </rule>
+
 </group>

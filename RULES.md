@@ -337,9 +337,9 @@ Kết quả: 1 `builtin`, 14 `approx`, 26 `convert`.
 
 | Mã | Quyết định | Rule gốc | Ghi chú |
 |---|---|---|---|
-| AUTH-001 | convert | — | chỉ trúng rule chung 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7 |
-| AUTH-002 | convert | — | chỉ trúng rule chung 5715 (sshd: authentication success.), 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7 |
-| AUTH-003 | convert | — | chỉ trúng rule chung 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7 |
+| AUTH-001 | convert | — | chỉ trúng rule chung 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7; LƯU Ý: rule dự án 101000 (0101-auth.xml) nhận thay 5760/5710 nên alert từng lần thất bại là 101000 level 2 (không vào alerts.json),; hệ quả: 5763/5712 gốc (8 lần/120 s) không còn báo, hở nhịp 4-5 lần/phút (xem comment 0101-auth.xml) |
+| AUTH-002 | convert | — | chỉ trúng rule chung 5715 (sshd: authentication success.), 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7; LƯU Ý: rule dự án 101000 (0101-auth.xml) nhận thay 5760/5710 nên alert từng lần thất bại là 101000 level 2 (không vào alerts.json),; hệ quả: 5763/5712 gốc (8 lần/120 s) không còn báo, hở nhịp 4-5 lần/phút (xem comment 0101-auth.xml) |
+| AUTH-003 | convert | — | chỉ trúng rule chung 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7; LƯU Ý: rule dự án 101000 (0101-auth.xml) nhận thay 5760/5710 nên alert từng lần thất bại là 101000 level 2 (không vào alerts.json),; hệ quả: 5763/5712 gốc (8 lần/120 s) không còn báo, hở nhịp 4-5 lần/phút (xem comment 0101-auth.xml) |
 | AUTH-004 | convert | — | chỉ trúng rule chung 5715 (sshd: authentication success.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7 |
 | AUTH-005 | builtin | 5902 | 1/1 ca dương có rule gốc cụ thể level>=7; builtin: 5902 (level 8: New user added to the system.) |
 | AUTH-006 | convert | — | chỉ trúng rule chung 5403 (First time user executed sudo.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7 |

@@ -1,12 +1,13 @@
 # Ca kiểm chính bộ chạy trên đường logtest (rule gốc của Wazuh, không phải rule của repo).
-- rule: 5710                  # sshd: đăng nhập user không tồn tại
-  log_format: syslog
-  location: /var/log/auth.log
-  events:
-    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user admin from 203.0.113.5 port 4444 ssh2'
-
-- none: [5710]
+# Dùng rule gốc mà rule dự án KHÔNG che: 5710/5760 đã bị 101000 (0101-auth.xml) nhận thay nên không còn dùng được ở đây.
+- rule: 5715                  # sshd: đăng nhập thành công
   log_format: syslog
   location: /var/log/auth.log
   events:
     - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for alice from 203.0.113.5 port 4444 ssh2'
+
+- none: [5715]
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user admin from 203.0.113.5 port 4444 ssh2'
