@@ -399,4 +399,105 @@ Mỗi task dưới đây viết kế hoạch chi tiết riêng khi tới lượt
 
 ## Kết quả P0 / P1
 
-*(điền khi làm Task 0 và Task 2)*
+Task 0 đo ngày 31/10/2026 trên project `wzhdev` (bản chép volume Wazuh thật, manager 4.14.8, agent demo-web 4.14.7). Chạy trên mạng riêng `wzhdev-soc`: mạng `soc` của `docker-compose.yml` có tên cố định `soc-lab`, trùng mạng của stack thật. API gọi bằng một user admin tạm tạo trong container wzhdev, đã xóa sau khi đo. Phần dựng thử để ngoài repo.
+
+### S1 — reload: đạt
+
+- `PUT /manager/analysisd/reload` cần `manager:read` + `manager:restart` (`GET /security/actions?endpoint=PUT /manager/analysisd/reload`), trả lời trong 0,6–1 giây. `manager:restart` cũng mở `PUT /manager/restart`, không có quyền hẹp hơn.
+- Ghi 10.000 dòng syslog có số thứ tự vào `/var/ossec/logs/active-responses.log` của demo-web (~330 dòng/giây). Reload ở giây 6 (thêm 109030), 14 (thêm 109031, con của 109030), 22 (bỏ 109031):
+  ```
+  analysisd: processed 10017, dropped 0; agentd: msg_buffer 0
+  archives.json: 10000 dòng, 10000 seq khác nhau, thiếu 0, trùng 0
+  theo seq: 1–1767 chưa có rule | 1768–4422 → 109030 | 4423–7033 → 109031 | 7034–10000 → 109030
+  ```
+  Rule có hiệu lực ngay sau reload (alert đầu 0,7 giây sau lời gọi). Không có đoạn hở giữa hai ruleset.
+- Reload với file hỏng (mỗi file có thêm 1 rule tốt). HTTP luôn 200:
+
+| Kiểu hỏng | Phản hồi | Ruleset sau đó |
+|---|---|---|
+| XML không đóng thẻ, thẻ lạ `<foo>`, PCRE2 sai | `error: 1`, `failed_items[0].error.code` 1914 "Failed to reload ruleset: …" | giữ nguyên ruleset cũ, rule tốt cùng file không nạp |
+| trùng id | `error: 0`, `affected_items[0].msg` "(7612): Rule ID '109010' is duplicated…" | nạp, giữ bản đầu |
+| `if_sid` không tồn tại | `error: 0`, msg "(7619): Empty 'if_sid' value. Rule '109022' will be ignored." | nạp, bỏ rule đó |
+| file không đọc được (600) | `error: 0`, msg "(1103): Could not open file … Permission denied" | nạp, bỏ cả file |
+
+- Reload hỏng giữa luồng 5.000 dòng: đủ 5.000, dropped 0, rule cũ báo liên tục. Reload hỏng không ghi gì vào `ossec.log`, chỉ phản hồi API cho biết.
+- File hỏng còn trên đĩa thì lần khởi động sau manager không lên: `CRITICAL: (1220): Error loading the rules`, `wazuh-control start` dừng, remoted và apid cũng không chạy. `wazuh-analysisd -t` trả mã 1 khi lỗi, 0 khi sạch.
+- Hệ quả:
+  - Task 1 `WazuhApi.reload()`: xét `error` và `failed_items`, không xét HTTP status. `msg` khác "Ruleset reload request sent successfully." là cảnh báo; `write_dynamic` coi như lỗi (khôi phục + reload lại theo Ruling R1), vì Wazuh âm thầm bỏ rule trùng id / sai `if_sid`.
+  - Task 1: khôi phục file cũ là bắt buộc. Đề nghị thêm vào `10-siem-setup.sh`: chạy `wazuh-analysisd -t` trước khi start; lỗi thì chuyển file của `rules-dynamic` sang thư mục cách ly và ghi log, để một file AI/ngoại lệ hỏng không làm sập manager.
+
+### S2 — thư mục rule: đạt trên Windows, một phần trên Linux (mô phỏng quyền, chưa chạy máy Linux)
+
+- Dựng: `rules:/var/ossec/etc/rules:ro`, `decoders:/var/ossec/etc/decoders:ro` (chỉ có `.gitkeep`), volume `wazuh_dynamic_rules:/var/ossec/etc/rules-dynamic`, ossec.conf thêm `<rule_dir>etc/rules-dynamic</rule_dir>`, bỏ mount `local_rules.xml`. Manager lên bình thường; `.gitkeep` không gây lỗi. analysisd chạy bằng user `wazuh` (uid/gid 999), cả lúc reload.
+- Bind mount từ Windows: file trong container là `root:root 0777`. File thêm từ host khi container đang chạy có hiệu lực sau reload. File CRLF nạp bình thường.
+- Linux (mô phỏng trong volume): file uid 1000 mode 644 → `wazuh` đọc được; mode 600 → "(1103) Permission denied", file bị bỏ. Checkout git với umask 022 (644/755) là đủ. Chưa thử SELinux (`:z`).
+- Volume động mới tạo là `root:root 0755`: uid 10001 (image `siem-xdr-server`) ghi → `Permission denied`. Sau `chown 10001:wazuh /var/ossec/etc/rules-dynamic` (root, trong wazuh-manager): uid 10001 ghi được, file ra `10001:999 0644`, `wazuh` đọc được, reload nạp rule. Quyền giữ qua restart. (Group `siem` của image server tình cờ cũng là gid 999.)
+- analysisd chỉ nạp file đuôi `.xml`, kể cả file ẩn `.ai.xml`; `ai.xml.tmp`, `ai.tmp` bị bỏ qua.
+- `GET /rules`, `GET /rules/files` KHÔNG thấy rule trong `etc/rules-dynamic` (admin, đã reload): RBAC mở rộng `rule:file:*` bằng `expand_rules()` chỉ duyệt `ruleset/rules` và `etc/rules` (`wazuh/rbac/utils.py`). File thêm vào `etc/rules` thì thấy.
+- Hệ quả:
+  - Task 1: chown thư mục động trong `10-siem-setup.sh` mỗi lần khởi động (`install -d -o 10001 -g wazuh -m 0755 /var/ossec/etc/rules-dynamic`), không làm ở `install.sh` (volume có tên, không phải thư mục trên host).
+  - Task 1: bỏ hẳn mount `local_rules.xml`. Image chép `/wazuh-config-mount/*` vào `/var/ossec` lúc khởi động, chép vào `etc/rules` chỉ đọc sẽ lỗi (đọc `0-wazuh-init`, chưa thử).
+  - Task 1 `write_dynamic`: file tạm không được có đuôi `.xml` (vd `ai.xml.tmp`), cùng thư mục để `rename` nguyên tử.
+  - Task 14: `GET /rules` không có `ai.xml`, `exceptions.xml`. Thư viện rule đọc thêm file trong `DYNAMIC_DIR` bằng `wazuh_rules.parse` (manager đã mount volume này).
+  - Task 24 (DEPLOY-VM): trên Linux, `wazuh/manager/rules` phải đọc được với others (644/755).
+
+### S3 — API logtest: đạt với syslog / json / apache, không đạt với eventchannel
+
+- `PUT /logtest` `{event, log_format, location, token}`, quyền `logtest:run`. Lần đầu trả `token`; gửi lại token thì giữ trạng thái. Rule `frequency="5" timeframe="60"` (`if_matched_sid`, json/apache thêm `same_srcip`), 11 dòng cùng token:
+  ```
+  syslog  1–4:109040  5:109041  6–9:109040  10:109041  11:109040
+  json    5:109043, 10:109043      apache  5:109045, 10:109045
+  không gửi token: 6 dòng đều 109040 (mỗi dòng một session mới)
+  ```
+  Báo đúng dòng thứ N, sau khi báo thì đếm lại (báo tiếp ở dòng 2N).
+- Session đọc ruleset trên ĐĨA lúc tạo, không phụ thuộc analysisd đã reload chưa: rule vừa ghi đã báo trong logtest khi analysisd chính chưa có. File hỏng → `messages` có "ERROR … (7311): Failure to initializing session"; cảnh báo trùng id / `if_sid` cũng hiện trong `messages`.
+- Giới hạn: API mặc định `access.max_request_per_minute: 300`, bộ thử S4 (gần 300 lời gọi trong khoảng 1 phút) bị HTTP 429. `rule_test.max_sessions` là 64 → xóa session sau mỗi ca (`DELETE /logtest/sessions/{token}`).
+- Windows: gửi dạng agent `{"Message","Event":<XML>}` và dạng đã đổi `{"win":{…}}`, mỗi dạng với `log_format` eventchannel và json: cả 4 ra decoder `json`, không rule Windows nào báo. Decoder `windows_eventchannel` nằm trong mã analysisd (không có trong `ruleset/decoders`), logtest không gọi tới. Bơm vào hàng đợi (`queue/sockets/queue`, `f:EventChannel:` + `wazuh_coverage.sysmon_message`) vẫn chạy trên 4.14.8: decoder `windows_eventchannel`, rule 92032 báo.
+- Hệ quả:
+  - Task 3: ca `eventchannel` chạy bằng bơm hàng đợi (nhánh dự phòng đã ghi trong plan), các định dạng khác qua logtest. Bộ chạy dùng token cho ca nhiều dòng, xóa session sau mỗi ca, chờ rồi thử lại khi gặp 429. Job CI mount `api.yaml` riêng nâng `access.max_request_per_minute`.
+  - Logtest chỉ chứng minh file trên đĩa đúng, không chứng minh analysisd đang chạy đã nạp. Nạp thật kiểm bằng reload (S1).
+  - Ruling R1: có thể dùng logtest làm bước kiểm trước reload (báo cùng lỗi như reload). Không bắt buộc, vì reload hỏng đã giữ ruleset cũ.
+
+### S4 — đếm giá trị khác nhau: một phần
+
+- analysisd 4.14.8 có `different_srcip/dstip/srcport/dstport/srcuser/user/url/id/location/protocol/action/status/system_name/data/extra_data/srcgeoip/dstgeoip/field` và `not_same_field` (chuỗi trong `bin/wazuh-analysisd`). Ruleset gốc chỉ dùng `different_url` (5 chỗ).
+- Thử qua logtest, rule `frequency=N` + `if_matched_sid` + `same_srcip` / `same_field`:
+
+| Rule cũ | Thẻ, N | N giá trị khác nhau | 2 giá trị xen kẽ | 1 giá trị |
+|---|---|---|---|---|
+| NET-001 | `different_dstport`, 20 | báo ở dòng 20 | dòng 38, 41 (60 dòng) | không báo (40 dòng) |
+| NET-005 | `different_dstip`, 10 | dòng 10 | dòng 18, 21 (30 dòng) | — |
+| AUTH-003 | `different_srcuser`, 5 (sshd thật, con của 5710) | dòng 5 | dòng 11 (5712, frequency 8, cũng báo trong lượt) | — |
+| LNX-005 | `different_field` / `not_same_field` trên `pname`, 4 | dòng 4 | dòng 6, 9 | không báo |
+| — | `different_url`, 5 (apache) | dòng 5 | dòng 8, 11 | không báo |
+
+  Thêm: 20 cổng khác nhau nhưng từ 2 nguồn xen kẽ → không báo. Cổng 1..19, rồi 5, rồi 20 → báo ở dòng 21.
+- Nghĩa là Wazuh đếm "N−1 event trước (trong timeframe) có giá trị khác giá trị của event hiện tại", không đếm số giá trị khác nhau. Giá trị phân tán (quét cổng, spraying) cho kết quả như rule cũ; vài giá trị lặp lại thì báo sau khoảng 2N event. `not_same_field` chạy y như `different_field`.
+- Bẫy gặp khi thử:
+  - `<field name="x">proc</field>` là regex tìm chuỗi con, khớp cả `proc2`. Phải neo `^proc$`.
+  - `frequency` + `if_matched_group` không báo, cả logtest lẫn hàng đợi thật (thêm `<if_group>` cũng không). Rule gốc 40111 (`frequency=12`, `if_matched_group authentication_failed`) cũng không báo với 13 lần sai mật khẩu sshd cùng IP. `if_matched_sid` thì báo.
+- Hệ quả:
+  - Task 6, 7, 8: NET-001, NET-005, AUTH-003, LNX-005 viết bằng `different_*`, không cần xấp xỉ "≥ N event cùng nguồn". RULES.md ghi giới hạn: ít giá trị lặp lại vẫn báo sau ~2N event. Mỗi rule thêm ca âm "2 giá trị xen kẽ, < 2N−2 dòng".
+  - Task 4: đề nghị lint cảnh báo `<field>` có giá trị là một từ mà không neo `^…$`, và `frequency` dựa trên `if_matched_group`.
+  - Task 5, 6: AUTH-002 / 40112 (`if_group` + `if_matched_group`, không `frequency`) chưa thử ở đây; harness phải chứng minh rule gốc có báo.
+
+### S5 — giải mã URL: Wazuh không giải mã (đúng dự kiến)
+
+- Logtest `log_format apache`, decoder `web-accesslog`: trường `url` giữ nguyên chuỗi trong log ở mọi dạng. Rule gốc báo:
+
+| Dạng (status 200) | Rule gốc |
+|---|---|
+| `id=1'%20or%20'1'='1` (dấu nháy thô) | 31100 level 0 — không phát hiện |
+| `%27` | 31164 SQL injection attempt (6) |
+| `%2527`, `'+or+1=1--`, `%u0027` | 31100 level 0 — không phát hiện |
+| `UNION SELECT` với `%20` hoặc `+` | 31106 (6) |
+| `%55NION%20%53ELECT` | 31100 level 0 — không phát hiện |
+| `<script>` và `%3Cscript%3E`; `../` và `%2e%2e%2f` | 31106 (6) cả hai dạng |
+
+- Hệ quả:
+  - Task 9 giữ như plan: regex bắt cả dạng mã hóa, ca test có cả dạng thô lẫn `%xx`. Ca test nên có thêm `%2527`, `+`, `%u0027` và từ khóa mã hóa từng chữ (`%55NION`): rule gốc bỏ sót các dạng này.
+  - Status 200 thì rule gốc ra 31106 (con của rule tấn công) thay cho rule tấn công cụ thể (31164 thì vẫn ra 31164); Task 5 ghi cả hai id vào `legacy_map.yml`.
+
+### Task 2 — rule ồn
+
+*(điền khi làm Task 2)*
