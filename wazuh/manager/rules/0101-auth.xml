@@ -1,0 +1,107 @@
+<!--
+  Rule xác thực (AUTH-001..006 của bộ rule cũ), chạy BÓNG. Dải ID 101000-101999. AUTH-005 dùng thẳng rule gốc 5902 (không viết lại).
+  Phạm vi: chỉ các log đi qua Wazuh (sshd/sudo qua syslog); sự kiện đăng nhập console không qua Wazuh nên AUTH-002/003 không phủ chúng.
+-->
+<group name="local,siem-xdr,">
+  <!-- Thứ tự file quan trọng: AUTH-003 đứng TRƯỚC AUTH-001 vì cả hai khớp cùng event, chỉ rule đứng trước báo. -->
+  <!-- AUTH-003: password spraying, 5 tài khoản khác nhau từ một IP trong 2 phút. -->
+  <!-- Giới hạn (spike S4): different_user (dstuser của sshd; user không tồn tại dùng srcuser, xem 101013) đếm "event trước có user khác event hiện tại", không đếm số user phân biệt; 2 user xen kẽ vẫn báo sau ~2N event. -->
+  <rule id="101003" level="10" frequency="5" timeframe="120" ignore="120">
+    <if_matched_sid>5760</if_matched_sid>
+    <same_source_ip />
+    <different_user />
+    <description>AUTH-003 Password spraying: $(srcip) thử &gt;= 5 tài khoản khác nhau trong 2 phút</description>
+    <mitre>
+      <id>T1110.003</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,auth,shadow,legacy_AUTH-003,</group>
+  </rule>
+
+  <rule id="101013" level="10" frequency="5" timeframe="120" ignore="120">
+    <if_matched_sid>5710</if_matched_sid>
+    <same_source_ip />
+    <different_srcuser />
+    <description>AUTH-003 Password spraying (user không tồn tại): $(srcip) thử &gt;= 5 tài khoản khác nhau trong 2 phút</description>
+    <mitre>
+      <id>T1110.003</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,auth,shadow,legacy_AUTH-003,</group>
+  </rule>
+
+  <!-- AUTH-001: >= 5 lần sai từ cùng IP trong 60s. Đếm 5760 (user có thật); user không tồn tại (5710) do biến thể 101011. if_matched_group + frequency không chạy được (spike). -->
+  <rule id="101001" level="10" frequency="5" timeframe="60" ignore="60">
+    <if_matched_sid>5760</if_matched_sid>
+    <same_source_ip />
+    <description>AUTH-001 Brute-force đăng nhập: &gt;= 5 lần thất bại từ $(srcip) trong 60 giây</description>
+    <mitre>
+      <id>T1110.001</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,auth,shadow,legacy_AUTH-001,</group>
+  </rule>
+
+  <!-- Biến thể cho user không tồn tại (5710): cùng mã cũ, vì rule cũ đếm mọi thất bại. Không đếm chung 5760+5710 trong một ngưỡng (giới hạn). -->
+  <rule id="101011" level="10" frequency="5" timeframe="60" ignore="60">
+    <if_matched_sid>5710</if_matched_sid>
+    <same_source_ip />
+    <description>AUTH-001 Brute-force đăng nhập (user không tồn tại): &gt;= 5 lần thất bại từ $(srcip) trong 60 giây</description>
+    <mitre>
+      <id>T1110.001</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,auth,shadow,legacy_AUTH-001,</group>
+  </rule>
+
+  <!-- AUTH-002: nối sau AUTH-001, đăng nhập thành công (5715) cùng IP trong 10 phút. -->
+  <rule id="101002" level="12" timeframe="600">
+    <if_sid>5715</if_sid>
+    <if_matched_sid>101001</if_matched_sid>
+    <same_source_ip />
+    <description>AUTH-002 Brute-force THÀNH CÔNG: đăng nhập được từ $(srcip) sau chuỗi thất bại (khả năng cao tài khoản bị chiếm)</description>
+    <mitre>
+      <id>T1110</id>
+      <id>T1078</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,auth,shadow,legacy_AUTH-002,</group>
+  </rule>
+
+  <rule id="101012" level="12" timeframe="600">
+    <if_sid>5715</if_sid>
+    <if_matched_sid>101011</if_matched_sid>
+    <same_source_ip />
+    <description>AUTH-002 Brute-force THÀNH CÔNG: đăng nhập được từ $(srcip) sau chuỗi thất bại user không tồn tại</description>
+    <mitre>
+      <id>T1110</id>
+      <id>T1078</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,auth,shadow,legacy_AUTH-002,</group>
+  </rule>
+
+  <!-- AUTH-004: SSH root thành công. -->
+  <rule id="101004" level="7">
+    <if_sid>5715</if_sid>
+    <user>^root$</user>
+    <description>AUTH-004 Đăng nhập SSH bằng root từ $(srcip)</description>
+    <mitre>
+      <id>T1078.003</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,auth,shadow,legacy_AUTH-004,</group>
+  </rule>
+
+  <!-- AUTH-006: sudo mở shell/su, hoặc sudo thất bại. Con của các rule sudo gốc (đứng sau chúng mới thấy được). -->
+  <rule id="101006" level="7">
+    <if_sid>5401, 5402, 5403, 5405, 5406, 5407</if_sid>
+    <regex type="pcre2">incorrect password attempt|NOT in sudoers|command not allowed|COMMAND=\S*/(ba|z|da)?sh(\s|$)|COMMAND=(\S*/)?su(\s+-?)?\s*$|COMMAND=.*\s-i$</regex>
+    <description>AUTH-006 Sudo mở shell root hoặc sudo thất bại: $(dstuser)</description>
+    <mitre>
+      <id>T1548.003</id>
+    </mitre>
+    <info type="text">shadow_since=2026-10-31</info>
+    <group>siem,auth,shadow,legacy_AUTH-006,</group>
+  </rule>
+</group>
