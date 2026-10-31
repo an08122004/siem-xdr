@@ -215,12 +215,45 @@ def test_garbage_wazuh_event_does_not_crash():
 
 # ------------------------------------------------------------------ cầu nối cảnh báo Wazuh
 def test_bridge_selects_groups_and_levels():
-    assert bridge.should_bridge({"level": 7, "groups": ["ossec", "syscheck"]})
-    assert not bridge.should_bridge({"level": 5, "groups": ["syscheck"]})             # dưới ngưỡng
-    assert not bridge.should_bridge({"level": 7, "groups": ["sca"]})                  # SCA = tư thế, không phải sự cố
-    assert not bridge.should_bridge({"level": 10, "groups": ["sshd", "authentication_failures"]})  # rule riêng đã có
-    assert bridge.should_bridge({"level": 12, "groups": ["web"]})                     # rất nghiêm trọng: lấy hết
+    g = {"syscheck", "rootcheck"}                                                     # giới hạn nhóm bằng cấu hình
+    assert bridge.should_bridge({"level": 7, "groups": ["ossec", "syscheck"]}, groups=g)
+    assert not bridge.should_bridge({"level": 5, "groups": ["syscheck"]}, groups=g)   # dưới ngưỡng
+    assert not bridge.should_bridge({"level": 7, "groups": ["sca"]}, groups=g)
+    assert not bridge.should_bridge({"level": 10, "groups": ["sshd"]}, groups=g)
+    assert bridge.should_bridge({"level": 12, "groups": ["web"]}, groups=g)           # rất nghiêm trọng: lấy hết
     assert [bridge.severity_for(x) for x in (3, 7, 10, 12)] == ["low", "medium", "high", "critical"]
+
+
+def test_any_group_level7_bridged_by_default():
+    assert bridge.should_bridge({"id": "60122", "level": 10, "groups": ["windows", "authentication_failures"]})
+    assert bridge.should_bridge({"id": "5710", "level": 7, "groups": ["sca"]})
+
+
+def test_level6_not_bridged():
+    assert not bridge.should_bridge({"id": "31101", "level": 5, "groups": ["web"]})
+    assert bridge.should_bridge({"id": "100200", "level": 3, "groups": ["web"]})     # rule tự viết: luôn chuyển
+
+
+def test_shadow_group_marks_alert_shadow(enricher):
+    raw = wz("wazuh_alert", location="syscheck", rule={
+        "id": "104001", "level": 10, "description": "x", "groups": ["siem", "web", "shadow", "legacy_WEB-001"]})
+    a = bridge.to_alert(enricher.enrich(normalize(raw)))
+    assert a["alert"]["shadow"] is True and a["rule"]["mode"] == "shadow" and a["rule"]["legacy_id"] == "WEB-001"
+    assert a["rule"]["id"] == "WZH-104001" and a["rule"]["groups"] == ["siem", "web", "shadow", "legacy_WEB-001"]
+
+
+def test_non_shadow_wazuh_alert_is_active(enricher):
+    raw = wz("wazuh_alert", rule={"id": "5710", "level": 8, "description": "x", "groups": ["sshd"]})
+    a = bridge.to_alert(enricher.enrich(normalize(raw)))
+    assert not get(a, "alert.shadow") and a["rule"]["legacy_id"] is None and a["rule"]["groups"] == ["sshd"]
+
+
+def test_same_rule_same_source_suppressed_60s():
+    s = bridge.Suppressor(60)
+    assert not s.seen(("WZH-104001", "203.0.113.5"), 0) and s.seen(("WZH-104001", "203.0.113.5"), 30)
+    assert not s.seen(("WZH-104001", "198.51.100.7"), 30) and not s.seen(("WZH-104001", "203.0.113.5"), 61)
+    s.seen(("x", "y"), 1000)
+    assert len(s._seen) == 1                       # khóa quá hạn bị xóa, bộ nhớ không phình
 
 
 def test_bridge_alert_document(enricher):
@@ -242,6 +275,7 @@ def test_analyzer_does_not_store_wazuh_alert_twice(enricher, engine):
     an.enricher, an.engine, an.detector, an.buffer, an.stats = enricher, engine, None, [], {"events": 0, "alerts": 0}
     emitted = []
     an.emit = emitted.append
+    an.suppressor = bridge.Suppressor(60)
     # file không thuộc FIM-001 (rule đó chạy chính thức thì cảnh báo 550 của /etc/passwd không chuyển nữa: test_fim_rules.py)
     an.handle(wz("wazuh_alert", location="syscheck", syscheck={"path": "/etc/hostname", "event": "modified"},
                  rule={"id": "550", "level": 7, "description": "Integrity checksum changed.", "groups": ["syscheck"]}))

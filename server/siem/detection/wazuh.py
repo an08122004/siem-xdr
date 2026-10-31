@@ -41,9 +41,37 @@ def should_bridge(rule: dict, groups: set[str] | None = None, min_level: int | N
         level = int(rule.get("level") or 0)
     except (TypeError, ValueError):
         return False
-    if level >= any_level:
+    if level >= any_level or _is_local(rule):
         return True
-    return level >= min_level and bool(groups & {str(g) for g in rule.get("groups") or []})
+    # groups rỗng = mọi nhóm (ruleset Wazuh là nguồn phát hiện duy nhất)
+    return level >= min_level and (not groups or bool(groups & {str(g) for g in rule.get("groups") or []}))
+
+
+def _is_local(rule: dict) -> bool:
+    try:
+        return int(rule.get("id") or 0) >= LOCAL_RULE_MIN_ID
+    except (TypeError, ValueError):
+        return False
+
+
+class Suppressor:
+    """Chống trùng: cùng khóa trong `window` giây chỉ cho qua lần đầu. Khóa quá hạn bị xóa mỗi lần gọi nên bộ nhớ
+    chỉ giữ các khóa trong cửa sổ. `now` do người gọi đưa vào (analyzer dùng time.monotonic)."""
+
+    def __init__(self, window: float | None = None) -> None:
+        self.window = settings.WAZUH_ALERT_SUPPRESS if window is None else window
+        self._seen: dict[tuple, float] = {}
+
+    def seen(self, key: tuple, now: float) -> bool:
+        self._seen = {k: t for k, t in self._seen.items() if now - t < self.window}
+        if key in self._seen:
+            return True
+        self._seen[key] = now
+        return False
+
+
+def suppress_key(doc: Doc) -> tuple:
+    return (f"WZH-{get(doc, 'wazuh.rule.id')}", get(doc, "data.srcip") or get(doc, "source.ip") or get(doc, "agent.id"))
 
 
 def to_alert(doc: Doc) -> Doc | None:

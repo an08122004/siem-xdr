@@ -122,7 +122,8 @@ def from_wazuh(event: Doc, severity: str) -> Doc:
             "id": f"WZH-{r.get('id')}", "name": r.get("description") or f"Wazuh rule {r.get('id')}",
             "description": f"Cảnh báo từ ruleset Wazuh (rule {r.get('id')}, level {r.get('level')}, "
                            f"nhóm {', '.join(groups) or '—'})",
-            "type": "wazuh", "severity": severity, "tags": ["wazuh", *groups],
+            "type": "wazuh", "severity": severity, "tags": ["wazuh", *groups], "groups": groups,
+            "legacy_id": next((g[7:] for g in groups if g.startswith("legacy_")), None),
             "mitre": {"tactic": (mitre.get("tactic") or [None])[0], "technique": list(mitre.get("id") or [])},
         },
         "severity": severity,
@@ -134,6 +135,9 @@ def from_wazuh(event: Doc, severity: str) -> Doc:
         "event_time": event.get("@timestamp"),
         "trigger_event": _trigger(event),
     }
+    if "shadow" in groups:      # như rule YAML chạy bóng: lưu để đo, SOAR bỏ qua (soar/engine.py)
+        alert["alert"]["shadow"] = True
+        alert["rule"]["mode"] = "shadow"
     _copy_entities(event, alert)
     for path in ("file.path", "registry.path", "sca.check.title"):
         if (v := get(event, path)) is not None:
