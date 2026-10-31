@@ -202,6 +202,9 @@ def analysisd_counters() -> dict[str, float]:
     return {k: float(v.strip("'")) for k, v in re.findall(r"^(\w+)='?([\d.]+)'?$", out, re.M)}
 
 
+LAST_SENT = 0      # số event run_wazuh gửi được lần gần nhất (để bên gọi kiểm bơm có hỏng không)
+
+
 def run_wazuh(items: list[dict]) -> list[dict]:
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "events.jsonl"
@@ -222,6 +225,8 @@ def run_wazuh(items: list[dict]) -> list[dict]:
             done = c.get("events_processed", 0) - before.get("events_processed", 0)
             stable = stable + 1 if done == last else 0
             last = done
+        global LAST_SENT
+        LAST_SENT = int(sent)
         print(f"đã gửi {sent} event, analysisd xử lý {last:.0f}, bỏ {c.get('events_dropped', 0):.0f} "
               f"({time.time() - t0:.0f}s)")
         out = Path(tmp) / "alerts.json"

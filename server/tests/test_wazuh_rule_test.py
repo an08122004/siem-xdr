@@ -107,3 +107,91 @@ def test_load_cases_tags_file_and_index(tmp_path):
                  "  location: l\n  events: [b]\n", encoding="utf-8")
     cs = wrt.load_cases(tmp_path)
     assert [(c["_file"], c["_index"]) for c in cs] == [("x.yml", 0), ("x.yml", 1)]
+
+
+# ---------------------------------------------------------------- phần bơm hàng đợi (không docker)
+import json  # noqa: E402
+
+EVT = ('{"Message": "m", "Event": "<Event><System><EventRecordID>1</EventRecordID></System></Event>"}')
+
+
+def test_message_syscheck_added_and_modified():
+    m = wrt._message("syscheck", {"path": "/var/www/html/a.php", "type": "added"}, 6_000_007)
+    assert m.startswith("8:syscheck:")
+    d = json.loads(m[len("8:syscheck:"):])["data"]
+    assert d["path"] == "/var/www/html/a.php" and d["type"] == "added" and d["attributes"]["inode"] == 6_000_007
+    assert "changed_attributes" not in d
+    d = json.loads(wrt._message("syscheck", {"path": "/x", "type": "modified"}, 1)[len("8:syscheck:"):])["data"]
+    assert d["changed_attributes"] == ["size", "mtime"] and d["old_attributes"]["size"] == 5
+
+
+def test_message_eventchannel_rewrites_record_id_or_raises():
+    m = wrt._message("eventchannel", EVT, 5_001_002)
+    assert m.startswith("f:EventChannel:") and "<EventRecordID>5001002</EventRecordID>" in m
+    with pytest.raises(ValueError):
+        wrt._message("eventchannel", '{"Event": "<Event/>"}', 1)
+
+
+def test_alert_ident():
+    assert wrt._alert_ident("syscheck", {"syscheck": {"inode_after": 6001000}}) == 6001000
+    assert wrt._alert_ident("eventchannel", {"data": {"win": {"system": {"eventRecordID": "5000003"}}}}) == 5000003
+    assert wrt._alert_ident("syscheck", {"rule": {}}) is None
+
+
+def _fake_docker(monkeypatch, alerts_for, sent=None):
+    """Thay manager tạm: alerts_for(msgs) -> list alert; sent = số event 'gửi được' (mặc định đủ)."""
+    import wazuh_coverage as cov
+    import wazuh_noise as noise
+    monkeypatch.setattr(noise, "start", lambda tmp: None)
+    monkeypatch.setattr(wrt.subprocess, "run", lambda *a, **k: None)
+
+    def run_wazuh(items):
+        cov.LAST_SENT = len(items) if sent is None else sent
+        return alerts_for([i["msg"] for i in items])
+    monkeypatch.setattr(cov, "run_wazuh", run_wazuh)
+
+
+def _sc_alert(rule, inode):
+    return {"rule": {"id": str(rule)}, "syscheck": {"inode_after": inode}}
+
+
+def _ec_alert(rule, rid):
+    return {"rule": {"id": str(rule)}, "data": {"win": {"system": {"eventRecordID": str(rid)}}}}
+
+
+def test_inject_maps_alerts_back_to_cases(monkeypatch):
+    base_s, base_e = wrt._BASE["syscheck"], wrt._BASE["eventchannel"]
+    # ca 0 eventchannel (1 dòng), ca 1 syscheck (2 dòng), ca 2 syscheck (1 dòng, không alert)
+    alerts = [_ec_alert(92032, base_e + 0), _sc_alert(100100, base_s + 1000), _sc_alert(554, base_s + 1001),
+              _sc_alert(554, wrt.CANARY_IDENT), _sc_alert(999, base_e + 1000)]   # inode trùng dải eventchannel: bỏ
+    _fake_docker(monkeypatch, lambda msgs: alerts)
+    cases = [case(log_format="eventchannel", events=[EVT]),
+             case(log_format="syscheck", events=[{"path": "/a", "type": "added"}] * 2),
+             case(log_format="syscheck", events=[{"path": "/b", "type": "added"}])]
+    assert wrt.inject(cases) == [{92032}, {100100, 554}, set()]
+
+
+def test_inject_restores_container(monkeypatch):
+    import wazuh_coverage as cov
+    _fake_docker(monkeypatch, lambda msgs: [_sc_alert(554, wrt.CANARY_IDENT)])
+    cov.CONTAINER = "keep-me"
+    wrt.inject([case(log_format="syscheck", events=[{"path": "/a", "type": "added"}])])
+    assert cov.CONTAINER == "keep-me"
+
+
+def test_inject_without_canary_alert_raises(monkeypatch):
+    _fake_docker(monkeypatch, lambda msgs: [])
+    with pytest.raises(wrt.InjectionError, match="canary"):
+        wrt.inject([case(log_format="syscheck", events=[{"path": "/a", "type": "added"}])])
+
+
+def test_inject_short_sent_count_raises(monkeypatch):
+    _fake_docker(monkeypatch, lambda msgs: [_sc_alert(554, wrt.CANARY_IDENT)], sent=1)
+    with pytest.raises(wrt.InjectionError, match="1/2"):
+        wrt.inject([case(log_format="syscheck", events=[{"path": "/a", "type": "added"}])])
+
+
+def test_negative_only_batch_does_not_pass_when_injection_broken(monkeypatch):
+    _fake_docker(monkeypatch, lambda msgs: [])
+    with pytest.raises(wrt.InjectionError):
+        wrt.run([case(none=[100100], log_format="syscheck", events=[{"path": "/a", "type": "added"}])], FakeApi(None))

@@ -3,7 +3,7 @@
     python tools/wazuh_rule_test.py --url https://localhost:55000 [--insecure] [đường dẫn file/thư mục ca test]
 
 Mặc định đọc wazuh/manager/tests/cases/*.yml, đăng nhập user `siem-rules` (secrets/wazuh_rules_api_password).
-Thoát mã 1 khi có ca sai và in bảng `file:index  mong đợi  thực tế`.
+Thoát mã 1 khi có ca sai, mã 2 khi bơm hàng đợi hỏng (InjectionError) và in bảng `file:index  mong đợi  thực tế`.
 
 Định dạng một ca (mỗi file YAML là một danh sách ca):
 
@@ -121,8 +121,16 @@ def _alert_ident(fmt: str, alert: dict) -> int | None:
     return int(v) if v else None
 
 
+CANARY_IDENT, CANARY_RULE = _BASE["syscheck"] + 999_000, 554     # file mới ngoài thư mục web: rule gốc 554 luôn báo
+
+
+class InjectionError(RuntimeError):
+    """Bơm hàng đợi hỏng (gửi thiếu event, hoặc event canary không ra alert): KHÔNG phải rule sai."""
+
+
 def inject(cases: list[dict]) -> list[set[int]]:
-    """Bơm mọi ca (eventchannel / syscheck) vào một manager tạm, trả tập id rule đã báo của từng ca (cùng thứ tự)."""
+    """Bơm mọi ca (eventchannel / syscheck) vào một manager tạm, trả tập id rule đã báo của từng ca (cùng thứ tự).
+    Kèm một event canary phải ra alert 554 và so số event đã gửi, để bơm hỏng không bị đọc thành "rule không báo"."""
     import wazuh_coverage as cov
     import wazuh_noise as noise
     items, owner = [], {}
@@ -131,13 +139,22 @@ def inject(cases: list[dict]) -> list[set[int]]:
             ident = _BASE[c["log_format"]] + n * 1000 + line
             owner[(c["log_format"], ident // 1000)] = n
             items.append({"msg": _message(c["log_format"], ev, ident)})
-    cov.CONTAINER = noise.NAME
-    with tempfile.TemporaryDirectory() as tmp:
-        try:
-            noise.start(Path(tmp))
-            alerts = cov.run_wazuh(items)
-        finally:
-            subprocess.run(["docker", "rm", "-f", noise.NAME], env=cov.ENV, capture_output=True)
+    items.append({"msg": _message("syscheck", {"path": "/etc/canary-wazuh-rule-test", "type": "added"}, CANARY_IDENT)})
+    saved, cov.CONTAINER = cov.CONTAINER, noise.NAME
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                noise.start(Path(tmp))
+                alerts = cov.run_wazuh(items)
+            finally:
+                subprocess.run(["docker", "rm", "-f", noise.NAME], env=cov.ENV, capture_output=True)
+        sent = cov.LAST_SENT
+    finally:
+        cov.CONTAINER = saved
+    if sent != len(items):
+        raise InjectionError(f"chỉ gửi được {sent}/{len(items)} event vào hàng đợi analysisd")
+    if not any(_alert_ident("syscheck", a) == CANARY_IDENT and int(a["rule"]["id"]) == CANARY_RULE for a in alerts):
+        raise InjectionError(f"event canary không ra alert {CANARY_RULE}: analysisd bỏ event hoặc chưa xử lý xong")
     out = [set() for _ in cases]
     for a in alerts:
         for fmt, base in _BASE.items():
@@ -181,7 +198,11 @@ def main() -> int:
     if a.insecure:
         api.ctx.check_hostname, api.ctx.verify_mode = False, 0      # ssl.CERT_NONE
     cases = load_cases(Path(a.path))
-    fails = run(cases, api)
+    try:
+        fails = run(cases, api)
+    except InjectionError as e:
+        print(f"LỖI BƠM HÀNG ĐỢI (không phải rule sai): {e}")
+        return 2
     print(f"{len(cases)} ca, {len(fails)} sai")
     for f in fails:
         print(f"  {f.file}:{f.index}  mong đợi {f.expected}  thực tế {f.got_ids}")

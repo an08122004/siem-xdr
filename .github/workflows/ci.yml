@@ -77,7 +77,10 @@ jobs:
       - name: Chờ manager healthy
         run: |
           for i in $(seq 1 60); do
-            [ "$(docker inspect -f '{{.State.Health.Status}}' wazuh-rules-ci)" = healthy ] && exit 0
+            st=$(docker inspect -f '{{.State.Status}} {{.State.Health.Status}}' wazuh-rules-ci)
+            [ "$st" = "running healthy" ] && exit 0
+            case "$st" in "running "*) ;; *) break ;; esac     # container đã thoát
+            [ "${st#running }" = unhealthy ] && break
             sleep 5
           done
           docker logs wazuh-rules-ci | tail -n 80
