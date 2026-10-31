@@ -181,8 +181,9 @@ def approve(es, pid: str, analyst: str, rules_dir: Path = settings.RULES_DIR, no
     return p
 
 
-def shadow_stats(es, rule_id: str, since: str | None) -> dict[str, Any]:
-    """Số alert chạy bóng của rule kể từ `since` (YYYY-MM-DD) và kết luận analyst đã ghi."""
+def shadow_stats(es, rule_id: str, since: str | None, now: str = "") -> dict[str, Any]:
+    """Số alert chạy bóng của rule kể từ `since` (YYYY-MM-DD) tới `now` (ISO, mặc định giờ hiện tại) và kết luận
+    analyst đã ghi."""
     flt: list[dict[str, Any]] = [{"term": {"rule.id": rule_id}}, {"term": {"alert.shadow": True}}]
     if since:
         flt.append({"range": {"@timestamp": {"gte": since}}})
@@ -195,7 +196,13 @@ def shadow_stats(es, rule_id: str, since: str | None) -> dict[str, Any]:
         log.debug("không đếm được alert chạy bóng của %s: %s", rule_id, e)
         total, verdicts = 0, {}
     start = datetime.fromisoformat(since).replace(tzinfo=timezone.utc) if since else None
-    days = (datetime.now(timezone.utc) - start).total_seconds() / 86400 if start else 0.0
+    try:
+        ref = datetime.fromisoformat(now) if now else datetime.now(timezone.utc)
+    except ValueError:
+        ref = datetime.now(timezone.utc)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    days = (ref - start).total_seconds() / 86400 if start else 0.0
     judged = sum(verdicts.values())
     return {"since": since, "days": round(days, 1), "alerts": total,
             "alerts_per_day": round(total / max(days, 1.0), 2), "judged": judged,
@@ -228,7 +235,7 @@ def promote(es, rule_id: str, who: str, rules_dir: Path = settings.RULES_DIR, no
     rule = next((d for d in yaml.safe_load(text) or [] if isinstance(d, dict) and str(d.get("id")) == rule_id), None)
     if not rule or rule.get("mode") != "shadow" or not _MODE_LINE.search(text):
         raise DeployError(409, f"{rule_id} không ở chế độ chạy bóng")
-    stats = shadow_stats(es, rule_id, rule.get("shadow_since"))
+    stats = shadow_stats(es, rule_id, rule.get("shadow_since"), now)
     if (problems := promotion_problems(stats)):
         raise DeployError(409, "chưa đạt tiêu chí bật chính thức: " + "; ".join(problems))
     note = (f"\\1mode: active\n\\1promoted: {{by: {who}, at: '{now}', alerts_per_day: {stats['alerts_per_day']}, "

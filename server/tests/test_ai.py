@@ -521,11 +521,11 @@ def test_approved_ai_rule_runs_in_shadow_then_promoted(tmp_path, monkeypatch):
         deploy.promote(es, "AI-077", "de", rd, now="2026-10-13T11:00:00+00:00")
     assert e.value.code == 409 and "tối thiểu" in str(e.value)
     monkeypatch.setattr(settings, "SHADOW_MIN_DAYS", 0)
-    monkeypatch.setattr(deploy, "shadow_stats", lambda es, rid, since: {
+    monkeypatch.setattr(deploy, "shadow_stats", lambda es, rid, since, now="": {
         "since": since, "days": 8.0, "alerts": 40, "alerts_per_day": 5.0, "judged": 10, "fp_rate": 0.1, "verdicts": {}})
     with pytest.raises(deploy.DeployError, match="alert/ngày"):         # ồn quá
         deploy.promote(es, "AI-077", "de", rd, now="2026-10-21T11:00:00+00:00")
-    monkeypatch.setattr(deploy, "shadow_stats", lambda es, rid, since: {
+    monkeypatch.setattr(deploy, "shadow_stats", lambda es, rid, since, now="": {
         "since": since, "days": 8.0, "alerts": 8, "alerts_per_day": 1.0, "judged": 5, "fp_rate": 0.2, "verdicts": {}})
     r = deploy.promote(es, "AI-077", "de", rd, now="2026-10-21T11:00:00+00:00")
     after = yaml.safe_load(f.read_text(encoding="utf-8"))[0]
