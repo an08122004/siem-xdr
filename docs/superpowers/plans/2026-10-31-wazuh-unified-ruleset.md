@@ -475,10 +475,10 @@ Task 0 đo ngày 31/10/2026 trên project `wzhdev` (bản chép volume Wazuh th�
 - Nghĩa là Wazuh đếm "N−1 event trước (trong timeframe) có giá trị khác giá trị của event hiện tại", không đếm số giá trị khác nhau. Giá trị phân tán (quét cổng, spraying) cho kết quả như rule cũ; vài giá trị lặp lại thì báo sau khoảng 2N event. `not_same_field` chạy y như `different_field`.
 - Bẫy gặp khi thử:
   - `<field name="x">proc</field>` là regex tìm chuỗi con, khớp cả `proc2`. Phải neo `^proc$`.
-  - `frequency` + `if_matched_group` không báo, cả logtest lẫn hàng đợi thật (thêm `<if_group>` cũng không). Rule gốc 40111 (`frequency=12`, `if_matched_group authentication_failed`) cũng không báo với 13 lần sai mật khẩu sshd cùng IP. `if_matched_sid` thì báo.
+  - `frequency` + `if_matched_group` chưa tái hiện được trong đợt thử này: không thấy báo, cả logtest lẫn hàng đợi thật (thêm `<if_group>` cũng không). Rule gốc 40111 (`frequency=12`, `if_matched_group authentication_failed`) cũng không báo, nhưng chỉ thử với 13 lần sai mật khẩu sshd từ một IP. `if_matched_sid` thì báo. Chưa rõ nguyên nhân (chưa tìm ra trong mã analysisd); có thể là một điều kiện còn thiếu ở ca thử, chưa kết luận Wazuh không hỗ trợ.
 - Hệ quả:
   - Task 6, 7, 8: NET-001, NET-005, AUTH-003, LNX-005 viết bằng `different_*`, không cần xấp xỉ "≥ N event cùng nguồn". RULES.md ghi giới hạn: ít giá trị lặp lại vẫn báo sau ~2N event. Mỗi rule thêm ca âm "2 giá trị xen kẽ, < 2N−2 dòng".
-  - Task 4: đề nghị lint cảnh báo `<field>` có giá trị là một từ mà không neo `^…$`, và `frequency` dựa trên `if_matched_group`.
+  - Task 4: đề nghị lint cảnh báo `<field>` có giá trị là một từ mà không neo `^…$`, và `frequency` dựa trên `if_matched_group` (mức WARNING, không phải lỗi, vì chưa chứng minh được là hỏng). Rule nào dùng cấu trúc này phải có ca dương tính đạt trong harness mới được nhận.
   - Task 5, 6: AUTH-002 / 40112 (`if_group` + `if_matched_group`, không `frequency`) chưa thử ở đây; harness phải chứng minh rule gốc có báo.
 
 ### S5 — giải mã URL: Wazuh không giải mã (đúng dự kiến)
