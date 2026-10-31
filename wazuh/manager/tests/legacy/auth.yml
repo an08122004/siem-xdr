@@ -1,0 +1,111 @@
+# Ca test rule cũ auth đổi sang LOG GỐC bởi tools/cases_to_raw.py (nguồn: server/rules/cases/auth.yml).
+# Không có khóa rule:/none: -> bộ chạy mặc định bỏ qua; chạy bằng `wazuh_rule_test.py --report`.
+- legacy: AUTH-001
+  kind: positive
+  name: 5 lần SSH sai trong 5 giây từ một IP
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+- legacy: AUTH-001
+  kind: negative
+  name: 4 lần sai (dưới ngưỡng)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+- legacy: AUTH-002
+  kind: positive
+  name: 5 lần sai rồi đăng nhập được từ cùng IP
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for deploy from 203.0.113.8 port 4444 ssh2'
+- legacy: AUTH-002
+  kind: negative
+  name: sai từ một IP, đăng nhập thành công từ IP khác
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for deploy from 10.0.0.25 port 4444 ssh2'
+- legacy: AUTH-003
+  kind: positive
+  name: 5 tài khoản khác nhau sai từ một IP
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for binh from 203.0.113.9 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for chi from 203.0.113.9 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for dung from 203.0.113.9 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for em from 203.0.113.9 port 4444 ssh2'
+- legacy: AUTH-003
+  kind: negative
+  name: một tài khoản gõ sai 5 lần (không phải spraying)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+  - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+- legacy: AUTH-004
+  kind: positive
+  name: đăng nhập SSH bằng root thành công
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for root from 10.0.0.5 port 4444 ssh2'
+- legacy: AUTH-004
+  kind: negative
+  name: đăng nhập SSH bằng tài khoản thường
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for deploy from 10.0.0.5 port 4444 ssh2'
+- legacy: AUTH-005
+  kind: positive
+  name: useradd tạo tài khoản mới
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Oct 31 10:00:00 host useradd[1234]: new user: name=backdoor, UID=1001, GID=1001, home=/home/backdoor, shell=/bin/bash'
+- legacy: AUTH-005
+  kind: negative
+  name: xóa tài khoản
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Oct 31 10:00:00 host userdel[1234]: delete user ''olduser'''
+- legacy: AUTH-006
+  kind: positive
+  name: sudo mở bash root
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Oct 31 10:00:00 host sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/bin/bash'
+- legacy: AUTH-006
+  kind: negative
+  name: sudo chạy lệnh cập nhật gói
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Oct 31 10:00:00 host sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/apt update'

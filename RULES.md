@@ -318,6 +318,72 @@ Cả 40 rule nhận case playbook riêng theo mã rule (không rule nào rơi v�
 ATT&CK: trong 310 kỹ thuật (kể cả kỹ thuật con) của dataset endpoint, 135 (44%) có playbook riêng. Các kỹ thuật thuộc Defense
 Impairment (0/24), Collection (0/17), Exfiltration (0/9) và Discovery (2/35) gần như đều rơi về PB-00.
 
+### 4.5 Đối chiếu 41 rule cũ với ruleset gốc Wazuh 4.14.8 (31/10/2026)
+
+Chuyển phát hiện sang rule XML của `wazuh-analysisd` (kế hoạch `docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md`)
+cần biết rule nào ruleset gốc (4.515 rule) đã phủ. `tools/cases_to_raw.py` đổi các ca ECS trong `server/rules/cases/` về log gốc
+(Apache, sshd/sudo/useradd, filterlog, `eve.json`, Windows Security/Sysmon/PowerShell/Defender, syscheck, `siem-proc:`, auditd) vào
+`wazuh/manager/tests/legacy/`; `python tools/wazuh_rule_test.py --report` chạy mọi ca qua manager chỉ có ruleset gốc (cộng 100100/100101,
+không tính) và ghi `wazuh/manager/tests/legacy_map.yml`. Quyết định:
+
+- `builtin`: MỖI ca dương có ít nhất một rule gốc level >= 7 (không thuộc nhóm `sca`) và không ca âm nào báo rule gốc level >= 7.
+- `approx`: có rule gốc báo trên ca dương nhưng chưa đủ (thiếu ca, báo nhầm ca âm, hoặc chỉ level < 7: ứng viên nâng level ở `0190-tuning.xml`).
+- `convert`: không rule gốc nào báo (hoặc ca không dựng được log gốc): phải viết rule XML riêng.
+
+Kết quả: 7 `builtin`, 21 `approx`, 13 `convert`.
+
+| Mã | Quyết định | Rule gốc | Ghi chú |
+|---|---|---|---|
+| AUTH-001 | approx | 5760 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5760] |
+| AUTH-002 | approx | 5715, 5760 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5715, 5760] |
+| AUTH-003 | approx | 5760 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5760] |
+| AUTH-004 | approx | 5715 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5715] |
+| AUTH-005 | builtin | 5902 | 1/1 ca dương có rule gốc level>=7 |
+| AUTH-006 | approx | 5403 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5403] |
+| FIM-001 | approx | 550, 554 | không dựng được log gốc: ca registry: bộ bơm syscheck chỉ dựng được sự kiện file, không có sự kiện registry; 1/3 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [554]; ca âm báo level>=7: [550, 553] |
+| LNX-001 | approx | 80792 | 0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792] |
+| LNX-002 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
+| LNX-003 | approx | 80792 | 0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792] |
+| LNX-004 | approx | 80792 | 0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792] |
+| LNX-005 | approx | 80792 | 0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792] |
+| LNX-006 | approx | 80792 | 0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792] |
+| NET-001 | builtin | 87701, 87702 | 1/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [87701] |
+| NET-002 | builtin | 87701, 87702 | 1/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [87701] |
+| NET-003 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
+| NET-004 | approx | 86601 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [86601] |
+| NET-005 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
+| TI-001 | convert | — | không dựng được log gốc: phụ thuộc làm giàu MISP (threat.matched do pipeline gắn), log gốc của kết nối không có trường này; không có ca dương |
+| WEB-001 | approx | 31106 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31106]; status 200 chỉ ra 31106 (rule con chung) thay vì rule tấn công cụ thể: Wazuh không giải mã URL |
+| WEB-002 | approx | 31106 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31106]; status 200 chỉ ra 31106 (rule con chung) thay vì rule tấn công cụ thể: Wazuh không giải mã URL |
+| WEB-003 | approx | 31106 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31106]; status 200 chỉ ra 31106 (rule con chung) thay vì rule tấn công cụ thể: Wazuh không giải mã URL |
+| WEB-004 | convert | — | 0/2 ca dương có rule gốc level>=7; không rule gốc nào báo |
+| WEB-005 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
+| WEB-006 | approx | 31101, 31151 | 1/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31101]; ca âm báo level>=7: [31151] |
+| WEB-007 | builtin | 31509, 31510 | 1/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31509] |
+| WEB-008 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
+| WEB-009 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
+| WIN-001 | approx | 60122 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [60122] |
+| WIN-002 | approx | 63103 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [63103] |
+| WIN-003 | approx | 60109 | 1/1 ca dương có rule gốc level>=7; ca âm báo level>=7: [60109] |
+| WIN-004 | builtin | 60154 | 1/1 ca dương có rule gốc level>=7 |
+| WIN-005 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
+| WIN-006 | approx | 91837 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [91837] |
+| WIN-007 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
+| WIN-008 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
+| WIN-009 | approx | 61138 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [61138] |
+| WIN-010 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
+| WIN-011 | builtin | 62123 | 1/1 ca dương có rule gốc level>=7 |
+| WIN-012 | builtin | 92075 | 1/1 ca dương có rule gốc level>=7 |
+| WIN-013 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
+
+Lưu ý khi đọc bảng:
+
+- Wazuh không giải mã URL: request web trả 200 chỉ ra 31106 (level 6), rule tấn công cụ thể (31103...) chỉ báo khi status là 4xx/5xx. Vì vậy WEB-001..003 chỉ là `approx`.
+- Ngưỡng của rule gốc khác rule cũ (vd. 5763 cần 8 lần sai SSH trong 120 giây, rule cũ 5 lần trong 5 giây), nên AUTH-001 chỉ thấy 5760 (level 5).
+- Rule gốc 60109 báo cả tạo (4720) lẫn bật lại (4722) tài khoản nên WIN-003 báo nhầm ca âm.
+- TI-001 phụ thuộc làm giàu MISP (trường `threat.matched` do pipeline gắn, log gốc không có), ca registry của FIM-001 không bơm được qua syscheck: cả hai không bịa log, ghi `convert` / `approx` kèm lý do.
+- Ca Linux dựng thêm bản auditd (trừ ca cần tên tiến trình cha); `siem-proc:` là định dạng riêng của dự án nên ruleset gốc không có decoder.
+
 ## 5. Điểm mạnh
 
 - **Cú pháp gọn, đọc được, đủ tương quan cơ bản.** Ba kiểu rule (so khớp, ngưỡng có đếm giá trị khác nhau, chuỗi có thứ tự)

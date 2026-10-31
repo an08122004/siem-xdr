@@ -1,0 +1,226 @@
+# Ca test rule cũ network đổi sang LOG GỐC bởi tools/cases_to_raw.py (nguồn: server/rules/cases/network.yml).
+# Không có khóa rule:/none: -> bộ chạy mặc định bỏ qua; chạy bằng `wazuh_rule_test.py --report`.
+- legacy: NET-001
+  kind: positive
+  name: 20 cổng đích khác nhau trong 20 giây
+  log_format: syslog
+  location: /var/log/filter.log
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,21,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,22,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,25,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,53,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,110,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,135,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,139,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,143,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,993,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,995,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1433,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,3306,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,3389,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,5432,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,5900,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+- legacy: NET-001
+  kind: negative
+  name: nhiều kết nối tới cùng cổng 443
+  log_format: syslog
+  location: /var/log/filter.log
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.20,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+- legacy: NET-002
+  kind: positive
+  name: 50 kết nối bị chặn trong 50 giây
+  log_format: syslog
+  location: /var/log/filter.log
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+- legacy: NET-002
+  kind: negative
+  name: 50 kết nối được cho phép
+  log_format: syslog
+  location: /var/log/filter.log
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.11,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+- legacy: NET-003
+  kind: positive
+  name: IP public vào RDP được cho phép
+  log_format: syslog
+  location: /var/log/filter.log
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.12,10.0.0.5,50000,3389,0,S,123456,,64240,,mss'
+- legacy: NET-003
+  kind: negative
+  name: máy nội bộ vào RDP
+  log_format: syslog
+  location: /var/log/filter.log
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.30,10.0.0.5,50000,3389,0,S,123456,,64240,,mss'
+- legacy: NET-004
+  kind: positive
+  name: chữ ký Suricata mức 1
+  log_format: json
+  location: /var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"203.0.113.13","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
+- legacy: NET-004
+  kind: negative
+  name: chữ ký Suricata mức 3 (thông tin)
+  log_format: json
+  location: /var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"203.0.113.13","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2210054,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":3}}'
+- legacy: NET-005
+  kind: positive
+  name: một máy kết nối SMB tới 10 máy trong 10 giây
+  log_format: syslog
+  location: /var/log/filter.log
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.11,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.12,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.13,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.14,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.15,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.16,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.17,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.18,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.19,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.20,50000,445,0,S,123456,,64240,,mss'
+- legacy: NET-005
+  kind: negative
+  name: nhiều phiên SMB tới cùng máy chủ file
+  log_format: syslog
+  location: /var/log/filter.log
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.2,50000,445,0,S,123456,,64240,,mss'

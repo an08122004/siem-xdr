@@ -1,0 +1,199 @@
+# Đối chiếu rule YAML cũ với ruleset Wazuh gốc, sinh bởi `wazuh_rule_test.py --report`.
+AUTH-001:
+  wazuh:
+  - 5760
+  decision: approx
+  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5760]'
+AUTH-002:
+  wazuh:
+  - 5715
+  - 5760
+  decision: approx
+  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5715, 5760]'
+AUTH-003:
+  wazuh:
+  - 5760
+  decision: approx
+  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5760]'
+AUTH-004:
+  wazuh:
+  - 5715
+  decision: approx
+  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5715]'
+AUTH-005:
+  wazuh:
+  - 5902
+  decision: builtin
+  note: 1/1 ca dương có rule gốc level>=7
+AUTH-006:
+  wazuh:
+  - 5403
+  decision: approx
+  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5403]'
+FIM-001:
+  wazuh:
+  - 550
+  - 554
+  decision: approx
+  note: 'không dựng được log gốc: ca registry: bộ bơm syscheck chỉ dựng được sự kiện file, không có sự kiện registry; 1/3 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [554]; ca âm báo level>=7: [550, 553]'
+LNX-001:
+  wazuh:
+  - 80792
+  decision: approx
+  note: '0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792]'
+LNX-002:
+  wazuh: []
+  decision: convert
+  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+LNX-003:
+  wazuh:
+  - 80792
+  decision: approx
+  note: '0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792]'
+LNX-004:
+  wazuh:
+  - 80792
+  decision: approx
+  note: '0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792]'
+LNX-005:
+  wazuh:
+  - 80792
+  decision: approx
+  note: '0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792]'
+LNX-006:
+  wazuh:
+  - 80792
+  decision: approx
+  note: '0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792]'
+NET-001:
+  wazuh:
+  - 87701
+  - 87702
+  decision: builtin
+  note: '1/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [87701]'
+NET-002:
+  wazuh:
+  - 87701
+  - 87702
+  decision: builtin
+  note: '1/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [87701]'
+NET-003:
+  wazuh: []
+  decision: convert
+  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+NET-004:
+  wazuh:
+  - 86601
+  decision: approx
+  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [86601]'
+NET-005:
+  wazuh: []
+  decision: convert
+  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+TI-001:
+  wazuh: []
+  decision: convert
+  note: 'không dựng được log gốc: phụ thuộc làm giàu MISP (threat.matched do pipeline gắn), log gốc của kết nối không có trường này; không có ca dương'
+WEB-001:
+  wazuh:
+  - 31106
+  decision: approx
+  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31106]; status 200 chỉ ra 31106 (rule con chung) thay vì rule tấn công cụ thể: Wazuh không giải mã URL'
+WEB-002:
+  wazuh:
+  - 31106
+  decision: approx
+  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31106]; status 200 chỉ ra 31106 (rule con chung) thay vì rule tấn công cụ thể: Wazuh không giải mã URL'
+WEB-003:
+  wazuh:
+  - 31106
+  decision: approx
+  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31106]; status 200 chỉ ra 31106 (rule con chung) thay vì rule tấn công cụ thể: Wazuh không giải mã URL'
+WEB-004:
+  wazuh: []
+  decision: convert
+  note: 0/2 ca dương có rule gốc level>=7; không rule gốc nào báo
+WEB-005:
+  wazuh: []
+  decision: convert
+  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+WEB-006:
+  wazuh:
+  - 31101
+  - 31151
+  decision: approx
+  note: '1/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31101]; ca âm báo level>=7: [31151]'
+WEB-007:
+  wazuh:
+  - 31509
+  - 31510
+  decision: builtin
+  note: '1/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31509]'
+WEB-008:
+  wazuh: []
+  decision: convert
+  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+WEB-009:
+  wazuh: []
+  decision: convert
+  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+WIN-001:
+  wazuh:
+  - 60122
+  decision: approx
+  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [60122]'
+WIN-002:
+  wazuh:
+  - 63103
+  decision: approx
+  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [63103]'
+WIN-003:
+  wazuh:
+  - 60109
+  decision: approx
+  note: '1/1 ca dương có rule gốc level>=7; ca âm báo level>=7: [60109]'
+WIN-004:
+  wazuh:
+  - 60154
+  decision: builtin
+  note: 1/1 ca dương có rule gốc level>=7
+WIN-005:
+  wazuh: []
+  decision: convert
+  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+WIN-006:
+  wazuh:
+  - 91837
+  decision: approx
+  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [91837]'
+WIN-007:
+  wazuh: []
+  decision: convert
+  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+WIN-008:
+  wazuh: []
+  decision: convert
+  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+WIN-009:
+  wazuh:
+  - 61138
+  decision: approx
+  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [61138]'
+WIN-010:
+  wazuh: []
+  decision: convert
+  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+WIN-011:
+  wazuh:
+  - 62123
+  decision: builtin
+  note: 1/1 ca dương có rule gốc level>=7
+WIN-012:
+  wazuh:
+  - 92075
+  decision: builtin
+  note: 1/1 ca dương có rule gốc level>=7
+WIN-013:
+  wazuh: []
+  decision: convert
+  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo

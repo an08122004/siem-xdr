@@ -1,0 +1,58 @@
+# Ca test rule cũ fim đổi sang LOG GỐC bởi tools/cases_to_raw.py (nguồn: server/rules/cases/fim.yml).
+# Không có khóa rule:/none: -> bộ chạy mặc định bỏ qua; chạy bằng `wazuh_rule_test.py --report`.
+- legacy: FIM-001
+  kind: positive
+  name: lối tắt mới trong thư mục Startup của Windows
+  log_format: syscheck
+  location: syscheck
+  events:
+  - path: c:\programdata\microsoft\windows\start menu\programs\startup\updater.lnk
+    type: added
+- legacy: FIM-001
+  kind: positive
+  name: file cron mới
+  log_format: syscheck
+  location: syscheck
+  events:
+  - path: /etc/cron.d/backup-sync
+    type: added
+- legacy: FIM-001
+  kind: positive
+  name: authorized_keys của root bị sửa
+  log_format: syscheck
+  location: syscheck
+  events:
+  - path: /root/.ssh/authorized_keys
+    type: modified
+- legacy: FIM-001
+  kind: negative
+  name: known_hosts đổi sau khi SSH ra ngoài
+  log_format: syscheck
+  location: syscheck
+  events:
+  - path: /root/.ssh/known_hosts
+    type: modified
+- legacy: FIM-001
+  kind: negative
+  name: xóa file cron (không phải cài cơ chế duy trì)
+  log_format: syscheck
+  location: syscheck
+  events:
+  - path: /etc/cron.d/backup-sync
+    type: deleted
+- legacy: FIM-001
+  kind: negative
+  name: khóa máy chủ SSH sinh lại
+  log_format: syscheck
+  location: syscheck
+  events:
+  - path: /etc/ssh/ssh_host_ed25519_key
+    type: modified
+- legacy: FIM-001
+  kind: negative
+  name: nội dung web bị sửa (thuộc rule Wazuh 100101)
+  log_format: syscheck
+  location: syscheck
+  events:
+  - path: /var/www/html/index.html
+    type: modified
