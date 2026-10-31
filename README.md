@@ -221,6 +221,37 @@ KRaft là điều kiện bắt buộc để sau này nâng lên Kafka 4.x (bản
 khả năng chịu tải: ZooKeeper không nằm trên đường đi của log, broker nhận khoảng 227–243 nghìn msg/s ở cả hai chế độ
 (`kafka-producer-perf-test`, 200 byte/msg).
 
+### Đường đi của dữ liệu và khi một thành phần chết
+
+```
+Endpoint   Wazuh agent ──1514──▶ wazuh-manager ──▶ archives.json + alerts.json (volume wazuh_logs, trên đĩa)
+                                                        └──▶ wazuh-forwarder (Vector) ──┐
+Thiết bị   Firewall / Suricata ──syslog 514──▶ syslog (Vector, hàng đợi đĩa 1 GiB) ─────┴──▶ Kafka siem.raw
+Kafka siem.raw ──▶ analyzer ──▶ ES siem-events-* (event), siem-alerts (alert) + Kafka siem.alerts ──▶ SOAR
+```
+
+Mỗi chặng chỉ coi dữ liệu là đã chuyển xong khi chặng sau nhận được:
+- `wazuh-forwarder` chỉ lưu vị trí đã đọc (volume `vectorwazuh`) khi Kafka xác nhận đã nhận (`acknowledgements`).
+- `syslog` ghi log vào hàng đợi trên đĩa (volume `vectordata`) trước khi gửi Kafka.
+- analyzer và SOAR chỉ xác nhận offset sau khi ghi xong (*Độ bền pipeline*, mục 7).
+- Kafka giữ message 72 giờ (`KAFKA_LOG_RETENTION_HOURS`) dù đã có ai đọc hay chưa.
+
+| Thành phần chết | Dữ liệu trong lúc chết nằm ở đâu | Khi chạy lại | Mất trong trường hợp nào | Ai báo |
+|---|---|---|---|---|
+| **wazuh-manager** | Log agent nằm trong bộ đệm RAM của agent (`client_buffer`, mặc định 5.000 event). Syslog không đi qua Wazuh nên vẫn vào Kafka bình thường. | Agent tự kết nối lại, gửi phần đã đệm. | Bộ đệm agent đầy thì event mới bị bỏ (log agent: `Agent buffer full`). Event manager đã nhận nhưng chưa ghi ra `archives.json` (hàng đợi RAM, `queue_size` 131.072) mất nếu manager chết đột ngột. Theo diễn đàn Wazuh, logcollector ngừng đọc file khi mất kết nối và đọc tiếp từ vị trí đã lưu — **chưa kiểm trên hệ thống này**. | HLT-004 (SOAR không gọi được Wazuh API) |
+| **Kafka** | Log agent: `archives.json` / `alerts.json` trên đĩa của wazuh-manager, forwarder giữ nguyên vị trí đọc. Syslog: hàng đợi đĩa 1 GiB của Vector. Alert analyzer vừa sinh: hàng đợi RAM của analyzer. | Forwarder đọc tiếp từ vị trí đã lưu, Vector xả hàng đợi đĩa, analyzer / SOAR đọc tiếp từ offset đã xác nhận. | Hàng đợi syslog đầy 1 GiB thì Vector chặn: TCP đẩy ngược về thiết bị, UDP bị kernel bỏ. Kafka chết qua lúc Wazuh xoay vòng file (ghi chú bên dưới). Alert analyzer đang chờ gửi quá 5 phút (`message.timeout.ms` mặc định của librdkafka) bị bỏ: vẫn có trong `siem-alerts` nhưng SOAR không nhận — **chưa kiểm**. | HLT-002 (nguồn log im lặng). HLT-005 cần đọc Kafka nên không báo được. |
+| **wazuh-forwarder** | `archives.json` / `alerts.json` tiếp tục lớn trên đĩa. | Đọc tiếp từ vị trí đã lưu ở volume `vectorwazuh`. | Chết qua lúc Wazuh xoay vòng file (ghi chú bên dưới). | HLT-002 |
+| **syslog** (Vector) | Không có chỗ chứa. | Hàng đợi đĩa còn tồn được gửi tiếp. | Mọi syslog gửi trong lúc chết: UDP mất ngay, TCP tùy bộ đệm của thiết bị gửi. | HLT-002 |
+| **analyzer** | Kafka `siem.raw`. | Đọc tiếp từ offset đã xác nhận. Event Wazuh đọc lại không thành bản ghi trùng vì `event.id` cố định. | Chết quá 72 giờ. | HLT-005 (lag), HLT-002 |
+| **Elasticsearch** | Kafka `siem.raw`: analyzer giữ event trong RAM, thử ghi lại mỗi 2 giây và không xác nhận offset. | Ghi tiếp phần còn giữ. | Alert analyzer sinh trong lúc ES chết chỉ được ghi log lỗi, không vào `siem-alerts` (SOAR vẫn nhận qua Kafka) — **lỗ hổng đã biết, chưa sửa**. ES chết quá 72 giờ. | HLT-006 |
+| **SOAR** | Kafka `siem.alerts`. | Xử lý tiếp các alert chưa xác nhận. | Chết quá 72 giờ. | **Không ai**: HLT-* chạy trong chính SOAR. Theo dõi bằng `docker compose ps`. |
+| manager (console), Grafana, AI worker | Không nằm trên đường đi của dữ liệu. | | Không mất. | |
+
+**Xoay vòng file của Wazuh**: 0 giờ (giờ của container wazuh-manager), Wazuh chuyển `archives.json` và `alerts.json` sang
+`archives/<năm>/<tháng>/`, `alerts/<năm>/<tháng>/`, còn forwarder chỉ theo dõi đúng hai file đang ghi. Nếu forwarder đang dừng
+hoặc đang bị Kafka chặn lúc đó, phần cuối file cũ chưa đọc có thể bị bỏ sót — **chưa kiểm**. Bản xoay vòng vẫn nằm trong volume
+`wazuh_logs`, đọc lại được bằng tay.
+
 Trình duyệt sẽ cảnh báo chứng chỉ của `https://localhost:8000` vì nó do **CA nội bộ** ký.
 Để hết cảnh báo, lấy CA rồi import vào *Trusted Root Certification Authorities* của Windows:
 ```bash
@@ -565,6 +596,7 @@ Truy cập console từ máy khác thì đặt `MANAGER_TLS_IPS=<IP máy docker>
 alert đã tới Kafka; SOAR: alert đã xử lý). Trước 3/10/2026 offset tự xác nhận 2 giây/lần trong khi event còn trong bộ đệm, nên
 dừng / tạo lại container đúng lúc đó là mất event. Event Wazuh có `event.id` cố định (id Wazuh + băm nội dung) nên đọc lại không
 thành bản ghi trùng; id Wazuh một mình không dùng được vì mọi event cùng giây của một agent trùng id (đã làm mất ~60% event).
+Dữ liệu nằm ở đâu khi từng thành phần chết: *Đường đi của dữ liệu và khi một thành phần chết* ở mục 2.
 
 **Giới hạn còn lại**:
 - Kafka chạy plaintext trong mạng docker nội bộ.
