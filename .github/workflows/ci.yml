@@ -68,6 +68,8 @@ jobs:
           cache: pip
           cache-dependency-path: server/requirements.txt
       - run: pip install -r server/requirements.txt
+      - name: Lint rule XML
+        run: python tools/wazuh_rule_lint.py
       - name: Dựng wazuh-manager
         run: |
           python3 tools/init_secrets.py
@@ -85,8 +87,6 @@ jobs:
           done
           docker logs wazuh-rules-ci | tail -n 80
           exit 1
-      - name: Lint rule XML
-        run: python tools/wazuh_rule_lint.py
       - name: Chạy ca test log gốc qua Wazuh
         run: python tools/wazuh_rule_test.py --url https://localhost:55000 --insecure wazuh/manager/tests/cases
       - name: Log manager khi lỗi

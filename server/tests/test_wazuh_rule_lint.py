@@ -67,7 +67,7 @@ def test_missing_positive_or_negative_case():
 
 
 def test_nested_quantifier_regex():
-    assert has(run(rule(extra="<regex>(a+)+$</regex>")), "regex")
+    assert has(run(rule(extra='<regex type="pcre2">(a+)+$</regex>')), "regex")
 
 
 def test_level0_needs_condition():
@@ -83,10 +83,40 @@ def test_tuning_file_exempt_but_needs_overwrite():
 
 
 def test_warnings_frequency_if_matched_group_and_bare_field():
-    xml = rule(extra='<if_matched_group>x</if_matched_group><field name="a">admin</field>', attrs=' frequency="5"')
+    xml = rule(extra='<if_matched_group>x</if_matched_group><field name="a" type="pcre2">admin</field>',
+               attrs=' frequency="5"')
     out = run(xml)
     assert len(out) == 2 and all(o.startswith("WARNING: ") for o in out)
-    assert run(rule(extra='<field name="a">^admin$</field>')) == []
+    assert run(rule(extra='<field name="a" type="pcre2">^admin$</field>')) == []
+
+
+def test_regex_and_field_need_pcre2_but_match_does_not():
+    assert has(run(rule(extra="<regex>a</regex>")), "pcre2")
+    assert has(run(rule(extra='<field name="a">^b$</field>')), "pcre2")
+    assert run(rule(extra='<regex type="pcre2">^a$</regex><url>x</url>')) == []
+    assert has(lint.check({lint.TUNING_FILE: rule(rid=5712, attrs=' overwrite="yes"', extra="<regex>a</regex>")}, []),
+               "pcre2") is False
+
+
+def test_malformed_rules_never_crash():
+    assert has(run('<group name="siem,"><rule level="5"><description>X</description></rule></group>'), "id")
+    assert has(run('<group name="siem,"><rule id="abc" level="5"/></group>'), "id")
+    out = run(rule().replace('<group name="local,">', "").replace("</group></rule></group>", "</group></rule>"))
+    assert has(out, "ngoài <group>")
+
+
+def test_duplicate_id_in_one_file_still_checks_first_element():
+    bad = '<rule id="101001" level="5"><field name="a" type="pcre2">admin</field></rule>'
+    xml = f'<group name="siem,">{bad}{bad}</group>'
+    out = run(xml)
+    assert has(out, "trùng") and sum("từ trần" in o for o in out) == 2
+
+
+def test_tuning_exempt_from_siem_and_dynamic_from_cases():
+    assert lint.check({lint.TUNING_FILE: rule(rid=5712, attrs=' overwrite="yes"', grp="x,")}, []) == []
+    ai = rule(rid=109001)
+    assert lint.check({"rules-dynamic/ai.xml": ai}, []) == []
+    assert has(lint.check({"rules-dynamic/ai.xml": rule(rid=109001, grp="x,")}, []), "siem")
 
 
 def test_real_repo_rules_are_clean():
