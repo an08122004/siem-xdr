@@ -184,12 +184,90 @@ def run(cases: list[dict], api) -> list[Failure]:
     return fails
 
 
+# ---------------------------------------------------------------- đối chiếu rule YAML cũ với ruleset gốc (--report)
+HIGH = 7                    # alert thật: level >= 7 (dưới đó rule không thành alert của SOC, chỉ là ứng viên chỉnh level)
+PROJECT_MIN_ID = 100000     # rule của repo (100100/100101...): không phải rule gốc, không tính vào đối chiếu
+LEGACY_DIR = ROOT / "wazuh/manager/tests/legacy"
+LEGACY_MAP = ROOT / "wazuh/manager/tests/legacy_map.yml"
+
+
+def rule_info(api, ids) -> dict[int, tuple[int, list[str]]]:
+    """{id: (level, groups)} từ GET /rules, 100 id một lần."""
+    ids, info = sorted(ids), {}
+    for i in range(0, len(ids), 100):
+        part = ",".join(map(str, ids[i:i + 100]))
+        for r in _retry(lambda: api.request("GET", f"/rules?rule_ids={part}&limit=500")).get("data", {}).get("affected_items", []):
+            info[int(r["id"])] = (int(r["level"]), list(r.get("groups") or []))
+    return info
+
+
+def decide(positives: list[set[int]], negatives: list[set[int]], info: dict, skipped: str = "") -> tuple[str, list[int], str]:
+    """(decision, id rule gốc, ghi chú) cho một rule cũ. `builtin`: MỖI ca dương có ít nhất một rule gốc level >= 7 (không thuộc
+    nhóm sca) và không ca âm nào báo rule gốc level >= 7. `approx`: còn lại nhưng có rule gốc báo trên ca dương (kể cả level < 7,
+    ứng viên nâng level). `convert`: không rule gốc nào. Rule level 0 (rule cha gom nhóm) và id >= 100000 (rule của repo) bỏ qua."""
+    lv = lambda i: info.get(i, (0, []))[0]                                            # noqa: E731
+    stock = lambda ids: {i for i in ids if i < PROJECT_MIN_ID and lv(i) > 0 and "sca" not in info[i][1]}  # noqa: E731
+    high = lambda ids: {i for i in stock(ids) if lv(i) >= HIGH}                       # noqa: E731
+    pos_high, pos_all = [high(p) for p in positives], [stock(p) for p in positives]
+    neg_hit = sorted(set().union(*[{i for i in stock(n) if lv(i) >= HIGH} for n in negatives]))
+    ids = sorted(set().union(*pos_all))
+    low = sorted(set(ids) - set().union(*pos_high))
+    notes = []
+    if skipped:
+        notes.append(f"không dựng được log gốc: {skipped}")
+    if positives:
+        notes.append(f"{sum(map(bool, pos_high))}/{len(positives)} ca dương có rule gốc level>=7")
+    if low:
+        notes.append(f"level<7 (ứng viên nâng level): {low}")
+    if neg_hit:
+        notes.append(f"ca âm báo level>=7: {neg_hit}")
+    if 31106 in ids:
+        notes.append("status 200 chỉ ra 31106 (rule con chung) thay vì rule tấn công cụ thể: Wazuh không giải mã URL")
+    if positives and all(pos_high) and not neg_hit:
+        return "builtin", ids, "; ".join(notes)
+    if ids:
+        return "approx", ids, "; ".join(notes)
+    return "convert", [], "; ".join(notes + ([] if positives else ["không có ca dương"]) + ([] if not positives or skipped else ["không rule gốc nào báo"]))
+
+
+def legacy_codes() -> list[str]:
+    """Mã của mọi rule YAML cũ (server/rules/*.yml), theo thứ tự file."""
+    return [r["id"] for f in sorted((ROOT / "server/rules").glob("*.yml")) for r in yaml.safe_load(f.read_text(encoding="utf-8"))]
+
+
+def report(cases: list[dict], api, skipped: dict[str, str], codes: list[str] | None = None) -> dict[str, dict]:
+    """Chạy MỌI ca legacy (các ca eventchannel/syscheck gộp một lần `inject`) và trả {mã: {wazuh, decision, note}}."""
+    codes = codes or legacy_codes()
+    missing = [c for c in codes if c not in skipped and not any(x["legacy"] == c for x in cases)]
+    if missing:
+        raise ValueError(f"thiếu ca và lý do bỏ qua cho: {', '.join(missing)}")
+    got: dict[int, set[int]] = {}
+    batch = [i for i, c in enumerate(cases) if c["log_format"] in INJECT]
+    if batch:
+        for i, ids in zip(batch, inject([cases[i] for i in batch])):
+            got[i] = ids
+    for i, c in enumerate(cases):
+        if i not in got:
+            got[i] = fired(c, api)
+    info = rule_info(api, set().union(*got.values())) if got else {}
+    out = {}
+    for code in codes:
+        pos = [got[i] for i, c in enumerate(cases) if c["legacy"] == code and c["kind"] == "positive"]
+        neg = [got[i] for i, c in enumerate(cases) if c["legacy"] == code and c["kind"] == "negative"]
+        d, ids, note = decide(pos, neg, info, skipped.get(code, ""))
+        out[code] = {"wazuh": ids, "decision": d, "note": note}
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("path", nargs="?", default=str(CASES_DIR), help="file hoặc thư mục ca test")
     ap.add_argument("--url", default="https://localhost:55000")
     ap.add_argument("--user", default="siem-rules")
     ap.add_argument("--password-file", default=str(ROOT / "secrets/wazuh_rules_api_password"))
+    ap.add_argument("--report", action="store_true",
+                    help="đối chiếu ca legacy (mặc định tests/legacy) với ruleset đang chạy, ghi tests/legacy_map.yml")
+    ap.add_argument("--out", default=str(LEGACY_MAP), help="file legacy_map.yml của --report")
     ap.add_argument("--ca", default="", help="CA ký chứng chỉ API")
     ap.add_argument("--insecure", action="store_true", help="không kiểm chứng chỉ API (manager thử, chứng chỉ tự ký)")
     a = ap.parse_args()
@@ -197,6 +275,19 @@ def main() -> int:
     api = WazuhApi(a.url, a.user, Path(a.password_file).read_text(encoding="utf-8").strip(), a.ca)
     if a.insecure:
         api.ctx.check_hostname, api.ctx.verify_mode = False, 0      # ssl.CERT_NONE
+    if a.report:
+        import cases_to_raw
+        cases = load_cases(LEGACY_DIR if a.path == str(CASES_DIR) else Path(a.path))
+        try:
+            res = report(cases, api, cases_to_raw.build()[1])
+        except InjectionError as e:
+            print(f"LỖI BƠM HÀNG ĐỢI (không phải rule sai): {e}")
+            return 2
+        Path(a.out).write_text("# Đối chiếu rule YAML cũ với ruleset Wazuh gốc, sinh bởi `wazuh_rule_test.py --report`.\n"
+                               + yaml.safe_dump(res, allow_unicode=True, sort_keys=False, width=10**9), encoding="utf-8", newline="\n")
+        for d in ("builtin", "approx", "convert"):
+            print(d, sum(r["decision"] == d for r in res.values()))
+        return 0
     cases = load_cases(Path(a.path))
     try:
         fails = run(cases, api)
