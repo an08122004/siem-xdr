@@ -110,3 +110,23 @@ def test_build_covers_all_rule_codes_and_shapes():
     assert set(cases) == {"auth", "fim", "linux", "network", "web", "windows"}
     web = [c for c in cases["web"] if c["legacy"] == "WEB-009" and c["kind"] == "positive"][0]
     assert len(web["events"]) == 300 and web["log_format"] == "apache"
+
+
+def test_web_positive_with_status_200_gets_a_404_twin_for_the_specific_attack_rule():
+    cases, _ = c2r.build(ROOT / "server/rules/cases")
+    web = [c for c in cases["web"] if c["legacy"] == "WEB-001" and c["kind"] == "positive"]
+    assert [c["name"].endswith("(status 404)") for c in web] == [False, True]
+    assert '" 200 ' in web[0]["events"][0] and '" 404 ' in web[1]["events"][0]
+    assert web[0]["events"][0].replace('" 200 ', '" 404 ') == web[1]["events"][0]
+    assert not [c for c in cases["web"] if c["legacy"] == "WEB-006" and c["name"].endswith("(status 404)")]
+
+
+def test_extra_cases_are_tagged_and_cover_every_branch_of_builtin_candidates():
+    cases, _ = c2r.build(ROOT / "server/rules/cases")
+    flat = [c for lst in cases.values() for c in lst]
+    assert all(c["name"].startswith("[bổ sung phủ nhánh]") for c in flat if c.get("extra"))
+    for code, branches in c2r.BRANCHES.items():
+        got = {c.get("branch") for c in flat if c["legacy"] == code and c["kind"] == "positive"}
+        assert set(branches) <= got, (code, set(branches) - got)
+    neg = [c for c in flat if c["legacy"] == "NET-001" and c["kind"] == "negative" and c.get("extra")]
+    assert any(len(c["events"]) == 20 and len({e.split(",")[21] for e in c["events"]}) == 1 for c in neg)

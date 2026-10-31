@@ -1,199 +1,192 @@
 # Đối chiếu rule YAML cũ với ruleset Wazuh gốc, sinh bởi `wazuh_rule_test.py --report`.
 AUTH-001:
-  wazuh:
-  - 5760
-  decision: approx
-  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5760]'
+  wazuh: []
+  decision: convert
+  note: 'chỉ trúng rule chung 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7'
 AUTH-002:
-  wazuh:
-  - 5715
-  - 5760
-  decision: approx
-  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5715, 5760]'
+  wazuh: []
+  decision: convert
+  note: 'chỉ trúng rule chung 5715 (sshd: authentication success.), 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7'
 AUTH-003:
-  wazuh:
-  - 5760
-  decision: approx
-  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5760]'
+  wazuh: []
+  decision: convert
+  note: 'chỉ trúng rule chung 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7'
 AUTH-004:
-  wazuh:
-  - 5715
-  decision: approx
-  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5715]'
+  wazuh: []
+  decision: convert
+  note: 'chỉ trúng rule chung 5715 (sshd: authentication success.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7'
 AUTH-005:
   wazuh:
   - 5902
   decision: builtin
-  note: 1/1 ca dương có rule gốc level>=7
+  note: '1/1 ca dương có rule gốc cụ thể level>=7; builtin: 5902 (level 8: New user added to the system.)'
 AUTH-006:
-  wazuh:
-  - 5403
-  decision: approx
-  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5403]'
+  wazuh: []
+  decision: convert
+  note: chỉ trúng rule chung 5403 (First time user executed sudo.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7
 FIM-001:
   wazuh:
   - 550
   - 554
   decision: approx
-  note: 'không dựng được log gốc: ca registry: bộ bơm syscheck chỉ dựng được sự kiện file, không có sự kiện registry; 1/3 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [554]; ca âm báo level>=7: [550, 553]'
+  note: 'không dựng được log gốc: ca registry: bộ bơm syscheck chỉ dựng được sự kiện file, không có sự kiện registry; 1/3 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 554 (level 5: File added to the system.) [level 5 ''File added to the system.'': mọi file mới trong thư mục được giám sát]; ca âm báo level>=7: [550, 553]'
 LNX-001:
-  wazuh:
-  - 80792
-  decision: approx
-  note: '0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792]'
+  wazuh: []
+  decision: convert
+  note: 'chỉ trúng rule chung 80792 (Audit: Command: $(audit.exe).), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7'
 LNX-002:
   wazuh: []
   decision: convert
-  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+  note: 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo
 LNX-003:
-  wazuh:
-  - 80792
-  decision: approx
-  note: '0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792]'
+  wazuh: []
+  decision: convert
+  note: 'chỉ trúng rule chung 80792 (Audit: Command: $(audit.exe).), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7'
 LNX-004:
-  wazuh:
-  - 80792
-  decision: approx
-  note: '0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792]'
+  wazuh: []
+  decision: convert
+  note: 'chỉ trúng rule chung 80792 (Audit: Command: $(audit.exe).), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7'
 LNX-005:
-  wazuh:
-  - 80792
-  decision: approx
-  note: '0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792]'
+  wazuh: []
+  decision: convert
+  note: 'chỉ trúng rule chung 80792 (Audit: Command: $(audit.exe).), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7'
 LNX-006:
-  wazuh:
-  - 80792
-  decision: approx
-  note: '0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792]'
+  wazuh: []
+  decision: convert
+  note: 'chỉ trúng rule chung 80792 (Audit: Command: $(audit.exe).), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7'
 NET-001:
   wazuh:
-  - 87701
   - 87702
-  decision: builtin
-  note: '1/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [87701]'
+  - 87701
+  decision: approx
+  note: '1/2 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: deny; thiếu: allow; rule chung, không tính phủ: 87701 (level 5: pfSense firewall drop event.) [level 5 ''pfSense firewall drop event.'': MỘT gói bị chặn, không có ngưỡng]; ca âm báo level>=7: [87702]'
 NET-002:
   wazuh:
-  - 87701
   - 87702
-  decision: builtin
-  note: '1/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [87701]'
+  - 87701
+  decision: approx
+  note: '1/1 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 87701 (level 5: pfSense firewall drop event.) [level 5 ''pfSense firewall drop event.'': MỘT gói bị chặn, không có ngưỡng]; ca âm báo level>=7: [87702]'
 NET-003:
   wazuh: []
   decision: convert
-  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+  note: 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo
 NET-004:
-  wazuh:
-  - 86601
-  decision: approx
-  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [86601]'
+  wazuh: []
+  decision: convert
+  note: 'chỉ trúng rule chung 86601 (Suricata: Alert - $(alert.signature)), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7'
 NET-005:
   wazuh: []
   decision: convert
-  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+  note: 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo
 TI-001:
   wazuh: []
   decision: convert
   note: 'không dựng được log gốc: phụ thuộc làm giàu MISP (threat.matched do pipeline gắn), log gốc của kết nối không có trường này; không có ca dương'
 WEB-001:
   wazuh:
+  - 31103
   - 31106
   decision: approx
-  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31106]; status 200 chỉ ra 31106 (rule con chung) thay vì rule tấn công cụ thể: Wazuh không giải mã URL'
+  note: '1/2 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 ''A web attack returned code 200 (success)'': con chung của 31103/31104/31105, không nói loại tấn công]'
 WEB-002:
   wazuh:
+  - 31105
   - 31106
   decision: approx
-  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31106]; status 200 chỉ ra 31106 (rule con chung) thay vì rule tấn công cụ thể: Wazuh không giải mã URL'
+  note: '0/2 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''31105 (level 6: XSS (Cross Site Scripting) attempt.)'']; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 ''A web attack returned code 200 (success)'': con chung của 31103/31104/31105, không nói loại tấn công]'
 WEB-003:
   wazuh:
+  - 31104
   - 31106
   decision: approx
-  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31106]; status 200 chỉ ra 31106 (rule con chung) thay vì rule tấn công cụ thể: Wazuh không giải mã URL'
+  note: '0/2 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''31104 (level 6: Common web attack.)'']; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 ''A web attack returned code 200 (success)'': con chung của 31103/31104/31105, không nói loại tấn công]'
 WEB-004:
   wazuh: []
   decision: convert
-  note: 0/2 ca dương có rule gốc level>=7; không rule gốc nào báo
+  note: chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/4 ca dương có rule gốc cụ thể level>=7
 WEB-005:
   wazuh: []
   decision: convert
-  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+  note: chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7
 WEB-006:
   wazuh:
-  - 31101
   - 31151
+  - 31101
   decision: approx
-  note: '1/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31101]; ca âm báo level>=7: [31151]'
+  note: '1/1 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 31101 (level 5: Web server 400 error code.) [level 5 ''Web server 400 error code.'': mọi phản hồi 4xx, không nhìn URL hay payload]; ca âm báo level>=7: [31151]'
 WEB-007:
   wazuh:
   - 31509
   - 31510
-  decision: builtin
-  note: '1/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31509]'
+  decision: approx
+  note: '1/5 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: wp-login; thiếu: signin, login, auth, admin; level<7 (ứng viên nâng level): [''31509 (level 3: CMS (WordPress or Joomla) login attempt.)'']'
 WEB-008:
   wazuh: []
   decision: convert
-  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+  note: chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7
 WEB-009:
   wazuh: []
   decision: convert
-  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+  note: 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo
 WIN-001:
-  wazuh:
-  - 60122
-  decision: approx
-  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [60122]'
+  wazuh: []
+  decision: convert
+  note: chỉ trúng rule chung 60122 (Logon Failure - Unknown user or bad password), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7
 WIN-002:
   wazuh:
   - 63103
   decision: approx
-  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [63103]'
+  note: '0/1 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''63103 (level 5: The audit log was cleared)'']'
 WIN-003:
   wazuh:
   - 60109
   decision: approx
-  note: '1/1 ca dương có rule gốc level>=7; ca âm báo level>=7: [60109]'
+  note: '1/1 ca dương có rule gốc cụ thể level>=7; ca âm báo level>=7: [60109]'
 WIN-004:
   wazuh:
+  - 60141
   - 60154
-  decision: builtin
-  note: 1/1 ca dương có rule gốc level>=7
+  - 60159
+  - 60179
+  decision: approx
+  note: '3/4 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: administrators, domain admins, remote desktop users; thiếu: enterprise admins; level<7 (ứng viên nâng level): [''60141 (level 5: Security Enabled Global Group Member Added $(win.eventdata.memberSid))'']'
 WIN-005:
   wazuh: []
   decision: convert
-  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+  note: 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo
 WIN-006:
   wazuh:
   - 91837
   decision: approx
-  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [91837]'
+  note: '0/1 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''91837 (level 4: Powershell executed "Get-Content -Stream or Invoke-Expresion". Possible string execution as code)'']'
 WIN-007:
   wazuh: []
   decision: convert
-  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+  note: 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo
 WIN-008:
   wazuh: []
   decision: convert
-  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+  note: 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo
 WIN-009:
-  wazuh:
-  - 61138
-  decision: approx
-  note: '0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [61138]'
+  wazuh: []
+  decision: convert
+  note: chỉ trúng rule chung 61138 (New Windows Service Created), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7
 WIN-010:
   wazuh: []
   decision: convert
-  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+  note: 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo
 WIN-011:
   wazuh:
   - 62123
-  decision: builtin
-  note: 1/1 ca dương có rule gốc level>=7
+  decision: approx
+  note: '1/2 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: 1116; thiếu: 1117'
 WIN-012:
   wazuh:
+  - 92018
   - 92075
-  decision: builtin
-  note: 1/1 ca dương có rule gốc level>=7
+  decision: approx
+  note: '2/6 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: certutil-urlcache, certutil-decode; thiếu: mshta, regsvr32, rundll32-javascript, bitsadmin'
 WIN-013:
   wazuh: []
   decision: convert
-  note: 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo
+  note: 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo

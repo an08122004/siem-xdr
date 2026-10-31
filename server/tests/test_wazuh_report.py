@@ -5,12 +5,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 import wazuh_rule_test as wrt  # noqa: E402
 
-INFO = {31103: (7, ["web"]), 31106: (6, ["web"]), 5710: (5, ["syslog"]), 5763: (10, ["syslog"]), 19000: (9, ["sca"]),
-        31100: (0, ["web"]), 100101: (12, ["fim"])}
+INFO = {31103: (7, ["web"], "SQL injection attempt."), 31106: (6, ["web"], "A web attack returned code 200 (success)"),
+        5710: (5, ["syslog"], "sshd: attempt to login using a non-existent user"), 5763: (10, ["syslog"], "sshd: brute force"),
+        19000: (9, ["sca"], "SCA"), 31100: (0, ["web"], "Access log messages grouped."), 100101: (12, ["fim"], "mine"),
+        80792: (3, ["audit"], "Audit: Command: $(audit.exe)."), 31510: (8, ["web"], "CMS brute force"),
+        92075: (12, ["win"], "launched with commands to create a binary file")}
 
 
-def decide(pos, neg, skipped=""):
-    return wrt.decide(pos, neg, INFO, skipped)
+def decide(pos, neg, skipped="", **kw):
+    return wrt.decide(pos, neg, INFO, skipped, **kw)
 
 
 def test_builtin_when_every_positive_has_high_stock_and_no_negative_does():
@@ -46,9 +49,33 @@ def test_sca_and_project_rules_do_not_count():
     assert decide([{19000}, {100101}], [set()])[0] == "convert"
 
 
-def test_generic_31106_is_recorded_with_explanation():
+def test_only_generic_ids_is_convert_and_names_them():
     d, ids, note = decide([{31106}], [set()])
-    assert d == "approx" and ids == [31106] and "200" in note
+    assert d == "convert" and ids == [] and "chỉ trúng rule chung 31106 (A web attack returned code 200 (success))" in note
+    assert "ứng viên nâng level" not in note
+    assert decide([{80792}, {80792}], [set()])[0] == "convert"
+
+
+def test_generic_plus_specific_is_approx_and_records_both_ids():
+    d, ids, note = decide([{31106}, {31103}], [set()])      # status 200 -> 31106, bản status 404 -> 31103
+    assert d == "approx" and ids == [31103, 31106] and "1/2" in note and "rule chung" in note
+
+
+def test_builtin_note_has_real_description_and_level():
+    d, _, note = decide([{31103}], [set()])
+    assert d == "builtin" and "31103 (level 7: SQL injection attempt.)" in note
+
+
+def test_partial_branch_coverage_downgrades_builtin_to_approx():
+    d, ids, note = decide([{31510}], [set()], branches=["wp-login", "admin"], pos_branch=["wp-login"])
+    assert d == "approx" and ids == [31510] and "chỉ chứng minh: wp-login; thiếu: admin" in note
+    d, _, note = decide([{31510}, {31510}], [set()], branches=["wp-login", "admin"], pos_branch=["wp-login", "admin"])
+    assert d == "builtin"
+
+
+def test_branch_proof_needs_a_covering_positive():
+    d, _, note = decide([{31510}, set()], [set()], branches=["a", "b"], pos_branch=["a", "b"])
+    assert d == "approx" and "thiếu: b" in note
 
 
 def test_skipped_reason_is_convert_with_reason():
@@ -60,7 +87,8 @@ class FakeApi:
     def request(self, method, path, body=None):
         assert method == "GET" and path.startswith("/rules?rule_ids=")
         wanted = [int(x) for x in path.split("rule_ids=")[1].split("&")[0].split(",")]
-        return {"data": {"affected_items": [{"id": i, "level": INFO[i][0], "groups": INFO[i][1]} for i in wanted]}}
+        return {"data": {"affected_items": [{"id": i, "level": INFO[i][0], "groups": INFO[i][1], "description": INFO[i][2]}
+                                            for i in wanted if i in INFO]}}
 
 
 def leg(code, kind, fmt="syslog", **kw):
@@ -91,3 +119,14 @@ def test_report_rejects_missing_codes():
     import pytest
     with pytest.raises(ValueError, match="WEB-2"):
         wrt.report([leg("WEB-1", "positive")], FakeApi(), {}, codes=["WEB-1", "WEB-2"])
+
+
+def test_rule_info_raises_on_id_missing_from_api():
+    import pytest
+    with pytest.raises(RuntimeError, match="999999"):
+        wrt.rule_info(FakeApi(), {31103, 999999})
+    assert wrt.rule_info(FakeApi(), {31103})[31103] == (7, ["web"], "SQL injection attempt.")
+
+
+def test_generic_ids_are_stock_ids_with_justification():
+    assert {80792, 31106, 86601} <= set(wrt.GENERIC_IDS) and all(v and k < 100000 for k, v in wrt.GENERIC_IDS.items())

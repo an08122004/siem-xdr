@@ -191,42 +191,76 @@ LEGACY_DIR = ROOT / "wazuh/manager/tests/legacy"
 LEGACY_MAP = ROOT / "wazuh/manager/tests/legacy_map.yml"
 
 
-def rule_info(api, ids) -> dict[int, tuple[int, list[str]]]:
-    """{id: (level, groups)} từ GET /rules, 100 id một lần."""
+def rule_info(api, ids) -> dict[int, tuple[int, list[str], str]]:
+    """{id: (level, groups, mô tả)} từ GET /rules, 100 id một lần. Id API không trả về thì LỖI (không coi như level 0)."""
     ids, info = sorted(ids), {}
     for i in range(0, len(ids), 100):
         part = ",".join(map(str, ids[i:i + 100]))
         for r in _retry(lambda: api.request("GET", f"/rules?rule_ids={part}&limit=500")).get("data", {}).get("affected_items", []):
-            info[int(r["id"])] = (int(r["level"]), list(r.get("groups") or []))
+            info[int(r["id"])] = (int(r["level"]), list(r.get("groups") or []), str(r.get("description") or ""))
+    if missing := [i for i in ids if i not in info]:
+        raise RuntimeError(f"Wazuh API không trả thông tin rule {missing}: không thể xác định level")
     return info
 
 
-def decide(positives: list[set[int]], negatives: list[set[int]], info: dict, skipped: str = "") -> tuple[str, list[int], str]:
-    """(decision, id rule gốc, ghi chú) cho một rule cũ. `builtin`: MỖI ca dương có ít nhất một rule gốc level >= 7 (không thuộc
-    nhóm sca) và không ca âm nào báo rule gốc level >= 7. `approx`: còn lại nhưng có rule gốc báo trên ca dương (kể cả level < 7,
-    ứng viên nâng level). `convert`: không rule gốc nào. Rule level 0 (rule cha gom nhóm) và id >= 100000 (rule của repo) bỏ qua."""
-    lv = lambda i: info.get(i, (0, []))[0]                                            # noqa: E731
+# Rule gốc CHUNG: khớp cả lớp sự kiện rộng, không phân biệt điều mà rule cũ bắt. Trúng chỉ các id này thì KHÔNG tính là phủ
+# (decision `convert`), và không gọi là "ứng viên nâng level" (nâng level sẽ báo mọi sự kiện cùng lớp). Mô tả + level lấy từ
+# GET /rules (Wazuh 4.14.8) ngày 31/10/2026; ghi chú trong legacy_map.yml lấy lại mô tả thật từ API mỗi lần chạy.
+GENERIC_IDS: dict[int, str] = {
+    80792: "level 3 'Audit: Command: $(audit.exe).': khớp MỌI lệnh execve do auditd ghi, không nhìn vào lệnh",
+    31106: "level 6 'A web attack returned code 200 (success)': con chung của 31103/31104/31105, không nói loại tấn công",
+    31101: "level 5 'Web server 400 error code.': mọi phản hồi 4xx, không nhìn URL hay payload",
+    86601: "level 3 'Suricata: Alert - $(alert.signature)': khớp MỌI cảnh báo Suricata, không nhìn mức độ/chữ ký",
+    5715: "level 3 'sshd: authentication success.': mọi đăng nhập SSH thành công, không phân biệt user",
+    5760: "level 5 'sshd: authentication failed.': MỘT lần sai mật khẩu SSH, không có ngưỡng brute force",
+    5403: "level 4 'First time user executed sudo.': chỉ lần sudo đầu tiên của user, không nhìn lệnh được chạy",
+    554: "level 5 'File added to the system.': mọi file mới trong thư mục được giám sát",
+    87701: "level 5 'pfSense firewall drop event.': MỘT gói bị chặn, không có ngưỡng",
+    60122: "level 5 'Logon Failure - Unknown user or bad password': MỘT lần 4625, không có ngưỡng",
+    61138: "level 5 'New Windows Service Created': mọi service mới, không nhìn đường dẫn/lệnh",
+}
+
+
+def decide(positives: list[set[int]], negatives: list[set[int]], info: dict, skipped: str = "",
+           branches: list[str] = (), pos_branch: list = ()) -> tuple[str, list[int], str]:
+    """(decision, id rule gốc, ghi chú) cho một rule cũ. `builtin`: MỖI ca dương có ít nhất một rule gốc CỤ THỂ level >= 7
+    (không thuộc nhóm sca, không nằm trong GENERIC_IDS), ca dương phủ MỌI nhánh `branches` của rule cũ (nhãn ở `pos_branch`,
+    song song với `positives`) và không ca âm nào báo rule gốc level >= 7. `approx`: có rule gốc cụ thể báo trên ca dương
+    nhưng chưa đủ (thiếu ca/nhánh, báo nhầm ca âm, hoặc chỉ level < 7). `convert`: không rule cụ thể nào (kể cả chỉ trúng
+    rule chung). Rule level 0 (gom nhóm) và id >= 100000 (rule của repo) bỏ qua."""
+    lv = lambda i: info.get(i, (0, [], ""))[0]                                          # noqa: E731
+    desc = lambda i: f"{i} (level {lv(i)}: {info[i][2]})"                               # noqa: E731
     stock = lambda ids: {i for i in ids if i < PROJECT_MIN_ID and lv(i) > 0 and "sca" not in info[i][1]}  # noqa: E731
-    high = lambda ids: {i for i in stock(ids) if lv(i) >= HIGH}                       # noqa: E731
-    pos_high, pos_all = [high(p) for p in positives], [stock(p) for p in positives]
+    specific = lambda ids: stock(ids) - GENERIC_IDS.keys()                              # noqa: E731
+    high = lambda ids: {i for i in specific(ids) if lv(i) >= HIGH}                      # noqa: E731
+    pos_high = [high(p) for p in positives]
     neg_hit = sorted(set().union(*[{i for i in stock(n) if lv(i) >= HIGH} for n in negatives]))
-    ids = sorted(set().union(*pos_all))
+    ids = sorted(set().union(*[specific(p) for p in positives]))
+    generic = sorted(set().union(*[stock(p) & GENERIC_IDS.keys() for p in positives]))
     low = sorted(set(ids) - set().union(*pos_high))
+    proven = [b for b in branches if any(h and b == pb for h, pb in zip(pos_high, pos_branch))]
+    missing = [b for b in branches if b not in proven]
     notes = []
     if skipped:
         notes.append(f"không dựng được log gốc: {skipped}")
     if positives:
-        notes.append(f"{sum(map(bool, pos_high))}/{len(positives)} ca dương có rule gốc level>=7")
+        notes.append(f"{sum(map(bool, pos_high))}/{len(positives)} ca dương có rule gốc cụ thể level>=7")
+    if branches and missing:
+        notes.append(f"chỉ chứng minh: {', '.join(proven) or 'không nhánh nào'}; thiếu: {', '.join(missing)}")
     if low:
-        notes.append(f"level<7 (ứng viên nâng level): {low}")
+        notes.append(f"level<7 (ứng viên nâng level): {[desc(i) for i in low]}")
+    if generic:
+        notes.append("rule chung, không tính phủ: " + "; ".join(f"{desc(i)} [{GENERIC_IDS[i]}]" for i in generic))
     if neg_hit:
         notes.append(f"ca âm báo level>=7: {neg_hit}")
-    if 31106 in ids:
-        notes.append("status 200 chỉ ra 31106 (rule con chung) thay vì rule tấn công cụ thể: Wazuh không giải mã URL")
-    if positives and all(pos_high) and not neg_hit:
-        return "builtin", ids, "; ".join(notes)
+    if positives and all(pos_high) and not neg_hit and not missing:
+        top = sorted(set().union(*pos_high))
+        return "builtin", ids + generic, "; ".join(notes + ["builtin: " + ", ".join(desc(i) for i in top)])
     if ids:
-        return "approx", ids, "; ".join(notes)
+        return "approx", ids + generic, "; ".join(notes)
+    if generic:
+        head = "chỉ trúng rule chung " + ", ".join(f"{i} ({info[i][2]})" for i in generic) + ", không chỉnh"
+        return "convert", [], "; ".join([head] + [n for n in notes if not n.startswith("rule chung")])
     return "convert", [], "; ".join(notes + ([] if positives else ["không có ca dương"]) + ([] if not positives or skipped else ["không rule gốc nào báo"]))
 
 
@@ -235,7 +269,8 @@ def legacy_codes() -> list[str]:
     return [r["id"] for f in sorted((ROOT / "server/rules").glob("*.yml")) for r in yaml.safe_load(f.read_text(encoding="utf-8"))]
 
 
-def report(cases: list[dict], api, skipped: dict[str, str], codes: list[str] | None = None) -> dict[str, dict]:
+def report(cases: list[dict], api, skipped: dict[str, str], codes: list[str] | None = None,
+           branches: dict[str, list[str]] | None = None) -> dict[str, dict]:
     """Chạy MỌI ca legacy (các ca eventchannel/syscheck gộp một lần `inject`) và trả {mã: {wazuh, decision, note}}."""
     codes = codes or legacy_codes()
     missing = [c for c in codes if c not in skipped and not any(x["legacy"] == c for x in cases)]
@@ -252,9 +287,10 @@ def report(cases: list[dict], api, skipped: dict[str, str], codes: list[str] | N
     info = rule_info(api, set().union(*got.values())) if got else {}
     out = {}
     for code in codes:
-        pos = [got[i] for i, c in enumerate(cases) if c["legacy"] == code and c["kind"] == "positive"]
-        neg = [got[i] for i, c in enumerate(cases) if c["legacy"] == code and c["kind"] == "negative"]
-        d, ids, note = decide(pos, neg, info, skipped.get(code, ""))
+        idx = [i for i, c in enumerate(cases) if c["legacy"] == code]
+        pos = [i for i in idx if cases[i]["kind"] == "positive"]
+        d, ids, note = decide([got[i] for i in pos], [got[i] for i in idx if cases[i]["kind"] == "negative"], info,
+                              skipped.get(code, ""), (branches or {}).get(code, []), [cases[i].get("branch") for i in pos])
         out[code] = {"wazuh": ids, "decision": d, "note": note}
     return out
 
@@ -279,7 +315,7 @@ def main() -> int:
         import cases_to_raw
         cases = load_cases(LEGACY_DIR if a.path == str(CASES_DIR) else Path(a.path))
         try:
-            res = report(cases, api, cases_to_raw.build()[1])
+            res = report(cases, api, cases_to_raw.build()[1], branches=cases_to_raw.BRANCHES)
         except InjectionError as e:
             print(f"LỖI BƠM HÀNG ĐỢI (không phải rule sai): {e}")
             return 2

@@ -326,62 +326,67 @@ cần biết rule nào ruleset gốc (4.515 rule) đã phủ. `tools/cases_to_ra
 `wazuh/manager/tests/legacy/`; `python tools/wazuh_rule_test.py --report` chạy mọi ca qua manager chỉ có ruleset gốc (cộng 100100/100101,
 không tính) và ghi `wazuh/manager/tests/legacy_map.yml`. Quyết định:
 
-- `builtin`: MỖI ca dương có ít nhất một rule gốc level >= 7 (không thuộc nhóm `sca`) và không ca âm nào báo rule gốc level >= 7.
-- `approx`: có rule gốc báo trên ca dương nhưng chưa đủ (thiếu ca, báo nhầm ca âm, hoặc chỉ level < 7: ứng viên nâng level ở `0190-tuning.xml`).
-- `convert`: không rule gốc nào báo (hoặc ca không dựng được log gốc): phải viết rule XML riêng.
+- `builtin`: ca dương phủ MỌI nhánh điều kiện của rule cũ (mỗi giá trị regex / danh sách; ca bổ sung gắn nhãn `[bổ sung phủ nhánh]`), mỗi ca có
+  ít nhất một rule gốc CỤ THỂ level >= 7 (không thuộc nhóm `sca`), và không ca âm nào báo rule gốc level >= 7.
+- `approx`: có rule gốc cụ thể báo trên ca dương nhưng chưa đủ (thiếu ca hoặc nhánh, báo nhầm ca âm, hoặc chỉ level < 7: ứng viên nâng level ở `0190-tuning.xml`).
+  Ghi chú `chỉ chứng minh: ...; thiếu: ...` liệt kê nhánh đã/chưa phủ.
+- `convert`: không rule gốc cụ thể nào (hoặc chỉ trúng rule CHUNG trong `GENERIC_IDS` của `tools/wazuh_rule_test.py`, vd. 80792 mọi lệnh auditd,
+  31106 / 31101 mọi phản hồi tấn công 200 / lỗi 4xx, 86601 mọi cảnh báo Suricata; hoặc ca không dựng được log gốc): phải viết rule XML riêng.
 
-Kết quả: 7 `builtin`, 21 `approx`, 13 `convert`.
+Kết quả: 1 `builtin`, 14 `approx`, 26 `convert`.
 
 | Mã | Quyết định | Rule gốc | Ghi chú |
 |---|---|---|---|
-| AUTH-001 | approx | 5760 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5760] |
-| AUTH-002 | approx | 5715, 5760 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5715, 5760] |
-| AUTH-003 | approx | 5760 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5760] |
-| AUTH-004 | approx | 5715 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5715] |
-| AUTH-005 | builtin | 5902 | 1/1 ca dương có rule gốc level>=7 |
-| AUTH-006 | approx | 5403 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [5403] |
-| FIM-001 | approx | 550, 554 | không dựng được log gốc: ca registry: bộ bơm syscheck chỉ dựng được sự kiện file, không có sự kiện registry; 1/3 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [554]; ca âm báo level>=7: [550, 553] |
-| LNX-001 | approx | 80792 | 0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792] |
-| LNX-002 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
-| LNX-003 | approx | 80792 | 0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792] |
-| LNX-004 | approx | 80792 | 0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792] |
-| LNX-005 | approx | 80792 | 0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792] |
-| LNX-006 | approx | 80792 | 0/2 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [80792] |
-| NET-001 | builtin | 87701, 87702 | 1/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [87701] |
-| NET-002 | builtin | 87701, 87702 | 1/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [87701] |
-| NET-003 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
-| NET-004 | approx | 86601 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [86601] |
-| NET-005 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
+| AUTH-001 | convert | — | chỉ trúng rule chung 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7 |
+| AUTH-002 | convert | — | chỉ trúng rule chung 5715 (sshd: authentication success.), 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7 |
+| AUTH-003 | convert | — | chỉ trúng rule chung 5760 (sshd: authentication failed.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7 |
+| AUTH-004 | convert | — | chỉ trúng rule chung 5715 (sshd: authentication success.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7 |
+| AUTH-005 | builtin | 5902 | 1/1 ca dương có rule gốc cụ thể level>=7; builtin: 5902 (level 8: New user added to the system.) |
+| AUTH-006 | convert | — | chỉ trúng rule chung 5403 (First time user executed sudo.), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7 |
+| FIM-001 | approx | 550, 554 | không dựng được log gốc: ca registry: bộ bơm syscheck chỉ dựng được sự kiện file, không có sự kiện registry; 1/3 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 554 (level 5: File added to the system.) [level 5 'File added to the system.': mọi file mới trong thư mục được giám sát]; ca âm báo level>=7: [550, 553] |
+| LNX-001 | convert | — | chỉ trúng rule chung 80792 (Audit: Command: $(audit.exe).), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7 |
+| LNX-002 | convert | — | 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo |
+| LNX-003 | convert | — | chỉ trúng rule chung 80792 (Audit: Command: $(audit.exe).), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7 |
+| LNX-004 | convert | — | chỉ trúng rule chung 80792 (Audit: Command: $(audit.exe).), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7 |
+| LNX-005 | convert | — | chỉ trúng rule chung 80792 (Audit: Command: $(audit.exe).), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7 |
+| LNX-006 | convert | — | chỉ trúng rule chung 80792 (Audit: Command: $(audit.exe).), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7 |
+| NET-001 | approx | 87702, 87701 | 1/2 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: deny; thiếu: allow; rule chung, không tính phủ: 87701 (level 5: pfSense firewall drop event.) [level 5 'pfSense firewall drop event.': MỘT gói bị chặn, không có ngưỡng]; ca âm báo level>=7: [87702] |
+| NET-002 | approx | 87702, 87701 | 1/1 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 87701 (level 5: pfSense firewall drop event.) [level 5 'pfSense firewall drop event.': MỘT gói bị chặn, không có ngưỡng]; ca âm báo level>=7: [87702] |
+| NET-003 | convert | — | 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo |
+| NET-004 | convert | — | chỉ trúng rule chung 86601 (Suricata: Alert - $(alert.signature)), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7 |
+| NET-005 | convert | — | 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo |
 | TI-001 | convert | — | không dựng được log gốc: phụ thuộc làm giàu MISP (threat.matched do pipeline gắn), log gốc của kết nối không có trường này; không có ca dương |
-| WEB-001 | approx | 31106 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31106]; status 200 chỉ ra 31106 (rule con chung) thay vì rule tấn công cụ thể: Wazuh không giải mã URL |
-| WEB-002 | approx | 31106 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31106]; status 200 chỉ ra 31106 (rule con chung) thay vì rule tấn công cụ thể: Wazuh không giải mã URL |
-| WEB-003 | approx | 31106 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31106]; status 200 chỉ ra 31106 (rule con chung) thay vì rule tấn công cụ thể: Wazuh không giải mã URL |
-| WEB-004 | convert | — | 0/2 ca dương có rule gốc level>=7; không rule gốc nào báo |
-| WEB-005 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
-| WEB-006 | approx | 31101, 31151 | 1/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31101]; ca âm báo level>=7: [31151] |
-| WEB-007 | builtin | 31509, 31510 | 1/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [31509] |
-| WEB-008 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
-| WEB-009 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
-| WIN-001 | approx | 60122 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [60122] |
-| WIN-002 | approx | 63103 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [63103] |
-| WIN-003 | approx | 60109 | 1/1 ca dương có rule gốc level>=7; ca âm báo level>=7: [60109] |
-| WIN-004 | builtin | 60154 | 1/1 ca dương có rule gốc level>=7 |
-| WIN-005 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
-| WIN-006 | approx | 91837 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [91837] |
-| WIN-007 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
-| WIN-008 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
-| WIN-009 | approx | 61138 | 0/1 ca dương có rule gốc level>=7; level<7 (ứng viên nâng level): [61138] |
-| WIN-010 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
-| WIN-011 | builtin | 62123 | 1/1 ca dương có rule gốc level>=7 |
-| WIN-012 | builtin | 92075 | 1/1 ca dương có rule gốc level>=7 |
-| WIN-013 | convert | — | 0/1 ca dương có rule gốc level>=7; không rule gốc nào báo |
+| WEB-001 | approx | 31103, 31106 | 1/2 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 'A web attack returned code 200 (success)': con chung của 31103/31104/31105, không nói loại tấn công] |
+| WEB-002 | approx | 31105, 31106 | 0/2 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): ['31105 (level 6: XSS (Cross Site Scripting) attempt.)']; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 'A web attack returned code 200 (success)': con chung của 31103/31104/31105, không nói loại tấn công] |
+| WEB-003 | approx | 31104, 31106 | 0/2 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): ['31104 (level 6: Common web attack.)']; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 'A web attack returned code 200 (success)': con chung của 31103/31104/31105, không nói loại tấn công] |
+| WEB-004 | convert | — | chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/4 ca dương có rule gốc cụ thể level>=7 |
+| WEB-005 | convert | — | chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7 |
+| WEB-006 | approx | 31151, 31101 | 1/1 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 31101 (level 5: Web server 400 error code.) [level 5 'Web server 400 error code.': mọi phản hồi 4xx, không nhìn URL hay payload]; ca âm báo level>=7: [31151] |
+| WEB-007 | approx | 31509, 31510 | 1/5 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: wp-login; thiếu: signin, login, auth, admin; level<7 (ứng viên nâng level): ['31509 (level 3: CMS (WordPress or Joomla) login attempt.)'] |
+| WEB-008 | convert | — | chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7 |
+| WEB-009 | convert | — | 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo |
+| WIN-001 | convert | — | chỉ trúng rule chung 60122 (Logon Failure - Unknown user or bad password), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7 |
+| WIN-002 | approx | 63103 | 0/1 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): ['63103 (level 5: The audit log was cleared)'] |
+| WIN-003 | approx | 60109 | 1/1 ca dương có rule gốc cụ thể level>=7; ca âm báo level>=7: [60109] |
+| WIN-004 | approx | 60141, 60154, 60159, 60179 | 3/4 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: administrators, domain admins, remote desktop users; thiếu: enterprise admins; level<7 (ứng viên nâng level): ['60141 (level 5: Security Enabled Global Group Member Added $(win.eventdata.memberSid))'] |
+| WIN-005 | convert | — | 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo |
+| WIN-006 | approx | 91837 | 0/1 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): ['91837 (level 4: Powershell executed "Get-Content -Stream or Invoke-Expresion". Possible string execution as code)'] |
+| WIN-007 | convert | — | 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo |
+| WIN-008 | convert | — | 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo |
+| WIN-009 | convert | — | chỉ trúng rule chung 61138 (New Windows Service Created), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7 |
+| WIN-010 | convert | — | 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo |
+| WIN-011 | approx | 62123 | 1/2 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: 1116; thiếu: 1117 |
+| WIN-012 | approx | 92018, 92075 | 2/6 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: certutil-urlcache, certutil-decode; thiếu: mshta, regsvr32, rundll32-javascript, bitsadmin |
+| WIN-013 | convert | — | 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo |
 
 Lưu ý khi đọc bảng:
 
-- Wazuh không giải mã URL: request web trả 200 chỉ ra 31106 (level 6), rule tấn công cụ thể (31103...) chỉ báo khi status là 4xx/5xx. Vì vậy WEB-001..003 chỉ là `approx`.
-- Ngưỡng của rule gốc khác rule cũ (vd. 5763 cần 8 lần sai SSH trong 120 giây, rule cũ 5 lần trong 5 giây), nên AUTH-001 chỉ thấy 5760 (level 5).
+- Request web trả 200 chỉ ra 31106 (rule con chung, level 6); mỗi ca dương web có thêm bản status 404 của cùng request để thấy rule tấn công cụ thể
+  (31103 SQL injection level 7, 31104 / 31105 level 6). Cột "Rule gốc" ghi cả hai. Wazuh giữ nguyên chuỗi URL (không giải mã), chi tiết ở spike S5.
+- Ngưỡng của rule gốc khác rule cũ (vd. 87702 là 18 lần chặn trong 45 giây từ một nguồn, mọi cổng: không phân biệt quét cổng của NET-001 với NET-002;
+  31151 là 14 lỗi 4xx trong 90 giây nên báo cả ca 29 lần 404 của WEB-006).
 - Rule gốc 60109 báo cả tạo (4720) lẫn bật lại (4722) tài khoản nên WIN-003 báo nhầm ca âm.
-- TI-001 phụ thuộc làm giàu MISP (trường `threat.matched` do pipeline gắn, log gốc không có), ca registry của FIM-001 không bơm được qua syscheck: cả hai không bịa log, ghi `convert` / `approx` kèm lý do.
+- TI-001 phụ thuộc làm giàu MISP (trường `threat.matched` do pipeline gắn, log gốc không có), ca registry của FIM-001 không bơm được qua syscheck: cả hai không bịa log.
 - Ca Linux dựng thêm bản auditd (trừ ca cần tên tiến trình cha); `siem-proc:` là định dạng riêng của dự án nên ruleset gốc không có decoder.
 
 ## 5. Điểm mạnh
