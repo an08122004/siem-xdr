@@ -1,0 +1,47 @@
+# Ca test cho wazuh/manager/rules/0100-platform.xml. Định dạng + cách chạy: tools/wazuh_rule_test.py.
+# FIM là message nội bộ của syscheckd, logtest không giải mã được -> log_format: syscheck (bơm hàng đợi, xem đầu tools/wazuh_rule_test.py).
+
+- rule: 100100
+  legacy: FIM-001
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /var/www/html/uploads/shell.php, type: added}
+
+- rule: 100100
+  legacy: FIM-001
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /usr/local/apache2/htdocs/cmd.jsp, type: added}
+
+- none: [100100, 100101]      # ngoài thư mục web: chỉ rule gốc 554 (level 5)
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /etc/cron.d/backdoor, type: added}
+
+- none: [100101]              # file MỚI trong thư mục web là 100100, không phải 100101
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /var/www/html/uploads/shell2.php, type: added}
+
+- rule: 100101
+  legacy: FIM-001
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /var/www/html/index.php, type: modified}
+
+- none: [100100, 100101]
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /etc/hosts, type: modified}
+
+- none: [100101]              # "html" phải là một thư mục (/html/), không phải một phần tên thư mục khác
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /home/user/htmlnotes/todo.txt, type: modified}

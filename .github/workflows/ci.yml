@@ -2,6 +2,7 @@
 #   test     unit test server (rule engine, SOAR, API, AI, Wazuh...) trên Python 3.12 như image server
 #   rules    kiểm tra kho rule: metadata bắt buộc, ReDoS, ca test dương / âm, playbook riêng, độ phủ ATT&CK ưu tiên;
 #            xuất layer ATT&CK Navigator làm artifact (chạy cả hằng tuần để theo dõi độ phủ)
+#   wazuh-rules  chạy ca test log gốc (wazuh/manager/tests/cases) qua wazuh-manager thật: logtest + bơm hàng đợi
 #   vector   unit test cấu hình Vector (syslog, Wazuh -> Kafka)
 #   compose  docker compose config hợp lệ (secret giả, không chạy container)
 name: CI
@@ -52,6 +53,40 @@ jobs:
         with:
           name: attack-layer
           path: build/
+
+  # Dựng wazuh-manager 4.14.8 đúng như compose (rule, decoder, ossec.conf, entrypoint của repo, secret sinh bằng
+  # init_secrets.py) nhưng không cần es-certs / Elasticsearch: chứng chỉ API tự ký bằng openssl, nên chạy test với --insecure.
+  # api-ci.yaml nâng access.max_request_per_minute (mặc định 300 -> HTTP 429 khi chạy cả bộ ca).
+  wazuh-rules:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+      - run: pip install -r server/requirements.txt
+      - name: Dựng wazuh-manager
+        run: |
+          python3 tools/init_secrets.py
+          mkdir certs
+          openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=wazuh-manager"             -keyout certs/wazuh-manager.key -out certs/wazuh-manager.crt
+          docker run -d --name wazuh-rules-ci -p 127.0.0.1:55000:55000             --ulimit memlock=-1:-1 --ulimit nofile=655360:655360             -v "$PWD/wazuh/manager/rules:/var/ossec/etc/rules:ro"             -v "$PWD/wazuh/manager/decoders:/var/ossec/etc/decoders:ro"             -v "$PWD/wazuh/manager/ossec.conf:/wazuh-config-mount/etc/ossec.conf:ro"             -v "$PWD/wazuh/manager/agent.conf:/wazuh-config-mount/etc/shared/default/agent.conf:ro"             -v "$PWD/wazuh/manager/tests/api-ci.yaml:/wazuh-config-mount/api/configuration/api.yaml:ro"             -v "$PWD/wazuh/manager/entrypoint:/entrypoint-scripts:ro"             -v "$PWD/certs:/certs/wazuh:ro"             -v "$PWD/secrets/enrollment_key:/run/secrets/enrollment_key:ro"             -v "$PWD/secrets/wazuh_api_password:/run/secrets/wazuh_api_password:ro"             -v "$PWD/secrets/wazuh_rules_api_password:/run/secrets/wazuh_rules_api_password:ro"             --health-cmd "/var/ossec/bin/wazuh-control status | grep -q 'wazuh-apid is running' && /var/ossec/bin/wazuh-control status | grep -q 'wazuh-analysisd is running'"             --health-interval 10s --health-retries 40             wazuh/wazuh-manager:4.14.8
+      - name: Chờ manager healthy
+        run: |
+          for i in $(seq 1 60); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' wazuh-rules-ci)" = healthy ] && exit 0
+            sleep 5
+          done
+          docker logs wazuh-rules-ci | tail -n 80
+          exit 1
+      - name: Chạy ca test log gốc qua Wazuh
+        run: python tools/wazuh_rule_test.py --url https://localhost:55000 --insecure wazuh/manager/tests/cases
+      - name: Log manager khi lỗi
+        if: failure()
+        run: docker logs wazuh-rules-ci | tail -n 120
 
   vector:
     runs-on: ubuntu-24.04
