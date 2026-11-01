@@ -26,6 +26,9 @@
   Rule khai key audit-wazuh-c (như 80792): khớp thì rule mình báo thay cho 80792 / 92600 (level cao hơn); không khớp thì vẫn là rule gốc.
   Bằng chứng không mất rule gốc: xem "Fix round 1" trong task-7-report.md (grep tham chiếu + diff với/không có rule trên corpus Linux).
   Giới hạn: lệnh ps/ls có đối số làm khớp 92604/92605 (level 6, vd `ps aux`) đi qua rule gốc đó, không vào bộ đếm LNX-005 auditd (đếm nó sẽ thay alert level 6 bằng level 3).
+  Nguồn: mọi rule chỉ khớp khi location là file audit của agent (`audit\.log$`, KHÔNG neo ^ hoặc /: event agent mang location dạng
+  "(demo-web) any->/var/log/audit/audit.log"). Agent 000 còn nhận syslog (location = IP người gửi) và log web: dòng giống auditd từ các nguồn đó
+  không được thành lệnh tiến trình (F8b). Ca âm: location = IP, location = access.log.
   Thứ tự: nặng trước (001 > 003 > 004 > 006), bộ đếm LNX-005 cuối.
 -->
 <group name="local,siem-xdr,">
@@ -33,6 +36,7 @@
   <rule id="102501" level="12">
     <if_sid>80792, 92600</if_sid>
     <field name="audit.key" type="pcre2">^audit-wazuh-c$</field>
+    <location type="pcre2">audit\.log$</location>
     <regex type="pcre2">\bnc(?:at)?\b.*[\s"]-e(?:\s+|"\s+a\d+=")/bin/(?:ba)?sh|socat.*exec:|mkfifo(?:\s+|"\s+a\d+=")/tmp/|/dev/tcp/\d+\.\d+\.\d+\.\d+/\d+|python[23]?(?:\s+|"\s+a\d+=")-c.*socket.*connect</regex>
     <description>LNX-001 Reverse shell (auditd): $(audit.exe)</description>
     <mitre>
@@ -46,6 +50,7 @@
   <rule id="102511" level="12">
     <if_sid>80792, 92600</if_sid>
     <field name="audit.key" type="pcre2">^audit-wazuh-c$</field>
+    <location type="pcre2">audit\.log$</location>
     <regex type="pcre2">2F6465762F7463702F|7074792E737061776E|python[23]?"\s+a\d+="-c"\s+a\d+=\w*736F636B6574\w*636F6E6E656374</regex>
     <description>LNX-001 Reverse shell trong bash -c / python -c (auditd, payload hex): $(audit.exe)</description>
     <mitre>
@@ -59,6 +64,7 @@
   <rule id="102503" level="10">
     <if_sid>80792, 92600</if_sid>
     <field name="audit.key" type="pcre2">^audit-wazuh-c$</field>
+    <location type="pcre2">audit\.log$</location>
     <regex type="pcre2">(?:6375726C|77676574)\w*202D(?:4F|6F)20?2F746D702F\w*2026262063686D6F64202B78</regex>
     <description>LNX-003 Tải script vào /tmp rồi chmod +x (auditd, payload hex): $(audit.exe)</description>
     <mitre>
@@ -73,6 +79,7 @@
   <rule id="102504" level="10">
     <if_sid>80792, 92600</if_sid>
     <field name="audit.key" type="pcre2">^audit-wazuh-c$</field>
+    <location type="pcre2">audit\.log$</location>
     <regex type="pcre2">\scomm="(?:xmrig|minerd|cpuminer|kdevtmpfsi|kinsing)"\s|stratum\+tcp://|--donate-level|pool\.(?:minexmr|supportxmr)</regex>
     <description>LNX-004 Tiến trình / dòng lệnh khai thác tiền ảo (auditd): $(audit.exe)</description>
     <mitre>
@@ -86,6 +93,7 @@
   <rule id="102506" level="10">
     <if_sid>80792, 92600</if_sid>
     <field name="audit.key" type="pcre2">^audit-wazuh-c$</field>
+    <location type="pcre2">audit\.log$</location>
     <regex type="pcre2">crontab(?:\s+|"\s+a\d+=")-[lr]?(?:\s*|"\s+a\d+=")\S*/tmp|systemctl(?:\s+|"\s+a\d+=")enable(?:\s+|"\s+a\d+=")\S+.*/tmp</regex>
     <description>LNX-006 Can thiệp cơ chế duy trì (auditd): $(audit.exe)</description>
     <mitre>
@@ -100,6 +108,7 @@
   <rule id="102516" level="10">
     <if_sid>80792, 92600</if_sid>
     <field name="audit.key" type="pcre2">^audit-wazuh-c$</field>
+    <location type="pcre2">audit\.log$</location>
     <regex type="pcre2">3E3E?(?:20)*(?:(?!20)\w\w)*2E7373682F617574686F72697A65645F6B657973|6563686F\w*3E3E?(?:20)*2F6574632F63726F6E</regex>
     <description>LNX-006 Ghi authorized_keys / cron trong bash -c (auditd, payload hex): $(audit.exe)</description>
     <mitre>
@@ -114,6 +123,7 @@
   <rule id="102590" level="3">
     <if_sid>80792</if_sid>
     <field name="audit.key" type="pcre2">^audit-wazuh-c$</field>
+    <location type="pcre2">audit\.log$</location>
     <field name="audit.command" type="pcre2">^(whoami|id|uname|hostname|ifconfig|ip|netstat|ss|ps|w|last|cat)$</field>
     <description>LNX-005 Lệnh trinh sát $(audit.command) (bộ đếm auditd)</description>
     <mitre>

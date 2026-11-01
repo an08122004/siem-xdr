@@ -7,13 +7,14 @@
   Thứ tự file quan trọng: một event khớp nhiều rule cùng cấp chỉ rule đứng trước báo (nặng trước: 001 > 002 > 003 > 004 > 006), và bộ đếm LNX-005 (102090) đứng CUỐI
   để không nuốt event của các rule kia. Hệ quả: event đã báo LNX-001..004/006 không cộng vào bộ đếm LNX-005 (đã có alert mức cao hơn).
   Tin cậy nguồn: kẻ tấn công ghi được chuỗi "siem-proc: ..." vào log web/sshd; decoder không biết location nên rule gốc 102000 chỉ nhận location kết thúc bằng "siem-procs"
-  (giống _SIEM_PROC_LOC ở normalize.py) và mọi rule siem-proc là con của 102000.
+  (giống _SIEM_PROC_LOC ở normalize.py). Event của AGENT mang location "(tên agent) any->siem-procs" (đo thật trên wzhdev: regex (^|/) làm
+  cả họ LNX chết với agent thật) nên regex là (^|/|->)siem-procs$; location = IP (syslog) hoặc log khác không khớp. Mọi rule siem-proc là con của 102000.
 -->
 <group name="local,siem-xdr,">
   <!-- LNX-000: nền cho dòng siem-proc đáng tin (decoder siem-proc + location siem-procs). Level 0, không ra alert. -->
   <rule id="102000" level="0">
     <decoded_as>siem-proc</decoded_as>
-    <location type="pcre2">(^|/)siem-procs$</location>
+    <location type="pcre2">(^|/|->)siem-procs$</location>
     <description>LNX-000 Dòng telemetry tiến trình siem-proc từ nguồn siem-procs</description>
     <mitre>
       <id>T1059.004</id>
