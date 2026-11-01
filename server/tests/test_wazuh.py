@@ -271,8 +271,21 @@ def test_stock_rule_outside_old_groups_is_shadow_until_gate(enricher):
 def test_suppress_key_uses_source_or_agent_and_ignores_dead_srcip(enricher):
     d = enricher.enrich(normalize(wz("wazuh_alert", data={"srcip": "9.9.9.9"},
                                      rule={"id": "5710", "level": 8, "groups": ["sshd"]})))
-    assert bridge.suppress_key(d) == ("WZH-5710", get(d, "agent.id"), get(d, "agent.id"))   # không còn data.srcip
+    assert bridge.suppress_key(d) == ("WZH-5710", get(d, "agent.id"), get(d, "agent.id"), None)   # không còn data.srcip
 
+
+
+def test_fim_alerts_on_different_files_are_not_collapsed(enricher, engine):
+    from siem.analyzer import Analyzer
+    an = Analyzer.__new__(Analyzer)
+    an.enricher, an.engine, an.detector, an.buffer, an.stats = enricher, engine, None, [], {"events": 0, "alerts": 0}
+    emitted = []
+    an.emit = emitted.append
+    an.suppressor = bridge.Suppressor(60)
+    for path in ("/etc/hostname", "/etc/motd", "/etc/hostname"):     # 2 file khác nhau + lặp lại file đầu trong 60 s
+        an.handle(wz("wazuh_alert", location="syscheck", syscheck={"path": path, "event": "modified"},
+                     rule={"id": "550", "level": 7, "description": "x", "groups": ["syscheck"]}))
+    assert [a["file"]["path"] for a in emitted] == ["/etc/hostname", "/etc/motd"]
 
 def test_analyzer_does_not_suppress_shadow_alerts(enricher, engine):
     from siem.analyzer import Analyzer

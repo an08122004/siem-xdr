@@ -88,6 +88,6 @@ def test_quarantine_restores_files_when_error_is_outside_rules_dynamic(tmp_path,
     assert r.returncode == 0, r.stdout + r.stderr
     q = list((ossec / "etc" / "rules-dynamic.quarantine").glob("*/*"))
     if always_fails:
-        assert sorted(p.name for p in d.iterdir()) == ["ai.xml", "bad.xml"] and not q and "chuyển về" in r.stdout
+        assert sorted(p.name for p in d.iterdir()) == ["ai.xml", "bad.xml"] and not q and "đã chuyển về" in r.stdout
     else:
         assert not list(d.iterdir()) and sorted(p.name for p in q) == ["ai.xml", "bad.xml"]

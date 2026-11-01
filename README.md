@@ -359,7 +359,7 @@ Trước khi bật lại cần: giai đoạn học trên dữ liệu thật, tá
 
 **Cảnh báo từ ruleset Wazuh** (`server/siem/detection/wazuh.py`): rule của SIEM/XDR chạy trên MỌI event lấy từ
 `archives.json`. Ruleset Wazuh (hơn 3.000 rule) phần lớn trùng việc với rule tự viết (web, SSH, đăng nhập Windows...), nên
-không chuyển hết thành alert thật để tránh mỗi sự cố thành 2 alert. Cầu nối chuyển mọi cảnh báo level ≥ 7 trong `alerts.json` để đo,
+không chuyển hết thành alert thật để tránh mỗi sự cố thành 2 alert. Cầu nối chuyển mọi cảnh báo level ≥ 7 trong `alerts.json` (mọi nhóm, trừ `sca`) để đo,
 nhưng rule gốc ngoài các nhóm `syscheck`, `rootcheck`, `vulnerability-detector`, `virustotal`, `yara` (`WAZUH_ALERT_ACTIVE_GROUPS`)
 và dưới level 12 chỉ là alert BÓNG (SOAR bỏ qua) tới cổng T18; rule riêng (id ≥ 100000) và mọi cảnh báo level ≥ 12 là alert thật. Alert có `rule.id = WZH-<id rule Wazuh>`, `alert.source = wazuh`. Level ánh xạ sang severity:
 7–9 medium, 10–11 high, ≥ 12 critical. Kết quả SCA (CIS) KHÔNG chuyển thành alert: máy demo có 83 mục không đạt ngay khi khởi động,

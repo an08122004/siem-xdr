@@ -5,11 +5,10 @@ siem-xdr tự phát hiện bằng rule YAML của mình (server/rules) trên M�
 hết sang, tránh mỗi sự cố thành 2 alert. Chỉ lấy:
   - các nhóm rule mà siem-xdr không có rule tương đương (mặc định: FIM `syscheck`, `rootcheck`...),
     từ level WAZUH_ALERT_MIN_LEVEL trở lên. SCA (đánh giá CIS) không nằm trong mặc định: đó là tư thế cấu hình;
-
-  - (cầu nối chuyển MỌI rule từ MIN_LEVEL để đo; rule gốc ngoài các nhóm trên và dưới ANY_LEVEL là alert BÓNG tới cổng T18,
-    xem is_shadow_stock; trùng YAML <-> rule gốc như NET-001/002 <-> 87702, AUTH-001 <-> 5758/2502, NET-004 <-> 1003 nên
-    không ra 2 case; alert bóng không bị chống trùng để T13 đếm đủ)
   - mọi cảnh báo có level >= WAZUH_ALERT_ANY_LEVEL (Wazuh coi là rất nghiêm trọng), bất kể nhóm.
+Cầu nối chuyển MỌI rule từ MIN_LEVEL để đo; rule gốc ngoài các nhóm trên và dưới ANY_LEVEL là alert BÓNG tới cổng T18 (xem
+is_shadow_stock). Trùng YAML <-> rule gốc như NET-001/002 <-> 87702, AUTH-001 <-> 5758/2502, NET-004 <-> 1003 nên không ra
+2 case; alert bóng không bị chống trùng để T13 đếm đủ.
 Level Wazuh (0-15) -> severity: <7 low, 7-9 medium, 10-11 high, >=12 critical.
 Event FIM đã bị rule riêng cụ thể hơn (vd FIM-001) bắt thì không chuyển cảnh báo chung của Wazuh nữa: covered_by().
 """
@@ -47,6 +46,7 @@ def should_bridge(rule: dict, groups: set[str] | None = None, min_level: int | N
         return False
     if _is_local(rule):
         return True
+    # CỐ Ý loại sca ở mọi level (R22): SCA là tư thế cấu hình, không phải phát hiện; đừng "sửa" cho level cao đi qua
     if exclude & {str(g) for g in rule.get("groups") or []}:
         return False
     if level >= any_level:
@@ -81,7 +81,8 @@ class Suppressor:
 def suppress_key(doc: Doc) -> tuple:
     # agent 000 dùng chung cho mọi thiết bị syslog: thiếu source.ip thì agent.id (syslog-<ip>) vẫn tách được nguồn
     agent = get(doc, "agent.id")
-    return (f"WZH-{get(doc, 'wazuh.rule.id')}", get(doc, "source.ip") or agent, agent)
+    # file.path: syscheck 550/554 trên các file KHÁC nhau của một agent là các thay đổi riêng (như main: mỗi thay đổi một alert)
+    return (f"WZH-{get(doc, 'wazuh.rule.id')}", get(doc, "source.ip") or agent, agent, get(doc, "file.path"))
 
 
 def is_shadow_stock(rule: dict, active_groups: set[str] | None = None, any_level: int | None = None) -> bool:
