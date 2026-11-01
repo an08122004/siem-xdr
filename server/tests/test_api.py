@@ -745,6 +745,14 @@ def test_audit_writes_one_json_line(tmp_path, monkeypatch):
     assert rec["event_type"] == "console_auth" and rec["timestamp"] and len(lines) == 2
 
 
+def test_audit_writes_srcip_equal_to_ip(tmp_path, monkeypatch):
+    """Decoder json của Wazuh không biến `ip` thành `srcip`, mà <same_source_ip/> cần `srcip`: Audit ghi sẵn cả hai khóa."""
+    a = _audit_to(monkeypatch, tmp_path / "console.json")
+    a("login", "failure", "bob", "1.2.3.4")
+    rec = json.loads((tmp_path / "console.json").read_text(encoding="utf-8"))
+    assert rec["srcip"] == rec["ip"] == "1.2.3.4"
+
+
 def test_audit_username_cannot_inject_a_second_line(tmp_path, monkeypatch):
     a = _audit_to(monkeypatch, tmp_path / "console.json")
     a("login", "failure", 'x"\n{"action":"login"}\n{"a":1}', "1.2.3.4")
@@ -801,6 +809,34 @@ def test_wazuh_console_event_normalizes_like_before():
               "source.ip", "agent.id", "agent.hostname", "agent.name", "host.name", "message", "@timestamp"):
         assert get(new, f) == get(old, f), f
     assert get(new, "agent.id") == "soc-console" and get(new, "event.module") == "console"
+
+
+def _alert_without_full_log(location, line, agent_id="000"):
+    """Alert của rule console: rule gốc có no_full_log nên alerts.json không có full_log, `data` là trường đã giải mã."""
+    ev = wazuh_console_event(location, line, agent_id)
+    ev["data"].pop("full_log")
+    ev["data"]["data"]["srcip"] = line["ip"]
+    return ev
+
+
+def test_wazuh_console_alert_without_full_log_is_rebuilt_from_data():
+    from siem.pipeline.normalize import get, normalize
+    line = {"timestamp": "2026-11-01T08:00:00+00:00", "event_type": "console_auth", **LOGIN_FAIL}
+    with_log = normalize(wazuh_console_event(settings.CONSOLE_AUDIT_WAZUH_PATH, line))
+    rebuilt = normalize(_alert_without_full_log(settings.CONSOLE_AUDIT_WAZUH_PATH, line))
+    for f in ("event.module", "event.category", "event.type", "event.outcome", "event.action", "event.reason", "user.name",
+              "source.ip", "agent.id", "host.name", "message"):
+        assert get(rebuilt, f) == get(with_log, f), f
+    assert get(rebuilt, "event.module") == "console" and get(rebuilt, "source.ip") == "1.2.3.4"
+
+
+@pytest.mark.parametrize("location,agent", [("/var/log/apache2/access.log", "000"), ("10.10.40.254", "000"),
+                                            (None, "001")])
+def test_console_alert_without_full_log_is_not_trusted_elsewhere(location, agent):
+    from siem.pipeline.normalize import get, normalize
+    d = normalize(_alert_without_full_log(location or settings.CONSOLE_AUDIT_WAZUH_PATH,
+                                          {"event_type": "console_auth", **LOGIN_FAIL}, agent))
+    assert get(d, "event.module") != "console" and get(d, "agent.id") != "soc-console"
 
 
 def test_console_location_from_enrolled_agent_is_not_trusted():
