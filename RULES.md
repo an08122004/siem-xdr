@@ -46,7 +46,7 @@ Tóm tắt 40 rule viết tay chạy chính thức (chưa tính FIM-001 đang ch
 
 ```
 Wazuh agent ──> wazuh-manager ──> archives.json (mọi event) ──> Vector ──> Kafka siem.raw
-syslog (firewall, Suricata) ──> Vector syslog ──────────────────────────────┘
+syslog (firewall, Suricata) ──> wazuh-manager (cổng 514, cùng archives.json)
                                                                             │
 analyzer (server/siem/analyzer.py):  normalize ──> enrich (Threat Intel, tài sản)
                                        │

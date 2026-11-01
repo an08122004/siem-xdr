@@ -116,8 +116,8 @@ async def security_headers(request: Request, call_next):
     return resp
 
 
-# Thao tác ghi dữ liệu trong console -> nhật ký hoạt động theo người dùng, cùng kênh với đăng nhập (auth.audit: Kafka ->
-# siem-events, event.module console). Đăng nhập / tài khoản / phiên tự ghi trong auth.py nên không có ở đây.
+# Thao tác ghi dữ liệu trong console -> nhật ký hoạt động theo người dùng, cùng kênh với đăng nhập (auth.audit: file nhật ký ->
+# wazuh-manager -> Kafka -> siem-events, event.module console). Đăng nhập / tài khoản / phiên tự ghi trong auth.py nên không có ở đây.
 ACTIVITY = [(re.compile(p), op) for p, op in (
     (r"^/api/v1/alerts/[^/]+$", "alert_updated"), (r"^/api/v1/alerts/[^/]+/soar/decline$", "soar_declined"),
     (r"^/api/v1/actions$", "action_requested"), (r"^/api/v1/cases/[^/]+$", "case_updated"),

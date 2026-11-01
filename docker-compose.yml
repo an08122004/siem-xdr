@@ -233,31 +233,13 @@ services:
       - ./server/config:/app/config:ro                # priority.yml (ưu tiên / SLA), threat_profile.yml (độ phủ ATT&CK)
       - ./datasets/processed:/datasets:ro
       - wazuh_dynamic_rules:/app/wazuh-rules          # ai.xml, exceptions.xml của Wazuh (siem/wazuh_rules.py)
-
-  # Syslog collector: Vector (Rust) thay cho bản Python cũ (siem/collector/syslog_server.py, giữ lại để đối chiếu).
-  # Nhận UDP/TCP 514 -> hàng đợi trên đĩa (volume vectordata) -> Kafka siem.raw. Xem vector/vector.yaml.
-  # Trên máy Linux thật nên đặt ở HOST: sysctl -w net.core.rmem_max=33554432 (để buffer UDP 32 MB có hiệu lực).
-  syslog:
-    image: timberio/vector:0.58.0-alpine
-    restart: unless-stopped
-    command: ["--config", "/etc/vector/vector.yaml"]
-    ports: ["514:514/udp", "514:514/tcp"]
-    volumes:
-      - ./vector/vector.yaml:/etc/vector/vector.yaml:ro
-      - vectordata:/var/lib/vector
-    depends_on:
-      kafka: {condition: service_healthy}
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8686/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    networks: [soc]
+      - console_audit:/app/audit                       # nhật ký console (1 dòng JSON/sự kiện), wazuh-manager đọc bằng <localfile>
 
   # Wazuh manager 4.14.8: trạm thu của Wazuh agent (Windows/Linux). Chỉ dùng manager (không indexer/dashboard/filebeat):
   # event + cảnh báo đi tiếp qua wazuh-forwarder vào Kafka. Cấu hình: wazuh/manager/ (xem README mục 1).
   #   1514/tcp  agent gửi event (mã hóa AES)       1515/tcp  enroll agent (TLS + mật khẩu secrets/enrollment_key)
-  #   55000     Wazuh API: KHÔNG publish, chỉ SOAR gọi trong mạng docker (user siem-soar, quyền tối thiểu)
+  #   514/udp+tcp  syslog của firewall/Suricata/router, CHỈ từ SYSLOG_ALLOWED_IPS (thay container Vector `syslog` cũ)
+  #   55000     Wazuh API: KHÔNG publish, chỉ gọi trong mạng docker: SOAR (user siem-soar, quyền tối thiểu) và manager nạp rule (user siem-rules)
   # Agent không được mới hơn manager: dùng bộ cài agent 4.14.8 trở xuống.
   wazuh-manager:
     image: wazuh/wazuh-manager:4.14.8
@@ -268,10 +250,12 @@ services:
     ulimits:
       memlock: {soft: -1, hard: -1}
       nofile: {soft: 655360, hard: 655360}
-    ports: ["1514:1514", "1515:1515"]
+    ports: ["1514:1514", "1515:1515", "514:514/udp", "514:514/tcp"]
     environment:
       # agent im lặng bao lâu thì Wazuh coi là "disconnected" (entrypoint/10-siem-setup.sh ghi vào ossec.conf); lab: 1m
       WAZUH_AGENTS_DISCONNECTION_TIME: ${WAZUH_AGENTS_DISCONNECTION_TIME:-10m}
+      # IP/CIDR được gửi syslog tới 514 (entrypoint/10-siem-setup.sh ghi vào allowed-ips)
+      SYSLOG_ALLOWED_IPS: ${SYSLOG_ALLOWED_IPS:-10.10.40.254}
     secrets: [enrollment_key, wazuh_api_password, wazuh_rules_api_password]
     volumes:
       - wazuh_api_configuration:/var/ossec/api/configuration
@@ -291,6 +275,7 @@ services:
       - ./wazuh/manager/ossec.conf:/wazuh-config-mount/etc/ossec.conf:ro
       - ./wazuh/manager/agent.conf:/wazuh-config-mount/etc/shared/default/agent.conf:ro
       - ./wazuh/manager/api.yaml:/wazuh-config-mount/api/configuration/api.yaml:ro
+      - console_audit:/var/log/siem-console                   # nhật ký console do manager ghi (ossec.conf <localfile>)
       - ./wazuh/manager/entrypoint:/entrypoint-scripts:ro     # mật khẩu enroll, user API, tắt filebeat
       - {type: volume, source: certs, target: /certs/wazuh, read_only: true, volume: {subpath: wazuh-manager}}
     healthcheck:
@@ -431,8 +416,8 @@ networks:
 
 volumes:
   certs:
+  console_audit:
   kafkadata:
-  vectordata:
   vectorwazuh:
   wazuh_api_configuration:
   wazuh_etc:

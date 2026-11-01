@@ -34,11 +34,54 @@ else
   echo "[siem-setup] WAZUH_AGENTS_DISCONNECTION_TIME không hợp lệ ('$T', vd 1m, 10m): giữ giá trị trong ossec.conf"
 fi
 
-# 6. Thư mục rule động (volume mới là root 0755): uid 10001 = user của container `manager` (siem-xdr-server) phải ghi
+# 6. Syslog 514: chỉ nhận từ các IP/CIDR trong SYSLOG_ALLOWED_IPS (danh sách phân cách bằng dấu phẩy, mặc định IP firewall lab).
+#    Xóa mọi <allowed-ips> cũ rồi ghi lại sau <connection>syslog</connection> của từng khối -> chạy lại không nhân đôi dòng.
+A=${SYSLOG_ALLOWED_IPS:-10.10.40.254}
+A=${A// /}
+# Danh sách cho phép (allowlist) từng phần tử: IPv4 [/1-32 hoặc netmask dạng chấm khác 0.0.0.0] hoặc IPv6 [/1-128].
+# Sai chính tả (10.0.0.0//8, 0.0.0.0/0:, prefix /0 cho cả Internet...) -> không hợp lệ, giữ cấu hình cũ: <allowed-ips> sai có
+# thể làm Wazuh từ chối ossec.conf và remoted không chạy (mất luôn agent 1514).
+O='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+V4="^($O\.){3}$O"
+siem_ip_ok() {
+  local ip=${1%%/*} len=""
+  [[ "$1" == */* ]] && len=${1#*/}
+  if [[ "$ip" =~ $V4$ ]]; then
+    [ -z "$len" ] && [[ "$1" != */* ]] && return 0
+    [[ "$len" =~ ^(0?[1-9]|[12][0-9]|3[0-2])$ ]] && return 0
+    [[ "$len" =~ $V4$ && "$len" != "0.0.0.0" ]]; return
+  fi
+  [[ "$ip" =~ ^([0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}$ && "$ip" != *:::* ]] || return 1
+  [[ "$ip" == *::*::* ]] && return 1                       # tối đa một "::"
+  [[ "$ip" == *::* ]] || [ "${ip//[^:]/}" = ":::::::" ] || return 1          # không có "::" thì phải đủ 8 nhóm
+  [[ "$1" != */* ]] || [[ "$len" =~ ^([1-9]|[1-9][0-9]|1[01][0-9]|12[0-8])$ ]]
+}
+ok=1
+[[ -n "$A" && ! "$A" =~ (^,|,,|,$) ]] || ok=0
+IFS=, read -ra IPS <<< "$A"
+for ip in "${IPS[@]}"; do siem_ip_ok "$ip" || ok=0; done
+if [ "$ok" = 1 ]; then
+  sed -i '/<allowed-ips>/d' /var/ossec/etc/ossec.conf
+  for ip in "${IPS[@]}"; do
+    sed -i "/<connection>syslog<\/connection>/a\    <allowed-ips>$ip</allowed-ips>" /var/ossec/etc/ossec.conf
+  done
+  echo "[siem-setup] syslog allowed-ips = $A"
+else
+  echo "[siem-setup] SYSLOG_ALLOWED_IPS không hợp lệ ('$A', vd 10.10.40.254,192.168.1.0/24; không nhận prefix /0): giữ giá trị trong ossec.conf"
+fi
+
+# 7. Nhật ký SOC console: manager (uid 10001, user của image siem-xdr-server) ghi /var/log/siem-console/console.json trên volume
+#    console_audit, Wazuh đọc bằng <localfile>. Volume mới tạo thuộc root nên đặt lại chủ mỗi lần khởi động.
+install -d -o 10001 -m 0755 /var/log/siem-console
+# file có sẵn để logcollector không báo lỗi 1103 khi khởi động trước lần ghi đầu tiên của manager
+[ -e /var/log/siem-console/console.json ] || install -m 0644 -o 10001 /dev/null /var/log/siem-console/console.json
+echo "[siem-setup] đã chuẩn bị /var/log/siem-console"
+
+# 8. Thư mục rule động (volume mới là root 0755): uid 10001 = user của container `manager` (siem-xdr-server) phải ghi
 #    được, group wazuh để analysisd đọc. Làm mỗi lần khởi động, không làm ở install.sh (volume có tên, không phải thư mục host).
 D=/var/ossec/etc/rules-dynamic
 install -d -o 10001 -g wazuh -m 0755 "$D"
-# 7. File rule hỏng còn trên đĩa thì wazuh-analysisd không lên, kéo theo remoted và apid. Kiểm tra cả ruleset trước khi
+# 9. File rule hỏng còn trên đĩa thì wazuh-analysisd không lên, kéo theo remoted và apid. Kiểm tra cả ruleset trước khi
 #    start; hỏng thì cách ly file động (AI / ngoại lệ) để manager vẫn khởi động được.
 if ! /var/ossec/bin/wazuh-analysisd -t >/tmp/analysisd-test.log 2>&1; then
   if [ -n "$(ls -A "$D")" ]; then

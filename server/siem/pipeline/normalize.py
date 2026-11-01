@@ -8,7 +8,7 @@
 
 Event thô: {"timestamp", "agent_id", "hostname", "os", "source", "event_type", "data": {...}}
   - event_type wazuh / wazuh_alert: event của Wazuh manager (data = 1 dòng archives.json / alerts.json)
-  - event_type syslog: dòng syslog do Vector nhận (firewall, Suricata...)
+  - event_type syslog: dòng syslog do wazuh-manager nhận (firewall, Suricata...)
   - event_type console_auth: đăng nhập / quản lý tài khoản của SOC console (manager/auth.py)
   - apache_access, windows_event, process_creation...: định dạng nội bộ, dataset công khai
     (tools/convert_datasets.py) và unit test dùng; parser Wazuh cũng chuyển dòng log gốc qua các parser này
@@ -16,12 +16,15 @@ Event thô: {"timestamp", "agent_id", "hostname", "os", "source", "event_type", 
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable
 from urllib.parse import unquote_plus, urlsplit
+
+from .. import settings
 
 Doc = dict[str, Any]
 
@@ -164,7 +167,8 @@ def parse_apache_error(line: str, doc: Doc) -> None:
 # Syslog / Linux auth
 # ---------------------------------------------------------------------------
 
-_SYSLOG_PRI = re.compile(r"^<(?P<pri>\d{1,3})>(?:1 )?")
+# <PRI> có thể đã bị Wazuh remoted bỏ; phiên bản RFC5424 ("1 " + thời gian ISO) vẫn còn nên bỏ riêng
+_SYSLOG_PRI = re.compile(r"^(?:<(?P<pri>\d{1,3})>)?(?:1 (?=\d{4}-))?")
 _SYSLOG_3164 = re.compile(
     r"^(?P<time>[A-Z][a-z]{2} [ \d]\d \d\d:\d\d:\d\d) (?P<host>\S+) (?P<prog>[^:\[\s]+)(?:\[(?P<pid>\d+)\])?: ?(?P<msg>.*)$"
 )
@@ -619,6 +623,14 @@ def _wazuh_ts(ts: Any) -> str | None:
         return None
 
 
+def _is_ip(s: str) -> bool:
+    try:
+        ipaddress.ip_address(s)
+        return True
+    except ValueError:
+        return False
+
+
 def parse_wazuh(ev: Doc, doc: Doc) -> None:
     ag = ev.get("agent") if isinstance(ev.get("agent"), dict) else {}
     if ev.get("id"):
@@ -635,6 +647,13 @@ def parse_wazuh(ev: Doc, doc: Doc) -> None:
     put(doc, "host.name", ag.get("name"))
     put(doc, "@timestamp", _wazuh_ts(ev.get("timestamp")))
     loc = str(ev.get("location") or "")
+    syslog = ag.get("id") == "000" and _is_ip(loc)
+    if syslog:
+        # syslog 514 do wazuh-manager nhận (không phải agent): giữ danh tính nguồn như đường Vector cũ để HLT-002 và
+        # dashboard vẫn gom theo agent.id = syslog-<ip>; host.name là host trong header syslog, không có thì lấy IP gửi
+        doc["agent"] = {"id": f"syslog-{loc}"}
+        put(doc, "observer.ip", loc)
+        put(doc, "host.name", loc)
     full = ev["full_log"] if isinstance(ev.get("full_log"), str) else ""
     decoder = str((ev.get("decoder") or {}).get("name") or "")
     data = ev["data"] if isinstance(ev.get("data"), dict) else {}
@@ -647,10 +666,19 @@ def parse_wazuh(ev: Doc, doc: Doc) -> None:
         put(doc, "log.file.path", loc)
     put(doc, "event.module", "wazuh")
 
-    if isinstance(ev.get("syscheck"), dict):
+    if syslog:
+        # nội dung do thiết bị tự viết và UDP giả được IP nguồn: chỉ qua bộ đọc syslog như đường Vector cũ, không bao giờ
+        # vào nhánh của agent (Windows, auditd, FIM...) -> không dựng được event tiến trình giả để SOAR kill / isolate
+        put(doc, "message", full or (rule or {}).get("description"))
+        if full:
+            parse_syslog(full, doc)
+    elif isinstance(ev.get("syscheck"), dict):
         _wazuh_fim(ev["syscheck"], doc)
     elif isinstance(data.get("win"), dict):
         _wazuh_windows(data["win"], doc, ag.get("name"))
+    # chỉ tin file do CHÍNH manager đọc (agent 000): agent đã enroll bị chiếm đặt được location giống hệt trong event của nó
+    elif ag.get("id") == "000" and loc == settings.CONSOLE_AUDIT_WAZUH_PATH and (rec := _console_line(full)) is not None:
+        _wazuh_console(rec, doc)
     elif full and _SIEM_XDR_LOC.search(loc) and (m := _SIEM_XDR.match(full)):
         _wazuh_response(m, doc)
     elif full and _SIEM_PROC_LOC.search(loc) and (m := _SIEM_PROC.match(full)):
@@ -680,6 +708,22 @@ def parse_wazuh(ev: Doc, doc: Doc) -> None:
             parse_syslog(full, doc)
     else:
         put(doc, "message", (rule or {}).get("description") or json.dumps(data, ensure_ascii=False)[:2000])
+
+
+def _console_line(full: str) -> Doc | None:
+    """Dòng JSON của Audit (manager/auth.py). Đọc từ full_log (dòng gốc) vì decoder json của Wazuh đổi tên trường (user -> dstuser)."""
+    try:
+        rec = json.loads(full)
+    except ValueError:
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
+def _wazuh_console(rec: Doc, doc: Doc) -> None:
+    """Nhật ký console đi qua wazuh-manager: ra đúng doc như đường console_auth cũ (agent.id / host.name = soc-console)."""
+    doc["agent"] = {"id": "soc-console", "hostname": "soc-console"}
+    put(doc, "@timestamp", rec.get("timestamp"))
+    parse_console({k: v for k, v in rec.items() if k not in ("timestamp", "event_type")}, doc)
 
 
 def _wazuh_fim(sc: Doc, doc: Doc) -> None:

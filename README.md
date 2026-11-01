@@ -19,7 +19,7 @@ Docker. Quy trình vận hành: **[SOC-OPERATIONS.md](SOC-OPERATIONS.md)**. Lộ
  │ rootcheck, kiểm kê│ ◀── active ────│ ruleset Wazuh)│               └─────────────────┘   │ siem.alerts     │   │ enrich (TI)│   └──────────────┘
  └───────────────────┘    response    └───────▲───────┘                                     │                 │   │ rules + ML │
  ┌───────────────────┐   syslog 514   ┌───────┼───────┐                                     │                 │   │ + cảnh báo │
- │ Firewall/Suricata │ ─────────────▶ │ Syslog│(Vector)│───────────────────────────────────▶│                 │◀──│   Wazuh    │
+ │ Firewall/Suricata │ ─────────────▶ │ Syslog│ 514   │                                     │                 │◀──│   Wazuh    │
  └───────────────────┘                └───────┼───────┘                                     └───────┬─────────┘   └────────────┘
                                               │ Wazuh API (55000, nội bộ)                           ▼
                                               │  block_ip / kill_process / isolate_host   ┌──────────────┐
@@ -36,9 +36,10 @@ Docker. Quy trình vận hành: **[SOC-OPERATIONS.md](SOC-OPERATIONS.md)**. Lộ
 |---|---|---|
 | Agent đa nền tảng (Windows/Linux) | **Wazuh agent 4.14.7** (bộ cài chính thức) + script phản ứng `siem-xdr` | `wazuh/agent/`, `demo/web/` |
 | Trạm thu của agent | **Wazuh manager 4.14.8** (chỉ manager, không indexer/dashboard) | `wazuh/manager/` |
+| Nhật ký audit của console | console ghi JSON vào volume `console_audit`, wazuh-manager đọc bằng `<localfile>` rồi đi cùng đường `archives.json` | `server/siem/manager/`, `wazuh/manager/` |
 | Chuyển dữ liệu Wazuh vào Kafka | **Vector** 0.58, end-to-end acknowledgement | `vector/wazuh.yaml` |
 | Manager API + giao diện chung (SOC console + Grafana nhúng) | FastAPI | `server/siem/manager/` |
-| Syslog collector (UDP/TCP 514) | **Vector** 0.58 (Rust), hàng đợi trên đĩa | `vector/vector.yaml` (bản Python cũ `server/siem/collector/` chỉ giữ để đối chiếu) |
+| Syslog (UDP/TCP 514) | Cổng syslog của **wazuh-manager** (chỉ nhận từ `SYSLOG_ALLOWED_IPS`), đi cùng đường `archives.json` | `wazuh/manager/` |
 | Message bus | Kafka 7.7 (Confluent) chế độ **KRaft**, không dùng ZooKeeper | `docker-compose.yml` |
 | Chuẩn hóa log (ECS rút gọn) + làm giàu | Python | `server/siem/pipeline/` |
 | Phân tích dựa trên luật | Rule engine YAML (match / threshold / sequence) + cảnh báo chọn lọc từ ruleset Wazuh | `server/siem/detection/`, `server/rules/` |
@@ -136,7 +137,7 @@ Kết quả được ghi vào `active-responses.log`, agent gửi dòng đó v�
 | Command injection `ping.cgi?host=127.0.0.1;sleep 15` | `siem-procs` thấy `sh` có cha `httpd` → LNX-002 → kill cả cây tiến trình. Request kết thúc sau 5,7 giây thay vì 15. Agent báo `đã kill PID 947 (sh) và 1 tiến trình con`. |
 | Tải webshell `htdocs/shell.php`, sửa `index.html` | FIM thời gian thực → rule 100100 / 100101 (level 10) → alert `WZH-100100` / `WZH-100101` (high, T1505.003) → thông báo + case PB-08. |
 | Cô lập máy (thủ công) | Web không truy cập được. Agent vẫn `Active` với manager, nhận và chạy được lệnh bỏ cô lập. |
-| Độ trễ agent → Kafka | Khoảng 2 giây. Bản đầu dùng hàng đợi đĩa của Vector: event bị giữ tới khi có event kế tiếp (6–10 giây), lệnh kill tới khi tiến trình đã chạy xong. Đã thay bằng end-to-end acknowledgement. |
+| Độ trễ agent → Kafka | Khoảng 2 giây. Bản đầu (đã bỏ) dùng hàng đợi đĩa của Vector: event bị giữ tới khi có event kế tiếp (6–10 giây), lệnh kill tới khi tiến trình đã chạy xong. Đã thay bằng end-to-end acknowledgement. |
 | SCA máy demo | 207 kết quả CIS Debian, 83 mục không đạt. Không chuyển thành alert (xem mục 3). |
 
 **Giới hạn**:
@@ -175,6 +176,12 @@ docker compose ps              # es-setup phải Exited (0); kafka, elasticsearc
 Hệ thống đã chạy từ trước thì chạy lại `python tools/init_secrets.py` (sinh thêm các bí mật mới, vd `misp_api_key` rỗng),
 rồi `docker compose up -d --force-recreate es-certs es-setup` để cập nhật chứng chỉ, quyền RBAC và chính sách snapshot.
 
+**Nâng cấp từ bản còn container Vector `syslog` (trước 1/11/2026)**: container `syslog` cũ không còn trong compose nên thành
+container mồ côi vẫn giữ cổng 514; wazuh-manager tạo lại sẽ lỗi "port is already allocated" và cổng agent 1514 cũng sập theo.
+Vì vậy dùng `docker compose up -d --build --remove-orphans` (hoặc `docker compose rm -sf syslog` trước), đặt `SYSLOG_ALLOWED_IPS` trong `.env`
+(IP nguồn của firewall) và có thể xóa volume cũ `docker volume rm <project>_vectordata`. Không cần chạy lại `init_secrets`; volume
+`console_audit` tự tạo. `install.sh --update` đã dùng sẵn `--remove-orphans`.
+
 **Tên project**: `docker-compose.yml` đặt `name: siem-xdr` (không phụ thuộc tên thư mục), dữ liệu nằm trong volume `siem-xdr_*`;
 `COMPOSE_PROJECT_NAME` trong `.env` (install.sh tự ghi) được ưu tiên hơn. Image server là `siem-xdr-server:latest`, chỉ build
 tại chỗ: sau khi lấy mã mới luôn chạy `docker compose up -d --build`. Dashboard Grafana nằm trong thư mục *SIEM-XDR*; manager
@@ -210,7 +217,7 @@ Phần AI (`--profile ai`, xem mục 5) và máy web demo (`--profile demo`, xem
 | https://localhost:8000/grafana/ | Grafana đầy đủ: *Tổng quan SOC* (tổng quan, phát hiện, telemetry, **phiên đăng nhập**, phản ứng, case), *Điều tra thực thể*, *Thư viện rule*, *SOC KPI* | **cùng tài khoản và phiên với console** |
 | http://127.0.0.1:8088 | Kafka UI, chỉ xem (chỉ từ máy chạy docker) | |
 | https://127.0.0.1:9200 | Elasticsearch (chỉ từ máy chạy docker) | `analyst` / `secrets/analyst_es_password` (chỉ đọc) |
-| UDP/TCP 514 | Syslog từ firewall F001 / Suricata | |
+| UDP/TCP 514 | Syslog từ firewall F001 / Suricata, chỉ nhận từ `SYSLOG_ALLOWED_IPS` | |
 | TCP 1514, 1515 | Wazuh agent gửi event (AES) / enroll (TLS) | mật khẩu enroll: `secrets/enrollment_key` |
 
 **Kafka chạy KRaft** (Kafka tự quản lý metadata, không cần ZooKeeper): 1 node vừa là broker vừa là controller,
@@ -226,22 +233,22 @@ khả năng chịu tải: ZooKeeper không nằm trên đường đi của log, 
 ```
 Endpoint   Wazuh agent ──1514──▶ wazuh-manager ──▶ archives.json + alerts.json (volume wazuh_logs, trên đĩa)
                                                         └──▶ wazuh-forwarder (Vector) ──┐
-Thiết bị   Firewall / Suricata ──syslog 514──▶ syslog (Vector, hàng đợi đĩa 1 GiB) ─────┴──▶ Kafka siem.raw
+Thiết bị   Firewall / Suricata ──syslog 514──▶ wazuh-manager (cùng đường với log agent) ──┴──▶ Kafka siem.raw
+Console    nhật ký audit ──file JSON (volume console_audit)──▶ wazuh-manager (localfile) ──▶ archives.json
 Kafka siem.raw ──▶ analyzer ──▶ ES siem-events-* (event), siem-alerts (alert) + Kafka siem.alerts ──▶ SOAR
 ```
 
 Mỗi chặng chỉ coi dữ liệu là đã chuyển xong khi chặng sau nhận được:
 - `wazuh-forwarder` chỉ lưu vị trí đã đọc (volume `vectorwazuh`) khi Kafka xác nhận đã nhận (`acknowledgements`).
-- `syslog` ghi log vào hàng đợi trên đĩa (volume `vectordata`) trước khi gửi Kafka.
+- syslog và nhật ký console vào `archives.json` của wazuh-manager như log agent, nên cùng được forwarder giữ vị trí đọc.
 - analyzer và SOAR chỉ xác nhận offset sau khi ghi xong (*Độ bền pipeline*, mục 7).
 - Kafka giữ message 72 giờ (`KAFKA_LOG_RETENTION_HOURS`) dù đã có ai đọc hay chưa.
 
 | Thành phần chết | Dữ liệu trong lúc chết nằm ở đâu | Khi chạy lại | Mất trong trường hợp nào | Ai báo |
 |---|---|---|---|---|
-| **wazuh-manager** | Log agent nằm trong bộ đệm RAM của agent (`client_buffer`, mặc định 5.000 event). Syslog không đi qua Wazuh nên vẫn vào Kafka bình thường. | Agent tự kết nối lại, gửi phần đã đệm. | Bộ đệm agent đầy thì event mới bị bỏ (log agent: `Agent buffer full`). Event manager đã nhận nhưng chưa ghi ra `archives.json` (hàng đợi RAM, `queue_size` 131.072) mất nếu manager chết đột ngột. Theo diễn đàn Wazuh, logcollector ngừng đọc file khi mất kết nối và đọc tiếp từ vị trí đã lưu — **chưa kiểm trên hệ thống này**. | HLT-004 (SOAR không gọi được Wazuh API) |
-| **Kafka** | Log agent: `archives.json` / `alerts.json` trên đĩa của wazuh-manager, forwarder giữ nguyên vị trí đọc. Syslog: hàng đợi đĩa 1 GiB của Vector. Alert analyzer vừa sinh: hàng đợi RAM của analyzer. | Forwarder đọc tiếp từ vị trí đã lưu, Vector xả hàng đợi đĩa, analyzer / SOAR đọc tiếp từ offset đã xác nhận. | Hàng đợi syslog đầy 1 GiB thì Vector chặn: TCP đẩy ngược về thiết bị, UDP bị kernel bỏ. Kafka chết qua lúc Wazuh xoay vòng file (ghi chú bên dưới). Alert analyzer đang chờ gửi quá 5 phút (`message.timeout.ms` mặc định của librdkafka) bị bỏ: vẫn có trong `siem-alerts` nhưng SOAR không nhận — **chưa kiểm**. | HLT-002 (nguồn log im lặng). HLT-005 cần đọc Kafka nên không báo được. |
+| **wazuh-manager** | Log agent nằm trong bộ đệm RAM của agent (`client_buffer`, mặc định 5.000 event). Syslog UDP gửi lúc này bị mất; syslog TCP tùy bộ đệm của thiết bị gửi. Nhật ký audit của console nằm chờ trong file (volume `console_audit`), wazuh-manager đọc tiếp từ vị trí đã lưu khi chạy lại (`<only-future-events>no</only-future-events>`; đã thử: dòng ghi lúc wazuh-manager tắt vào `archives.json` đúng một lần, khởi động lại nhiều lần không đọc lại). | Agent tự kết nối lại, gửi phần đã đệm. | Bộ đệm agent đầy thì event mới bị bỏ (log agent: `Agent buffer full`). Event manager đã nhận nhưng chưa ghi ra `archives.json` (hàng đợi RAM, `queue_size` 131.072) mất nếu manager chết đột ngột. Theo diễn đàn Wazuh, logcollector ngừng đọc file khi mất kết nối và đọc tiếp từ vị trí đã lưu — **chưa kiểm trên hệ thống này**. Không còn hàng đợi đĩa như Vector trước đây: syslog dồn dập vượt mức remoted / analysisd nhận kịp thì bị bỏ (chưa thử tải trên đường mới). Một datagram UDP là một event: dòng syslog nhiều dòng (xuống dòng trong một gói) không bị tách như Vector từng làm. | HLT-004 (SOAR không gọi được Wazuh API) |
+| **Kafka** | Log agent: `archives.json` / `alerts.json` trên đĩa của wazuh-manager, forwarder giữ nguyên vị trí đọc. Syslog cũng nằm ở đó như log agent. Alert analyzer vừa sinh: hàng đợi RAM của analyzer. | Forwarder đọc tiếp từ vị trí đã lưu, analyzer / SOAR đọc tiếp từ offset đã xác nhận. | Kafka chết qua lúc Wazuh xoay vòng file (ghi chú bên dưới). Alert analyzer đang chờ gửi quá 5 phút (`message.timeout.ms` mặc định của librdkafka) bị bỏ: vẫn có trong `siem-alerts` nhưng SOAR không nhận — **chưa kiểm**. | HLT-002 (nguồn log im lặng). HLT-005 cần đọc Kafka nên không báo được. |
 | **wazuh-forwarder** | `archives.json` / `alerts.json` tiếp tục lớn trên đĩa. | Đọc tiếp từ vị trí đã lưu ở volume `vectorwazuh`. | Chết qua lúc Wazuh xoay vòng file (ghi chú bên dưới). | HLT-002 |
-| **syslog** (Vector) | Không có chỗ chứa. | Hàng đợi đĩa còn tồn được gửi tiếp. | Mọi syslog gửi trong lúc chết: UDP mất ngay, TCP tùy bộ đệm của thiết bị gửi. | HLT-002 |
 | **analyzer** | Kafka `siem.raw`. | Đọc tiếp từ offset đã xác nhận. Event Wazuh đọc lại không thành bản ghi trùng vì `event.id` cố định. | Chết quá 72 giờ. | HLT-005 (lag), HLT-002 |
 | **Elasticsearch** | Kafka `siem.raw`: analyzer giữ event trong RAM, thử ghi lại mỗi 2 giây và không xác nhận offset. | Ghi tiếp phần còn giữ. | Alert analyzer sinh trong lúc ES chết chỉ được ghi log lỗi, không vào `siem-alerts` (SOAR vẫn nhận qua Kafka) — **lỗ hổng đã biết, chưa sửa**. ES chết quá 72 giờ. | HLT-006 |
 | **SOAR** | Kafka `siem.alerts`. | Xử lý tiếp các alert chưa xác nhận. | Chết quá 72 giờ. | **Không ai**: HLT-* chạy trong chính SOAR. Theo dõi bằng `docker compose ps`. |
@@ -266,16 +273,15 @@ Tạo file trong `/usr/local/apache2/htdocs` để thử FIM. Chỉ chạy máy 
 Container chạy với `init: true` (tini là PID 1): nếu để httpd làm PID 1, mọi tiến trình mồ côi (vd shell ngắn hạn của lượt quét
 SCA / rootcheck) bị gán cho httpd và trông như "web server sinh shell" — LNX-002 báo nhầm, SOAR còn tự kill (đã gặp 3/10/2026).
 
-**Firewall F001**: cấu hình remote syslog trỏ về `<IP máy docker>:514`, **ưu tiên TCP** nếu thiết bị hỗ trợ (xem bảng đánh giá bên dưới).
-Hệ thống parse được iptables/UFW, pfSense/OPNsense filterlog và Suricata eve (JSON qua syslog).
+**Firewall F001**: cấu hình remote syslog trỏ về `<IP máy docker>:514` (do wazuh-manager nhận). Đặt `SYSLOG_ALLOWED_IPS` trong `.env` là địa chỉ nguồn của firewall (mặc định `10.10.40.254`, nhiều giá trị cách nhau bằng dấu phẩy); IP khác bị bỏ (remoted ghi `WARNING: (1213): Message from '<IP>' not allowed`; xem `docker compose logs wazuh-manager`), phần tử sai chính tả thì cả danh sách bị bỏ qua và giữ giá trị cũ. IP nguồn UDP có thể bị giả: gói giả mạo đúng IP trong danh sách vẫn lọt, nên mạng (firewall / switch) phải chặn gói giả. Trên Docker Desktop IP nguồn thấy được là IP của proxy / gateway Docker chứ không phải firewall (xem LAB-VMWARE.md). Ngoài ra `/0`, netmask toàn 0 và tiền tố rỗng bị từ chối. Ưu tiên TCP nếu thiết bị hỗ trợ: UDP gửi lúc wazuh-manager chết hoặc khởi động lại là mất (xem bảng "khi một thành phần chết" ở trên). OPNsense có thể cài plugin `os-wazuh-agent` để thu bằng agent thay cho syslog. Hệ thống parse được iptables/UFW, pfSense/OPNsense filterlog và Suricata eve (JSON qua syslog).
 
-### Đánh giá syslog collector (vì sao chuyển sang Vector)
+### Lịch sử: đánh giá syslog collector (vì sao từng chuyển sang Vector)
 
-Syslog collector do **Vector** đảm nhận (`vector/vector.yaml`): nhận UDP/TCP 514, chuyển mỗi dòng thành đúng event thô
+> Lịch sử: từ 1/11/2026 syslog 514 do **wazuh-manager** nhận (chỉ từ `SYSLOG_ALLOWED_IPS`), container Vector `syslog` và `tools/bench_syslog.py` đã bỏ; phần dưới giữ làm lịch sử đánh giá.
+
+Khi đó syslog collector do **Vector** đảm nhận (`vector/vector.yaml`): nhận UDP/TCP 514, chuyển mỗi dòng thành đúng event thô
 mà analyzer đọc (`{"timestamp","agent_id":"syslog-<ip>","source":"syslog","event_type":"syslog","data":{"message","sender_ip"}}`),
 đưa qua **hàng đợi trên đĩa** (volume `vectordata`, 1 GiB, đầy thì chặn chứ không vứt log) rồi ghi vào Kafka `siem.raw`.
-Unit test phần chuyển đổi: `docker run --rm -v ./vector:/etc/vector:ro timberio/vector:0.58.0-alpine test /etc/vector/vector.yaml /etc/vector/tests.yaml`.
-Metrics (log nhận / gửi / bị loại) ở `http://syslog:9598/metrics`, chỉ truy cập được trong mạng docker.
 
 Cách đo (28/9/2026): `tools/bench_syslog.py` bắn log bình thường (không kích hoạt rule), mỗi collector ghi vào topic Kafka riêng,
 đếm số message thật sự vào Kafka qua offset. Số gói kernel bỏ lấy từ `RcvbufErrors` trong `/proc/net/snmp` của collector.
@@ -302,9 +308,10 @@ Số gói kernel bỏ cộng số log vào Kafka đúng bằng số đã gửi, 
 | TCP đột biến | 100% | 100% |
 
 Ở đường này **cả hai mất gần như nhau và kernel phía collector không bỏ gói nào**: UDP bị mất ở lớp chuyển tiếp cổng của Docker Desktop
-(từ Windows vào máy ảo), trước khi tới collector. Khi triển khai thật nên chạy trên máy Linux và đặt ở host
+(từ Windows vào máy ảo), trước khi tới collector. Khi đó khuyến nghị chạy trên máy Linux và đặt ở host
 `sysctl -w net.core.rmem_max=33554432` (tham số này toàn cục, không đặt riêng cho container được; không đặt thì buffer 32 MB của Vector bị giới hạn),
-và cho thiết bị gửi syslog qua **TCP** (không mất log nhờ đẩy ngược áp lực).
+và cho thiết bị gửi qua **TCP** (không mất log nhờ đẩy ngược áp lực).
+Hiện nay syslog do wazuh-manager nhận; `install.sh` vẫn đặt `net.core.rmem_max` nhưng chưa kiểm remoted có xin buffer nhận lớn (SO_RCVBUF) hay không, nên chưa biết tham số này có giúp ích.
 
 **C. Độ bền**: tắt Kafka, bắn 50.000 log vào mỗi collector, khởi động lại collector trong lúc Kafka vẫn chết, rồi bật Kafka:
 
@@ -312,7 +319,7 @@ và cho thiết bị gửi syslog qua **TCP** (không mất log nhờ đẩy ng�
 |---|---|---|
 | Log còn lại sau khi Kafka hồi phục | **0/50.000** (log chỉ nằm trong RAM) | **50.000/50.000** (hàng đợi trên đĩa) |
 
-Ghi chú cấu hình: `topic` trong `vector.yaml` phải ghi thẳng `siem.raw`. Thử `${TOPIC_RAW}` thì broker trả lỗi `InvalidTopic`
+Ghi chú cấu hình (khi đó): `topic` trong `vector.yaml` phải ghi thẳng `siem.raw`. Thử `${TOPIC_RAW}` thì broker trả lỗi `InvalidTopic`
 (Vector 0.58 không thay biến môi trường vào trường này).
 
 ## 3. Phát hiện
@@ -566,7 +573,7 @@ IP nguồn, máy, hình thức) và đăng nhập form web (POST tới đường
 | **Vai trò console** | 6 vai trò theo cơ cấu SOC, quyền theo năng lực ([SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 1): `analyst` (Tier 1) xử lý alert / case, chặn IP, kill; `lead` (Tier 2) thêm cô lập máy; `hunter` (Tier 3) thêm threat hunting; `detection` (Detection Engineer) duyệt đề xuất AI và bật chính thức rule, không xử lý cảnh báo; `manager` (SOC Manager) thêm tuyên bố sự cố lớn; `admin` thêm quản lý tài khoản (tab *Tài khoản*). Người xử lý cảnh báo không tự duyệt rule mình dùng (trước 13/10/2026 analyst duyệt được đề xuất AI). Xác thực 2 lớp TOTP, bắt buộc với vai trò trong `CONSOLE_MFA_REQUIRED_ROLES`. Tài khoản mới và mật khẩu vừa đặt lại luôn phải đổi ở lần đăng nhập đầu. Không tự khóa được chính mình, và luôn phải còn ít nhất 1 admin. |
 | **Đăng ký tài khoản** | Trang đăng ký riêng `/register` (liên kết *Đăng ký* ở trang đăng nhập) (họ và tên, ngày sinh, quê quán, số điện thoại, chức vụ, tên đăng nhập, mật khẩu). Tài khoản tạo ra ở trạng thái chờ duyệt, bị khóa tới khi admin duyệt và chọn vai trò ở tab *Tài khoản*; từ chối thì yêu cầu bị xóa. Mỗi IP gửi tối đa 5 yêu cầu / 15 phút. Thông tin cá nhân chỉ nằm ở `console-users`, không ghi vào nhật ký. Admin tạo tài khoản ở trang riêng *Tạo tài khoản* (`#/newuser`, không tự làm mới nên không mất chữ đang gõ), nhập được các trường này (không bắt buộc). |
 | **Nhật ký cho admin** | Tab *Nhật ký*: các phiên đang đăng nhập của mọi tài khoản (IP, lúc đăng nhập, thao tác gần nhất; đăng xuất từ xa được) và lịch sử hoạt động: đăng nhập, quản lý tài khoản, mọi thao tác thay đổi dữ liệu trong console (cập nhật cảnh báo / case, gửi lệnh phản ứng, duyệt AI...), lọc theo loại, thời gian, tài khoản. Phiên lưu ở index `console-sessions` (chỉ SHA-256 của token) nên manager khởi động lại không đăng xuất ai. |
-| **Nhật ký đăng nhập** | Đăng nhập (đúng/sai/bị khóa/chờ duyệt), đăng xuất, đổi mật khẩu, quản lý tài khoản và thao tác của console được gửi vào Kafka thành event của chính SIEM (`event.module: console`). Chúng hiện ở mục *Phiên đăng nhập* trên Grafana, và rule brute-force AUTH-001 áp dụng được cho console. Hash mật khẩu nằm ở index `console-users` (ngoài `siem-*`), nên Grafana và tài khoản ES chỉ đọc không thấy. |
+| **Nhật ký đăng nhập** | Đăng nhập (đúng/sai/bị khóa/chờ duyệt), đăng xuất, đổi mật khẩu, quản lý tài khoản và thao tác của console được ghi vào file (volume `console_audit`), wazuh-manager đọc rồi đưa vào Kafka thành event của chính SIEM (`event.module: console`). Chúng hiện ở mục *Phiên đăng nhập* trên Grafana, và rule brute-force AUTH-001 áp dụng được cho console. Hash mật khẩu nằm ở index `console-users` (ngoài `siem-*`), nên Grafana và tài khoản ES chỉ đọc không thấy. |
 | **RBAC** | Mỗi service có một user Elasticsearch với quyền tối thiểu (bảng dưới). Superuser `elastic` chỉ dùng trong `es-setup` và khi khẩn cấp. |
 | **Bí mật** | `tools/init_secrets.py` sinh ngẫu nhiên vào `secrets/` (đã gitignore). Mỗi service chỉ được mount **đúng** secret nó cần qua Docker secrets (`/run/secrets/...`), không có bí mật trong `.env`, biến môi trường hay compose. Mật khẩu `elastic` được Elasticsearch ghi vào **keystore** (`bootstrap.password`). |
 | **Khóa riêng** | Khóa CA chỉ root đọc được. Khóa của ES và manager chỉ uid của service tương ứng đọc được. Các container khác chỉ mount thư mục `ca/` (chứng chỉ công khai). |
