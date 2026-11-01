@@ -30,7 +30,8 @@ SETUP = ROOT / "wazuh" / "manager" / "entrypoint" / "10-siem-setup.sh"
 
 @pytest.mark.skipif(sys.platform == "win32", reason="cần bash của Linux (trên Windows `bash` có thể là WSL)")
 @pytest.mark.parametrize("value,ok", [("0.0.0.0/0", False), ("0.0.0.0/00", False), ("::/0", False), ("::/000", False),
-                                      ("10.0.0.1,192.168.0.0/0", False), ("10.0.0.0/8, 10.1.0.0/16", True),
+                                      ("10.0.0.1,192.168.0.0/0", False), ("10.0.0.0/0.0.0.0", False), ("10.0.0.0/", False),
+                                      ("10.0.0.0/255.0.0.0", True), ("10.0.0.0/8, 10.1.0.0/16", True),
                                       ("10.0.0.0/08", True), ("10.10.40.254", True)])
 def test_syslog_allowed_ips_rejects_all_zero_prefix(tmp_path, value, ok) -> None:
     """Bước 6 của 10-siem-setup.sh (allowed-ips) chạy trên ossec.conf tạm: prefix toàn số 0 -> giữ cấu hình cũ."""

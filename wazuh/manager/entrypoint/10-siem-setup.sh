@@ -38,8 +38,8 @@ fi
 #    Xóa mọi <allowed-ips> cũ rồi ghi lại sau <connection>syslog</connection> của từng khối -> chạy lại không nhân đôi dòng.
 A=${SYSLOG_ALLOWED_IPS:-10.10.40.254}
 A=${A// /}
-# Prefix toàn số 0 (/0, /00, /000: 0.0.0.0/0, ::/0) cho cả Internet gửi syslog giả -> coi như không hợp lệ.
-if [[ "$A" =~ ^[0-9A-Fa-f.:/]+(,[0-9A-Fa-f.:/]+)*$ && ! ",$A," =~ /0+, ]]; then
+# Prefix rỗng hoặc toàn số 0 (/, /0, /000, /0.0.0.0: 0.0.0.0/0, ::/0) cho cả Internet gửi syslog giả -> coi như không hợp lệ.
+if [[ "$A" =~ ^[0-9A-Fa-f.:/]+(,[0-9A-Fa-f.:/]+)*$ && ! ",$A," =~ /[0.]*, ]]; then
   sed -i '/<allowed-ips>/d' /var/ossec/etc/ossec.conf
   IFS=, read -ra IPS <<< "$A"
   for ip in "${IPS[@]}"; do
