@@ -54,7 +54,7 @@ class Analyzer:
             if (alert := wazuh_bridge.to_alert(doc)):
                 if (own := wazuh_bridge.covered_by(doc, self.engine.rules)):
                     log.debug("bỏ cảnh báo Wazuh %s: event FIM đã thành alert %s", get(doc, "wazuh.rule.id"), own)
-                elif not self.suppressor.seen(wazuh_bridge.suppress_key(doc), time.monotonic()):
+                elif get(alert, "alert.shadow") or not self.suppressor.seen(wazuh_bridge.suppress_key(doc), time.monotonic()):
                     self.emit(alert)
             return
         self.buffer.append({"_index": store.events_index(doc.get("@timestamp")), "_id": doc["event"]["id"], "_source": doc})

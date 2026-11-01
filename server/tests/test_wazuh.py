@@ -249,10 +249,41 @@ def test_shadow_group_marks_alert_shadow(enricher):
     assert a["rule"]["id"] == "WZH-104001" and a["rule"]["groups"] == ["siem", "web", "shadow", "legacy_WEB-001"]
 
 
+def _alert(enricher, rid, level, groups, **kw):
+    raw = wz("wazuh_alert", rule={"id": rid, "level": level, "description": "x", "groups": groups}, **kw)
+    return bridge.to_alert(enricher.enrich(normalize(raw)))
+
+
 def test_non_shadow_wazuh_alert_is_active(enricher):
-    raw = wz("wazuh_alert", rule={"id": "5710", "level": 8, "description": "x", "groups": ["sshd"]})
-    a = bridge.to_alert(enricher.enrich(normalize(raw)))
-    assert not get(a, "alert.shadow") and a["rule"]["legacy_id"] is None and a["rule"]["groups"] == ["sshd"]
+    a = _alert(enricher, "101002", 8, ["siem", "sshd"])                      # rule riêng không có nhóm shadow
+    assert not get(a, "alert.shadow") and a["rule"]["legacy_id"] is None and a["rule"]["groups"] == ["siem", "sshd"]
+
+
+def test_stock_rule_outside_old_groups_is_shadow_until_gate(enricher):
+    """A2: rule gốc ngoài danh sách nhóm cũ chỉ chạy bóng (đo cho cổng T18), trừ level >= WAZUH_ALERT_ANY_LEVEL."""
+    for a in (_alert(enricher, "87702", 10, ["pfsense", "firewall_block"]), _alert(enricher, "5710", 8, ["sshd"])):
+        assert a["alert"]["shadow"] is True and a["rule"]["mode"] == "shadow"
+    assert not get(_alert(enricher, "550", 7, ["ossec", "syscheck"]), "alert.shadow")        # nhóm cũ: giữ nguyên hành vi
+    assert not get(_alert(enricher, "1003", 13, ["syslog"]), "alert.shadow")                 # level >= 12: thật
+    assert _alert(enricher, "101001", 10, ["siem", "shadow"])["alert"]["shadow"] is True     # rule riêng có nhóm shadow
+
+
+def test_suppress_key_uses_source_or_agent_and_ignores_dead_srcip(enricher):
+    d = enricher.enrich(normalize(wz("wazuh_alert", data={"srcip": "9.9.9.9"},
+                                     rule={"id": "5710", "level": 8, "groups": ["sshd"]})))
+    assert bridge.suppress_key(d) == ("WZH-5710", get(d, "agent.id"), get(d, "agent.id"))   # không còn data.srcip
+
+
+def test_analyzer_does_not_suppress_shadow_alerts(enricher, engine):
+    from siem.analyzer import Analyzer
+    an = Analyzer.__new__(Analyzer)
+    an.enricher, an.engine, an.detector, an.buffer, an.stats = enricher, engine, None, [], {"events": 0, "alerts": 0}
+    emitted = []
+    an.emit = emitted.append
+    an.suppressor = bridge.Suppressor(60)
+    for _ in range(2):      # T13 cần đếm đủ số alert bóng: lần thứ 2 cùng nguồn vẫn ra
+        an.handle(wz("wazuh_alert", rule={"id": "5710", "level": 8, "description": "x", "groups": ["sshd"]}))
+    assert len(emitted) == 2
 
 
 def test_same_rule_same_source_suppressed_60s():

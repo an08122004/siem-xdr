@@ -69,6 +69,10 @@ WAZUH_ALERT_ANY_LEVEL = int(os.getenv("WAZUH_ALERT_ANY_LEVEL", "12"))
 WAZUH_ALERT_GROUPS = {g.strip() for g in os.getenv("WAZUH_ALERT_GROUPS", "").split(",") if g.strip()}   # rỗng = mọi nhóm
 # R22: không chuyển nhóm sca mặc định: mỗi mục CIS không đạt là 1 cảnh báo level 7 (máy demo: 83 cái lúc khởi động), làm ngập alert/case
 WAZUH_ALERT_EXCLUDE_GROUPS = {g.strip() for g in os.getenv("WAZUH_ALERT_EXCLUDE_GROUPS", "sca").split(",") if g.strip()}
+# Rule gốc (id < 100000) thuộc nhóm này giữ hành vi cũ (alert thật). Rule gốc ngoài danh sách chỉ CHẠY BÓNG tới cổng T18
+# (trừ level >= WAZUH_ALERT_ANY_LEVEL): cầu nối vẫn chuyển để đo, SOAR bỏ qua.
+WAZUH_ALERT_ACTIVE_GROUPS = {g.strip() for g in os.getenv(
+    "WAZUH_ALERT_ACTIVE_GROUPS", "syscheck,rootcheck,vulnerability-detector,virustotal,yara").split(",") if g.strip()}
 WAZUH_ALERT_SUPPRESS = int(os.getenv("WAZUH_ALERT_SUPPRESS", "60"))     # giây: cùng rule + cùng nguồn chỉ 1 alert
 
 # Thư mục cấu hình (rules, playbooks, intel, assets)
