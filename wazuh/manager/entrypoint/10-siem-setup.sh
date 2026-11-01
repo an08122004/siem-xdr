@@ -49,3 +49,10 @@ if [[ "$A" =~ ^[0-9A-Fa-f.:/]+(,[0-9A-Fa-f.:/]+)*$ && ! ",$A," =~ /0, ]]; then
 else
   echo "[siem-setup] SYSLOG_ALLOWED_IPS không hợp lệ ('$A', vd 10.10.40.254,192.168.1.0/24; không nhận prefix /0): giữ giá trị trong ossec.conf"
 fi
+
+# 7. Nhật ký SOC console: manager (uid 10001, user của image siem-xdr-server) ghi /var/log/siem-console/console.json trên volume
+#    console_audit, Wazuh đọc bằng <localfile>. Volume mới tạo thuộc root nên đặt lại chủ mỗi lần khởi động.
+install -d -o 10001 -m 0755 /var/log/siem-console
+# file có sẵn để logcollector không báo lỗi 1103 khi khởi động trước lần ghi đầu tiên của manager
+[ -e /var/log/siem-console/console.json ] || install -m 0644 -o 10001 /dev/null /var/log/siem-console/console.json
+echo "[siem-setup] đã chuẩn bị /var/log/siem-console"

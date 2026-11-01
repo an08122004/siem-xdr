@@ -29,13 +29,17 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import logging
 import secrets
+import sys
 import threading
 import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timezone
+from logging.handlers import RotatingFileHandler
+from time import monotonic as time_monotonic
 from typing import Any, Callable
 
 from elasticsearch import ConflictError, NotFoundError
@@ -43,7 +47,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from .. import bus, settings, store
+from .. import settings, store
 
 log = logging.getLogger("manager.auth")
 
@@ -451,24 +455,54 @@ class Throttle:
 
 
 # --------------------------------------------------------------------------- nhật ký
+AUDIT_MAX_BYTES = 20 * 1024 * 1024      # xoay vòng 20 MB x 5 file; wazuh-manager theo dõi inode nên đọc tiếp file mới
+
+
 class Audit:
-    """Gửi sự kiện đăng nhập / quản lý tài khoản vào Kafka siem.raw (best effort: Kafka lỗi không chặn đăng nhập)."""
+    """Ghi sự kiện đăng nhập / quản lý tài khoản thành MỘT dòng JSON vào CONSOLE_AUDIT_FILE (volume console_audit);
+    wazuh-manager đọc file bằng <localfile> nên nhật ký console cũng đi qua Wazuh (best effort: lỗi ghi file chỉ log cảnh
+    báo, tối đa mỗi phút một lần, không chặn đăng nhập)."""
+
+    WARN_EVERY = 60.0
 
     def __init__(self):
-        self._producer = None
+        self._lock = threading.Lock()
+        self._path: str | None = None
+        self._handler: logging.Handler | None = None
+        self._last_warn: float | None = None
+
+    def _warn(self, err: Any) -> None:
+        now = time_monotonic()
+        if self._last_warn is None or now - self._last_warn >= self.WARN_EVERY:
+            self._last_warn = now
+            log.warning("không ghi được nhật ký console vào %s: %s", settings.CONSOLE_AUDIT_FILE, err)
+
+    def _logger(self) -> logging.Logger:
+        """Tạo handler lúc cần (thư mục volume có thể chưa sẵn lúc manager khởi động); lỗi mở file thì thử lại lần gọi sau."""
+        lg = logging.getLogger("siem.console_audit")
+        if self._handler is None or self._path != settings.CONSOLE_AUDIT_FILE:
+            for h in list(lg.handlers):
+                lg.removeHandler(h)
+                h.close()
+            self._handler = None
+            h = RotatingFileHandler(settings.CONSOLE_AUDIT_FILE, maxBytes=AUDIT_MAX_BYTES, backupCount=5, encoding="utf-8")
+            h.setFormatter(logging.Formatter("%(message)s"))
+            h.handleError = lambda record: self._warn(sys.exc_info()[1])    # đĩa đầy, mất quyền giữa chừng
+            lg.addHandler(h)
+            lg.setLevel(logging.INFO)
+            lg.propagate = False
+            self._handler, self._path = h, settings.CONSOLE_AUDIT_FILE
+        return lg
 
     def __call__(self, action: str, outcome: str, user: str, ip: str, **extra: Any) -> None:
-        ev = {"timestamp": store.now_iso(), "agent_id": "soc-console", "hostname": "soc-console", "source": "console",
-              "event_type": "console_auth",
-              "data": {"action": action, "outcome": outcome, "user": user, "ip": ip,
-                       **{k: v for k, v in extra.items() if v is not None}}}
+        rec = {"timestamp": store.now_iso(), "event_type": "console_auth", "action": action, "outcome": outcome,
+               "user": user, "ip": ip, **{k: v for k, v in extra.items() if v is not None}}
         log.info("console %s %s: user=%s ip=%s %s", action, outcome, user, ip, extra or "")
         try:
-            if self._producer is None:
-                self._producer = bus.producer()
-            bus.send(self._producer, settings.TOPIC_RAW, ev, key="soc-console")
+            with self._lock:
+                self._logger().info(json.dumps(rec, default=str))    # json.dumps thoát xuống dòng -> mỗi sự kiện đúng một dòng
         except Exception as e:  # noqa: BLE001
-            log.warning("không gửi được nhật ký đăng nhập vào Kafka: %s", e)
+            self._warn(e)
 
 
 users: UserStore | None = None

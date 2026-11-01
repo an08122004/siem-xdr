@@ -229,6 +229,7 @@ services:
       - ./server/rules/exceptions:/app/rules/exceptions
       - ./server/config:/app/config:ro                # priority.yml (ưu tiên / SLA), threat_profile.yml (độ phủ ATT&CK)
       - ./datasets/processed:/datasets:ro
+      - console_audit:/app/audit                       # nhật ký console (1 dòng JSON/sự kiện), wazuh-manager đọc bằng <localfile>
 
   # Wazuh manager 4.14.8: trạm thu của Wazuh agent (Windows/Linux). Chỉ dùng manager (không indexer/dashboard/filebeat):
   # event + cảnh báo đi tiếp qua wazuh-forwarder vào Kafka. Cấu hình: wazuh/manager/ (xem README mục 1).
@@ -267,6 +268,7 @@ services:
       - ./wazuh/manager/agent.conf:/wazuh-config-mount/etc/shared/default/agent.conf:ro
       - ./wazuh/manager/local_rules.xml:/wazuh-config-mount/etc/rules/local_rules.xml:ro
       - ./wazuh/manager/api.yaml:/wazuh-config-mount/api/configuration/api.yaml:ro
+      - console_audit:/var/log/siem-console                   # nhật ký console do manager ghi (ossec.conf <localfile>)
       - ./wazuh/manager/entrypoint:/entrypoint-scripts:ro     # mật khẩu enroll, user API, tắt filebeat
       - {type: volume, source: certs, target: /certs/wazuh, read_only: true, volume: {subpath: wazuh-manager}}
     healthcheck:
@@ -406,6 +408,7 @@ networks:
 
 volumes:
   certs:
+  console_audit:
   kafkadata:
   vectorwazuh:
   wazuh_api_configuration:

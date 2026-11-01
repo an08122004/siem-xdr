@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 from urllib.parse import unquote_plus, urlsplit
 
+from .. import settings
+
 Doc = dict[str, Any]
 
 
@@ -666,6 +668,8 @@ def parse_wazuh(ev: Doc, doc: Doc) -> None:
         _wazuh_fim(ev["syscheck"], doc)
     elif isinstance(data.get("win"), dict):
         _wazuh_windows(data["win"], doc, ag.get("name"))
+    elif loc == settings.CONSOLE_AUDIT_WAZUH_PATH and (rec := _console_line(full)) is not None:
+        _wazuh_console(rec, doc)
     elif full and _SIEM_XDR_LOC.search(loc) and (m := _SIEM_XDR.match(full)):
         _wazuh_response(m, doc)
     elif full and _SIEM_PROC_LOC.search(loc) and (m := _SIEM_PROC.match(full)):
@@ -695,6 +699,22 @@ def parse_wazuh(ev: Doc, doc: Doc) -> None:
             parse_syslog(full, doc)
     else:
         put(doc, "message", (rule or {}).get("description") or json.dumps(data, ensure_ascii=False)[:2000])
+
+
+def _console_line(full: str) -> Doc | None:
+    """Dòng JSON của Audit (manager/auth.py). Đọc từ full_log (dòng gốc) vì decoder json của Wazuh đổi tên trường (user -> dstuser)."""
+    try:
+        rec = json.loads(full)
+    except ValueError:
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
+def _wazuh_console(rec: Doc, doc: Doc) -> None:
+    """Nhật ký console đi qua wazuh-manager: ra đúng doc như đường console_auth cũ (agent.id / host.name = soc-console)."""
+    doc["agent"] = {"id": "soc-console", "hostname": "soc-console"}
+    put(doc, "@timestamp", rec.get("timestamp"))
+    parse_console({k: v for k, v in rec.items() if k not in ("timestamp", "event_type")}, doc)
 
 
 def _wazuh_fim(sc: Doc, doc: Doc) -> None:

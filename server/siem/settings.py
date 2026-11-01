@@ -44,6 +44,11 @@ CONSOLE_SESSION_HOURS = int(os.getenv("CONSOLE_SESSION_HOURS", "8"))     # phiê
 CONSOLE_MAX_FAILURES = int(os.getenv("CONSOLE_MAX_FAILURES", "5"))       # sai N lần / 15 phút -> khóa 15 phút
 # vai trò bắt buộc xác thực 2 lớp TOTP (manager/auth.py), vd lead,hunter,detection,manager,admin; trống = tự nguyện
 CONSOLE_MFA_REQUIRED_ROLES = {r.strip() for r in os.getenv("CONSOLE_MFA_REQUIRED_ROLES", "").split(",") if r.strip()}
+# Nhật ký console: manager ghi mỗi sự kiện một dòng JSON (manager/auth.py Audit), wazuh-manager đọc bằng <localfile>.
+# CONSOLE_AUDIT_FILE: đường dẫn trong container manager; CONSOLE_AUDIT_WAZUH_PATH: cùng file nhìn từ wazuh-manager
+# (= <location> trong wazuh/manager/ossec.conf). Analyzer chỉ coi event Wazuh là console khi location khớp ĐÚNG đường dẫn này.
+CONSOLE_AUDIT_FILE = os.getenv("CONSOLE_AUDIT_FILE", "/app/audit/console.json")
+CONSOLE_AUDIT_WAZUH_PATH = os.getenv("CONSOLE_AUDIT_WAZUH_PATH", "/var/log/siem-console/console.json")
 # Grafana đứng sau manager (https://<manager>/grafana/), dùng chung tài khoản + phiên console (manager/grafana_proxy.py).
 # Tên "grafana-internal" chỉ phân giải trong mạng riêng manager <-> grafana (Grafana chỉ tin header từ mạng đó).
 GRAFANA_URL = os.getenv("GRAFANA_URL", "http://grafana-internal:3000")

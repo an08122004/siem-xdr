@@ -725,6 +725,81 @@ def test_console_auth_events_normalized():
     assert get(doc, "event.category") == "iam" and get(doc, "event.type") == "creation"
 
 
+# ------------------------------------------------------------------ nhật ký console ghi file cho wazuh-manager đọc
+CONSOLE_LOC = "/var/log/siem-console/console.json"      # = CONSOLE_AUDIT_WAZUH_PATH, <location> trong wazuh/manager/ossec.conf
+LOGIN_FAIL = {"action": "login", "outcome": "failure", "user": "bob", "ip": "1.2.3.4", "reason": "bad_credentials"}
+
+
+def _audit_to(monkeypatch, path):
+    from siem.manager import auth
+    monkeypatch.setattr(settings, "CONSOLE_AUDIT_FILE", str(path))
+    return auth.Audit()
+
+
+def test_audit_writes_one_json_line(tmp_path, monkeypatch):
+    a = _audit_to(monkeypatch, tmp_path / "console.json")
+    a("login", "success", "alice", "10.10.40.50", role="analyst", reason=None)
+    a("login", "failure", "bob", "1.2.3.4")
+    lines = (tmp_path / "console.json").read_text(encoding="utf-8").splitlines()
+    rec = json.loads(lines[0])
+    assert rec["action"] == "login" and rec["user"] == "alice" and rec["role"] == "analyst" and "reason" not in rec
+    assert rec["event_type"] == "console_auth" and rec["timestamp"] and len(lines) == 2
+
+
+def test_audit_username_cannot_inject_a_second_line(tmp_path, monkeypatch):
+    a = _audit_to(monkeypatch, tmp_path / "console.json")
+    a("login", "failure", 'x"\n{"action":"login"}\n{"a":1}', "1.2.3.4")
+    assert len((tmp_path / "console.json").read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_audit_write_failure_does_not_raise(monkeypatch, caplog):
+    a = _audit_to(monkeypatch, "/khong/ton/tai/console.json")
+    a("login", "failure", "bob", "1.2.3.4")
+    a("login", "failure", "bob", "1.2.3.4")
+    assert "nhật ký" in caplog.text
+    assert caplog.text.count("không ghi được nhật ký") == 1          # tối đa một cảnh báo mỗi phút
+
+
+def test_audit_rotation_keeps_writing_to_a_new_file(tmp_path, monkeypatch):
+    from siem.manager import auth
+    monkeypatch.setattr(auth, "AUDIT_MAX_BYTES", 400)
+    a = _audit_to(monkeypatch, tmp_path / "console.json")
+    for i in range(12):
+        a("login", "failure", f"user{i}", "1.2.3.4")
+    assert (tmp_path / "console.json.1").exists()                    # file cũ đã đổi tên
+    last = json.loads((tmp_path / "console.json").read_text(encoding="utf-8").splitlines()[-1])
+    assert last["user"] == "user11"
+
+
+def wazuh_console_event(location, line):
+    """Event Wazuh y như archives.json (4.14.8) khi <localfile> json đọc một dòng: json decoder đổi tên `user` thành `dstuser`."""
+    data = {("dstuser" if k == "user" else k): v for k, v in line.items()}
+    return {"timestamp": "2026-11-01", "event_type": "wazuh", "source": "wazuh", "agent_id": "wazuh",
+            "data": {"timestamp": "2026-11-01T07:58:30.654+0000", "agent": {"id": "000", "name": "wazuh-manager"},
+                     "manager": {"name": "wazuh-manager"}, "id": "1793519910.4376", "full_log": json.dumps(line),
+                     "decoder": {"name": "json"}, "data": data, "location": location}}
+
+
+def test_wazuh_console_event_normalizes_like_before():
+    from siem.pipeline.normalize import get, normalize
+    old = normalize({"timestamp": "2026-11-01T08:00:00+00:00", "agent_id": "soc-console", "hostname": "soc-console",
+                     "source": "console", "event_type": "console_auth", "data": LOGIN_FAIL})
+    new = normalize(wazuh_console_event(settings.CONSOLE_AUDIT_WAZUH_PATH,
+                                        {"timestamp": "2026-11-01T08:00:00+00:00", "event_type": "console_auth", **LOGIN_FAIL}))
+    for f in ("event.module", "event.category", "event.type", "event.outcome", "event.action", "event.reason", "user.name",
+              "source.ip", "agent.id", "host.name", "message", "@timestamp"):
+        assert get(new, f) == get(old, f), f
+    assert get(new, "agent.id") == "soc-console" and get(new, "event.module") == "console"
+
+
+@pytest.mark.parametrize("location", ["/var/log/apache2/access.log", "10.10.40.254", "/var/log/siem-console/other.json",
+                                      "/tmp/var/log/siem-console/console.json"])
+def test_console_json_from_other_location_is_not_trusted(location):
+    from siem.pipeline.normalize import get, normalize
+    d = normalize(wazuh_console_event(location, {"event_type": "console_auth", **LOGIN_FAIL}))
+    assert get(d, "event.module") != "console" and get(d, "agent.id") != "soc-console"
+
+
 # ------------------------------------------------------------------ Grafana sau manager (auth proxy, dùng chung phiên)
 @pytest.fixture()
 def grafana(env):
