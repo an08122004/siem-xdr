@@ -52,7 +52,7 @@ analyzer (server/siem/analyzer.py):  normalize ──> enrich (Threat Intel, tà
                                        │
                                        ├──> Elasticsearch siem-events-*
                                        └──> rule engine ──> alert ──> ES siem-alerts + Kafka siem.alerts ──> SOAR
-wazuh-manager alerts.json ──> cầu nối Wazuh (lọc theo nhóm + level) ──> alert WZH-* ┘
+wazuh-manager alerts.json ──> cầu nối Wazuh (mọi nhóm, level ≥ 7; rule gốc ngoài nhóm cũ = bóng) ──> alert WZH-* ┘
 ```
 
 - Mọi event đều được chuẩn hóa về một bộ trường chung (`event.category`, `process.command_line`, `url.decoded`,
@@ -137,9 +137,14 @@ liên quan (tối đa 50) và:
 ### 2.8 Cảnh báo từ ruleset Wazuh
 
 Rule viết tay chạy trên **mọi** event Wazuh thu về (`archives.json`). Ruleset gốc của Wazuh phần lớn trùng việc với rule viết
-tay, nên chỉ chuyển sang alert những cảnh báo trong `alerts.json` mà SIEM/XDR không có rule tương đương:
-- nhóm `syscheck`, `rootcheck`, `vulnerability-detector`, `virustotal`, `yara` (`WAZUH_ALERT_GROUPS`) từ level 7;
-- mọi cảnh báo level ≥ 12, bất kể nhóm.
+tay. Cầu nối chuyển MỌI cảnh báo level ≥ 7 trong `alerts.json` (mọi nhóm, trừ `sca`) để đo, nhưng chỉ một phần là alert thật:
+- **alert thật**: rule riêng (id ≥ 100000) không có nhóm `shadow`; rule gốc thuộc nhóm `syscheck`, `rootcheck`,
+  `vulnerability-detector`, `virustotal`, `yara` (`WAZUH_ALERT_ACTIVE_GROUPS`, danh sách lọc cũ trên main); mọi cảnh báo level ≥ 12;
+- **alert BÓNG** (`alert.shadow`, SOAR bỏ qua) tới cổng T18: rule gốc (id < 100000) ngoài danh sách trên và dưới level 12 (vd 87702
+  pfSense level 10), và rule riêng có nhóm `shadow`. Alert bóng không bị chống trùng 60 giây để T13 đếm đủ.
+
+Trùng rule YAML ↔ rule gốc (NET-001/002 ↔ 87702, AUTH-001 ↔ 5758/2502, NET-004 ↔ 1003) vì thế KHÔNG ra 2 case: phía rule gốc là
+bóng; T13 đếm các cặp này. Khóa chống trùng: `(rule.id, source.ip hoặc agent.id, agent.id)`.
 
 Level Wazuh (0–15) đổi sang mức độ: 7–9 medium, 10–11 high, ≥ 12 critical. Kết quả đánh giá cấu hình SCA (CIS) không thành
 alert. Hai rule Wazuh riêng trong `wazuh/manager/rules/0100-platform.xml`: 100100 (file mới trong thư mục web, có thể là webshell) và
@@ -427,7 +432,7 @@ Lưu ý khi đọc bảng:
 - **Trạng thái tương quan nằm trong bộ nhớ.** Cửa sổ đếm của rule ngưỡng / chuỗi mất khi analyzer khởi động lại, và không chia
   sẻ được nếu chạy nhiều analyzer song song.
 - **Bỏ qua một phần phát hiện của Wazuh.** Rule tấn công web của Wazuh ở level 6 (vd SQLi 31164) không bao giờ thành alert vì
-  cầu nối chỉ lấy từ level 7 trong các nhóm đã chọn; 124 mẫu SQLi Wazuh bắt được mà rule viết tay bỏ sót đang bị bỏ qua.
+  cầu nối chỉ lấy từ level 7; 124 mẫu SQLi Wazuh bắt được mà rule viết tay bỏ sót đang bị bỏ qua.
 - **Chưa có rule AI nào chạy thật.** 28 đề xuất đang chờ duyệt; AI chưa đóng góp vào độ phủ.
 
 ## 7. Kế hoạch bổ sung độ phủ (16/10/2026)

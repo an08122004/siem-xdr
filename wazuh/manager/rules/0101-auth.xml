@@ -1,6 +1,7 @@
 <!--
   Rule xác thực (AUTH-001..006 của bộ rule cũ), chạy BÓNG. Dải ID 101000-101999. AUTH-005 dùng thẳng rule gốc 5902 (không viết lại).
-  Phạm vi: chỉ các log đi qua Wazuh (sshd/sudo qua syslog); sự kiện đăng nhập console không qua Wazuh nên AUTH-002/003 không phủ chúng.
+  Phạm vi: sshd/sudo qua syslog. Nhật ký đăng nhập console NAY CŨNG đi qua Wazuh (agent 000, location /var/log/siem-console/console.json),
+  nhưng rule cho nó chưa viết (lượt B) nên AUTH-002/003 tạm chưa phủ chúng.
   Thứ tự file quan trọng: các rule dùng cùng event chỉ rule đứng trước báo, nên AUTH-003 > AUTH-001 > bộ đếm 600s (101010).
 -->
 <group name="local,siem-xdr,">

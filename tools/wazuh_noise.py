@@ -30,7 +30,8 @@ MIN_LEVEL = 7
 GATE = 1.0          # alert / 100 event bình thường
 # thay entrypoint của repo (cần secrets/chứng chỉ): chỉ tắt filebeat + tạo thư mục rule động như entrypoint thật
 SETUP = ("#!/bin/bash\nprintf '#!/bin/sh\\nexec sleep infinity\\n' > /etc/services.d/filebeat/run\n"
-         "install -d -o root -g wazuh -m 0755 /var/ossec/etc/rules-dynamic\n")
+         "install -d -o root -g wazuh -m 0755 /var/ossec/etc/rules-dynamic\n"
+         "install -d -m 0755 /var/log/siem-console\n")   # ossec.conf có <localfile> console: giữ ossec.log sạch cảnh báo logcollector
 
 
 def start(tmp: Path) -> None:

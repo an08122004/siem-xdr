@@ -60,7 +60,7 @@ Các quyết định mình tự chọn được đánh dấu *(Claude)*, ngườ
 
 1. **URL mã hóa** (`%27`, `%2527`, `+`, `%u0027`): rule web phải bắt như bản giải mã. Ca test ở Task 9.
 2. **Reload với file XML hỏng** (AI hoặc ngoại lệ ghi sai): analysisd phải giữ ruleset cũ, console báo lỗi, không mất event. Ca test ở Task 1 (`test_reload_rejects_invalid_xml`) và Task 16.
-3. **Bão alert khi bỏ lọc nhóm** (hàng nghìn rule level ≥ 7 trên log Windows bình thường): đo trên `realdata_normal` + tập bình thường. Ngưỡng ở Task 2: ≤ 1 alert / 100 event bình thường, rule ồn đưa vào tuning.
+3. **Bão alert khi bỏ lọc nhóm** (hàng nghìn rule level ≥ 7 trên log Windows bình thường): đo trên `realdata_normal` + tập bình thường. Ngưỡng ở Task 2: ≤ 1 alert / 100 event bình thường, rule ồn đưa vào tuning. Lưu ý: số đo Task 2 CHƯA có syslog (location = IP) và nhật ký console; phải đo lại ≥ 24 h archives.json agent 000 sau lượt B.
 4. **Ngoại lệ chặn nhầm cả rule cha** (rule level 0 chỉ có `<if_sid>`): validator từ chối. Ca test ở Task 16.
 5. **Trùng id hoặc vô tình ghi đè rule gốc** (copy rule gốc mà quên đổi id): lint chặn. Ca test ở Task 4.
 
@@ -183,7 +183,7 @@ def test_same_rule_same_source_suppressed_60s():
 
 - [ ] **Step 2:** chạy → FAIL
 - [ ] **Step 3:** sửa code. Khóa chống trùng = `(rule.id, data.srcip or agent.id)`. `Suppressor` xóa khóa quá hạn mỗi lần gọi để không phình bộ nhớ.
-- [ ] **Step 4:** chạy test → PASS. Chạy `python tools/wazuh_noise.py --normal`, ghi top 20 rule ồn vào mục *Kết quả P0/P1*. Đạt khi ≤ 1 alert / 100 event bình thường. Không đạt thì đưa các rule ồn vào Task 12.
+- [ ] **Step 4:** chạy test → PASS. Chạy `python tools/wazuh_noise.py --normal`, ghi top 20 rule ồn vào mục *Kết quả P0/P1*. Đạt khi ≤ 1 alert / 100 event bình thường. (Thiếu syslog + console trong tập đo: xem lượt đo lại sau B.) Không đạt thì đưa các rule ồn vào Task 12.
 - [ ] **Step 5:** commit `detection/wazuh: chuyển mọi cảnh báo level>=7, chạy bóng theo nhóm, chống trùng`
 
 ### Task 3: Ca test dạng log gốc + bộ chạy qua Wazuh + job CI
@@ -273,7 +273,7 @@ Mỗi task một file, cùng một quy trình. Chỉ chuyển các mã có `deci
 |---|---|---|---|
 | 6 | `0101-auth.xml` | AUTH-001..006 | AUTH-002 có thể là rule gốc 40112 (`if_matched_group` + `same_source_ip`). AUTH-003 theo kết quả S4. |
 | 7 | `0102-linux.xml` + `decoders/0102-siem-procs.xml` | LNX-001..006 | Decoder cho dòng `siem-proc:` (ra trường `pid`, `ppid`, `uid`, `name`, `parent`, `exe`, `cmd`). Chỉ áp cho `location` khớp `siem-procs`, giống `_SIEM_PROC_LOC`, để chặn telemetry giả. |
-| 8 | `0103-network.xml` | NET-001..005 | filterlog qua decoder `pf`. NET-003 dùng `<srcip negate="yes">` dải nội bộ. NET-004 là rule con của nhóm Suricata, lọc `alert.severity`. NET-001, NET-005 theo S4. |
+| 8 | `0103-network.xml` | NET-001..005 | Nguồn mặc định: syslog vào wazuh-manager (cổng 514, agent 000, `location` = IP người gửi); agent OPNsense chỉ là lựa chọn, không phải đường mặc định. filterlog qua decoder `pf`. NET-003 dùng `<srcip negate="yes">` dải nội bộ. NET-004 là rule con của nhóm Suricata, lọc `alert.severity`. NET-001, NET-005 theo S4. |
 | 9 | `0104-web.xml` | WEB-001..009 | Regex bắt cả dạng mã hóa (S5). Ca test mỗi rule có ≥ 1 dạng thô + ≥ 1 dạng `%xx`. |
 | 10 | `0105-windows.xml` | WIN-001..013 | Trường `win.eventdata.*` (camelCase). WIN-005 giữ ngoại lệ lớp vỏ Ansible/WinRM. WIN-013 giữ giới hạn schtasks. |
 | 11 | `0106-fim.xml`, `0107-ti.xml` + `tools/misp_to_cdb.py` | FIM-001, TI-001 | FIM là con của 550/554 lọc theo đường dẫn. TI: SOAR xuất IOC MISP ra `etc/lists/malicious-ioc/malicious-ip` mỗi chu kỳ đồng bộ, rồi reload. |
@@ -342,7 +342,7 @@ Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info 
 
 ### Task 16: Ngoại lệ dạng rule level 0
 
-**Files:** Modify `server/siem/manager/api.py` (luồng duyệt ngoại lệ ghi XML qua `wazuh_rules.write_dynamic("exceptions.xml", …)`); Create `server/siem/wazuh_fields.py` (ECS → trường Wazuh: `source.ip→srcip`, `user.name→dstuser`, `url.original→url`, `process.command_line→win.eventdata.commandLine` / `cmd` cho siem-procs, `file.path→file`); Test `server/tests/test_api.py`, `server/tests/test_wazuh_fields.py`
+**Files:** Modify `server/siem/manager/api.py` (luồng duyệt ngoại lệ ghi XML qua `wazuh_rules.write_dynamic("exceptions.xml", …)`); Create `server/siem/wazuh_fields.py` (ECS → trường Wazuh: `source.ip→srcip` (SAI với nhật ký console: decoder json không có `srcip`, trường là `ip`; `Audit` sẽ ghi thêm `srcip` — CHỜ LƯỢT B1), `user.name→dstuser`, `url.original→url`, `process.command_line→win.eventdata.commandLine` / `cmd` cho siem-procs, `file.path→file`); Test `server/tests/test_api.py`, `server/tests/test_wazuh_fields.py`
 
 **Interfaces:**
 - Produces:
@@ -529,3 +529,12 @@ Mỗi event tính 1 alert (rule level cao nhất khớp). Chỉ có 7 rule (khô
 - Kết luận: web và Linux sạch; Windows **không đạt** cổng (1,34 / 100 event) nên 7 rule trên đưa vào Task 12 (chưa chỉnh gì). 92041 là regex quá rộng đã ghi ở `GENERIC` của `wazuh_coverage.py`.
 - Giới hạn: tập Windows chỉ có Sysmon EventID 1 (671 event, nhỏ), chưa có đăng nhập / dịch vụ / registry bình thường. 3 rule `Suspicious Process` (61618/61627/61640) có thể do cách dựng event (ParentImage lấy từ dữ liệu ghi thật, các trường khác để trống) nên nên kiểm lại ở Task 12 trước khi sửa.
 - Sửa kèm: `tools/wazuh_coverage.py` `load_items` lấy web normal chỉ từ `csic2010` (assert độ dài cũ vỡ vì dataset có thêm normal endpoint) và có tham số `extra_normal` (chỉ `wazuh_noise.py` dùng; báo cáo độ phủ giữ số liệu cũ).
+
+### S7 — location thật của event agent (01/11, wzhdev, agent demo-web 4.14.7 thật)
+
+- Chạy một lệnh trong container demo-web; script `siem-procs` (alias `<localfile>` command) báo tiến trình. Trong `archives.json` / `alerts.json` trường
+  `location` là `siem-procs` (JSON không có tiền tố), `agent.id=001`, `agent.name=demo-web`.
+- Nhưng analysisd so khớp `<location>` của rule với chuỗi có tiền tố agent: `(demo-web) any->siem-procs` (auditd: `(demo-web) any->/var/log/audit/audit.log`).
+- Hệ quả đo thật: với `(^|/)siem-procs$` ở 102000 cả họ LNX siem-proc CHẾT với agent thật (chạy `xmrig` trong demo-web không ra 102004; T7 chỉ thử bằng logtest/hàng đợi như agent 000).
+  Sửa thành `(^|/|->)siem-procs$`: cùng lệnh ra `102004` (level 10, bóng) trong `alerts.json`. Ca harness: dương `(demo-web) any->siem-procs`, âm location = IP và `(demo-web) any->/var/log/auth.log`.
+- 0851 (auditd) nay khai `<location type="pcre2">audit\.log$</location>` (không neo): dương `(demo-web) any->/var/log/audit/audit.log`, âm location = IP `10.10.40.254` và `/var/log/apache2/access.log`.
