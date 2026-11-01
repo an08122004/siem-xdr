@@ -726,7 +726,6 @@ def test_console_auth_events_normalized():
 
 
 # ------------------------------------------------------------------ nhật ký console ghi file cho wazuh-manager đọc
-CONSOLE_LOC = "/var/log/siem-console/console.json"      # = CONSOLE_AUDIT_WAZUH_PATH, <location> trong wazuh/manager/ossec.conf
 LOGIN_FAIL = {"action": "login", "outcome": "failure", "user": "bob", "ip": "1.2.3.4", "reason": "bad_credentials"}
 
 
@@ -758,6 +757,18 @@ def test_audit_write_failure_does_not_raise(monkeypatch, caplog):
     a("login", "failure", "bob", "1.2.3.4")
     assert "nhật ký" in caplog.text
     assert caplog.text.count("không ghi được nhật ký") == 1          # tối đa một cảnh báo mỗi phút
+
+
+def test_audit_stream_write_error_warns_once_and_does_not_raise(tmp_path, monkeypatch, caplog):
+    """Đĩa đầy / mất quyền giữa chừng: lỗi nằm ở stream.write (đi qua handler.handleError), không phải lúc mở file."""
+    a = _audit_to(monkeypatch, tmp_path / "console.json")
+    a("login", "success", "alice", "10.10.40.50")                    # mở handler thật
+    def boom(_):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(a._handler.stream, "write", boom)
+    a("login", "failure", "bob", "1.2.3.4")
+    a("login", "failure", "bob", "1.2.3.4")
+    assert caplog.text.count("không ghi được nhật ký") == 1 and "No space left" in caplog.text
 
 
 def test_audit_rotation_keeps_writing_to_a_new_file(tmp_path, monkeypatch):

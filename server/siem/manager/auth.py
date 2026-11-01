@@ -17,8 +17,8 @@
   khóa tới khi admin duyệt và gán vai trò; admin từ chối thì yêu cầu bị xóa. Admin xem / thu hồi được mọi phiên.
 - Người thực hiện mọi thao tác lấy từ phiên (không tự khai) -> lịch sử case / duyệt AI đáng tin, và quy định
   "ngoại lệ AI cần 2 người KHÁC NHAU duyệt" có hiệu lực thật.
-- Đăng nhập / đăng xuất / đổi mật khẩu / quản lý tài khoản được gửi vào Kafka thành event của chính SIEM
-  (event_type console_auth): lưu trong siem-events-*, hiện trên Grafana (Phiên đăng nhập), rule AUTH-001 áp dụng được.
+- Đăng nhập / đăng xuất / đổi mật khẩu / quản lý tài khoản được ghi thành dòng JSON (volume console_audit), wazuh-manager
+  đọc rồi đi cùng đường Wazuh -> Kafka thành event của chính SIEM (event_type console_auth): lưu trong siem-events-*, hiện trên Grafana (Phiên đăng nhập), rule AUTH-001 áp dụng được.
 - Xác thực 2 lớp TOTP (RFC 6238: HMAC-SHA1, 30 giây, 6 số; Google Authenticator, Microsoft Authenticator...). Bật
   tự nguyện, hoặc bắt buộc với vai trò trong CONSOLE_MFA_REQUIRED_ROLES: chưa bật thì phiên chỉ dùng được để bật MFA.
   Mỗi mã chỉ dùng được một lần (lưu bước thời gian đã dùng), nhập sai mã tính như sai mật khẩu. Khóa bí mật TOTP nằm
