@@ -36,7 +36,7 @@ chỉ được nói chuyện với `siem-server` qua cổng Wazuh.
 | VM | Vùng · IP | Vai trò | Tên agent (bắt buộc) | vCPU / RAM / Đĩa |
 |---|---|---|---|---|
 | `fw` (F001) | WAN: DHCP từ VMnet8; 10.10.40.254, 10.10.20.254, 10.10.30.254, 203.0.113.1 | Firewall, NAT ra Internet, DNS, NTP, Suricata, gửi syslog | — | 2 / 2 GB / 16 GB |
-| `siem-server` | SOC 10.10.40.10 | Elasticsearch, Kafka, Wazuh manager, Vector, analyzer, SOAR, console, Grafana | — | 4 / **8 GB** / 60 GB. Bật AI: 16 GB+ / 100 GB (mục 2.4) |
+| `siem-server` | SOC 10.10.40.10 | Elasticsearch, Kafka, Wazuh manager (kèm cổng syslog 514), Vector (chuyển log Wazuh vào Kafka), analyzer, SOAR, console, Grafana | — | 4 / **8 GB** / 60 GB. Bật AI: 16 GB+ / 100 GB (mục 2.4) |
 | `Web-01` | DMZ 10.10.20.20 | Máy chủ web S001 (Apache) | `Web-01` | 1 / 1,5 GB / 20 GB |
 | `Ubuntu-01` | LAN 10.10.30.21 | Máy trạm Linux A003 | `Ubuntu-01` | 1 / 1,5 GB / 20 GB |
 | `PC-01` | LAN 10.10.30.30 | Máy trạm Windows A001 | `PC-01` | 2 / 4 GB / 50 GB |
@@ -457,8 +457,8 @@ Làm sau khi `siem-server` chạy (mục 2). `assets.yml` đã khai IP các cổ
 
 1. **Syslog**: *Status → System Logs → Settings → Remote Logging Options*: bật *Send log messages to remote syslog server*,
    *Source Address* `SOC` (để gói syslog đi ra từ 10.10.40.254), *Remote log servers* `10.10.40.10:514`, *Remote Syslog
-   Contents* `Everything` (cần cả log Suricata ở bước 3). pfSense gửi UDP; Vector nghe cả UDP và TCP 514.
-   OPNsense: *System → Settings → Logging → Remote*, thêm đích UDP `10.10.40.10:514`.
+   Contents* `Everything` (cần cả log Suricata ở bước 3). pfSense gửi UDP; wazuh-manager nghe cả UDP và TCP 514 nhưng chỉ nhận từ các IP trong `SYSLOG_ALLOWED_IPS` (`.env`, mặc định `10.10.40.254`): đặt đúng địa chỉ nguồn của firewall rồi `docker compose up -d wazuh-manager`.
+   OPNsense: *System → Settings → Logging → Remote*, thêm đích UDP `10.10.40.10:514`. Hoặc cài plugin `os-wazuh-agent` trên OPNsense để thu log bằng agent (không cần syslog).
 2. Kiểm tra: từ attacker `nmap -Pn -p 1-200 203.0.113.1`, trong 1 phút có event `event.module: pfsense` (tên dùng chung cho
    filterlog của pfSense và OPNsense) với `observer.ip` 10.10.40.254 trên Grafana *Điều tra*, và alert **NET-001** (một IP
    chạm ≥ 20 cổng trong 60 giây).
@@ -509,7 +509,7 @@ Kết quả đúng: không có alert LNX-002 và không có lệnh *Kill tiến 
 | `Duplicate agent name` | Agent cũ cùng tên còn trên manager: `docker compose exec wazuh-manager /var/ossec/bin/manage_agents -l`, xóa bằng `manage_agents -r <id>`. |
 | Lệnh phản ứng *Quá hạn* / *Thất bại* | Script đúng chỗ, quyền `root:wazuh 750`, không CRLF; `iptables` đã cài; agent đọc `active-responses.log` (mục 3.2). Lỗi ghi trong cột kết quả của lệnh. |
 | WEB-001 có IP nguồn là IP firewall, SOAR chặn nhầm | Outbound NAT của firewall đang NAT cả cổng DMZ: để *Automatic* (chỉ NAT khi ra WAN). Gỡ chặn, và kiểm tra IP firewall có trong `SOAR_WHITELIST` (mục 2.5). |
-| Không có log firewall | `docker compose logs syslog` trên VM; *Source Address* của remote logging phải là cổng SOC; `observer.ip` khác các IP của F001 trong `assets.yml` thì log vẫn vào nhưng không gắn tài sản. |
+| Không có log firewall | `docker compose logs wazuh-manager` trên VM (tìm dòng remoted từ chối IP lạ), `SYSLOG_ALLOWED_IPS` phải chứa IP nguồn firewall (Docker Desktop NAT có thể đổi IP nguồn manager nhìn thấy); *Source Address* của remote logging phải là cổng SOC; `observer.ip` khác các IP của F001 trong `assets.yml` thì log vẫn vào nhưng không gắn tài sản. |
 | Alert Suricata chỉ hiện là event `host` / `info` | Dòng EVE bị cắt hoặc tên chương trình khác `suricata`: tắt ghi payload trong EVE Output (mục 5). |
 | Không có alert LNX-* | Thiếu `siem-procs` hoặc alias khác `siem-procs` (mục 3.3). |
 | Không có alert AUTH-* (SSH) | Agent phải đọc `/var/log/auth.log`: `grep -n auth.log /var/ossec/etc/ossec.conf`; thiếu thì thêm `<localfile>` `log_format syslog` cho file này. Ubuntu cần `rsyslog` để có file đó (`sudo apt-get install -y rsyslog`). |

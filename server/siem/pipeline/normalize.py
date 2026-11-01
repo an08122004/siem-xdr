@@ -8,7 +8,7 @@
 
 Event thô: {"timestamp", "agent_id", "hostname", "os", "source", "event_type", "data": {...}}
   - event_type wazuh / wazuh_alert: event của Wazuh manager (data = 1 dòng archives.json / alerts.json)
-  - event_type syslog: dòng syslog do Vector nhận (firewall, Suricata...)
+  - event_type syslog: dòng syslog do wazuh-manager nhận (firewall, Suricata...)
   - event_type console_auth: đăng nhập / quản lý tài khoản của SOC console (manager/auth.py)
   - apache_access, windows_event, process_creation...: định dạng nội bộ, dataset công khai
     (tools/convert_datasets.py) và unit test dùng; parser Wazuh cũng chuyển dòng log gốc qua các parser này
