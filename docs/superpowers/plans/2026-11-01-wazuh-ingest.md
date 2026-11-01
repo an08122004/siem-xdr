@@ -178,4 +178,9 @@ Controller báo người dùng, chờ đồng ý trước khi làm.
 
 ## Kết quả thử
 
-*(điền khi làm Task 1, 2)*
+Thử thật trong project `wzhingest` (Wazuh 4.14.8, không build image, stack `siem-xdr` giữ nguyên ID container trước/sau):
+
+- **Syslog vào wazuh-manager (Task 1)**: filterlog, sshd và Suricata EVE dài 2,8 KB qua UDP và TCP đều vào `archives.json` (agent 000, `location` = IP gửi); `normalize` trên chính các dòng đó cho đúng `event.module`, `host.name`, `source.ip`, chữ ký Suricata. Gửi từ IP không có trong `SYSLOG_ALLOWED_IPS`: 0 dòng vào, remoted ghi `WARNING: (1213): Message from '<IP>' not allowed`.
+- **Nhật ký console (Task 2)**: `Audit` ghi JSON từng dòng, Wazuh đọc bằng `<localfile>` json; decoder đổi `user` thành `dstuser` nên analyzer parse `full_log`. Xoay vòng 20 MB/5 bản: Wazuh đọc tiếp file mới (xoay quá nhanh, vài giây một lần, thì logcollector có thể bỏ lỡ dòng; với 20 MB không xảy ra). Event giống hệt đường Kafka cũ ở 14 trường.
+- **Vòng sửa cuối (nhánh review toàn bộ)**: (1) `<only-future-events>no</only-future-events>` cho file console: tắt wazuh-manager, ghi 1 dòng, bật lại -> đúng 1 lần trong `archives.json` (18 -> 19 dòng console); khởi động lại thêm 2 lần -> vẫn 1 lần, `file_status.json` giữ offset 784. (2) RFC5424 qua remoted: `full_log` còn tiền tố `1 <ISO>`; sau khi sửa regex, dòng filterlog và Suricata RFC5424 thật cho `host.name` fwrfc / surrfc, `pfsense` / `suricata`, chữ ký ET đúng. (3) Bị từ chối: `Message from '172.20.0.3' not allowed. Cannot find the ID of the agent.`. (6) Validator `SYSLOG_ALLOWED_IPS` kiểm danh sách cho phép từng phần tử: 28 ca (11 ca sai chính tả mới bị bản cũ cho lọt, bản mới chặn hết) chạy tay bằng Git Bash; pytest bash chỉ chạy trên Linux CI.
+- Chưa kiểm: tải syslog dồn dập trên đường mới, nhiều dòng trong một datagram, `SO_RCVBUF` của remoted, Docker Desktop thật với firewall OPNsense thật (IP nguồn bị NAT).

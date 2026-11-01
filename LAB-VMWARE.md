@@ -37,7 +37,16 @@ host nối vào vùng SOC với địa chỉ `10.10.40.1` và chính là SIEM. M
    SOAR_WHITELIST=127.0.0.0/8,10.10.40.1/32,10.10.40.254/32,10.10.20.254/32,10.10.30.254/32,203.0.113.1/32
    AGENT_DOWN_MINUTES=2
    WAZUH_AGENTS_DISCONNECTION_TIME=1m
+   SYSLOG_ALLOWED_IPS=10.10.40.254      # xem lưu ý Docker Desktop ngay dưới
    ```
+   **Docker Desktop (Windows):** gói syslog vào cổng 514 được Docker chuyển tiếp nên wazuh-manager thấy IP nguồn là IP của
+   proxy / gateway Docker (thường `172.x.0.1`), không phải `10.10.40.254`; để mặc định thì mọi syslog của firewall bị bỏ
+   và bước 11 (`event.module:pfsense` trong 1 phút) thất bại mà không báo lỗi. Cách tìm IP thật: gửi thử một dòng log từ firewall rồi
+   chạy `docker compose logs wazuh-manager | findstr "not allowed"`, dòng
+   `wazuh-remoted: WARNING: (1213): Message from '172.x.0.1' not allowed. Cannot find the ID of the agent.` cho IP cần
+   thêm. Ghi IP đó vào `SYSLOG_ALLOWED_IPS` (cách nhau bằng dấu phẩy). Hệ quả: mọi máy tới được cổng 514 của máy host
+   đều gửi được syslog vào SIEM, nên chỉ để lab chạy trên mạng riêng và dựa vào firewall OPNsense / firewall máy host
+   để chặn cổng 514 từ nơi khác. Trên Linux (DEPLOY-VM.md) IP nguồn giữ nguyên nên chỉ cần `10.10.40.254`.
    Sau khi sửa `.env`: `docker compose up -d soar manager analyzer wazuh-manager`.
 4. **Mật khẩu enroll agent:** nội dung file `secrets\enrollment_key` trong thư mục mã nguồn.
 
