@@ -25,6 +25,17 @@ def test_app_image_matches_compose() -> None:
     assert f"\n  image: {image}\n" in (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
 
+def test_console_audit_file_agrees_across_ossec_compose_settings() -> None:
+    """File nhật ký console được nêu ở ba nơi: <location> trong ossec.conf, điểm gắn volume trong compose, mặc định settings."""
+    from siem import settings
+    ossec = (ROOT / "wazuh" / "manager" / "ossec.conf").read_text(encoding="utf-8")
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    wz, app = settings.CONSOLE_AUDIT_WAZUH_PATH, settings.CONSOLE_AUDIT_FILE
+    assert f"<location>{wz}</location>" in ossec
+    assert f"console_audit:{wz.rsplit('/', 1)[0]}" in compose and f"console_audit:{app.rsplit('/', 1)[0]}" in compose
+    assert wz.rsplit("/", 1)[1] == app.rsplit("/", 1)[1]            # cùng tên file ở hai phía volume
+
+
 SETUP = ROOT / "wazuh" / "manager" / "entrypoint" / "10-siem-setup.sh"
 
 
@@ -32,7 +43,13 @@ SETUP = ROOT / "wazuh" / "manager" / "entrypoint" / "10-siem-setup.sh"
 @pytest.mark.parametrize("value,ok", [("0.0.0.0/0", False), ("0.0.0.0/00", False), ("::/0", False), ("::/000", False),
                                       ("10.0.0.1,192.168.0.0/0", False), ("10.0.0.0/0.0.0.0", False), ("10.0.0.0/", False),
                                       ("10.0.0.0/255.0.0.0", True), ("10.0.0.0/8, 10.1.0.0/16", True),
-                                      ("10.0.0.0/08", True), ("10.10.40.254", True)])
+                                      ("10.0.0.0/08", True), ("10.10.40.254", True),
+                                      # sai chính tả: danh sách cho phép từng phần tử phải từ chối
+                                      ("10.0.0.0//8", False), ("0.0.0.0/0:", False), ("::/0:", False), ("10.0.0.0/33", False),
+                                      ("10.0.0.256", False), ("10.0.0", False), ("10.0.0.1,,10.0.0.2", False), ("10.0.0.1,", False),
+                                      ("fd00::/129", False), ("fd00:::1", False), ("fd00::1::2", False), ("abc", False),
+                                      ("1:2:3", False), ("fd00::/64", True), ("::1", True), ("2001:db8:0:0:0:0:0:1", True),
+                                      ("10.10.40.254,fd00::/8", True)])
 def test_syslog_allowed_ips_rejects_all_zero_prefix(tmp_path, value, ok) -> None:
     """Bước 6 của 10-siem-setup.sh (allowed-ips) chạy trên ossec.conf tạm: prefix toàn số 0 -> giữ cấu hình cũ."""
     text = SETUP.read_text(encoding="utf-8")

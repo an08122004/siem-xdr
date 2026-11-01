@@ -38,10 +38,30 @@ fi
 #    Xóa mọi <allowed-ips> cũ rồi ghi lại sau <connection>syslog</connection> của từng khối -> chạy lại không nhân đôi dòng.
 A=${SYSLOG_ALLOWED_IPS:-10.10.40.254}
 A=${A// /}
-# Prefix rỗng hoặc toàn số 0 (/, /0, /000, /0.0.0.0: 0.0.0.0/0, ::/0) cho cả Internet gửi syslog giả -> coi như không hợp lệ.
-if [[ "$A" =~ ^[0-9A-Fa-f.:/]+(,[0-9A-Fa-f.:/]+)*$ && ! ",$A," =~ /[0.]*, ]]; then
+# Danh sách cho phép (allowlist) từng phần tử: IPv4 [/1-32 hoặc netmask dạng chấm khác 0.0.0.0] hoặc IPv6 [/1-128].
+# Sai chính tả (10.0.0.0//8, 0.0.0.0/0:, prefix /0 cho cả Internet...) -> không hợp lệ, giữ cấu hình cũ: <allowed-ips> sai có
+# thể làm Wazuh từ chối ossec.conf và remoted không chạy (mất luôn agent 1514).
+O='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+V4="^($O\.){3}$O"
+siem_ip_ok() {
+  local ip=${1%%/*} len=""
+  [[ "$1" == */* ]] && len=${1#*/}
+  if [[ "$ip" =~ $V4$ ]]; then
+    [ -z "$len" ] && [[ "$1" != */* ]] && return 0
+    [[ "$len" =~ ^(0?[1-9]|[12][0-9]|3[0-2])$ ]] && return 0
+    [[ "$len" =~ $V4$ && "$len" != "0.0.0.0" ]]; return
+  fi
+  [[ "$ip" =~ ^([0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}$ && "$ip" != *:::* ]] || return 1
+  [[ "$ip" == *::*::* ]] && return 1                       # tối đa một "::"
+  [[ "$ip" == *::* ]] || [ "${ip//[^:]/}" = ":::::::" ] || return 1          # không có "::" thì phải đủ 8 nhóm
+  [[ "$1" != */* ]] || [[ "$len" =~ ^([1-9]|[1-9][0-9]|1[01][0-9]|12[0-8])$ ]]
+}
+ok=1
+[[ -n "$A" && ! "$A" =~ (^,|,,|,$) ]] || ok=0
+IFS=, read -ra IPS <<< "$A"
+for ip in "${IPS[@]}"; do siem_ip_ok "$ip" || ok=0; done
+if [ "$ok" = 1 ]; then
   sed -i '/<allowed-ips>/d' /var/ossec/etc/ossec.conf
-  IFS=, read -ra IPS <<< "$A"
   for ip in "${IPS[@]}"; do
     sed -i "/<connection>syslog<\/connection>/a\    <allowed-ips>$ip</allowed-ips>" /var/ossec/etc/ossec.conf
   done
