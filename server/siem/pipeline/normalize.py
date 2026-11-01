@@ -668,7 +668,8 @@ def parse_wazuh(ev: Doc, doc: Doc) -> None:
         _wazuh_fim(ev["syscheck"], doc)
     elif isinstance(data.get("win"), dict):
         _wazuh_windows(data["win"], doc, ag.get("name"))
-    elif loc == settings.CONSOLE_AUDIT_WAZUH_PATH and (rec := _console_line(full)) is not None:
+    # chỉ tin file do CHÍNH manager đọc (agent 000): agent đã enroll bị chiếm đặt được location giống hệt trong event của nó
+    elif ag.get("id") == "000" and loc == settings.CONSOLE_AUDIT_WAZUH_PATH and (rec := _console_line(full)) is not None:
         _wazuh_console(rec, doc)
     elif full and _SIEM_XDR_LOC.search(loc) and (m := _SIEM_XDR.match(full)):
         _wazuh_response(m, doc)

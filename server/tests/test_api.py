@@ -771,11 +771,11 @@ def test_audit_rotation_keeps_writing_to_a_new_file(tmp_path, monkeypatch):
     assert last["user"] == "user11"
 
 
-def wazuh_console_event(location, line):
+def wazuh_console_event(location, line, agent_id="000"):
     """Event Wazuh y như archives.json (4.14.8) khi <localfile> json đọc một dòng: json decoder đổi tên `user` thành `dstuser`."""
     data = {("dstuser" if k == "user" else k): v for k, v in line.items()}
     return {"timestamp": "2026-11-01", "event_type": "wazuh", "source": "wazuh", "agent_id": "wazuh",
-            "data": {"timestamp": "2026-11-01T07:58:30.654+0000", "agent": {"id": "000", "name": "wazuh-manager"},
+            "data": {"timestamp": "2026-11-01T07:58:30.654+0000", "agent": {"id": agent_id, "name": "wazuh-manager"},
                      "manager": {"name": "wazuh-manager"}, "id": "1793519910.4376", "full_log": json.dumps(line),
                      "decoder": {"name": "json"}, "data": data, "location": location}}
 
@@ -787,9 +787,15 @@ def test_wazuh_console_event_normalizes_like_before():
     new = normalize(wazuh_console_event(settings.CONSOLE_AUDIT_WAZUH_PATH,
                                         {"timestamp": "2026-11-01T08:00:00+00:00", "event_type": "console_auth", **LOGIN_FAIL}))
     for f in ("event.module", "event.category", "event.type", "event.outcome", "event.action", "event.reason", "user.name",
-              "source.ip", "agent.id", "host.name", "message", "@timestamp"):
+              "source.ip", "agent.id", "agent.hostname", "agent.name", "host.name", "message", "@timestamp"):
         assert get(new, f) == get(old, f), f
     assert get(new, "agent.id") == "soc-console" and get(new, "event.module") == "console"
+
+
+def test_console_location_from_enrolled_agent_is_not_trusted():
+    from siem.pipeline.normalize import get, normalize
+    d = normalize(wazuh_console_event(settings.CONSOLE_AUDIT_WAZUH_PATH, {"event_type": "console_auth", **LOGIN_FAIL}, agent_id="001"))
+    assert get(d, "event.module") != "console" and get(d, "agent.id") == "001"
 
 
 @pytest.mark.parametrize("location", ["/var/log/apache2/access.log", "10.10.40.254", "/var/log/siem-console/other.json",
