@@ -16,6 +16,7 @@ Event thô: {"timestamp", "agent_id", "hostname", "os", "source", "event_type", 
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import re
 import uuid
@@ -619,6 +620,14 @@ def _wazuh_ts(ts: Any) -> str | None:
         return None
 
 
+def _is_ip(s: str) -> bool:
+    try:
+        ipaddress.ip_address(s)
+        return True
+    except ValueError:
+        return False
+
+
 def parse_wazuh(ev: Doc, doc: Doc) -> None:
     ag = ev.get("agent") if isinstance(ev.get("agent"), dict) else {}
     if ev.get("id"):
@@ -635,6 +644,12 @@ def parse_wazuh(ev: Doc, doc: Doc) -> None:
     put(doc, "host.name", ag.get("name"))
     put(doc, "@timestamp", _wazuh_ts(ev.get("timestamp")))
     loc = str(ev.get("location") or "")
+    if ag.get("id") == "000" and _is_ip(loc):
+        # syslog 514 do wazuh-manager nhận (không phải agent): giữ danh tính nguồn như đường Vector cũ để HLT-002 và
+        # dashboard vẫn gom theo agent.id = syslog-<ip>; host.name là host trong header syslog, không có thì lấy IP gửi
+        doc["agent"] = {"id": f"syslog-{loc}"}
+        put(doc, "observer.ip", loc)
+        put(doc, "host.name", loc)
     full = ev["full_log"] if isinstance(ev.get("full_log"), str) else ""
     decoder = str((ev.get("decoder") or {}).get("name") or "")
     data = ev["data"] if isinstance(ev.get("data"), dict) else {}

@@ -2,7 +2,7 @@
 #   test     unit test server (rule engine, SOAR, API, AI, Wazuh...) trên Python 3.12 như image server
 #   rules    kiểm tra kho rule: metadata bắt buộc, ReDoS, ca test dương / âm, playbook riêng, độ phủ ATT&CK ưu tiên;
 #            xuất layer ATT&CK Navigator làm artifact (chạy cả hằng tuần để theo dõi độ phủ)
-#   vector   unit test cấu hình Vector (syslog, Wazuh -> Kafka)
+#   vector   unit test cấu hình Vector (Wazuh -> Kafka)
 #   compose  docker compose config hợp lệ (secret giả, không chạy container)
 name: CI
 
@@ -59,7 +59,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Unit test cấu hình Vector
         run: |
-          docker run --rm -v "$PWD/vector:/etc/vector:ro" timberio/vector:0.58.0-alpine test /etc/vector/vector.yaml /etc/vector/tests.yaml
           docker run --rm -v "$PWD/vector:/etc/vector:ro" timberio/vector:0.58.0-alpine test /etc/vector/wazuh.yaml /etc/vector/wazuh-tests.yaml
 
   compose:

@@ -330,7 +330,7 @@ wait_ready() {
   compose cp elasticsearch:/usr/share/elasticsearch/config/certs/ca/ca.crt ./ca.crt >/dev/null
   chmod 644 ca.crt
   wait_until 300 healthy wazuh-manager || die "wazuh-manager chưa healthy (docker compose logs wazuh-manager)"
-  ok "Wazuh manager (agent kết nối cổng 1514/1515)"
+  ok "Wazuh manager (agent kết nối cổng 1514/1515, syslog 514 chỉ từ SYSLOG_ALLOWED_IPS)"
   wait_until 180 console_up || { compose logs --tail 30 manager >&2; die "console chưa trả lời trên cổng 8000 (log ở trên)"; }
   ok "SOC console + Grafana"
   local bad

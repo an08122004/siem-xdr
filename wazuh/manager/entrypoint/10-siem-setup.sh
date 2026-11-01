@@ -33,3 +33,18 @@ if [[ "$T" =~ ^[1-9][0-9]*[smhd]?$ ]]; then
 else
   echo "[siem-setup] WAZUH_AGENTS_DISCONNECTION_TIME không hợp lệ ('$T', vd 1m, 10m): giữ giá trị trong ossec.conf"
 fi
+
+# 6. Syslog 514: chỉ nhận từ các IP/CIDR trong SYSLOG_ALLOWED_IPS (danh sách phân cách bằng dấu phẩy, mặc định IP firewall lab).
+#    Xóa mọi <allowed-ips> cũ rồi ghi lại sau <connection>syslog</connection> của từng khối -> chạy lại không nhân đôi dòng.
+A=${SYSLOG_ALLOWED_IPS:-10.10.40.254}
+A=${A// /}
+if [[ "$A" =~ ^[0-9A-Fa-f.:/]+(,[0-9A-Fa-f.:/]+)*$ ]]; then
+  sed -i '/<allowed-ips>/d' /var/ossec/etc/ossec.conf
+  IFS=, read -ra IPS <<< "$A"
+  for ip in "${IPS[@]}"; do
+    sed -i "/<connection>syslog<\/connection>/a\    <allowed-ips>$ip</allowed-ips>" /var/ossec/etc/ossec.conf
+  done
+  echo "[siem-setup] syslog allowed-ips = $A"
+else
+  echo "[siem-setup] SYSLOG_ALLOWED_IPS không hợp lệ ('$A', vd 10.10.40.254,192.168.1.0/24): giữ giá trị trong ossec.conf"
+fi

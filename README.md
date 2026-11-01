@@ -271,6 +271,8 @@ Hệ thống parse được iptables/UFW, pfSense/OPNsense filterlog và Suricat
 
 ### Đánh giá syslog collector (vì sao chuyển sang Vector)
 
+> Lịch sử: từ 1/11/2026 syslog 514 do **wazuh-manager** nhận (chỉ từ `SYSLOG_ALLOWED_IPS`), container Vector `syslog` và `tools/bench_syslog.py` đã bỏ; phần dưới giữ làm lịch sử đánh giá.
+
 Syslog collector do **Vector** đảm nhận (`vector/vector.yaml`): nhận UDP/TCP 514, chuyển mỗi dòng thành đúng event thô
 mà analyzer đọc (`{"timestamp","agent_id":"syslog-<ip>","source":"syslog","event_type":"syslog","data":{"message","sender_ip"}}`),
 đưa qua **hàng đợi trên đĩa** (volume `vectordata`, 1 GiB, đầy thì chặn chứ không vứt log) rồi ghi vào Kafka `siem.raw`.
