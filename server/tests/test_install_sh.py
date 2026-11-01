@@ -63,3 +63,31 @@ def test_syslog_allowed_ips_rejects_all_zero_prefix(tmp_path, value, ok) -> None
         assert all(f"<allowed-ips>{ip}</allowed-ips>" in conf for ip in value.replace(" ", "").split(","))
     else:
         assert conf.count("<allowed-ips>") == 1 and "<allowed-ips>10.10.40.254</allowed-ips>" in conf and "không hợp lệ" in r.stdout
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="cần bash của Linux")
+@pytest.mark.parametrize("always_fails", [False, True])
+def test_quarantine_restores_files_when_error_is_outside_rules_dynamic(tmp_path, always_fails) -> None:
+    """Bước 9 của 10-siem-setup.sh: lỗi do file rule động thì cách ly (giữ ở quarantine); lỗi vẫn còn sau khi cách ly
+    (nằm ngoài rules-dynamic) thì chuyển file về chỗ cũ, không để mất rule AI / ngoại lệ vô ích."""
+    text = SETUP.read_text(encoding="utf-8")
+    step = text[text.index("# 8. Thư mục rule động"):]
+    ossec = tmp_path / "ossec"
+    (ossec / "bin").mkdir(parents=True)
+    # analysisd giả: lỗi khi còn bad.xml trong rules-dynamic; always_fails: lỗi mãi (lỗi nằm ngoài rules-dynamic)
+    cond = "true" if always_fails else f'[ -e "{ossec.as_posix()}/etc/rules-dynamic/bad.xml" ]'
+    (ossec / "bin" / "wazuh-analysisd").write_text(f'#!/bin/sh\nif {cond}; then echo "ERROR: bad rule"; exit 1; fi\n')
+    (ossec / "bin" / "wazuh-analysisd").chmod(0o755)
+    d = ossec / "etc" / "rules-dynamic"
+    d.mkdir(parents=True)
+    (d / "bad.xml").write_text("x")
+    (d / "ai.xml").write_text("y")
+    step = (step.replace("/var/ossec", ossec.as_posix()).replace("/tmp/analysisd-test.log", (tmp_path / "t.log").as_posix())
+            .replace('install -d -o 10001 -g wazuh -m 0755 "$D"', 'mkdir -p "$D"'))
+    r = subprocess.run(["bash", "-c", "set -euo pipefail\n" + step], capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert r.returncode == 0, r.stdout + r.stderr
+    q = list((ossec / "etc" / "rules-dynamic.quarantine").glob("*/*"))
+    if always_fails:
+        assert sorted(p.name for p in d.iterdir()) == ["ai.xml", "bad.xml"] and not q and "chuyển về" in r.stdout
+    else:
+        assert not list(d.iterdir()) and sorted(p.name for p in q) == ["ai.xml", "bad.xml"]

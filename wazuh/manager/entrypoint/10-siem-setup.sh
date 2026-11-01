@@ -96,6 +96,11 @@ if ! /var/ossec/bin/wazuh-analysisd -t >/tmp/analysisd-test.log 2>&1; then
     echo "[siem-setup] ruleset hợp lệ sau khi cách ly rules-dynamic"
   else
     echo "[siem-setup] ruleset VẪN lỗi sau khi cách ly — lỗi nằm ngoài rules-dynamic: $(grep -m1 -iE 'error|critical' /tmp/analysisd-test.log || head -n 1 /tmp/analysisd-test.log)"
+    # cách ly vô ích: chuyển file về chỗ cũ để không mất rule AI / ngoại lệ vì một lỗi không phải của chúng
+    if [ -n "${Q:-}" ] && [ -n "$(ls -A "$Q")" ]; then
+      find "$Q" -mindepth 1 -maxdepth 1 -exec mv -t "$D" {} + && rmdir "$Q"
+      echo "[siem-setup] đã chuyển về $D các file rule động vừa cách ly"
+    fi
   fi
 else
   echo "[siem-setup] ruleset hợp lệ (wazuh-analysisd -t)"
