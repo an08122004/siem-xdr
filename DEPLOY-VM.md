@@ -457,8 +457,8 @@ Làm sau khi `siem-server` chạy (mục 2). `assets.yml` đã khai IP các cổ
 
 1. **Syslog**: *Status → System Logs → Settings → Remote Logging Options*: bật *Send log messages to remote syslog server*,
    *Source Address* `SOC` (để gói syslog đi ra từ 10.10.40.254), *Remote log servers* `10.10.40.10:514`, *Remote Syslog
-   Contents* `Everything` (cần cả log Suricata ở bước 3). pfSense gửi UDP; wazuh-manager nghe cả UDP và TCP 514 nhưng chỉ nhận từ các IP trong `SYSLOG_ALLOWED_IPS` (`.env`, mặc định `10.10.40.254`): đặt đúng địa chỉ nguồn của firewall rồi `docker compose up -d wazuh-manager`.
-   OPNsense: *System → Settings → Logging → Remote*, thêm đích UDP `10.10.40.10:514`. Hoặc cài plugin `os-wazuh-agent` trên OPNsense để thu log bằng agent (không cần syslog).
+   Contents* `Everything` (cần cả log Suricata ở bước 3). pfSense mặc định gửi UDP (mất log khi wazuh-manager chết hoặc khởi động lại; dùng TCP nếu phiên bản hỗ trợ); wazuh-manager nghe cả UDP và TCP 514 nhưng chỉ nhận từ các IP trong `SYSLOG_ALLOWED_IPS` (`.env`, mặc định `10.10.40.254`): đặt đúng địa chỉ nguồn của firewall rồi `docker compose up -d wazuh-manager`.
+   OPNsense: *System → Settings → Logging → Remote*, thêm đích `10.10.40.10:514` (ưu tiên TCP nếu có, UDP thì mất log lúc manager dừng). Hoặc cài plugin `os-wazuh-agent` trên OPNsense để thu log bằng agent (không cần syslog).
 2. Kiểm tra: từ attacker `nmap -Pn -p 1-200 203.0.113.1`, trong 1 phút có event `event.module: pfsense` (tên dùng chung cho
    filterlog của pfSense và OPNsense) với `observer.ip` 10.10.40.254 trên Grafana *Điều tra*, và alert **NET-001** (một IP
    chạm ≥ 20 cổng trong 60 giây).

@@ -36,6 +36,7 @@ Docker. Quy trình vận hành: **[SOC-OPERATIONS.md](SOC-OPERATIONS.md)**. Lộ
 |---|---|---|
 | Agent đa nền tảng (Windows/Linux) | **Wazuh agent 4.14.7** (bộ cài chính thức) + script phản ứng `siem-xdr` | `wazuh/agent/`, `demo/web/` |
 | Trạm thu của agent | **Wazuh manager 4.14.8** (chỉ manager, không indexer/dashboard) | `wazuh/manager/` |
+| Nhật ký audit của console | console ghi JSON vào volume `console_audit`, wazuh-manager đọc bằng `<localfile>` rồi đi cùng đường `archives.json` | `server/siem/manager/`, `wazuh/manager/` |
 | Chuyển dữ liệu Wazuh vào Kafka | **Vector** 0.58, end-to-end acknowledgement | `vector/wazuh.yaml` |
 | Manager API + giao diện chung (SOC console + Grafana nhúng) | FastAPI | `server/siem/manager/` |
 | Syslog (UDP/TCP 514) | Cổng syslog của **wazuh-manager** (chỉ nhận từ `SYSLOG_ALLOWED_IPS`), đi cùng đường `archives.json` | `wazuh/manager/` |
@@ -266,8 +267,7 @@ Tạo file trong `/usr/local/apache2/htdocs` để thử FIM. Chỉ chạy máy 
 Container chạy với `init: true` (tini là PID 1): nếu để httpd làm PID 1, mọi tiến trình mồ côi (vd shell ngắn hạn của lượt quét
 SCA / rootcheck) bị gán cho httpd và trông như "web server sinh shell" — LNX-002 báo nhầm, SOAR còn tự kill (đã gặp 3/10/2026).
 
-**Firewall F001**: cấu hình remote syslog trỏ về `<IP máy docker>:514`, **ưu tiên TCP** nếu thiết bị hỗ trợ (xem bảng đánh giá bên dưới).
-Hệ thống parse được iptables/UFW, pfSense/OPNsense filterlog và Suricata eve (JSON qua syslog).
+**Firewall F001**: cấu hình remote syslog trỏ về `<IP máy docker>:514` (do wazuh-manager nhận). Đặt `SYSLOG_ALLOWED_IPS` trong `.env` là địa chỉ nguồn của firewall (mặc định `10.10.40.254`, nhiều giá trị cách nhau bằng dấu phẩy); IP khác bị bỏ lặng lẽ, còn `/0`, netmask toàn 0 và tiền tố rỗng bị từ chối. Ưu tiên TCP nếu thiết bị hỗ trợ: UDP gửi lúc wazuh-manager chết hoặc khởi động lại là mất (xem bảng "khi một thành phần chết" ở trên). OPNsense có thể cài plugin `os-wazuh-agent` để thu bằng agent thay cho syslog. Hệ thống parse được iptables/UFW, pfSense/OPNsense filterlog và Suricata eve (JSON qua syslog).
 
 ### Lịch sử: đánh giá syslog collector (vì sao từng chuyển sang Vector)
 
@@ -302,9 +302,10 @@ Số gói kernel bỏ cộng số log vào Kafka đúng bằng số đã gửi, 
 | TCP đột biến | 100% | 100% |
 
 Ở đường này **cả hai mất gần như nhau và kernel phía collector không bỏ gói nào**: UDP bị mất ở lớp chuyển tiếp cổng của Docker Desktop
-(từ Windows vào máy ảo), trước khi tới collector. Khi triển khai thật nên chạy trên máy Linux và đặt ở host
+(từ Windows vào máy ảo), trước khi tới collector. Khi đó khuyến nghị chạy trên máy Linux và đặt ở host
 `sysctl -w net.core.rmem_max=33554432` (tham số này toàn cục, không đặt riêng cho container được; không đặt thì buffer 32 MB của Vector bị giới hạn),
-và cho thiết bị gửi syslog qua **TCP** (không mất log nhờ đẩy ngược áp lực).
+và cho thiết bị gửi qua **TCP** (không mất log nhờ đẩy ngược áp lực).
+Hiện nay syslog do wazuh-manager nhận; `install.sh` vẫn đặt `net.core.rmem_max` vì buffer UDP của remoted cũng được lợi.
 
 **C. Độ bền**: tắt Kafka, bắn 50.000 log vào mỗi collector, khởi động lại collector trong lúc Kafka vẫn chết, rồi bật Kafka:
 
@@ -312,7 +313,7 @@ và cho thiết bị gửi syslog qua **TCP** (không mất log nhờ đẩy ng�
 |---|---|---|
 | Log còn lại sau khi Kafka hồi phục | **0/50.000** (log chỉ nằm trong RAM) | **50.000/50.000** (hàng đợi trên đĩa) |
 
-Ghi chú cấu hình: `topic` trong `vector.yaml` phải ghi thẳng `siem.raw`. Thử `${TOPIC_RAW}` thì broker trả lỗi `InvalidTopic`
+Ghi chú cấu hình (khi đó): `topic` trong `vector.yaml` phải ghi thẳng `siem.raw`. Thử `${TOPIC_RAW}` thì broker trả lỗi `InvalidTopic`
 (Vector 0.58 không thay biến môi trường vào trường này).
 
 ## 3. Phát hiện
