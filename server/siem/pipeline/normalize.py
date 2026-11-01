@@ -647,7 +647,8 @@ def parse_wazuh(ev: Doc, doc: Doc) -> None:
     put(doc, "host.name", ag.get("name"))
     put(doc, "@timestamp", _wazuh_ts(ev.get("timestamp")))
     loc = str(ev.get("location") or "")
-    if ag.get("id") == "000" and _is_ip(loc):
+    syslog = ag.get("id") == "000" and _is_ip(loc)
+    if syslog:
         # syslog 514 do wazuh-manager nhận (không phải agent): giữ danh tính nguồn như đường Vector cũ để HLT-002 và
         # dashboard vẫn gom theo agent.id = syslog-<ip>; host.name là host trong header syslog, không có thì lấy IP gửi
         doc["agent"] = {"id": f"syslog-{loc}"}
@@ -665,7 +666,13 @@ def parse_wazuh(ev: Doc, doc: Doc) -> None:
         put(doc, "log.file.path", loc)
     put(doc, "event.module", "wazuh")
 
-    if isinstance(ev.get("syscheck"), dict):
+    if syslog:
+        # nội dung do thiết bị tự viết và UDP giả được IP nguồn: chỉ qua bộ đọc syslog như đường Vector cũ, không bao giờ
+        # vào nhánh của agent (Windows, auditd, FIM...) -> không dựng được event tiến trình giả để SOAR kill / isolate
+        put(doc, "message", full or (rule or {}).get("description"))
+        if full:
+            parse_syslog(full, doc)
+    elif isinstance(ev.get("syscheck"), dict):
         _wazuh_fim(ev["syscheck"], doc)
     elif isinstance(data.get("win"), dict):
         _wazuh_windows(data["win"], doc, ag.get("name"))

