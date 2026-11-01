@@ -167,7 +167,8 @@ def parse_apache_error(line: str, doc: Doc) -> None:
 # Syslog / Linux auth
 # ---------------------------------------------------------------------------
 
-_SYSLOG_PRI = re.compile(r"^<(?P<pri>\d{1,3})>(?:1 )?")
+# <PRI> có thể đã bị Wazuh remoted bỏ; phiên bản RFC5424 ("1 " + thời gian ISO) vẫn còn nên bỏ riêng
+_SYSLOG_PRI = re.compile(r"^(?:<(?P<pri>\d{1,3})>)?(?:1 (?=\d{4}-))?")
 _SYSLOG_3164 = re.compile(
     r"^(?P<time>[A-Z][a-z]{2} [ \d]\d \d\d:\d\d:\d\d) (?P<host>\S+) (?P<prog>[^:\[\s]+)(?:\[(?P<pid>\d+)\])?: ?(?P<msg>.*)$"
 )

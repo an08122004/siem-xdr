@@ -153,6 +153,22 @@ def test_wazuh_syslog_long_suricata_eve():
     assert get(d, "agent.id") == "syslog-10.10.40.254"
 
 
+def test_wazuh_syslog_rfc5424_filterlog():
+    # remoted chỉ bỏ <PRI>: full_log bắt đầu bằng "1 <thời gian ISO> ..." (phiên bản RFC5424)
+    d = normalize(wazuh_syslog("10.10.40.254", "<134>1 2026-11-01T10:00:00+00:00 fw01 filterlog 4321 - - " + PF_BLOCK))
+    assert get(d, "host.name") == "fw01" and get(d, "event.module") == "pfsense"
+    assert get(d, "source.ip") == "203.0.113.50" and get(d, "destination.port") == 22
+
+
+def test_wazuh_syslog_rfc5424_suricata():
+    eve = {"timestamp": "2026-11-01T10:00:00.000000+0000", "event_type": "alert", "src_ip": "203.0.113.5", "src_port": 4444,
+           "dest_ip": "192.168.1.10", "dest_port": 80, "proto": "TCP",
+           "alert": {"signature": "ET WEB_SERVER SQL Injection", "signature_id": 2006445, "severity": 1, "category": "Web Application Attack"}}
+    d = normalize(wazuh_syslog("10.10.40.254", "<134>1 2026-11-01T10:00:02+00:00 sur01 suricata 9 - - " + json.dumps(eve)))
+    assert get(d, "host.name") == "sur01" and get(d, "event.module") == "suricata"
+    assert get(d, "suricata.signature") == "ET WEB_SERVER SQL Injection"
+
+
 def test_agent_event_is_not_treated_as_syslog():
     d = normalize(wazuh_agent_event("001", "/var/log/auth.log", "Nov  1 10:00:01 web01 sshd[811]: " + SSH_FAIL))
     assert get(d, "agent.id") == "001" and get(d, "observer.ip") is None
