@@ -554,3 +554,13 @@
   location: /var/log/siem-console/console.json
   events:
     - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"unknown","user":"bob","ip":"198.51.100.30","srcip":"198.51.100.30"}'
+
+- none: [101000, 101001]   # S6: 5 lần sai sshd dạng RFC 5424 (remoted đã bỏ <PRI>) -> sshd không được giải mã, bộ đếm không chạy; thiết bị phải gửi RFC 3164
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+    - '1 2026-11-02T10:00:04+07:00 host sshd 1235 - - Failed password for admin from 203.0.113.60 port 4444 ssh2'
+    - '1 2026-11-02T10:00:04+07:00 host sshd 1235 - - Failed password for admin from 203.0.113.60 port 4444 ssh2'
+    - '1 2026-11-02T10:00:04+07:00 host sshd 1235 - - Failed password for admin from 203.0.113.60 port 4444 ssh2'
+    - '1 2026-11-02T10:00:04+07:00 host sshd 1235 - - Failed password for admin from 203.0.113.60 port 4444 ssh2'
+    - '1 2026-11-02T10:00:04+07:00 host sshd 1235 - - Failed password for admin from 203.0.113.60 port 4444 ssh2'

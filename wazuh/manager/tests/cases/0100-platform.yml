@@ -45,3 +45,19 @@
   location: syscheck
   events:
     - {path: /home/user/htmlnotes/todo.txt, type: modified}
+
+# ---------------------------------------------------------------------------------------------------------------
+# S6 (B4): remoted KHÔNG tách RFC 5424 -> firewall/thiết bị phải gửi RFC 3164 (DEPLOY-VM.md, LAB-VMWARE.md). Ghim hành vi trên 4.14.8:
+# cùng nội dung, dạng BSD được decoder pf / sshd nhận, dạng RFC 5424 (sau khi remoted bỏ <PRI>) thì không.
+# ---------------------------------------------------------------------------------------------------------------
+- rule: 87701   # S6: filterlog RFC 3164 -> decoder pf, rule gốc 87701
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+    - 'Nov  2 10:00:01 fw.lab filterlog[1234]: 5,,,02f4bab031b57d1e30553ce08e0ec131,igb0,match,block,in,4,0x0,,64,1,0,none,6,tcp,60,203.0.113.5,10.10.40.5,50000,22,0,S,1,2,64240,,mss'
+
+- none: [87701]   # S6: cùng filterlog dạng RFC 5424 -> không decoder
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+    - '1 2026-11-02T10:00:02+07:00 fw.lab filterlog 1234 - - 5,,,02f4bab031b57d1e30553ce08e0ec131,igb0,match,block,in,4,0x0,,64,1,0,none,6,tcp,60,203.0.113.6,10.10.40.5,50000,22,0,S,1,2,64240,,mss'

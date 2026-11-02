@@ -538,3 +538,20 @@ Mỗi event tính 1 alert (rule level cao nhất khớp). Chỉ có 7 rule (khô
 - Hệ quả đo thật: với `(^|/)siem-procs$` ở 102000 cả họ LNX siem-proc CHẾT với agent thật (chạy `xmrig` trong demo-web không ra 102004; T7 chỉ thử bằng logtest/hàng đợi như agent 000).
   Sửa thành `(^|/|->)siem-procs$`: cùng lệnh ra `102004` (level 10, bóng) trong `alerts.json`. Ca harness: dương `(demo-web) any->siem-procs`, âm location = IP và `(demo-web) any->/var/log/auth.log`.
 - 0851 (auditd) nay khai `<location type="pcre2">audit\.log$</location>` (không neo): dương `(demo-web) any->/var/log/audit/audit.log`, âm location = IP `10.10.40.254` và `/var/log/apache2/access.log`.
+
+### S6 — syslog RFC 5424 qua remoted (02/11, wzhdev, 4.14.8)
+
+- Cách đo: wazuh-manager thử với `SYSLOG_ALLOWED_IPS=172.20.0.0/16` (mạng `wzhdev-soc`, KHÔNG publish 514 ra host); container `alpine` trong mạng đó gửi UDP 514 bằng `nc -u` sáu dòng
+  (filterlog, sshd, Suricata; mỗi loại một dòng RFC 3164 và một dòng RFC 5424), đọc `archives.json`; sau đó cùng nội dung qua logtest (`log_format syslog`, location = IP gửi).
+- Kết quả (location = IP gửi, agent 000; remoted bỏ `<PRI>` ở cả hai dạng):
+
+  | Loại | RFC 3164 | RFC 5424 (full_log bắt đầu bằng `1 2026-11-02T...`) |
+  |---|---|---|
+  | filterlog | decoder `pf`, rule 87701 (srcip/dstip/port/action giải mã đủ) | KHÔNG decoder, không rule |
+  | sshd `Failed password` | decoder `sshd`, ra 101000 (srcip, dstuser) | KHÔNG decoder, rơi rule 1002 "Unknown problem somewhere in the system" |
+  | Suricata (`suricata[99]: {json}`) | KHÔNG decoder / rule (tiền tố syslog trước JSON; decoder json cần dòng bắt đầu bằng `{`) | KHÔNG decoder / rule |
+
+  Logtest cho đúng cùng kết quả (RFC 5424 sshd: rule 1002, decoder rỗng).
+- Kết luận: remoted không tách được RFC 5424 (không có `program_name`) nên **phải gửi RFC 3164**. Đã làm: DEPLOY-VM.md (bước Syslog) và LAB-VMWARE.md (bước 9) ghi BẮT BUỘC RFC 3164, OPNsense/pfSense không bật RFC 5424;
+  ca CI ghim hành vi: `0100-platform.yml` (filterlog 3164 -> 87701, 5424 -> không), `0101-auth.yml` (5 lần sai sshd 5424 -> không 101000/101001).
+- Ghi nhận thêm: Suricata qua syslog 514 không được Wazuh giải mã ở cả hai dạng; analyzer vẫn đọc được JSON trong `full_log` qua nhánh syslog của `parse_wazuh` (tên chương trình `suricata`), nhưng rule Wazuh về Suricata (86601...) không chạy với đường này.

@@ -78,7 +78,8 @@ host nối vào vùng SOC với địa chỉ `10.10.40.1` và chính là SIEM. M
 8. **Port forward web:** *Firewall → NAT → Port Forward*: cổng `INET_GIA`, TCP, đích là địa chỉ của INET_GIA cổng 80, chuyển
    tới `10.10.20.20:80`, chọn tự tạo luật đi kèm.
 9. **Syslog về SIEM:** *System → Settings → Logging → Remote*: thêm đích UDP, `10.10.40.1`, cổng `514`, mọi ứng dụng và mọi
-   mức.
+   mức. **Định dạng BẮT BUỘC RFC 3164 (BSD, `Nov  2 10:00:03 host filterlog[1234]: ...`): KHÔNG bật RFC 5424** (hộp *RFC 5424* trong
+   mục Remote). Wazuh remoted không tách được RFC 5424 nên decoder `pf`/`sshd` không chạy (spike S6; ca CI `0101-auth.yml` / `0100-platform.yml` ghim hành vi này).
 10. **Suricata:** *Services → Intrusion Detection*:
     - *Administration*: bật *Enabled*, **không** bật IPS mode (chỉ phát hiện, để SOAR là bên phản ứng), Interfaces
       `INET_GIA` (thêm `DMZ` nếu đủ RAM), bật *Enable eve syslog output*.
