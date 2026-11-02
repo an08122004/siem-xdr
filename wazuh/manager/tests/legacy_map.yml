@@ -59,25 +59,25 @@ NET-001:
   - 87702
   - 87701
   decision: approx
-  note: '1/2 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: deny; thiếu: allow; rule chung, không tính phủ: 87701 (level 5: pfSense firewall drop event.) [level 5 ''pfSense firewall drop event.'': MỘT gói bị chặn, không có ngưỡng]; ca âm báo level>=7: [87702]'
+  note: '1/2 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: deny; thiếu: allow; rule chung, không tính phủ: 87701 (level 5: pfSense firewall drop event.) [level 5 ''pfSense firewall drop event.'': MỘT gói bị chặn, không có ngưỡng]; ca âm báo level>=7: [87702]; rule dự án 0541-network.xml: 103001 (không phải block) và 103002 (block, level 11 vì 87702 level 10 đã đánh dấu event) đếm `different_dstport` >= 20/60 s cùng nguồn, chạy bóng; giới hạn S4: ít cổng xen kẽ vẫn báo sau ~2N-2 dòng, một cổng lặp lại không báo; 103002 báo ở dòng 21 (sau 87702 ở dòng 18)'
 NET-002:
   wazuh:
   - 87702
   - 87701
   decision: approx
-  note: '1/1 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 87701 (level 5: pfSense firewall drop event.) [level 5 ''pfSense firewall drop event.'': MỘT gói bị chặn, không có ngưỡng]; ca âm báo level>=7: [87702]'
+  note: '1/1 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 87701 (level 5: pfSense firewall drop event.) [level 5 ''pfSense firewall drop event.'': MỘT gói bị chặn, không có ngưỡng]; ca âm báo level>=7: [87702]; không có rule dự án: chỉ khác 87702 ở ngưỡng (18/45 s so với 50/60 s), Task 12 chỉnh ngưỡng bằng 0190-tuning'
 NET-003:
   wazuh: []
   decision: convert
-  note: 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo
+  note: '0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo; rule dự án 103003 (0541-network.xml, con của bộ đếm 103000): pass + nguồn ngoài 10/8, 172.16/12, 192.168/16, 100.64/10, 169.254/16, 127/8 + cổng quản trị; chạy bóng; IPv6 chưa phủ'
 NET-004:
   wazuh: []
   decision: convert
-  note: 'chỉ trúng rule chung 86601 (Suricata: Alert - $(alert.signature)), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7'
+  note: 'chỉ trúng rule chung 86601 (Suricata: Alert - $(alert.signature)), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7; rule dự án 103004 (0541-network.xml, con của 86601): alert.severity <= 2, chạy bóng; CHỈ qua agent OPNsense đọc eve.json (Suricata qua syslog không có decoder, S6); che 99915/99916 (IOC, level 9) với cảnh báo severity <= 2'
 NET-005:
   wazuh: []
   decision: convert
-  note: 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo
+  note: '0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo; rule dự án 103005 (0541-network.xml): `different_dstip` >= 10 trên cổng 445/60 s cùng nguồn, chỉ kết nối không bị chặn, chạy bóng; giới hạn S4 như NET-001; quét SMB từ IP public đã bị NET-003 báo từng event nên không vào đếm'
 TI-001:
   wazuh: []
   decision: convert

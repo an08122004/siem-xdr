@@ -1,0 +1,118 @@
+<!--
+  Rule mạng (NET-001..005 của bộ rule cũ), chạy BÓNG. Dải ID 103000-103999. KHÔNG ĐỔI TÊN FILE: tên phải xếp SAU 0475-suricata_rules.xml và 0540-pfsense_rules.xml
+  (Wazuh nạp mọi file theo tên; rule con của 87700/87701/86601 phải nằm sau cha). Vì vậy file này không mang số 0103 như bảng kế hoạch.
+
+  HAI ĐƯỜNG VÀO của filterlog (R43); rule không đọc <location> nên phủ cả hai:
+    (1) syslog RFC 3164 gửi thẳng cổng 514 của wazuh-manager (agent 000, location = IP người gửi, vd 10.10.40.254). BẮT BUỘC RFC 3164: RFC 5424 không có decoder (S6);
+    (2) plugin os-wazuh-agent của OPNsense: syslog-ng ghi chương trình `filterlog` vào /var/ossec/logs/opnsense_syslog.log, agent đọc bằng log_format syslog;
+        rule thấy location `(fw01) any->/var/ossec/logs/opnsense_syslog.log` (S7).
+  Suricata (NET-004) CHỈ tới rule Wazuh qua agent OPNsense đọc /var/log/suricata/eve.json (log_format json, location `(fw01) any->/var/log/suricata/eve.json`);
+  Suricata qua syslog 514 không có decoder Wazuh (S6) nên không chạy NET-004 (có ca âm), chỉ analyzer YAML đọc được đường đó.
+  Decoder gốc `pf` (0455-pfsense_decoders.xml) giải filterlog IPv4 thành srcip, dstip, srcport, dstport, protocol, action (pass/block/reject), id, length. Rule gốc 87700 (level 0) bắt
+  `filterlog`, 87701 (level 5, no_log) là action=block, 87702 (level 10, 18 block/45 s cùng nguồn) cộng dồn. filterlog IPv6 có cột khác nên decoder gốc ra trường sai: chưa phủ
+  (parse_firewall cũ cũng chỉ nhận IPv4). Suricata: decoder `json` + rule gốc 86600/86601 (level 3); eve.json KHÔNG đặt srcip, chỉ có data.src_ip, alert.severity (số), alert.signature_id.
+  Mọi bộ đếm đều có <same_source_ip /> vì agent 000 dùng chung cho mọi thiết bị syslog, console và manager.
+
+  Rule gốc bị treo con: 87700 (103000, level 2) và 86601 (103004). 86601 có anh em 99915/99916 (0999-malicious-ioc-rules.xml, level 9, IP trong danh sách IOC): file này nạp trước 0999
+  nên với cảnh báo severity <= 2 từ IP độc hại thì 103004 (level 10) là rule cuối thay cho 99915/99916.
+
+  NET-002 (>= 50 chặn / 60 s, cùng nguồn) KHÔNG có rule ở đây: chỉ khác 87702 ở ngưỡng (18/45 s), nên chuyển sang 0190-tuning (Task 12), cùng việc sửa 87702.
+
+  Phát hiện về analysisd 4.14.8 (đã thử trên wzhdev):
+    1. Event có rule cuối cùng level 0 (87700) KHÔNG vào lịch sử đếm, nên không đếm được bằng if_matched_sid 87700. Rule 103000 (level 2, dưới log_alert_level 3 nên không ra alert)
+       là bộ đếm cho mọi dòng filterlog không phải block. Nó chỉ đổi rule cuối của event từ 87700 (level 0) sang 103000; không rule gốc nào dùng 87700 làm if_matched, nên không mất rule gốc.
+    2. Rule frequency bỏ qua event đã được rule frequency khác báo với level >= level của nó ("lf->matched"). 87702 (level 10) báo khi thấy 18 block, đánh dấu các event trước;
+       rule level <= 10 đếm trên 87701 sẽ không báo được sau đó. Vì thế NET-001 nhánh block (103002) đặt level 11, và vì event thứ 18 (rule cuối 87702) không nằm trong lịch sử 87701 nên nó
+       báo ở dòng thứ 21 thay vì 20 (khi quét nhanh hơn 18 block/45 s). NET-005 KHÔNG có nhánh block: level 10 của nó sẽ đánh dấu event và làm MẤT 87702 gốc.
+    3. <dstport> dùng OS_Regex (không có nhóm "(a|b)", chỉ ^a$|^b$); <field name="dstport"> bị từ chối (trường tĩnh).
+    4. `ignore` chỉ có tác dụng với rule frequency, không giảm tần suất rule match thường (NET-003, NET-004); luật cũ có suppress 600/120 s, việc dập trùng để console làm.
+  Mọi rule frequency dưới đây: giới hạn spike S4 — Wazuh đếm "event trước có giá trị khác event hiện tại", không đếm số giá trị phân biệt; 2 giá trị xen kẽ vẫn báo sau ~2N-2 event.
+  5. Event khớp một rule con (NET-003, rule cuối 103003) không còn là event của 103000 trong lịch sử đếm: NET-001/NET-005 không đếm chúng (giới hạn đã biết, đã có ca test).
+  Rule frequency 103001/103002/103005 chỉ chạy trên MỘT nhánh (pass/khác block hoặc block), không cộng gộp hai nhánh: quét lẫn pass và block mà mỗi nhánh dưới ngưỡng thì không báo.
+-->
+<group name="local,siem-xdr,">
+  <!-- NET-000: bộ đếm cho dòng filterlog không phải block (pass, reject...). Level 2: không ra alert. Block đã là 87701 (rule gốc, đứng trước) nên không tới đây. -->
+  <rule id="103000" level="2">
+    <if_sid>87700</if_sid>
+    <description>NET-000 Bộ đếm filterlog không phải block (cho NET-001, NET-003, NET-005)</description>
+    <mitre>
+      <id>T1046</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-02</info>
+    <group>siem,network,shadow,legacy_NET-001,</group>
+  </rule>
+
+  <!-- NET-001 (pass/khác block): >= 20 cổng đích khác nhau từ một nguồn trong 60 s. Mức 7 (medium). -->
+  <rule id="103001" level="7" frequency="20" timeframe="60" ignore="60">
+    <if_matched_sid>103000</if_matched_sid>
+    <same_source_ip />
+    <different_dstport />
+    <description>NET-001 Quét cổng: $(srcip) chạm &gt;= 20 cổng đích khác nhau trong 60 giây (kết nối được cho phép)</description>
+    <mitre>
+      <id>T1046</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-02</info>
+    <group>siem,network,shadow,legacy_NET-001,</group>
+  </rule>
+
+  <!-- NET-001 (block): level 11 vì 87702 (level 10) đánh dấu event; xem mục 2 ở đầu file. Báo ở dòng thứ 21 khi 87702 đã báo trước. -->
+  <rule id="103002" level="11" frequency="20" timeframe="60" ignore="60">
+    <if_matched_sid>87701</if_matched_sid>
+    <same_source_ip />
+    <different_dstport />
+    <description>NET-001 Quét cổng: $(srcip) chạm &gt;= 20 cổng đích khác nhau trong 60 giây (kết nối bị chặn)</description>
+    <mitre>
+      <id>T1046</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-02</info>
+    <group>siem,network,shadow,legacy_NET-001,</group>
+  </rule>
+
+  <!-- NET-005: một nguồn nối cổng 445 tới >= 10 IP đích khác nhau trong 60 s (chỉ kết nối không bị chặn). Event có rule cuối 103003 (NET-003: nguồn public, cổng quản trị gồm 445)
+       không vào lịch sử của 103000, nên NET-005/NET-001 không đếm chúng; quét SMB từ IP public đã được NET-003 báo từng event. NET-005 thực chất phủ quét từ nguồn nội bộ (di chuyển ngang). -->
+  <rule id="103005" level="10" frequency="10" timeframe="60" ignore="60">
+    <if_matched_sid>103000</if_matched_sid>
+    <dstport>^445$</dstport>
+    <same_source_ip />
+    <same_dst_port />
+    <different_dstip />
+    <description>NET-005 Dò quét SMB: $(srcip) nối cổng 445 tới &gt;= 10 IP khác nhau trong 60 giây</description>
+    <mitre>
+      <id>T1021.002</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-02</info>
+    <group>siem,network,shadow,legacy_NET-005,</group>
+  </rule>
+
+  <!-- NET-003: firewall CHO PHÉP nguồn NGOÀI dải nội bộ vào cổng quản trị. "Nội bộ" theo ip_scope() của pipeline cũ: 10/8, 172.16/12, 192.168/16, 100.64/10 (CGNAT), 169.254/16 và loopback 127/8
+       (IPv6 fc00::/7, fe80::/10, ::1 chưa phủ vì filterlog IPv6 chưa giải được). Nhiều <srcip negate="yes"> là phép VÀ (đã thử). Cổng: 22 23 445 1433 3306 3389 5432 5985 6379. -->
+  <rule id="103003" level="10">
+    <if_sid>103000</if_sid>
+    <action>pass</action>
+    <srcip negate="yes">10.0.0.0/8</srcip>
+    <srcip negate="yes">172.16.0.0/12</srcip>
+    <srcip negate="yes">192.168.0.0/16</srcip>
+    <srcip negate="yes">100.64.0.0/10</srcip>
+    <srcip negate="yes">169.254.0.0/16</srcip>
+    <srcip negate="yes">127.0.0.0/8</srcip>
+    <dstport>^22$|^23$|^445$|^1433$|^3306$|^3389$|^5432$|^5985$|^6379$</dstport>
+    <description>NET-003 Internet vào dịch vụ quản trị: $(srcip) -&gt; cổng $(dstport) được firewall cho phép</description>
+    <mitre>
+      <id>T1133</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-02</info>
+    <group>siem,network,shadow,legacy_NET-003,</group>
+  </rule>
+
+  <!-- NET-004: cảnh báo Suricata severity <= 2 (1 = cao nhất). Con của 86601 (event_type alert). -->
+  <rule id="103004" level="10">
+    <if_sid>86601</if_sid>
+    <field name="alert.severity" type="pcre2">^[0-2]$</field>
+    <description>NET-004 Cảnh báo IDS Suricata mức cao: $(alert.signature)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-02</info>
+    <group>siem,network,shadow,legacy_NET-004,</group>
+  </rule>
+</group>
