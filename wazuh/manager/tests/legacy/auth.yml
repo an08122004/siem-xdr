@@ -109,3 +109,47 @@
   location: /var/log/auth.log
   events:
   - 'Oct 31 10:00:00 host sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/apt update'
+- legacy: AUTH-001
+  kind: positive
+  name: console: 5 lần đăng nhập sai trong 5 giây từ một IP
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"203.0.113.7","srcip":"203.0.113.7"}'
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"203.0.113.7","srcip":"203.0.113.7"}'
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"203.0.113.7","srcip":"203.0.113.7"}'
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"203.0.113.7","srcip":"203.0.113.7"}'
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"203.0.113.7","srcip":"203.0.113.7"}'
+- legacy: AUTH-001
+  kind: negative
+  name: console: 4 lần đăng nhập sai (dưới ngưỡng)
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"203.0.113.7","srcip":"203.0.113.7"}'
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"203.0.113.7","srcip":"203.0.113.7"}'
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"203.0.113.7","srcip":"203.0.113.7"}'
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"203.0.113.7","srcip":"203.0.113.7"}'
+- legacy: AUTH-002
+  kind: positive
+  name: console: 5 lần sai rồi đăng nhập được từ cùng IP
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"203.0.113.8","srcip":"203.0.113.8"}'
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"203.0.113.8","srcip":"203.0.113.8"}'
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"203.0.113.8","srcip":"203.0.113.8"}'
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"203.0.113.8","srcip":"203.0.113.8"}'
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"203.0.113.8","srcip":"203.0.113.8"}'
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"alice","ip":"203.0.113.8","srcip":"203.0.113.8"}'
+- legacy: AUTH-003
+  kind: positive
+  name: console: 5 tài khoản khác nhau sai từ một IP
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"an","ip":"203.0.113.9","srcip":"203.0.113.9"}'
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"binh","ip":"203.0.113.9","srcip":"203.0.113.9"}'
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"chi","ip":"203.0.113.9","srcip":"203.0.113.9"}'
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"dung","ip":"203.0.113.9","srcip":"203.0.113.9"}'
+  - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"em","ip":"203.0.113.9","srcip":"203.0.113.9"}'

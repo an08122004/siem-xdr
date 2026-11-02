@@ -1,10 +1,52 @@
 <!--
   Rule xác thực (AUTH-001..006 của bộ rule cũ), chạy BÓNG. Dải ID 101000-101999. AUTH-005 dùng thẳng rule gốc 5902 (không viết lại).
-  Phạm vi: sshd/sudo qua syslog. Nhật ký đăng nhập console NAY CŨNG đi qua Wazuh (agent 000, location /var/log/siem-console/console.json),
-  nhưng rule cho nó chưa viết (lượt B) nên AUTH-002/003 tạm chưa phủ chúng.
+  Phạm vi: sshd/sudo qua syslog và đăng nhập SOC console (agent 000, location /var/log/siem-console/console.json, dòng JSON do manager/auth.py `Audit` ghi).
+  Console: rule gốc nhận dòng JSON là 86600 (decoded_as json, level 0, no_full_log) nên 101020 (root decoded_as json) chiếm dòng trước 86600 và 101021/101022 là con của nó; thất bại console vào CHUNG bộ đếm 101000 với sshd
+  (AUTH-001 nay đếm cả console, rộng hơn YAML cũ chỉ phân biệt theo agent; 3 lần sai sshd + 2 lần sai console từ một IP vẫn cộng dồn), success console vào AUTH-002.
+  Mọi bộ đếm đều có <same_source_ip /> vì agent 000 dùng chung cho mọi thiết bị syslog, console và manager.
   Thứ tự file quan trọng: các rule dùng cùng event chỉ rule đứng trước báo, nên AUTH-003 > AUTH-001 > bộ đếm 600s (101010).
 -->
 <group name="local,siem-xdr,">
+  <!-- Console (B3). Rule gốc đang nhận dòng JSON console là 86600 (Suricata messages: decoded_as json + có trường timestamp, event_type; level 0, no_full_log; tìm bằng logtest 4.14.8).
+       KHÔNG dùng if_sid 86600: analysisd nạp file rule theo thứ tự tên file (0101 < 0475) nên lúc nạp 0101 rule 86600 chưa có ("Signature ID not found", rule bị bỏ).
+       Thay vào đó 101020 là rule gốc (root) decoded_as json, đứng trước 86600 nên chiếm dòng console; nó chỉ nhận location + event_type console, json khác (Suricata eve.json) vẫn xuống 86600.
+       Khai trước 101000 vì if_sid chỉ trỏ tới rule đã nạp. Chỉ tin dòng do CHÍNH manager đọc: location đúng /var/log/siem-console/console.json (event của agent thật mang tiền tố "(host) any->",
+       thiết bị syslog mang IP nên không khớp neo ^). Trường đã giải mã: dstuser (decoder json đổi user), srcip (Audit ghi sẵn từ B1), action, outcome.
+       Không đặt no_full_log (bản gốc 86600 có) để alert còn full_log; analyzer vẫn dựng lại từ data nếu thiếu (B2). Level 0: chỉ để chuỗi con.
+       Chọn bộ đếm CHUNG với sshd thay vì bộ đếm console riêng trong nhóm auth_bf_stage: một bộ đếm thì AUTH-001/003 và chuỗi AUTH-002 (if_matched_group auth_bf_stage)
+       không đổi gì, còn bộ đếm riêng cần nhân đôi 101001/101003/101010 và hai nguồn từ một IP không cộng dồn. -->
+  <rule id="101020" level="0">
+    <decoded_as>json</decoded_as>
+    <location type="pcre2">^/var/log/siem-console/console\.json$</location>
+    <field name="event_type" type="pcre2">^console_auth$</field>
+    <regex type="pcre2">"action":\s*"login"</regex>
+    <description>CON-020 Console: đăng nhập vào SOC console (rule gốc của chuỗi console)</description>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+    <group>siem,auth,console,</group>
+  </rule>
+
+  <rule id="101021" level="0">
+    <if_sid>101020</if_sid>
+    <field name="outcome" type="pcre2">^failure$</field>
+    <description>CON-021 Console: đăng nhập thất bại (vào bộ đếm 101000)</description>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+    <group>siem,auth,console,</group>
+  </rule>
+
+  <rule id="101022" level="0">
+    <if_sid>101020</if_sid>
+    <field name="outcome" type="pcre2">^success$</field>
+    <description>CON-022 Console: đăng nhập thành công (nối AUTH-002)</description>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+    <group>siem,auth,console,</group>
+  </rule>
+
   <!-- AUTH-000: bộ đếm chung cho mọi thất bại SSH (5760 user có thật, 5710 user không tồn tại), nên 3 user thật + 3 user giả vẫn cộng dồn.
        Level 2 < log_alert_level (3) nên không ra alert.
        HỆ QUẢ: alert từng lần thất bại của rule gốc (5760/5710, level 5) nay được ghi là 101000 level 2 (không vào alerts.json); các rule gốc đếm if_matched_sid 5760/5710
@@ -14,8 +56,8 @@
        trên 8/120s của gốc): chỉ còn 101010 (level 2, im) và 101002 nếu sau đó đăng nhập được. Rule YAML cũ không có ngưỡng này nên không thua rule cũ, chỉ thua ruleset gốc;
        Task 12 (tuning) cân nhắc lại. Từ đây, event bị ghi nhận là 101000 (không còn là 5760/5710) -> mọi bộ đếm dùng if_matched_sid 101000. -->
   <rule id="101000" level="2">
-    <if_sid>5760, 5710</if_sid>
-    <description>AUTH-000 Thất bại đăng nhập SSH (bộ đếm chung cho AUTH-001/002/003)</description>
+    <if_sid>5760, 5710, 101021</if_sid>
+    <description>AUTH-000 Thất bại đăng nhập SSH hoặc console (bộ đếm chung cho AUTH-001/002/003)</description>
     <mitre>
       <id>T1110.001</id>
     </mitre>
@@ -65,10 +107,10 @@
     <group>siem,auth,shadow,legacy_AUTH-002,auth_bf_stage,</group>
   </rule>
 
-  <!-- AUTH-002: đăng nhập thành công (5715) cùng IP trong 10 phút sau chuỗi thất bại (brute-force, spraying hoặc chậm). Nối bằng nhóm, không dùng frequency
+  <!-- AUTH-002: đăng nhập thành công (sshd 5715 hoặc console 101022) cùng IP trong 10 phút sau chuỗi thất bại (brute-force, spraying hoặc chậm). Nối bằng nhóm, không dùng frequency
        nên không dính giới hạn if_matched_group của spike. Đứng trước AUTH-004: root đăng nhập sau brute-force ra 101002 (critical), không ra 101004; chấp nhận được vì mức nặng hơn. -->
   <rule id="101002" level="12" timeframe="600">
-    <if_sid>5715</if_sid>
+    <if_sid>5715, 101022</if_sid>
     <if_matched_group>auth_bf_stage</if_matched_group>
     <same_source_ip />
     <description>AUTH-002 Brute-force THÀNH CÔNG: đăng nhập được từ $(srcip) sau chuỗi thất bại (khả năng cao tài khoản bị chiếm)</description>

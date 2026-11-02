@@ -39,6 +39,7 @@ def check(files: dict[str, str], cases: list[dict]) -> list[str]:
     pos = {c["rule"] for c in cases if "rule" in c}
     neg = {i for c in cases for i in (c.get("none") or [])}
     seen: dict[int, str] = {}
+    feeds = {int(x) for t in files.values() for m in re.findall(r"<if_sid>([^<]*)</if_sid>", t) for x in re.findall(r"\d+", m)}
     for name, text in sorted(files.items()):
         tuning = name == TUNING_FILE
         dynamic = name.startswith("rules-dynamic/")      # console sinh lúc chạy: không đòi ca test
@@ -91,7 +92,7 @@ def check(files: dict[str, str], cases: list[dict]) -> list[str]:
                     elif rng and not rng[0] <= rid <= rng[1]:
                         err(rid, f"id ngoài dải {rng[0]}-{rng[1]} của file")
                     if not (dynamic or tuning):
-                        if rid not in pos:
+                        if rid not in pos and not (level == 0 and rid in feeds):   # cha level 0: harness chỉ thấy rule cuối chuỗi
                             err(rid, "thiếu ca test dương (rule: id)")
                         if rid not in neg:
                             err(rid, "thiếu ca test âm (none: [id])")

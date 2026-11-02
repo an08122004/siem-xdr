@@ -376,3 +376,181 @@
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
+
+# ---------------------------------------------------------------------------------------------------------------
+# Console (lượt B3): dòng JSON đúng như server/siem/manager/auth.py `Audit` ghi (kể cả khóa srcip), location agent 000.
+# Rule gốc nhận dòng này là 86600 (Suricata messages, decoded_as json, level 0, no_full_log); 101021/101022 là con của nó.
+# Bộ đếm thất bại DÙNG CHUNG với sshd (101000): AUTH-001 nay đếm cả console, AUTH-002 nhận success console.
+# ---------------------------------------------------------------------------------------------------------------
+- rule: 101001   # AUTH-001 console: 5 lần sai cùng IP (bộ đếm chung 101000)
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.7","srcip":"198.51.100.7","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.7","srcip":"198.51.100.7","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.7","srcip":"198.51.100.7","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.7","srcip":"198.51.100.7","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.7","srcip":"198.51.100.7","reason":"bad_credentials"}'
+
+- none: [101001]   # AUTH-001 console: 4 lần sai (dưới ngưỡng)
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.8","srcip":"198.51.100.8","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.8","srcip":"198.51.100.8","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.8","srcip":"198.51.100.8","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.8","srcip":"198.51.100.8","reason":"bad_credentials"}'
+
+- none: [101001]   # AUTH-001 console: 5 lần sai từ 5 IP khác nhau (same_source_ip)
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.20","srcip":"198.51.100.20","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.21","srcip":"198.51.100.21","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.22","srcip":"198.51.100.22","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.23","srcip":"198.51.100.23","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.24","srcip":"198.51.100.24","reason":"bad_credentials"}'
+
+- rule: 101002   # AUTH-002 console: 5 lần sai rồi đăng nhập được cùng IP
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9"}'
+
+- none: [101002]   # AUTH-002 console: sai từ một IP, thành công từ IP khác
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"alice","ip":"10.10.40.50","srcip":"10.10.40.50"}'
+
+- none: [101002]   # AUTH-002 console: thành công đơn lẻ, không có chuỗi sai
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"alice","ip":"198.51.100.10","srcip":"198.51.100.10"}'
+
+- rule: 101003   # AUTH-003 console: 5 tài khoản khác nhau sai từ một IP
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"an","ip":"198.51.100.11","srcip":"198.51.100.11","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"binh","ip":"198.51.100.11","srcip":"198.51.100.11","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"chi","ip":"198.51.100.11","srcip":"198.51.100.11","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"dung","ip":"198.51.100.11","srcip":"198.51.100.11","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"em","ip":"198.51.100.11","srcip":"198.51.100.11","reason":"bad_credentials"}'
+
+- none: [101003]   # AUTH-003 console: một tài khoản sai 5 lần
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"an","ip":"198.51.100.12","srcip":"198.51.100.12","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"an","ip":"198.51.100.12","srcip":"198.51.100.12","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"an","ip":"198.51.100.12","srcip":"198.51.100.12","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"an","ip":"198.51.100.12","srcip":"198.51.100.12","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"an","ip":"198.51.100.12","srcip":"198.51.100.12","reason":"bad_credentials"}'
+
+- none: [101001, 101003, 101000, 101021]   # console: 5 dòng login sai nhưng action là logout/activity, không phải đăng nhập
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"logout","outcome":"failure","user":"bob","ip":"198.51.100.13","srcip":"198.51.100.13","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"logout","outcome":"failure","user":"bob","ip":"198.51.100.13","srcip":"198.51.100.13","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"logout","outcome":"failure","user":"bob","ip":"198.51.100.13","srcip":"198.51.100.13","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"activity","outcome":"failure","user":"bob","ip":"198.51.100.13","srcip":"198.51.100.13","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"activity","outcome":"failure","user":"bob","ip":"198.51.100.13","srcip":"198.51.100.13","reason":"bad_credentials"}'
+
+- none: [101000, 101001, 101002, 101003, 101010, 101020, 101021, 101022]   # console giả mạo: cùng dòng JSON nhưng location = IP thiết bị syslog
+  log_format: json
+  location: 10.10.40.254
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.14","srcip":"198.51.100.14","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.14","srcip":"198.51.100.14","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.14","srcip":"198.51.100.14","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.14","srcip":"198.51.100.14","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.14","srcip":"198.51.100.14","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"198.51.100.14","srcip":"198.51.100.14"}'
+
+- none: [101000, 101001, 101002, 101003, 101010, 101020, 101021, 101022]   # console giả mạo: cùng dòng JSON nằm trong access.log
+  log_format: json
+  location: /var/log/apache2/access.log
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.15","srcip":"198.51.100.15","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.15","srcip":"198.51.100.15","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.15","srcip":"198.51.100.15","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.15","srcip":"198.51.100.15","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.15","srcip":"198.51.100.15","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"198.51.100.15","srcip":"198.51.100.15"}'
+
+- none: [101000, 101001, 101002, 101003, 101010, 101020, 101021, 101022]   # console giả mạo: location của agent thật (tiền tố (host) any->)
+  log_format: json
+  location: (demo-web) any->/var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.16","srcip":"198.51.100.16","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.16","srcip":"198.51.100.16","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.16","srcip":"198.51.100.16","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.16","srcip":"198.51.100.16","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.16","srcip":"198.51.100.16","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"198.51.100.16","srcip":"198.51.100.16"}'
+
+# ---------------------------------------------------------------------------------------------------------------
+# B5: sshd tới qua đường syslog (agent 000, location = IP thiết bị gửi) vẫn vào bộ đếm 0101; đếm theo IP tấn công (srcip), không theo thiết bị.
+# ---------------------------------------------------------------------------------------------------------------
+- rule: 101001   # AUTH-001 qua syslog: 5 lần sai, location = IP thiết bị
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.40 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.40 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.40 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.40 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.40 port 4444 ssh2'
+
+- rule: 101002   # AUTH-002 qua syslog: 5 lần sai rồi thành công, location = IP thiết bị
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.41 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.41 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.41 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.41 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.41 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for deploy from 203.0.113.41 port 4444 ssh2'
+
+- none: [101001]   # AUTH-001 qua syslog: 5 lần sai từ 5 IP tấn công khác nhau qua cùng một thiết bị (không trộn nguồn)
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.50 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.51 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.52 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.53 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.54 port 4444 ssh2'
+
+
+- rule: 101020   # console: dòng đăng nhập có outcome lạ dừng ở rule gốc console (101021/101022 không nhận)
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"unknown","user":"bob","ip":"198.51.100.30","srcip":"198.51.100.30"}'
+
+- rule: 101022   # console: đăng nhập thành công
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"198.51.100.30","srcip":"198.51.100.30"}'
+
+- none: [101021, 101022]   # console: đăng nhập thành công không phải thất bại / ngược lại
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"unknown","user":"bob","ip":"198.51.100.30","srcip":"198.51.100.30"}'

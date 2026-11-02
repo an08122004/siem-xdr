@@ -125,3 +125,14 @@ def test_tuning_exempt_from_siem_and_dynamic_from_cases():
 def test_real_repo_rules_are_clean():
     files = {f.name: f.read_text(encoding="utf-8") for f in lint.RULES_DIR.glob("*.xml")}
     assert [o for o in lint.check(files, lint.load_cases(lint.CASES_DIR)) if not o.startswith("WARNING")] == []
+
+
+def test_level0_feeder_rule_needs_no_positive_case():
+    """Rule level 0 chỉ làm cha (if_sid) của rule khác: harness chỉ thấy rule cuối của chuỗi nên không thể có ca dương riêng."""
+    parent = ('<group name="local,"><rule id="101021" level="0"><decoded_as>json</decoded_as>'
+              '<description>CON-021 cha</description><mitre><id>T1078</id></mitre><group>siem,</group></rule>'
+              '<rule id="101000" level="2"><if_sid>101021</if_sid><match>x</match><description>AUT-000 con</description>'
+              '<mitre><id>T1110</id></mitre><group>siem,</group></rule></group>')
+    cs = [{"rule": 101000}, {"none": [101000, 101021]}]
+    assert run(parent, cs=cs) == []
+    assert has(run(parent, cs=[{"rule": 101000}, {"none": [101000]}]), "ca test âm")   # vẫn đòi ca âm
