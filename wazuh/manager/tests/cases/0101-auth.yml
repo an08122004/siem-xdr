@@ -564,3 +564,58 @@
     - '1 2026-11-02T10:00:04+07:00 host sshd 1235 - - Failed password for admin from 203.0.113.60 port 4444 ssh2'
     - '1 2026-11-02T10:00:04+07:00 host sshd 1235 - - Failed password for admin from 203.0.113.60 port 4444 ssh2'
     - '1 2026-11-02T10:00:04+07:00 host sshd 1235 - - Failed password for admin from 203.0.113.60 port 4444 ssh2'
+
+# Đếm CHUNG sshd + console (R42): cùng IP cộng dồn qua hai dịch vụ; log_format/location của ca là sshd qua syslog (IP thiết bị), dòng console ghi đè nguồn.
+- rule: 101001   # AUTH-001: 3 lần sai sshd + 2 lần sai console từ cùng một IP trong cửa sổ -> 5 lần, báo
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.71 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.71 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.71 port 4444 ssh2'
+    - {event: '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.71","srcip":"192.0.2.71","reason":"bad_credentials"}', location: /var/log/siem-console/console.json, log_format: json}
+    - {event: '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.71","srcip":"192.0.2.71","reason":"bad_credentials"}', location: /var/log/siem-console/console.json, log_format: json}
+
+- rule: 101002   # AUTH-002: 5 lần sai sshd rồi đăng nhập console được từ cùng IP -> critical (chéo dịch vụ có chủ ý)
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.72 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.72 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.72 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.72 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.72 port 4444 ssh2'
+    - {event: '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"192.0.2.72","srcip":"192.0.2.72"}', location: /var/log/siem-console/console.json, log_format: json}
+
+- none: [101002]   # AUTH-002: như trên nhưng console success từ IP khác (không chéo nguồn)
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.73 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.73 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.73 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.73 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.73 port 4444 ssh2'
+    - {event: '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"192.0.2.74","srcip":"192.0.2.74"}', location: /var/log/siem-console/console.json, log_format: json}
+
+- none: [101000, 101001, 101002, 101003, 101010, 101020, 101021, 101022]   # console giả mạo: tiền tố lạ /tmp
+  log_format: json
+  location: /tmp/var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80"}'
+
+- none: [101000, 101001, 101002, 101003, 101010, 101020, 101021, 101022]   # console giả mạo: file xoay vòng .1
+  log_format: json
+  location: /var/log/siem-console/console.json.1
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80"}'

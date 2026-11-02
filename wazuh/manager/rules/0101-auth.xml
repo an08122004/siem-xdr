@@ -3,6 +3,8 @@
   Phạm vi: sshd/sudo qua syslog và đăng nhập SOC console (agent 000, location /var/log/siem-console/console.json, dòng JSON do manager/auth.py `Audit` ghi).
   Console: rule gốc nhận dòng JSON là 86600 (decoded_as json, level 0, no_full_log) nên 101020 (root decoded_as json) chiếm dòng trước 86600 và 101021/101022 là con của nó; thất bại console vào CHUNG bộ đếm 101000 với sshd
   (AUTH-001 nay đếm cả console, rộng hơn YAML cũ chỉ phân biệt theo agent; 3 lần sai sshd + 2 lần sai console từ một IP vẫn cộng dồn), success console vào AUTH-002.
+  HAI HỆ QUẢ của đếm chung (quyết định R42, chấp nhận): (1) thất bại sshd và console từ cùng một IP cộng dồn cho AUTH-001/003 và 101010; (2) thành công trên MỘT dịch vụ sau chuỗi thất bại
+  trên dịch vụ KIA từ cùng IP cũng ra 101002 (critical), vd 5 lần sai sshd rồi đăng nhập console được. Vì cùng một IP đang dò mật khẩu nhiều dịch vụ nên coi là cùng một chiến dịch.
   Mọi bộ đếm đều có <same_source_ip /> vì agent 000 dùng chung cho mọi thiết bị syslog, console và manager.
   Thứ tự file quan trọng: các rule dùng cùng event chỉ rule đứng trước báo, nên AUTH-003 > AUTH-001 > bộ đếm 600s (101010).
 -->
@@ -17,7 +19,7 @@
        không đổi gì, còn bộ đếm riêng cần nhân đôi 101001/101003/101010 và hai nguồn từ một IP không cộng dồn. -->
   <rule id="101020" level="0">
     <decoded_as>json</decoded_as>
-    <location type="pcre2">^/var/log/siem-console/console\.json$</location>
+    <location type="pcre2">^/var/log/siem-console/console\.json\z</location>
     <field name="event_type" type="pcre2">^console_auth$</field>
     <regex type="pcre2">"action":\s*"login"</regex>
     <description>CON-020 Console: đăng nhập vào SOC console (rule gốc của chuỗi console)</description>
@@ -107,7 +109,7 @@
     <group>siem,auth,shadow,legacy_AUTH-002,auth_bf_stage,</group>
   </rule>
 
-  <!-- AUTH-002: đăng nhập thành công (sshd 5715 hoặc console 101022) cùng IP trong 10 phút sau chuỗi thất bại (brute-force, spraying hoặc chậm). Nối bằng nhóm, không dùng frequency
+  <!-- AUTH-002: đăng nhập thành công (sshd 5715 hoặc console 101022) cùng IP trong 10 phút sau chuỗi thất bại CỦA BẤT KỲ dịch vụ nào trong hai (chéo dịch vụ có chủ ý, xem header) (brute-force, spraying hoặc chậm). Nối bằng nhóm, không dùng frequency
        nên không dính giới hạn if_matched_group của spike. Đứng trước AUTH-004: root đăng nhập sau brute-force ra 101002 (critical), không ra 101004; chấp nhận được vì mức nặng hơn. -->
   <rule id="101002" level="12" timeframe="600">
     <if_sid>5715, 101022</if_sid>

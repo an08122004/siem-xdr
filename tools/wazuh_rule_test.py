@@ -11,6 +11,7 @@ Thoát mã 1 khi có ca sai, mã 2 khi bơm hàng đợi hỏng (InjectionError)
       legacy: WEB-001         # (tùy chọn) mã rule cũ, để tra
       log_format: apache      # syslog | json | apache | eventchannel | syscheck
       location: /var/log/apache2/access.log
+      # (tùy chọn) một dòng có thể là map {event: '...', location: ..., log_format: ...} để ghi đè nguồn của riêng dòng đó (chỉ syslog/json/apache)
       delay: 16               # (tùy chọn, syslog/json/apache) giây nghỉ sau mỗi dòng, để thử timeframe thật
       events:                 # NHIỀU DÒNG = CÙNG MỘT session logtest (rule đếm ngưỡng frequency/timeframe)
         - '203.0.113.5 - - [31/Oct/2026:10:00:00 +0700] "GET /p.php?id=1%27 HTTP/1.1" 200 12 "-" "curl/8"'
@@ -81,7 +82,10 @@ def fired(case: dict, api) -> set[int]:
         for n, ev in enumerate(case["events"]):
             if n and case.get("delay"):
                 time.sleep(case["delay"])        # giây GIỮA các dòng (không nghỉ sau dòng cuối): timeframe tính theo giờ thật lúc nhận, không theo giờ trong log
-            res = _retry(lambda: api.logtest(ev, case["log_format"], case["location"], token))
+            fmt, loc = case["log_format"], case["location"]
+            if isinstance(ev, dict):          # {event, location?, log_format?}: trộn nguồn (sshd qua syslog + console) trong một session
+                fmt, loc, ev = ev.get("log_format", fmt), ev.get("location", loc), ev["event"]
+            res = _retry(lambda: api.logtest(ev, fmt, loc, token))
             token = res.get("token") or token
             if (rid := ((res.get("output") or {}).get("rule") or {}).get("id")):
                 ids.add(int(rid))

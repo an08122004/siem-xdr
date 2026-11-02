@@ -136,3 +136,17 @@ def test_level0_feeder_rule_needs_no_positive_case():
     cs = [{"rule": 101000}, {"none": [101000, 101021]}]
     assert run(parent, cs=cs) == []
     assert has(run(parent, cs=[{"rule": 101000}, {"none": [101000]}]), "ca test âm")   # vẫn đòi ca âm
+
+
+def test_level0_rule_with_if_sid_but_no_child_still_needs_positive_case():
+    alone = rule(rid=101021, level=0, extra="<decoded_as>json</decoded_as>")
+    assert has(run(alone, cs=[{"none": [101021]}]), "ca test dương")
+
+
+def test_level0_feeder_exemption_ignores_comments_and_other_files():
+    parent = rule(rid=101021, level=0, extra="<decoded_as>json</decoded_as>")
+    commented = parent + "<!-- <rule id='101000'><if_sid>101021</if_sid></rule> -->"
+    assert has(run(commented, cs=[{"none": [101021]}]), "ca test dương")                         # chú thích không tính
+    other = lint.check({AUTH: parent, "0102-linux.xml": rule(rid=102001, extra="<if_sid>101021</if_sid>")},
+                       [{"none": [101021]}, {"rule": 102001}, {"none": [102001]}])
+    assert has(other, "ca test dương")                                                           # con ở file khác không tính

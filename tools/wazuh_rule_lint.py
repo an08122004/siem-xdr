@@ -39,7 +39,6 @@ def check(files: dict[str, str], cases: list[dict]) -> list[str]:
     pos = {c["rule"] for c in cases if "rule" in c}
     neg = {i for c in cases for i in (c.get("none") or [])}
     seen: dict[int, str] = {}
-    feeds = {int(x) for t in files.values() for m in re.findall(r"<if_sid>([^<]*)</if_sid>", t) for x in re.findall(r"\d+", m)}
     for name, text in sorted(files.items()):
         tuning = name == TUNING_FILE
         dynamic = name.startswith("rules-dynamic/")      # console sinh lúc chạy: không đòi ca test
@@ -55,6 +54,8 @@ def check(files: dict[str, str], cases: list[dict]) -> list[str]:
         except ET.ParseError as e:
             err("-", f"XML sai cú pháp: {e}")
             continue
+        # id nằm trong <if_sid> của một rule CÙNG FILE tĩnh (bỏ comment, không đếm rules-dynamic): cha level 0 như vậy miễn ca dương
+        feeds = set() if dynamic else {int(x) for e in root.iter("if_sid") for x in re.findall(r"\d+", e.text or "")}
         # Đọc XML phản chiếu wazuh_rules.parse (nhóm hiệu lực, overwrite, level), không gọi nó vì cần phần tử thô và không được ném lỗi.
         parent = {c: p for p in root.iter() for c in p}
         for el in root.iter("rule"):

@@ -214,3 +214,18 @@ def test_negative_only_batch_does_not_pass_when_injection_broken(monkeypatch):
     _fake_docker(monkeypatch, lambda msgs: [])
     with pytest.raises(wrt.InjectionError):
         wrt.run([case(none=[100100], log_format="syscheck", events=[{"path": "/a", "type": "added"}])], FakeApi(None))
+
+
+def test_event_mapping_overrides_location_and_format_in_same_session():
+    """Một ca trộn nguồn (sshd qua syslog + console) vẫn là MỘT session; dòng dạng map {event, location, log_format} ghi đè mặc định của ca."""
+    seen = []
+
+    class Api(FakeApi):
+        def logtest(self, event, log_format, location, token=None):
+            seen.append((event, log_format, location))
+            return super().logtest(event, log_format, location, token)
+
+    c = case(rule=1, events=["a", {"event": "b", "location": "/c.json", "log_format": "json"}])
+    api = Api(lambda n, e: 1)
+    assert wrt.fired(c, api) == {1} and len(api.sessions) == 1
+    assert seen == [("a", "syslog", "x"), ("b", "json", "/c.json")]

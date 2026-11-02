@@ -466,7 +466,8 @@ Làm sau khi `siem-server` chạy (mục 2). `assets.yml` đã khai IP các cổ
 3. **Suricata** (pfSense: *System → Package Manager* cài gói `suricata`; OPNsense có sẵn ở *Services → Intrusion Detection*):
    - Tải bộ luật *ETOpen Emerging Threats* (pfSense: *Services → Suricata → Global Settings*; OPNsense: tab *Download*).
    - Bật Suricata trên cổng `INET_GIA` (và `DMZ` nếu đủ RAM), chế độ chỉ phát hiện (không chặn) để SOAR là bên phản ứng.
-   - Gửi alert dạng EVE qua syslog: pfSense *Interface Settings → EVE Output Settings*: bật *EVE JSON Log*, *EVE Output
+   - **Rule Suricata của Wazuh (86601...) và NET-004 bản XML cần agent Wazuh trên OPNsense đọc `/var/log/suricata/eve.json`** (`<localfile>` `log_format json`, plugin `os-wazuh-agent`). Spike S6: Suricata qua syslog 514 KHÔNG có decoder Wazuh (cả RFC 3164 lẫn 5424), nên đường syslog dưới đây chỉ nuôi parser Suricata của analyzer YAML.
+   - Gửi alert dạng EVE qua syslog (đường phụ cho analyzer YAML): pfSense *Interface Settings → EVE Output Settings*: bật *EVE JSON Log*, *EVE Output
      Type* `SYSLOG`, tắt ghi payload (dòng syslog quá dài bị cắt thì analyzer không đọc được JSON); OPNsense *Settings →
      Enable eve syslog output*.
    - Analyzer chỉ đọc JSON EVE từ dòng syslog có tên chương trình `suricata` (mặc định của cả hai).
