@@ -59,7 +59,7 @@ NET-001:
   - 87702
   - 87701
   decision: approx
-  note: '1/2 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: deny; thiếu: allow; rule chung, không tính phủ: 87701 (level 5: pfSense firewall drop event.) [level 5 ''pfSense firewall drop event.'': MỘT gói bị chặn, không có ngưỡng]; ca âm báo level>=7: [87702]; rule dự án 0541-network.xml: 103001 (không phải block) và 103002 (block, level 11 vì 87702 level 10 đã đánh dấu event) đếm `different_dstport` >= 20/60 s cùng nguồn, chạy bóng; giới hạn S4: ít cổng xen kẽ vẫn báo sau ~2N-2 dòng, một cổng lặp lại không báo; 103002 báo ở dòng 21 (sau 87702 ở dòng 18)'
+  note: '1/2 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: deny; thiếu: allow; rule chung, không tính phủ: 87701 (level 5: pfSense firewall drop event.) [level 5 ''pfSense firewall drop event.'': MỘT gói bị chặn, không có ngưỡng]; ca âm báo level>=7: [87702]; rule dự án 0541-network.xml: 103001 (không phải block) và 103002 (block, level 11 = high trong khi bản pass 103001 là medium, vì 87702 level 10 đã đánh dấu event; báo SAU 87702 nên một đợt quét cho hai alert) đếm `different_dstport` >= 20/60 s cùng nguồn, chạy bóng; giới hạn S4: Wazuh đếm event trước có giá trị khác, nên một chuỗi DÀI hai cổng xen kẽ (>= 2N-2 dòng) VẪN báo (dương tính giả, không chỉ bỏ sót); một cổng lặp lại không báo; 103002 báo ở dòng 21 (sau 87702 ở dòng 18)'
 NET-002:
   wazuh:
   - 87702
@@ -73,11 +73,11 @@ NET-003:
 NET-004:
   wazuh: []
   decision: convert
-  note: 'chỉ trúng rule chung 86601 (Suricata: Alert - $(alert.signature)), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7; rule dự án 103004 (0541-network.xml, con của 86601): alert.severity <= 2, chạy bóng; CHỈ qua agent OPNsense đọc eve.json (Suricata qua syslog không có decoder, S6); che 99915/99916 (IOC, level 9) với cảnh báo severity <= 2'
+  note: 'chỉ trúng rule chung 86601 (Suricata: Alert - $(alert.signature)), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7; rule dự án 103004 (0541-network.xml, con của 86601): alert.severity <= 2, chạy bóng; CHỈ qua agent OPNsense đọc eve.json (Suricata qua syslog không có decoder, S6); loại IP trong danh sách malicious-ip bằng lookup phủ định nên rule IOC gốc 99915/99916 (level 9) thắng NET-004 (R44), NET-004 chỉ ra với IP sạch'
 NET-005:
   wazuh: []
   decision: convert
-  note: '0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo; rule dự án 103005 (0541-network.xml): `different_dstip` >= 10 trên cổng 445/60 s cùng nguồn, chỉ kết nối không bị chặn, chạy bóng; giới hạn S4 như NET-001; quét SMB từ IP public đã bị NET-003 báo từng event nên không vào đếm'
+  note: '0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo; rule dự án 103005 (0541-network.xml): `different_dstip` >= 10 trên cổng 445/60 s cùng nguồn, chỉ kết nối không bị chặn, chạy bóng; giới hạn S4 như NET-001: chuỗi dài (>= 18 dòng) hai IP đích xen kẽ vẫn báo (dương tính giả); quét SMB từ IP public đã bị NET-003 báo từng event nên không vào đếm'
 TI-001:
   wazuh: []
   decision: convert

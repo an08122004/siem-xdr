@@ -838,7 +838,7 @@
   events:
   - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"198.51.100.43","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":3}}'
 
-- rule: 103004   # NET-004 che 99915 (anh em, level 9, 0999): severity 1 từ IP trong danh sách malicious-ip ra 103004 (level 10), không ra 99915 — đã biết, xem đầu 0541-network.xml
+- rule: 99915   # R44: severity 1 từ IP trong danh sách malicious-ip -> rule IOC gốc thắng
   log_format: json
   location: (fw01) any->/var/log/suricata/eve.json
   events:
@@ -849,3 +849,15 @@
   location: (fw01) any->/var/log/suricata/eve.json
   events:
   - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"196.251.85.62","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":3}}'
+
+- none: [103004]   # R44: IP malicious + severity 1 KHÔNG ra NET-004 (99915 thắng)
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"196.251.85.62","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
+
+- rule: 103004   # R44: IP sạch + severity 1 vẫn ra NET-004
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"198.51.100.50","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'

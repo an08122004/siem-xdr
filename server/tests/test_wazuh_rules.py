@@ -150,3 +150,11 @@ def test_api_user_script_fails_loudly_on_wrong_argc(args):
     script = Path(__file__).resolve().parents[2] / "wazuh/manager/entrypoint/siem_api_user.py"
     r = subprocess.run([sys.executable, str(script), *args], capture_output=True, text=True)
     assert r.returncode != 0 and "usage" in r.stderr
+
+
+def test_log_alert_level_giu_o_3():
+    # rule trợ giúp level 2 (101000, 101010, 103000) không được vào alerts.json, nếu không cầu nối (luôn bắc cầu rule local) biến chúng thành alert
+    import re
+    from pathlib import Path
+    conf = (Path(__file__).resolve().parents[2] / "wazuh" / "manager" / "ossec.conf").read_text(encoding="utf-8")
+    assert int(re.search(r"<log_alert_level>(\d+)</log_alert_level>", conf).group(1)) >= 3

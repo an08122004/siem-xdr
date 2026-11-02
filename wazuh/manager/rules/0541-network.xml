@@ -13,8 +13,8 @@
   (parse_firewall cũ cũng chỉ nhận IPv4). Suricata: decoder `json` + rule gốc 86600/86601 (level 3); eve.json KHÔNG đặt srcip, chỉ có data.src_ip, alert.severity (số), alert.signature_id.
   Mọi bộ đếm đều có <same_source_ip /> vì agent 000 dùng chung cho mọi thiết bị syslog, console và manager.
 
-  Rule gốc bị treo con: 87700 (103000, level 2) và 86601 (103004). 86601 có anh em 99915/99916 (0999-malicious-ioc-rules.xml, level 9, IP trong danh sách IOC): file này nạp trước 0999
-  nên với cảnh báo severity <= 2 từ IP độc hại thì 103004 (level 10) là rule cuối thay cho 99915/99916.
+  Rule gốc bị treo con: 87700 (103000, level 2) và 86601 (103004). 86601 có anh em 99915/99916 (0999-malicious-ioc-rules.xml, level 9, IP nguồn/đích trong danh sách IOC): 103004 loại các IP đó bằng
+  lookup phủ định cùng danh sách (R44) để rule IOC gốc (nhóm/ngữ cảnh threat-intel cho TI-001) là rule cuối; thử đổi thứ tự file không đổi kết quả nên không dùng cách đó.
 
   NET-002 (>= 50 chặn / 60 s, cùng nguồn) KHÔNG có rule ở đây: chỉ khác 87702 ở ngưỡng (18/45 s), nên chuyển sang 0190-tuning (Task 12), cùng việc sửa 87702.
 
@@ -104,9 +104,13 @@
     <group>siem,network,shadow,legacy_NET-003,</group>
   </rule>
 
-  <!-- NET-004: cảnh báo Suricata severity <= 2 (1 = cao nhất). Con của 86601 (event_type alert). -->
+  <!-- NET-004: cảnh báo Suricata severity <= 2 (1 = cao nhất). Con của 86601 (event_type alert).
+       R44: loại IP nằm trong danh sách IOC (cùng danh sách, cùng trường src_ip/dest_ip với 99915/99916 của 0999) để rule IOC gốc thắng; thứ tự file KHÔNG quyết định được (đã thử nạp 103004 sau 0999: vẫn thắng 99915),
+       nên dùng lookup phủ định. IP sạch vẫn ra NET-004. -->
   <rule id="103004" level="10">
     <if_sid>86601</if_sid>
+    <list field="src_ip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
+    <list field="dest_ip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <field name="alert.severity" type="pcre2">^[0-2]$</field>
     <description>NET-004 Cảnh báo IDS Suricata mức cao: $(alert.signature)</description>
     <mitre>
