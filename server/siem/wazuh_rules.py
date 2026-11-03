@@ -33,6 +33,10 @@ class WazuhRuleError(ValueError):
     pass
 
 
+class WazuhUnavailable(WazuhRuleError):
+    """Không hỏi được Wazuh API (đóng, sai mật khẩu...): thao tác cần xác nhận từ Wazuh phải từ chối (fail closed)."""
+
+
 def _split(text: str | None) -> list[str]:
     return [x.strip() for x in (text or "").split(",") if x.strip()]
 
@@ -87,6 +91,15 @@ class WazuhApi(WazuhAPI):
         if token:
             body["token"] = token
         return self.request("PUT", "/logtest", body).get("data", {})
+
+    def rule(self, rule_id: int) -> dict | None:
+        """Rule đang nạp theo id (dict có `id`, `level`), không có thì None. Không gọi được API thì WazuhUnavailable."""
+        try:
+            res = self.request("GET", f"/rules?rule_ids={int(rule_id)}")
+        except WazuhError as e:
+            raise WazuhUnavailable(f"không hỏi được Wazuh API: {e}") from e
+        items = (res.get("data") or {}).get("affected_items") or []
+        return items[0] if items else None
 
     def rules(self, offset: int = 0, limit: int = 500) -> dict:
         return self.request("GET", f"/rules?offset={offset}&limit={limit}")
