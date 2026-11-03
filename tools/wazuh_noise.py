@@ -12,6 +12,7 @@ level cao nhất đã khớp event đó, như wazuh_coverage.match_alerts).
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -25,7 +26,8 @@ import wazuh_coverage as cov  # noqa: E402
 
 ROOT = cov.ROOT
 IMAGE = "wazuh/wazuh-manager:4.14.8"
-NAME = "wazuh-noise"
+# đổi tên khi nhiều bản chạy song song trên cùng máy (container tạm bị `docker rm -f` theo tên)
+NAME = os.getenv("WAZUH_NOISE_NAME", "wazuh-noise")
 MIN_LEVEL = 7
 GATE = 1.0          # alert / 100 event bình thường
 # thay entrypoint của repo (cần secrets/chứng chỉ): chỉ tắt filebeat + tạo thư mục rule động như entrypoint thật
