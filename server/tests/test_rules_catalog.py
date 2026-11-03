@@ -173,11 +173,12 @@ class FakeES:
 
 def test_sync_writes_once_and_removes_stale(rules_dir, monkeypatch):
     monkeypatch.setattr(rc, "_last_sig", None)
+    monkeypatch.setattr(rc, "_doc_sigs", {})
     es = FakeES()
     n = rc.sync(es, rules_dir)
     ids = [op["index"]["_id"] for op in es.bulks[0] if "index" in op]
     assert n == len(ids) and "rule:WEB-001" in ids and "proposal:p-sqli" in ids
-    assert es.deleted[0] == {"bool": {"must_not": [{"ids": {"values": ids}}]}}   # rule bị xóa / gỡ -> bản ghi cũ bị xóa
+    assert es.deleted[0] == {"bool": {"must_not": [{"ids": {"values": ids}}, {"term": {"origin": "wazuh_rule"}}]}}   # rule bị xóa / gỡ -> bản ghi cũ bị xóa
     assert rc.sync(es, rules_dir) == 0 and len(es.bulks) == 1                     # không đổi gì -> không ghi lại
     (rules_dir / "ai" / "AI-021.yml").unlink()                                    # gỡ rule AI
     rc.sync(es, rules_dir)
@@ -231,11 +232,12 @@ def test_wazuh_rule_docs_pages_and_maps(monkeypatch):
     assert stock["severity"] == "low" and stock["shadow"] is True and stock["mode"] == "shadow"   # rule gốc level 5 ngoài nhóm cũ
     assert stock["alerts"]["d7"] == 3 and stock["mitre"]["technique"] == ["T1110"] and stock["file"] == "ruleset/rules/0095-sshd_rules.xml"
     assert proj["severity"] == "high" and proj["shadow"] is True and proj["legacy_id"] == "AUTH-001"
-    assert proj["mode"] == "off" and proj["status"] == "disabled" and proj["source"] == "wazuh" and proj["origin"] == "rule"
+    assert proj["mode"] == "off" and proj["status"] == "disabled" and proj["source"] == "wazuh" and proj["origin"] == "wazuh_rule" and "legacy_id" not in stock
 
 
 def test_sync_includes_wazuh_and_keeps_old_on_api_error(rules_dir, monkeypatch):
     monkeypatch.setattr(rc, "_last_sig", None)
+    monkeypatch.setattr(rc, "_doc_sigs", {})
     es = FakeES()
     rc.sync(es, rules_dir, api=FakeWazuh())
     ids = [op["index"]["_id"] for op in es.bulks[0] if "index" in op]
@@ -243,4 +245,8 @@ def test_sync_includes_wazuh_and_keeps_old_on_api_error(rules_dir, monkeypatch):
     rc.sync(es, rules_dir, api=FakeWazuh(fail=True), force=True)               # API tắt: vẫn ghi phần còn lại, không xóa rule Wazuh
     ids2 = [op["index"]["_id"] for op in es.bulks[1] if "index" in op]
     assert "rule:WZH-5710" not in ids2 and "rule:WEB-001" in ids2
-    assert {"term": {"source": "wazuh"}} in es.deleted[1]["bool"]["must_not"]
+    assert {"term": {"origin": "wazuh_rule"}} in es.deleted[1]["bool"]["must_not"]
+    rc.sync(es, rules_dir, force=True)                                            # không truyền api: cũng không xóa rule Wazuh
+    assert {"term": {"origin": "wazuh_rule"}} in es.deleted[2]["bool"]["must_not"]
+    rc.sync(es, rules_dir, api=FakeWazuh(), force=True)                           # lấy thành công: được dọn bản ghi Wazuh thừa
+    assert es.deleted[3]["bool"]["must_not"] == [{"ids": {"values": [op["index"]["_id"] for op in es.bulks[3] if "index" in op]}}]

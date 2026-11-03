@@ -447,16 +447,17 @@ def wazuh_rule_docs(api, alert_stats: dict[str, dict[str, Any]]) -> list[dict[st
             mitre = r.get("mitre") or {}
             ids = [str(i) for i in mitre.get("id") or []]
             sev, rid = severity_for(level), f"WZH-{r['id']}"
+            legacy = [g for g in groups if g.startswith("legacy_")]
             shadow = "shadow" in groups or is_shadow_stock({"id": r["id"], "level": level, "groups": groups})
             off = str(r.get("status", "enabled")).lower() != "enabled"
             mode = "off" if off else "shadow" if shadow else "active"
             st = alert_stats.get(rid, {})
             docs.append({
-                "_id": f"rule:{rid}", "origin": "rule", "origin_label": "Rule Wazuh", "source": "wazuh",
+                "_id": f"rule:{rid}", "origin": "wazuh_rule", "origin_label": "Rule Wazuh", "source": "wazuh",
                 "rule": {"id": rid, "name": r.get("description", "")}, "description": r.get("description", ""),
                 "severity": sev, "severity_score": SEVERITY_SCORE.get(sev, 0), "type": "wazuh", "level": level,
                 **_common(tactic=(mitre.get("tactic") or [None])[0], techniques=ids, tags=["wazuh", *groups], fields=[]),
-                "groups": groups, "legacy_id": next((g[7:] for g in groups if g.startswith("legacy_")), None),
+                "groups": groups, **({"legacy_id": legacy[0][7:]} if legacy else {}),     # như alert: không có thì bỏ khóa
                 "condition_text": "", "patterns": [], "yaml": "",
                 "file": f"{r.get('relative_dirname', '')}/{r.get('filename', '')}".strip("/"),
                 "status": r.get("status", "enabled"), "shadow": shadow,
@@ -473,8 +474,10 @@ def wazuh_rule_docs(api, alert_stats: dict[str, dict[str, Any]]) -> list[dict[st
 def alert_stats(es) -> dict[str, dict[str, Any]]:
     """Số alert 24 giờ / 7 ngày và lần gần nhất của từng rule (để biết rule nào hay kêu, rule nào im lặng)."""
     try:
+        # 10 000: rule Wazuh (WZH-*) cũng kêu, 2000 làm rớt rule; vẫn dưới search.max_buckets (65 536)
+        # 10 000: rule Wazuh (WZH-*) cũng kêu, 2000 làm rớt rule; vẫn dưới search.max_buckets (65 536)
         d30 = {"range": {"@timestamp": {"gte": "now-30d"}}}
-        res = es.search(index=settings.IDX_ALERTS, size=0, aggs={"r": {"terms": {"field": "rule.id", "size": 2000}, "aggs": {
+        res = es.search(index=settings.IDX_ALERTS, size=0, aggs={"r": {"terms": {"field": "rule.id", "size": 10000}, "aggs": {
             "d90": {"filter": {"range": {"@timestamp": {"gte": "now-90d"}}}},
             "d7": {"filter": {"range": {"@timestamp": {"gte": "now-7d"}}}},
             "h24": {"filter": {"range": {"@timestamp": {"gte": "now-24h"}}}},
@@ -539,6 +542,7 @@ def build(rules_dir: Path, proposals: list[dict[str, Any]], stats: dict[str, dic
 
 _lock = threading.Lock()
 _last_sig: str | None = None
+_doc_sigs: dict[str, str] = {}      # chữ ký từng bản ghi đã ghi: chỉ gửi bản ghi đổi (~4,5 nghìn rule Wazuh, mỗi chu kỳ ít đổi)
 
 
 def sync(es, rules_dir: Path = settings.RULES_DIR, force: bool = False, api=None) -> int:
@@ -547,19 +551,21 @@ def sync(es, rules_dir: Path = settings.RULES_DIR, force: bool = False, api=None
     Trả về số bản ghi đã ghi (0 nếu bỏ qua)."""
     global _last_sig
     with _lock:
-        stats, wazuh, keep_wazuh = alert_stats(es), None, False
+        stats, wazuh, keep_wazuh = alert_stats(es), None, True      # mặc định giữ rule Wazuh
         if api is not None:
             try:
-                wazuh = wazuh_rule_docs(api, stats)
+                wazuh, keep_wazuh = wazuh_rule_docs(api, stats), False
             except Exception as e:  # noqa: BLE001
                 log.warning("không đọc được rule từ Wazuh API, giữ danh mục Wazuh cũ: %s", e)
-                keep_wazuh = True
         docs = build(rules_dir, load_proposals(es), stats, lint_report(rules_dir, settings.CONFIG_DIR), wazuh)
         sig = hashlib.sha1(json.dumps(docs, sort_keys=True, default=str).encode()).hexdigest()
         if sig == _last_sig and not force:
             return 0
         ops: list[dict[str, Any]] = []
+        sigs = {d["_id"]: hashlib.sha1(json.dumps(d, sort_keys=True, default=str).encode()).hexdigest() for d in docs}
         for d in docs:
+            if not force and _doc_sigs.get(d["_id"]) == sigs[d["_id"]]:
+                continue
             ops += [{"index": {"_index": settings.IDX_RULES, "_id": d["_id"]}}, {k: v for k, v in d.items() if k != "_id"}]
         if ops:
             res = es.bulk(operations=ops, refresh="wait_for")
@@ -567,9 +573,10 @@ def sync(es, rules_dir: Path = settings.RULES_DIR, force: bool = False, api=None
                 bad = [i for i in res["items"] if i["index"].get("error")]
                 log.warning("danh mục rule: %d bản ghi lỗi, ví dụ %s", len(bad), bad[:1])
         # không refresh=True: cần quyền maintenance mà manager không có (lỗi 403 như SOAR đã gặp)
+        _doc_sigs.update(sigs)
         must_not = [{"ids": {"values": [d["_id"] for d in docs]}}]
-        if keep_wazuh:
-            must_not.append({"term": {"source": "wazuh"}})
+        if keep_wazuh:      # chỉ xóa bản ghi Wazuh khi lần lấy Wazuh API trong chính lần này thành công
+            must_not.append({"term": {"origin": "wazuh_rule"}})
         es.delete_by_query(index=settings.IDX_RULES, conflicts="proceed", query={"bool": {"must_not": must_not}})
         _last_sig = None if api is not None and keep_wazuh else sig        # lần sau thử lại Wazuh
         log.info("đã đồng bộ danh mục rule: %d bản ghi", len(docs))

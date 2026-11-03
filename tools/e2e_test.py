@@ -293,7 +293,7 @@ check("grafana", "mục Phiên đăng nhập thấy lượt đăng nhập consol
 st, d = admin.grafana("/api/dashboards/uid/siem-investigate")
 check("grafana", "dashboard Điều tra thực thể (biến q) tải được", st == 200 and d["dashboard"]["templating"]["list"][0]["name"] == "q")
 st, d = admin.grafana("/api/dashboards/uid/siem-rules")
-check("grafana", "dashboard Thư viện rule tải được", st == 200 and len(d["dashboard"]["panels"]) == 15)
+check("grafana", "dashboard Thư viện rule tải được", st == 200 and len(d["dashboard"]["panels"]) == 17)
 
 
 def catalog_count(query):
@@ -310,7 +310,7 @@ n_files = sum(1 for f in Path("server/rules").glob("**/*.y*ml") if not {"excepti
 n_rules = catalog_count("origin:rule AND source:(builtin OR ai)")
 check("grafana", "Thư viện rule liệt kê đủ rule trong server/rules (Grafana đọc qua siem-rules)", n_rules == n_files,
       f"{n_rules}/{n_files} rule")
-n_wzh = catalog_count("origin:rule AND source:wazuh")
+n_wzh = catalog_count("origin:wazuh_rule")
 wzh_total = manager_py("""
 from siem.wazuh_rules import WazuhApi
 print(WazuhApi.from_settings().rules(0, 1)['data']['total_affected_items'])

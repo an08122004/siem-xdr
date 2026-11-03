@@ -92,7 +92,7 @@ async def kpi_loop() -> None:
 def refresh_catalog() -> None:
     """Sau khi duyệt / từ chối / gỡ đề xuất: cập nhật danh mục ngay, không chờ chu kỳ."""
     try:
-        rules_catalog.sync(es(), settings.RULES_DIR)
+        rules_catalog.sync(es(), settings.RULES_DIR, api=WazuhApi.from_settings())
     except Exception as e:  # noqa: BLE001 - danh mục chỉ để tra cứu, không được làm hỏng thao tác duyệt
         log.warning("cập nhật danh mục rule lỗi: %s", e)
 
