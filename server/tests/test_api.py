@@ -1157,39 +1157,63 @@ def test_ai_assist_jobs_and_feedback(env):
 
 
 # ------------------------------------------------------------------ ngoại lệ thành rule Wazuh level 0 (Task 16)
+
+
 def test_wazuh_exceptions_api(env, monkeypatch, tmp_path):
-    from siem import wazuh_exceptions
+    from siem import wazuh_exceptions, wazuh_rules
     from siem.wazuh_rules import WazuhRuleError
 
     class Api:
-        fail = None
+        fail, down = None, False
 
         def reload(self):
             if self.fail:
                 raise WazuhRuleError(self.fail)
+
+        def rule(self, rid):
+            if self.down:
+                raise wazuh_rules.WazuhUnavailable("API đóng")
+            return {"id": rid, "level": 5} if rid == 31103 else None
     a = Api()
     monkeypatch.setattr(wazuh_exceptions, "DYNAMIC_DIR", tmp_path)
     monkeypatch.setattr("siem.wazuh_rules.WazuhApi.from_settings", classmethod(lambda cls: a))
+    body = {"rule": "WZH-31103", "conditions": [{"field": "source.ip", "value": "10.10.40.50"}], "reason": "máy quét"}
+
+    def xml():
+        p = tmp_path / "exceptions.xml"
+        return p.read_text(encoding="utf-8") if p.exists() else ""
     pw = activate(env, "an", "analyst")
     login(env, "an", pw)
-    body = {"rule": "WZH-31103", "conditions": [{"field": "source.ip", "value": "10.10.40.50"}], "reason": "máy quét"}
     assert env.post("/api/v1/exceptions", json=body, headers=H).status_code == 403
-    pw = activate(env, "de", "detection")
-    login(env, "de", pw)
+    assert env.delete("/api/v1/exceptions/110000?reason=abc", headers=H).status_code == 403
+    pw2 = activate(env, "de", "detection")
+    pw3 = activate(env, "de3", "detection")
+    login(env, "de", pw2)
     r = env.post("/api/v1/exceptions", json=body, headers=H)
-    assert r.status_code == 200 and r.json()["id"] == 110000
-    xml = (tmp_path / "exceptions.xml").read_text(encoding="utf-8")
-    assert 'id="110000" level="0"' in xml and "<srcip>10.10.40.50</srcip>" in xml
-    # chỉ có rule cha: một ngoại lệ tắt cả rule không được phép
+    assert r.status_code == 200 and r.json()["id"] == 110000 and r.json()["status"] == "pending"
+    assert xml() == ""                                                                      # chưa đủ 2 người duyệt
+    assert env.post("/api/v1/exceptions", json=body, headers=H).status_code == 409           # trùng
+    assert env.post("/api/v1/exceptions/110000/approve", headers=H).status_code == 400       # cùng người
     assert env.post("/api/v1/exceptions", json=body | {"conditions": []}, headers=H).status_code == 400
     assert env.post("/api/v1/exceptions", json=body | {"conditions": [{"field": "host.name", "value": "x"}]},
                     headers=H).status_code == 400
-    # Wazuh nạp lại hỏng -> 409, file cũ còn nguyên
+    assert env.post("/api/v1/exceptions", json=body | {"rule": "WZH-1"}, headers=H).status_code == 400   # cha không có
+    other = body | {"conditions": [{"field": "user.name", "value": "svc"}]}
+    a.down = True
+    assert env.post("/api/v1/exceptions", json=other, headers=H).status_code == 503
+    a.down = False
+    login(env, "de3", pw3)
     a.fail = "Failed to reload"
-    r = env.post("/api/v1/exceptions", json=body | {"conditions": [{"field": "user.name", "value": "svc"}]}, headers=H)
-    assert r.status_code == 409 and (tmp_path / "exceptions.xml").read_text(encoding="utf-8") == xml
+    assert env.post("/api/v1/exceptions/110000/approve", headers=H).status_code == 409     # Wazuh nạp lỗi: giữ file cũ
+    assert xml() == "" and env.get("/api/v1/exceptions").json()[0]["status"] == "failed"
     a.fail = None
-    assert [e["id"] for e in env.get("/api/v1/exceptions").json()] == [110000]
-    assert env.delete("/api/v1/exceptions/110000", headers=H).status_code == 200
-    assert env.delete("/api/v1/exceptions/110000", headers=H).status_code == 404
-    assert env.get("/api/v1/exceptions").json() == []
+    r = env.post("/api/v1/exceptions", json=other, headers=H)
+    assert r.json()["id"] == 110001                                                         # 110000 không tái dùng
+    login(env, "de", pw2)
+    assert env.post("/api/v1/exceptions/110001/approve", headers=H).status_code == 200
+    assert 'id="110001" level="0"' in xml() and 'id="110000"' not in xml()
+    assert env.delete("/api/v1/exceptions/110001", headers=H).status_code == 400            # thiếu lý do
+    r = env.delete("/api/v1/exceptions/110001?reason=hết cần", headers=H)
+    assert r.status_code == 200 and r.json()["status"] == "removed" and r.json()["removed_by"] == "de"
+    assert 'id="110001"' not in xml()
+    assert env.delete("/api/v1/exceptions/110001?reason=hết cần", headers=H).status_code == 404

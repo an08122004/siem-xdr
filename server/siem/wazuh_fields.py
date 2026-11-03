@@ -24,10 +24,10 @@ def to_wazuh(ecs_field: str, decoder: str | None) -> str:
 
 
 def literal(value: str) -> str:
-    """Mẫu pcre2 khớp đúng `value`, neo hai đầu."""
+    """Mẫu pcre2 khớp đúng `value`, neo hai đầu (`\\z`, không phải `$` vì `$` còn khớp trước dấu xuống dòng cuối)."""
     out = "".join(c if _SAFE.match(c) else r"\." if c == "." else f"\\x{ord(c):02x}" if ord(c) < 128 else c
                   for c in value)
-    return f"^{out}$"
+    return f"^{out}\\z"
 
 
 def _condition(c: dict) -> str:
@@ -48,7 +48,8 @@ def exception_rule(parent_id: int, conditions: list[dict], new_id: int, reason: 
     """Một <rule level="0"> con của rule `parent_id`. Không có điều kiện thì lỗi: ngoại lệ không được tắt cả rule."""
     if not conditions:
         raise ValueError("ngoại lệ phải có ít nhất một điều kiện (không được tắt cả rule)")
-    desc = escape(" ".join(f"Ngoại lệ: {reason}".split()))[:300]
+    clean = "".join(c for c in reason if c.isprintable() or c.isspace())      # bỏ NUL và ký tự điều khiển
+    desc = escape(" ".join(f"Ngoại lệ: {clean}".split())[:300])                # cắt TRƯỚC khi escape
     body = "\n".join("    " + _condition(c) for c in conditions)
     return (f'  <rule id="{int(new_id)}" level="0">\n    <if_sid>{int(parent_id)}</if_sid>\n{body}\n'
             f"    <description>{desc}</description>\n    <group>siem,exception,</group>\n  </rule>")

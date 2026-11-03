@@ -1,5 +1,6 @@
 """Ngoại lệ thành rule Wazuh level 0 (siem/wazuh_fields.py + siem/wazuh_exceptions.py)."""
-import json
+import re
+import threading
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -9,8 +10,15 @@ from siem.wazuh_rules import WazuhRuleError
 
 
 class FakeApi:
-    def __init__(self, errors=()):
-        self.errors, self.reloads = list(errors), 0
+    RULES = {31103: 5, 31104: 6, 60000: 4, 100: 0}
+
+    def __init__(self, errors=(), down=False):
+        self.errors, self.reloads, self.down = list(errors), 0, down
+
+    def rule(self, rid):
+        if self.down:
+            raise wazuh_rules.WazuhUnavailable("API đóng")
+        return {"id": rid, "level": self.RULES[rid]} if rid in self.RULES else None
 
     def reload(self):
         self.reloads += 1
@@ -50,15 +58,15 @@ def test_srcip_must_be_single_ip():
 def test_value_is_exact_literal_and_cannot_inject_xml():
     evil = 'a<b>"c" & .* (x|y) [z] $ \\ \n</rule><rule id="1" level="15">'
     x = wazuh_fields.exception_rule(31103, [{"field": "url.original", "value": evil}], 110000, evil)
-    group = ET.fromstring(f"<g>{x}</g>")                      # XML vẫn hợp lệ, đúng 1 rule
-    rules = group.findall("rule")
+    rules = ET.fromstring(f"<g>{x}</g>").findall("rule")      # XML vẫn hợp lệ, đúng 1 rule
     assert len(rules) == 1 and rules[0].get("level") == "0"
     pat = rules[0].find("url").text
-    assert pat.startswith("^") and pat.endswith("$") and rules[0].find("url").get("type") == "pcre2"
+    assert pat.startswith("^") and pat.endswith("\\z") and rules[0].find("url").get("type") == "pcre2"
     assert not any(c in pat for c in "<>\"&*()[]|\n ")       # mọi ký tự đặc biệt đã thành \xHH
-    import re
-    assert re.search(pat, evil) and not re.search(pat, "x" + evil) and not re.search(pat, "a")
-    assert rules[0].findtext("description") == "Ngoại lệ: " + " ".join(evil.split())      # lý do chỉ là chữ, không thành thẻ
+    py = pat.replace("\\z", "\\Z")                            # Python viết \z là \Z
+    assert re.search(py, evil) and not re.search(py, "x" + evil) and not re.search(py, "a")
+    assert not re.search(py, evil + "\n")                     # `$` sẽ khớp trước \n cuối, \z thì không
+    assert rules[0].findtext("description") == "Ngoại lệ: " + " ".join(evil.split())      # lý do chỉ là chữ
 
 
 def test_dynamic_field_uses_field_tag():
@@ -68,39 +76,121 @@ def test_dynamic_field_uses_field_tag():
     assert f.get("name") == "cmd" and f.get("type") == "pcre2"
 
 
-def test_add_allocates_ids_stably_and_removal_rewrites(tmp_path):
+def test_dynamic_field_cannot_inject():
+    evil = '"/><rule id="1" level="15"/><field name="x'
+    x = wazuh_fields.exception_rule(60000, [{"field": "file.path", "value": evil}], 110001, "r")
+    rules = ET.fromstring(f"<g>{x}</g>").findall("rule")
+    assert len(rules) == 1 and rules[0].find("field").get("name") == "file"
+    assert not any(c in rules[0].find("field").text for c in "<>\"")
+
+
+def test_reason_truncated_before_escape_and_controls_stripped():
+    x = wazuh_fields.exception_rule(60000, [{"field": "file.path", "value": "a"}], 110001, "<" * 400 + "\x00\x07z")
+    d = ET.fromstring(f"<g>{x}</g>").findtext("rule/description")
+    assert len(d) == 300                                      # cắt trước khi escape: không cắt đôi "&lt;"
+    assert "\x00" not in x and "\x07" not in x
+
+
+A = [{"field": "source.ip", "value": "10.10.40.50"}]
+
+
+def mk(tmp_path, rule="WZH-31103", conds=A, api=None, by="de1"):
+    return wazuh_exceptions.add(rule, conds, "lý do", by, api or FakeApi(), tmp_path)
+
+
+def xml(tmp_path):
+    p = tmp_path / "exceptions.xml"
+    return p.read_text(encoding="utf-8") if p.exists() else ""
+
+
+def test_pending_not_rendered_until_second_distinct_approver(tmp_path):
     api = FakeApi()
-    a = wazuh_exceptions.add("WZH-31103", [{"field": "source.ip", "value": "10.10.40.50"}], "r1", "de", api, tmp_path)
-    b = wazuh_exceptions.add("31104", [{"field": "user.name", "value": "svc"}], "r2", "de", api, tmp_path)
-    assert (a["id"], b["id"]) == (110000, 110001)
-    wazuh_exceptions.remove(110000, api, tmp_path)
-    c = wazuh_exceptions.add("31103", [{"field": "source.ip", "value": "10.10.40.51"}], "r3", "de", api, tmp_path)
-    assert c["id"] == 110002                                   # không tái dùng id đã gỡ
-    ids = [r["id"] for r in wazuh_rules.parse((tmp_path / "exceptions.xml").read_text(encoding="utf-8"))]
-    assert ids == [110001, 110002]
-    assert [i["id"] for i in wazuh_exceptions.items(tmp_path)] == [110001, 110002]
+    e = mk(tmp_path, api=api)
+    assert e["id"] == 110000 and e["status"] == "pending" and e["approvals"][0]["by"] == "de1"
+    assert xml(tmp_path) == "" and api.reloads == 0
+    with pytest.raises(ValueError):
+        wazuh_exceptions.approve(110000, "DE1", api, tmp_path)           # cùng người (không phân biệt hoa thường)
+    assert xml(tmp_path) == ""
+    assert wazuh_exceptions.approve(110000, "de2", api, tmp_path)["status"] == "active"
+    out = xml(tmp_path)
+    assert 'id="110000" level="0"' in out and "<if_sid>31103</if_sid>" in out and "<srcip>10.10.40.50</srcip>" in out
+    assert [r["id"] for r in wazuh_rules.parse(out)] == [110000]
 
 
-def test_reload_failure_keeps_old_file_and_registry(tmp_path):
-    ok = FakeApi()
-    wazuh_exceptions.add("31103", [{"field": "source.ip", "value": "10.10.40.50"}], "r1", "de", ok, tmp_path)
-    before = (tmp_path / "exceptions.xml").read_text(encoding="utf-8")
+def test_ids_stable_never_reused_removed_kept_as_history(tmp_path):
+    api = FakeApi()
+    a, b = mk(tmp_path, api=api), mk(tmp_path, "31104", [{"field": "user.name", "value": "svc"}], api)
+    for i in (a["id"], b["id"]):
+        wazuh_exceptions.approve(i, "de2", api, tmp_path)
+    r = wazuh_exceptions.remove(110000, "de3", "hết cần", api, tmp_path)
+    assert r["status"] == "removed" and r["removed_by"] == "de3" and r["removed_reason"] == "hết cần"
+    c = mk(tmp_path, conds=[{"field": "source.ip", "value": "10.10.40.51"}], api=api)
+    assert c["id"] == 110002
+    assert [x["id"] for x in wazuh_rules.parse(xml(tmp_path))] == [110001]
+    assert [i["status"] for i in wazuh_exceptions.items(tmp_path)] == ["removed", "active", "pending"]
+
+
+def test_duplicate_rejected_but_allowed_after_removal(tmp_path):
+    api = FakeApi()
+    mk(tmp_path, api=api)
+    with pytest.raises(wazuh_exceptions.Duplicate):
+        mk(tmp_path, api=api, by="de2")
+    wazuh_exceptions.remove(110000, "de1", "huy", api, tmp_path)
+    assert mk(tmp_path, api=api)["id"] == 110001
+
+
+def test_reload_failure_keeps_old_xml_and_registry_written_first(tmp_path):
+    api = FakeApi()
+    a = mk(tmp_path, api=api)
+    wazuh_exceptions.approve(a["id"], "de2", api, tmp_path)
+    before = xml(tmp_path)
+    b = mk(tmp_path, conds=[{"field": "source.ip", "value": "10.10.40.51"}], api=api)
+    seen = []
+    bad = FakeApi(errors=["Failed to reload"])
+    orig = bad.reload
+    bad.reload = lambda: (seen.append([i["status"] for i in wazuh_exceptions.items(tmp_path)]), orig())[1]
     with pytest.raises(WazuhRuleError):
-        wazuh_exceptions.add("31103", [{"field": "source.ip", "value": "10.10.40.51"}], "r2", "de",
-                             FakeApi(errors=["Failed to reload"]), tmp_path)
-    assert (tmp_path / "exceptions.xml").read_text(encoding="utf-8") == before
-    assert len(wazuh_exceptions.items(tmp_path)) == 1
+        wazuh_exceptions.approve(b["id"], "de2", bad, tmp_path)
+    assert seen[0] == ["active", "active"]                     # lúc nạp lại, sổ cái ĐÃ có mục (ghi trước)
+    assert xml(tmp_path) == before
+    st = wazuh_exceptions.items(tmp_path)
+    assert st[1]["status"] == "failed" and st[1]["id"] == 110001
+    assert mk(tmp_path, conds=[{"field": "source.ip", "value": "10.10.40.52"}], api=api)["id"] == 110002
+
+
+def test_failed_removal_restores_active(tmp_path):
+    api = FakeApi()
+    a = mk(tmp_path, api=api)
+    wazuh_exceptions.approve(a["id"], "de2", api, tmp_path)
+    with pytest.raises(WazuhRuleError):
+        wazuh_exceptions.remove(a["id"], "de3", "x", FakeApi(errors=["boom"]), tmp_path)
+    assert wazuh_exceptions.items(tmp_path)[0]["status"] == "active" and "110000" in xml(tmp_path)
+
+
+def test_parent_must_exist_and_be_alerting(tmp_path):
+    for rule in ("WZH-99999", "110000", "100"):                # không có / là ngoại lệ / level 0
+        with pytest.raises(ValueError):
+            mk(tmp_path, rule)
+    with pytest.raises(wazuh_rules.WazuhUnavailable):
+        mk(tmp_path, api=FakeApi(down=True))
+    assert wazuh_exceptions.items(tmp_path) == []
 
 
 def test_bad_input(tmp_path):
-    for rule, conds in (("31103", []), ("abc", [{"field": "source.ip", "value": "1.1.1.1"}]),
-                        ("31103", [{"field": "host.name", "value": "x"}]),
-                        ("31103", [{"field": "source.ip", "value": "1.1.1.1"}, {"field": "source.ip", "value": "1.1.1.2"}])):
+    for rule, conds in (("31103", []), ("abc", A), ("31103", [{"field": "host.name", "value": "x"}]),
+                        ("31103", A + [{"field": "source.ip", "value": "1.1.1.2"}])):
         with pytest.raises((ValueError, KeyError)):
-            wazuh_exceptions.add(rule, conds, "r", "de", FakeApi(), tmp_path)
-    assert not (tmp_path / "exceptions.xml").exists()
+            mk(tmp_path, rule, conds)
+    assert wazuh_exceptions.items(tmp_path) == [] and xml(tmp_path) == ""
 
 
-def test_registry_is_valid_json(tmp_path):
-    wazuh_exceptions.add("31103", [{"field": "source.ip", "value": "10.10.40.50"}], "r", "de", FakeApi(), tmp_path)
-    assert json.loads((tmp_path / "exceptions.json").read_text(encoding="utf-8"))["next"] == 110001
+def test_concurrent_adds_get_distinct_ids(tmp_path):
+    api, out = FakeApi(), []
+
+    def go(n):
+        out.append(mk(tmp_path, conds=[{"field": "source.ip", "value": f"10.0.0.{n}"}], api=api)["id"])
+    ts = [threading.Thread(target=go, args=(n,)) for n in range(1, 21)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert sorted(out) == list(range(110000, 110020))
+    assert len(wazuh_exceptions.items(tmp_path)) == 20
