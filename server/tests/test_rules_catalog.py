@@ -163,9 +163,14 @@ class FakeES:
             return {"hits": {"hits": [{"_id": p["id"], "_source": p} for p in PROPOSALS]}}
         raise ConnectionError("chưa có alert")                                   # danh mục vẫn dựng được
 
+    fail_ids: set = frozenset()
+
     def bulk(self, operations, refresh=None):
         self.bulks.append(operations)
-        return {"errors": False, "items": []}
+        ids = [op["index"]["_id"] for op in operations if "index" in op]
+        return {"errors": bool(self.fail_ids & set(ids)),
+                "items": [{"index": {"_id": i, **({"status": 400, "error": "x"} if i in self.fail_ids else {"status": 200})}}
+                          for i in ids]}
 
     def delete_by_query(self, index, query, **kw):
         self.deleted.append(query)
@@ -182,7 +187,7 @@ def test_sync_writes_once_and_removes_stale(rules_dir, monkeypatch):
     assert rc.sync(es, rules_dir) == 0 and len(es.bulks) == 1                     # không đổi gì -> không ghi lại
     (rules_dir / "ai" / "AI-021.yml").unlink()                                    # gỡ rule AI
     rc.sync(es, rules_dir)
-    assert "rule:AI-021" not in [op["index"]["_id"] for op in es.bulks[1] if "index" in op]
+    assert "rule:AI-021" not in es.deleted[-1]["bool"]["must_not"][0]["ids"]["values"]   # chỉ xóa, không bản ghi nào đổi để gửi lại
 
 
 def test_catalog_metadata_false_positive_rate_detectors_and_coverage():
@@ -250,3 +255,32 @@ def test_sync_includes_wazuh_and_keeps_old_on_api_error(rules_dir, monkeypatch):
     assert {"term": {"origin": "wazuh_rule"}} in es.deleted[2]["bool"]["must_not"]
     rc.sync(es, rules_dir, api=FakeWazuh(), force=True)                           # lấy thành công: được dọn bản ghi Wazuh thừa
     assert es.deleted[3]["bool"]["must_not"] == [{"ids": {"values": [op["index"]["_id"] for op in es.bulks[3] if "index" in op]}}]
+
+
+def test_doc_signatures_only_for_stored_docs_and_pruned(rules_dir, monkeypatch):
+    monkeypatch.setattr(rc, "_last_sig", None)
+    monkeypatch.setattr(rc, "_doc_sigs", {})
+    es = FakeES()
+    es.fail_ids = {"rule:WEB-001"}
+    rc.sync(es, rules_dir)
+    sent = lambda n: [op["index"]["_id"] for op in es.bulks[n] if "index" in op]
+    assert "rule:WEB-001" not in rc._doc_sigs and "rule:AUTH-001" in rc._doc_sigs      # bản ghi lỗi không có chữ ký
+    es.fail_ids = set()
+    rc.sync(es, rules_dir)
+    assert sent(1) == ["rule:WEB-001"]                                                 # chỉ gửi lại bản ghi lỗi
+    (rules_dir / "auth.yml").rename(rules_dir / "auth.bak")                            # gỡ rule rồi trả lại y nguyên
+    rc.sync(es, rules_dir)
+    assert "rule:AUTH-001" not in rc._doc_sigs
+    (rules_dir / "auth.bak").rename(rules_dir / "auth.yml")
+    rc.sync(es, rules_dir)
+    assert "rule:AUTH-001" in sent(3)                                                  # xuất hiện lại -> gửi lại
+
+
+def test_doc_signatures_keep_wazuh_when_api_fails(rules_dir, monkeypatch):
+    monkeypatch.setattr(rc, "_last_sig", None)
+    monkeypatch.setattr(rc, "_doc_sigs", {})
+    es = FakeES()
+    rc.sync(es, rules_dir, api=FakeWazuh())
+    assert "rule:WZH-5710" in rc._doc_sigs
+    rc.sync(es, rules_dir, api=FakeWazuh(fail=True))
+    assert "rule:WZH-5710" in rc._doc_sigs                                             # API lỗi: không cắt chữ ký rule Wazuh

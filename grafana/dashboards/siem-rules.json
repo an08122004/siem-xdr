@@ -1762,10 +1762,10 @@
         "type": "custom",
         "name": "origin",
         "label": "Hiển thị",
-        "query": "Tất cả : (rule OR ai_proposal OR exception),Rule đang chạy : rule,Đề xuất AI : ai_proposal,Ngoại lệ : exception",
+        "query": "Tất cả : (rule OR wazuh_rule OR ai_proposal OR exception),Rule đang chạy : rule,Rule Wazuh : wazuh_rule,Đề xuất AI : ai_proposal,Ngoại lệ : exception",
         "current": {
           "text": "Tất cả",
-          "value": "(rule OR ai_proposal OR exception)"
+          "value": "(rule OR wazuh_rule OR ai_proposal OR exception)"
         }
       },
       {
@@ -1778,7 +1778,7 @@
         },
         "refresh": 1,
         "sort": 1,
-        "query": "{\"find\": \"terms\", \"field\": \"mitre.tactic\", \"query\": \"origin:(rule OR ai_proposal OR exception)\", \"size\": 300}",
+        "query": "{\"find\": \"terms\", \"field\": \"mitre.tactic\", \"query\": \"origin:(rule OR wazuh_rule OR ai_proposal OR exception)\", \"size\": 300}",
         "includeAll": true,
         "multi": true,
         "allValue": "*",
@@ -1797,7 +1797,7 @@
         },
         "refresh": 1,
         "sort": 1,
-        "query": "{\"find\": \"terms\", \"field\": \"tags\", \"query\": \"origin:(rule OR ai_proposal OR exception)\", \"size\": 300}",
+        "query": "{\"find\": \"terms\", \"field\": \"tags\", \"query\": \"origin:(rule OR wazuh_rule OR ai_proposal OR exception)\", \"size\": 300}",
         "includeAll": true,
         "multi": true,
         "allValue": "*",
@@ -1816,7 +1816,7 @@
         },
         "refresh": 1,
         "sort": 1,
-        "query": "{\"find\": \"terms\", \"field\": \"fields\", \"query\": \"origin:(rule OR ai_proposal OR exception)\", \"size\": 300}",
+        "query": "{\"find\": \"terms\", \"field\": \"fields\", \"query\": \"origin:(rule OR wazuh_rule OR ai_proposal OR exception)\", \"size\": 300}",
         "includeAll": true,
         "multi": true,
         "allValue": "*",

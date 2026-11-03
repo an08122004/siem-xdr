@@ -475,7 +475,6 @@ def alert_stats(es) -> dict[str, dict[str, Any]]:
     """Số alert 24 giờ / 7 ngày và lần gần nhất của từng rule (để biết rule nào hay kêu, rule nào im lặng)."""
     try:
         # 10 000: rule Wazuh (WZH-*) cũng kêu, 2000 làm rớt rule; vẫn dưới search.max_buckets (65 536)
-        # 10 000: rule Wazuh (WZH-*) cũng kêu, 2000 làm rớt rule; vẫn dưới search.max_buckets (65 536)
         d30 = {"range": {"@timestamp": {"gte": "now-30d"}}}
         res = es.search(index=settings.IDX_ALERTS, size=0, aggs={"r": {"terms": {"field": "rule.id", "size": 10000}, "aggs": {
             "d90": {"filter": {"range": {"@timestamp": {"gte": "now-90d"}}}},
@@ -562,22 +561,30 @@ def sync(es, rules_dir: Path = settings.RULES_DIR, force: bool = False, api=None
         if sig == _last_sig and not force:
             return 0
         ops: list[dict[str, Any]] = []
+        sent: list[str] = []
         sigs = {d["_id"]: hashlib.sha1(json.dumps(d, sort_keys=True, default=str).encode()).hexdigest() for d in docs}
         for d in docs:
             if not force and _doc_sigs.get(d["_id"]) == sigs[d["_id"]]:
                 continue
+            sent.append(d["_id"])
             ops += [{"index": {"_index": settings.IDX_RULES, "_id": d["_id"]}}, {k: v for k, v in d.items() if k != "_id"}]
         if ops:
             res = es.bulk(operations=ops, refresh="wait_for")
-            if res.get("errors"):
-                bad = [i for i in res["items"] if i["index"].get("error")]
-                log.warning("danh mục rule: %d bản ghi lỗi, ví dụ %s", len(bad), bad[:1])
+            failed = {sent[n] for n, i in enumerate(res.get("items") or []) if i["index"].get("error")} if res.get("errors") else set()
+            if failed:
+                log.warning("danh mục rule: %d bản ghi lỗi, ví dụ %s", len(failed), sorted(failed)[:1])
+            for k in failed:
+                sigs.pop(k)          # bản ghi lỗi: không ghi chữ ký để chu kỳ sau gửi lại
+        else:
+            failed = set()
         # không refresh=True: cần quyền maintenance mà manager không có (lỗi 403 như SOAR đã gặp)
+        for k in [k for k in _doc_sigs if k not in sigs and not (keep_wazuh and k.startswith("rule:WZH-"))] + list(failed):
+            _doc_sigs.pop(k, None)      # bản ghi đã gỡ / ghi lỗi: lần sau gửi lại dù nội dung y hệt
         _doc_sigs.update(sigs)
         must_not = [{"ids": {"values": [d["_id"] for d in docs]}}]
         if keep_wazuh:      # chỉ xóa bản ghi Wazuh khi lần lấy Wazuh API trong chính lần này thành công
             must_not.append({"term": {"origin": "wazuh_rule"}})
         es.delete_by_query(index=settings.IDX_RULES, conflicts="proceed", query={"bool": {"must_not": must_not}})
-        _last_sig = None if api is not None and keep_wazuh else sig        # lần sau thử lại Wazuh
+        _last_sig = None if failed or (api is not None and keep_wazuh) else sig        # lần sau thử lại Wazuh
         log.info("đã đồng bộ danh mục rule: %d bản ghi", len(docs))
         return len(docs)
