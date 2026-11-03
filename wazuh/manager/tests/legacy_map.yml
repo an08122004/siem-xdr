@@ -87,47 +87,47 @@ WEB-001:
   - 31103
   - 31106
   decision: approx
-  note: '1/2 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 ''A web attack returned code 200 (success)'': con chung của 31103/31104/31105, không nói loại tấn công]'
+  note: '1/2 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 ''A web attack returned code 200 (success)'': con chung của 31103/31104/31105, không nói loại tấn công]; rule dự án 104001/104011/104012/104013/104014 (0271-web.xml, con của 31100-31123), level 10, chạy bóng: phủ cả dạng mã hóa (%27, %2527, %u0027, +, %55NION) mà rule gốc 31103/31106 không bắt; CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R52: srcip trong danh sách IOC thì rule này thắng 99905/99906 gốc (mất alert level 14 của dòng đó, chấp nhận)'
 WEB-002:
   wazuh:
   - 31105
   - 31106
   decision: approx
-  note: '0/2 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''31105 (level 6: XSS (Cross Site Scripting) attempt.)'']; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 ''A web attack returned code 200 (success)'': con chung của 31103/31104/31105, không nói loại tấn công]'
+  note: '0/2 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''31105 (level 6: XSS (Cross Site Scripting) attempt.)'']; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 ''A web attack returned code 200 (success)'': con chung của 31103/31104/31105, không nói loại tấn công]; rule dự án 104002/104021 (0271-web.xml), level 7, chạy bóng: phủ cả dạng mã hóa (%3C, %253C, %u003c, %3A, %3D); CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R52: srcip trong danh sách IOC thì rule này thắng 99905/99906 gốc (mất alert level 14 của dòng đó, chấp nhận)'
 WEB-003:
   wazuh:
   - 31104
   - 31106
   decision: approx
-  note: '0/2 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''31104 (level 6: Common web attack.)'']; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 ''A web attack returned code 200 (success)'': con chung của 31103/31104/31105, không nói loại tấn công]'
+  note: '0/2 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''31104 (level 6: Common web attack.)'']; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 ''A web attack returned code 200 (success)'': con chung của 31103/31104/31105, không nói loại tấn công]; rule dự án 104003/104031 (0271-web.xml), level 10, chạy bóng: phủ cả dạng mã hóa (..%2f, %2e%2e, %252e, ..%5c); CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R52: srcip trong danh sách IOC thì rule này thắng 99905/99906 gốc (mất alert level 14 của dòng đó, chấp nhận)'
 WEB-004:
   wazuh: []
   decision: convert
-  note: chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/4 ca dương có rule gốc cụ thể level>=7
+  note: 'chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/4 ca dương có rule gốc cụ thể level>=7; rule dự án 104004/104041 (0271-web.xml), level 12, chạy bóng, kể cả dạng mã hóa (%3b, %26%26, %7c, %24%28); CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R52: srcip trong danh sách IOC thì rule này thắng 99905/99906 gốc (mất alert level 14 của dòng đó, chấp nhận)'
 WEB-005:
   wazuh: []
   decision: convert
-  note: chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7
+  note: 'chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7; rule dự án 104005 (0271-web.xml), level 7, chạy bóng: khớp chuỗi trong ngoặc kép CUỐI của dòng (User-Agent, decoder gốc không tách trường này); CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R52: srcip trong danh sách IOC thì rule này thắng 99905/99906 gốc (mất alert level 14 của dòng đó, chấp nhận)'
 WEB-006:
   wazuh:
   - 31151
   - 31101
   decision: approx
-  note: '1/1 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 31101 (level 5: Web server 400 error code.) [level 5 ''Web server 400 error code.'': mọi phản hồi 4xx, không nhìn URL hay payload]; ca âm báo level>=7: [31151]'
+  note: '1/1 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 31101 (level 5: Web server 400 error code.) [level 5 ''Web server 400 error code.'': mọi phản hồi 4xx, không nhìn URL hay payload]; ca âm báo level>=7: [31151]; KHÔNG có rule ở 0271-web.xml: chỉ khác 31151 (14 phản hồi 4xx/90 s, level 10) ở ngưỡng (30/60 s); để Task 12 (0190-tuning)'
 WEB-007:
   wazuh:
   - 31509
   - 31510
   decision: approx
-  note: '1/5 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: wp-login; thiếu: signin, login, auth, admin; level<7 (ứng viên nâng level): [''31509 (level 3: CMS (WordPress or Joomla) login attempt.)'']'
+  note: '1/5 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: wp-login; thiếu: signin, login, auth, admin; level<7 (ứng viên nâng level): [''31509 (level 3: CMS (WordPress or Joomla) login attempt.)'']; rule dự án 104070 -> 104007 (0271-web.xml): 10 POST/60 s vào login|signin|auth|admin cùng nguồn, level 10, chạy bóng; wp-login.php và /administrator vẫn do 31509/31510 gốc; CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca)'
 WEB-008:
   wazuh: []
   decision: convert
-  note: chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7
+  note: 'chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7; rule dự án 104008 (0271-web.xml), level 12, chạy bóng, kể cả dấu = mã hóa %3d; CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R52: srcip trong danh sách IOC thì rule này thắng 99905/99906 gốc (mất alert level 14 của dòng đó, chấp nhận)'
 WEB-009:
   wazuh: []
   decision: convert
-  note: 0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo
+  note: '0/1 ca dương có rule gốc cụ thể level>=7; không rule gốc nào báo; rule dự án 104090 -> 104009 (0271-web.xml): 300 request THƯỜNG/60 s cùng nguồn, level 10, chạy bóng; request đã dính rule gốc cấp >= 3 (4xx, tấn công) không được đếm (31151 và alert từng event đã phủ); CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca)'
 WIN-001:
   wazuh: []
   decision: convert
