@@ -126,7 +126,9 @@ ACTIVITY = [(re.compile(p), op) for p, op in (
     (r"^/api/v1/cases/[^/]+/incident$", "case_incident"), (r"^/api/v1/rules/[^/]+/promote$", "rule_promoted"),
     (r"^/api/v1/hunts$", "hunt_created"), (r"^/api/v1/hunts/[^/]+$", "hunt_updated"),
     (r"^/api/v1/handover$", "handover_saved"), (r"^/api/v1/ai/assist$", "ai_assist"),
-    (r"^/api/v1/ai/assist/[^/]+/feedback$", "ai_assist_feedback"))]
+    (r"^/api/v1/ai/assist/[^/]+/feedback$", "ai_assist_feedback"),
+    (r"^/api/v1/exceptions$", "exception_added"), (r"^/api/v1/exceptions/\d+/approve$", "exception_approved"),
+    (r"^/api/v1/exceptions/\d+$", "exception_removed"))]
 
 
 def activity_detail(body: bytes) -> str | None:

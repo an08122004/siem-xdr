@@ -140,7 +140,7 @@ def approve(eid: int, by: str, api, root: Path | None = None) -> dict:
             _save(reg, root)                                       # sổ cái trước, XML sau
             try:
                 _render(reg, api, root)
-            except WazuhRuleError as e:
+            except Exception as e:                                 # kể cả OSError khi ghi file: không để rule treo không rõ trạng thái
                 item.update(status="failed", error=str(e))
                 _save(reg, root)
                 raise
@@ -162,7 +162,7 @@ def remove(eid: int, by: str, reason: str, api, root: Path | None = None) -> dic
         if was == "active":
             try:
                 _render(reg, api, root)
-            except WazuhRuleError:
+            except Exception:
                 for k in ("removed_by", "removed_at", "removed_reason"):
                     item.pop(k, None)
                 item["status"] = was                               # XML vẫn còn rule này: sổ cái phải nói đúng

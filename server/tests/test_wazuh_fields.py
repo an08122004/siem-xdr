@@ -194,3 +194,21 @@ def test_concurrent_adds_get_distinct_ids(tmp_path):
     [t.join() for t in ts]
     assert sorted(out) == list(range(110000, 110020))
     assert len(wazuh_exceptions.items(tmp_path)) == 20
+
+
+def test_os_error_during_write_rolls_back_registry(tmp_path, monkeypatch):
+    api = FakeApi()
+    a = mk(tmp_path, api=api)
+    b = mk(tmp_path, conds=[{"field": "source.ip", "value": "10.10.40.51"}], api=api)
+    wazuh_exceptions.approve(a["id"], "de2", api, tmp_path)
+
+    def boom(*args, **kw):
+        raise OSError("đĩa đầy")
+    monkeypatch.setattr(wazuh_rules, "write_dynamic", boom)
+    with pytest.raises(OSError):
+        wazuh_exceptions.remove(a["id"], "de3", "x", api, tmp_path)
+    with pytest.raises(OSError):
+        wazuh_exceptions.approve(b["id"], "de2", api, tmp_path)
+    st = wazuh_exceptions.items(tmp_path)
+    assert st[0]["status"] == "active" and "removed_by" not in st[0]          # XML còn rule: sổ cái phải nói đúng
+    assert st[1]["status"] == "failed" and "đĩa đầy" in st[1]["error"]

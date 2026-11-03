@@ -1217,3 +1217,6 @@ def test_wazuh_exceptions_api(env, monkeypatch, tmp_path):
     assert r.status_code == 200 and r.json()["status"] == "removed" and r.json()["removed_by"] == "de"
     assert 'id="110001"' not in xml()
     assert env.delete("/api/v1/exceptions/110001?reason=hết cần", headers=H).status_code == 404
+    ops = [(x[3]["op"], x[1]) for x in env.audit if x[0] == "activity" and x[3]["op"].startswith("exception_")]
+    assert ("exception_added", "success") in ops and ("exception_approved", "failure") in ops
+    assert ("exception_approved", "success") in ops and ("exception_removed", "success") in ops
