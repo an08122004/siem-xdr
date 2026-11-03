@@ -164,12 +164,20 @@ def compute(es, rules_dir: Path | None = None, config_dir: Path | None = None, d
     if rules_dir:
         from ..detection.lint import lint
         rep = lint(rules_dir, config_dir)
-        cov = rep.coverage
-        try:   # R49: rule YAML đang bật HOẶC rule Wazuh đang bật (thư viện siem-rules); ES lỗi thì dùng kết quả lint (chỉ YAML)
+        cov, doc["attack_coverage_source"] = rep.coverage, "lint-yaml"
+        try:   # R49: rule YAML đang bật HOẶC rule Wazuh đang bật và ra alert (thư viện siem-rules)
             from ..rules_catalog import attack_coverage
-            hits = es.search(index=settings.IDX_RULES, size=10000, query={"terms": {"origin": ["rule", "wazuh_rule"]}},
-                             _source=["origin", "source", "rule.id", "mode", "shadow", "status", "tests", "mitre.technique"])
-            cov = attack_coverage([h["_source"] for h in hits["hits"]["hits"]], rep.profile)
+            hits = es.search(index=settings.IDX_RULES, size=10000, track_total_hits=True, sort=[{"_doc": "asc"}],
+                             query={"terms": {"origin": ["rule", "wazuh_rule"]}},
+                             _source=["origin", "source", "rule.id", "mode", "shadow", "bridged", "status", "tests", "mitre.technique"])
+            rows = [h["_source"] for h in hits["hits"]["hits"]]
+            total = hits["hits"]["total"]["value"]
+            if total > len(rows):
+                log.warning("độ phủ ATT&CK: siem-rules có %s rule, chỉ đọc %s", total, len(rows))
+            if any(r.get("origin") == "wazuh_rule" for r in rows):      # chưa có rule Wazuh (khởi động đầu, API Wazuh tắt) = lùi về lint
+                cov, doc["attack_coverage_source"] = attack_coverage(rows, rep.profile), "siem-rules"
+            else:
+                log.warning("độ phủ ATT&CK: siem-rules chưa có rule Wazuh, dùng kết quả lint YAML")
         except Exception as e:  # noqa: BLE001
             log.warning("độ phủ ATT&CK: không đọc được %s, dùng kết quả lint YAML: %s", settings.IDX_RULES, e)
         doc["attack_coverage_pct"] = _pct(sum(c["covered"] for c in cov), len(cov)) or 0.0

@@ -284,3 +284,22 @@ def test_doc_signatures_keep_wazuh_when_api_fails(rules_dir, monkeypatch):
     assert "rule:WZH-5710" in rc._doc_sigs
     rc.sync(es, rules_dir, api=FakeWazuh(fail=True))
     assert "rule:WZH-5710" in rc._doc_sigs                                             # API lỗi: không cắt chữ ký rule Wazuh
+
+
+def test_wazuh_rule_docs_not_bridged_never_counts_as_running():
+    """Rule bật nhưng cầu nối bỏ (syscheck level 5, sca mọi level, rule dự án level 2) không ra alert: không "chính thức"."""
+    from siem.rules_catalog import attack_coverage
+
+    class Api:
+        def rules(self, offset=0, limit=500):
+            mk = lambda i, lv, g, f="x.xml", d="ruleset/rules": {"id": i, "level": lv, "groups": g, "status": "enabled", "filename": f,
+                                                               "relative_dirname": d, "mitre": {"id": ["T1110"]}}
+            return {"data": {"total_affected_items": 4, "affected_items": [
+                mk(550, 5, ["syscheck"]), mk(19007, 12, ["sca"]), mk(101099, 2, ["auth"], "0101-auth.xml", "etc/rules"),
+                mk(101100, 5, ["auth"], "0101-auth.xml", "etc/rules")]}}
+    docs = {d["rule"]["id"]: d for d in rc.wazuh_rule_docs(Api(), {})}
+    for rid in ("WZH-550", "WZH-19007", "WZH-101099"):
+        assert docs[rid]["bridged"] is False and docs[rid]["mode"] == "nobridge" and docs[rid]["mode_label"] == "không tạo alert"
+    assert docs["WZH-101100"]["bridged"] is True and docs["WZH-101100"]["mode"] in ("active", "shadow")
+    only_bad = [docs[r] for r in ("WZH-550", "WZH-19007", "WZH-101099")]
+    assert not attack_coverage(only_bad, {"techniques": [{"id": "T1110"}]})[0]["covered"]

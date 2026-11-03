@@ -2,6 +2,7 @@
 
     python tools/wazuh_rule_lint.py
     python tools/wazuh_rule_lint.py --layer build/attack-layer.json   # kèm layer cho MITRE ATT&CK Navigator
+    (--layer: CHỈ rule XML dự án đang bật; khác KPI độ phủ, vốn tính cả rule YAML và rule gốc Wazuh có ra alert)
 
 Mỗi dòng: `file:rule_id: thông điệp`; cảnh báo có tiền tố `WARNING: `. Thoát mã 1 khi có LỖI, cảnh báo thì mã 0.
 """

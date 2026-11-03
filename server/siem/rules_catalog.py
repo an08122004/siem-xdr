@@ -175,7 +175,7 @@ def _common(*, tactic: Any, techniques: Any, tags: Iterable[str], fields: Iterab
 
 
 # ------------------------------------------------------------------ dựng bản ghi
-MODE_LABEL = {"active": "chính thức", "shadow": "chạy bóng"}
+MODE_LABEL = {"active": "chính thức", "shadow": "chạy bóng", "nobridge": "không tạo alert"}
 
 
 def _text(v: Any) -> str:
@@ -277,6 +277,8 @@ def attack_coverage(docs: list[dict[str, Any]], profile: dict[str, Any]) -> list
             if d.get("origin") not in ("rule", "wazuh_rule") or not covers(tid, (d.get("mitre") or {}).get("technique") or []):
                 continue
             rid, mode = d["rule"]["id"], d.get("mode")
+            if d.get("origin") == "wazuh_rule" and d.get("bridged") is not True and mode != "off":
+                continue                                    # bật nhưng không ra alert (cầu nối loại): không tính phủ
             if d.get("shadow") is True or mode == "shadow":
                 shadow.append(rid)
             elif mode == "off" or str(d.get("status", "enabled")).lower() != "enabled":
@@ -465,7 +467,7 @@ def wazuh_rule_docs(api, alert_stats: dict[str, dict[str, Any]]) -> list[dict[st
     """Mỗi rule trong Wazuh (rule gốc ~4,5 nghìn + rule dự án, kể cả rules-dynamic/) thành một bản ghi cùng dạng rule YAML.
     `shadow` khớp đúng cách cầu nối cấp alert (detection/wazuh.py): nhóm `shadow` hoặc rule gốc is_shadow_stock, để thư viện
     không bao giờ ghi "chính thức" cho rule chỉ ra alert chạy bóng. Lỗi API thì raise (người gọi giữ danh mục cũ)."""
-    from .detection.wazuh import is_shadow_stock, severity_for
+    from .detection.wazuh import _is_local, is_shadow_stock, severity_for, should_bridge
     docs, offset = [], 0
     while True:
         data = (api.rules(offset, WAZUH_PAGE) or {}).get("data") or {}
@@ -478,7 +480,10 @@ def wazuh_rule_docs(api, alert_stats: dict[str, dict[str, Any]]) -> list[dict[st
             legacy = [g for g in groups if g.startswith("legacy_")]
             shadow = "shadow" in groups or is_shadow_stock({"id": r["id"], "level": level, "groups": groups})
             off = str(r.get("status", "enabled")).lower() != "enabled"
-            mode = "off" if off else "shadow" if shadow else "active"
+            # rule không qua cầu nối (stock level thấp, sca) hoặc rule dự án level < 3 (log_alert_level) không bao giờ ra alert
+            rule = {"id": r["id"], "level": level, "groups": groups}
+            bridged = should_bridge(rule) and (level >= 3 or not _is_local(rule))
+            mode = "off" if off else "shadow" if shadow else "active" if bridged else "nobridge"
             st = alert_stats.get(rid, {})
             docs.append({
                 "_id": f"rule:{rid}", "origin": "wazuh_rule", "origin_label": "Rule Wazuh", "source": "wazuh",
@@ -488,7 +493,7 @@ def wazuh_rule_docs(api, alert_stats: dict[str, dict[str, Any]]) -> list[dict[st
                 "groups": groups, **({"legacy_id": legacy[0][7:]} if legacy else {}),     # như alert: không có thì bỏ khóa
                 "condition_text": "", "patterns": [], "yaml": "",
                 "file": f"{r.get('relative_dirname', '')}/{r.get('filename', '')}".strip("/"),
-                "status": r.get("status", "enabled"), "shadow": shadow,
+                "status": r.get("status", "enabled"), "shadow": shadow, "bridged": bridged,
                 "alerts": {"h24": st.get("h24", 0), "d7": st.get("d7", 0), "d90": st.get("d90", 0), "last": st.get("last"),
                            "closed30": st.get("closed30", 0), "fp30": st.get("fp30", 0), "fp_rate30": None},
                 "mode": mode, "mode_label": "đã tắt" if off else MODE_LABEL[mode],
