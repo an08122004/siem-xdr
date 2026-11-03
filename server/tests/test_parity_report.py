@@ -30,9 +30,32 @@ def test_matched_yaml_only_xml_only():
     assert r["NET-004"] == {"yaml": 1, "xml": 0, "matched": 0, "only_yaml": ["n1"], "only_xml": []}
 
 
-def test_frequency_rule_fires_on_different_event_is_exposed():
-    r = pr.parity([y("AUTH-001", ["a", "b", "c"]), x("AUTH-001", ["a", "b"])], "2026-01-01T00:00:00+00:00")
-    assert r["AUTH-001"]["only_yaml"] == ["c"] and r["AUTH-001"]["only_xml"] == []
+def test_threshold_pairs_on_trigger_event_only():
+    since = "2026-01-01T00:00:00+00:00"
+    yml = y("AUTH-001", ["e1", "e2", "e3", "e4", "e5"])          # rule ngưỡng: event kích hoạt là event cuối
+    early = pr.parity([yml, x("AUTH-001", ["e1"])], since)["AUTH-001"]
+    assert early["matched"] == 0 and early["only_yaml"] == ["e5"] and early["only_xml"] == ["e1"]
+    assert pr.parity([yml, x("AUTH-001", ["e5"])], since)["AUTH-001"]["matched"] == 1
+
+
+def test_fetch_pages_with_search_after():
+    hit = lambda i: {"_source": {"n": i}, "sort": [i]}      # noqa: E731
+    pages, bodies = [[hit(1), hit(2)], [hit(3), hit(4)], [hit(5)]], []
+
+    def search(body):
+        bodies.append(body)
+        return {"hits": {"hits": pages[len(bodies) - 1]}}
+
+    got = pr.fetch("siem-alerts", "2026-01-01T00:00:00+00:00", page=2, search=search)
+    assert [d["n"] for d in got] == [1, 2, 3, 4, 5]
+    assert "search_after" not in bodies[0] and bodies[1]["search_after"] == [2] and bodies[2]["search_after"] == [4]
+
+
+def test_since_must_be_iso():
+    import argparse
+    import pytest
+    with pytest.raises(argparse.ArgumentTypeError):
+        pr._iso("hôm qua")
 
 
 def test_since_filters_old_alerts_and_other_sources():

@@ -246,6 +246,7 @@ def test_shadow_group_marks_alert_shadow(enricher):
         "id": "104001", "level": 10, "description": "x", "groups": ["siem", "web", "shadow", "legacy_WEB-001"]})
     a = bridge.to_alert(enricher.enrich(normalize(raw)))
     assert a["alert"]["shadow"] is True and a["rule"]["mode"] == "shadow" and a["rule"]["legacy_id"] == "WEB-001"
+    assert a["rule"]["legacy_ids"] == ["WEB-001"]
     assert a["rule"]["id"] == "WZH-104001" and a["rule"]["groups"] == ["siem", "web", "shadow", "legacy_WEB-001"]
 
 

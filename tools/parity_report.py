@@ -4,8 +4,10 @@ Wazuh (rule.legacy_id, kể cả alert chạy bóng) có cùng tham chiếu tớ
     python tools/parity_report.py --since 2026-11-02T00:00:00+00:00        # ghi build/parity.md
     python tools/parity_report.py --since ... --out - --index siem-alerts
 
-Chạy từ thư mục gốc project khi stack đang chạy; chỉ ĐỌC siem-alerts (qua helper `es` của tools/es_snapshot.py).
-Ghép theo event.id nằm trong related_events của alert. Rule tần suất YAML bắn ở event thứ N còn rule XML có thể bắn ở
+Chạy từ thư mục CHÍNH của project (không phải worktree) khi stack đang chạy: `docker compose exec` không có `-p`, nên
+dựa vào .env ở đó. Chỉ ĐỌC siem-alerts (helper `es` của tools/es_snapshot.py, chỉ gọi `_search`), phân trang search_after.
+Ghép theo event KÍCH HOẠT của alert (related_events[-1]: rules.py thêm event hiện tại vào cuối danh sách, còn rule
+Wazuh chỉ có đúng một event), không theo cả danh sách event đóng góp của rule ngưỡng/chuỗi. Rule tần suất YAML bắn ở event thứ N còn rule XML có thể bắn ở
 event khác: event lệch đó hiện ở only_yaml / only_xml chứ không bị gộp lại; đọc kèm số alert (cột yaml / xml).
 """
 from __future__ import annotations
@@ -41,7 +43,8 @@ def parity(alerts: list[dict], since: str) -> dict[str, dict]:
         for c in codes:
             d = seen.setdefault(c, {"yaml": 0, "xml": 0, "ev": {"yaml": set(), "xml": set()}})
             d[side] += 1
-            d["ev"][side].update(e for e in a.get("related_events") or [] if e)
+            if trigger := (a.get("related_events") or [None])[-1]:
+                d["ev"][side].add(trigger)
     return {c: {"yaml": d["yaml"], "xml": d["xml"], "matched": len(d["ev"]["yaml"] & d["ev"]["xml"]),
                 "only_yaml": sorted(d["ev"]["yaml"] - d["ev"]["xml"]),
                 "only_xml": sorted(d["ev"]["xml"] - d["ev"]["yaml"])}
@@ -59,16 +62,34 @@ def markdown(report: dict[str, dict], since: str, examples: int = 3) -> str:
     return "\n".join(out) + "\n"
 
 
-def fetch(index: str, since: str, size: int = 10000) -> list[dict]:
-    from es_snapshot import es      # chỉ đọc: _search, không ghi
-    q = {"size": size, "sort": [{"@timestamp": "asc"}], "_source": ["@timestamp", "alert", "rule", "related_events"],
-         "query": {"range": {"@timestamp": {"gte": since}}}}
-    return [h["_source"] for h in es("POST", f"/{index}/_search", q).get("hits", {}).get("hits", [])]
+def fetch(index: str, since: str, page: int = 5000, search=None) -> list[dict]:
+    """Đọc hết alert từ `since`, phân trang search_after (sort @timestamp + alert.id làm tiebreaker)."""
+    if search is None:
+        from es_snapshot import es      # chỉ đọc: _search, không ghi
+        search = lambda body: es("POST", f"/{index}/_search", body)  # noqa: E731
+    body = {"size": page, "sort": [{"@timestamp": "asc"}, {"alert.id": "asc"}],
+            "_source": ["@timestamp", "alert", "rule", "related_events"],
+            "query": {"range": {"@timestamp": {"gte": since}}}}
+    out: list[dict] = []
+    while hits := search(body).get("hits", {}).get("hits", []):
+        out += [h["_source"] for h in hits]
+        if len(hits) < page:
+            break
+        body = {**body, "search_after": hits[-1]["sort"]}
+    return out
+
+
+def _iso(s: str) -> str:
+    try:
+        _ts(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"không phải thời điểm ISO 8601: {s!r}") from None
+    return s
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--since", required=True, help="ISO 8601, bỏ alert cũ hơn mốc này")
+    ap.add_argument("--since", required=True, type=_iso, help="ISO 8601, bỏ alert cũ hơn mốc này")
     ap.add_argument("--index", default="siem-alerts")
     ap.add_argument("--out", default="build/parity.md", help="'-' = in ra màn hình")
     a = ap.parse_args()
