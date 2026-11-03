@@ -131,12 +131,12 @@ WEB-009:
 WIN-001:
   wazuh: []
   decision: convert
-  note: 'chỉ trúng rule chung 60122 (Logon Failure - Unknown user or bad password), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7; rule dự án 105001 (0965-windows.xml, con của 60122): >= 5 lần 4625 / 60 s cùng win.eventdata.ipAddress (IP ''-'' / ::1 / 127.0.0.1 không đếm), chạy bóng; che rule gốc 60204 (>= 8 / 240 s) khi cả hai cùng đủ điều kiện, 60204 vẫn báo khi nhịp chậm hơn 5/60 s'
+  note: 'chỉ trúng rule chung 60122 (Logon Failure - Unknown user or bad password), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7; rule dự án 105001 (0965-windows.xml, con của 60122): >= 5 lần 4625 / 60 s cùng win.eventdata.ipAddress (IP ''-'' / ::1 / 127.0.0.1 không đếm), chạy bóng; IP trong danh sách malicious-ip: 99919 (level 9, nạp sau) giữ mọi event nên 105001 không báo cho IP đó; che rule gốc 60204 (>= 8 / 240 s) khi cả hai cùng đủ điều kiện, 60204 vẫn báo khi nhịp chậm hơn 5/60 s'
 WIN-002:
   wazuh:
   - 63103
   decision: approx
-  note: '0/1 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''63103 (level 5: The audit log was cleared)'']; không có rule dự án: chỉ khác 63103 ở mức độ (level 5 so với critical), Task 12 nâng level; nhánh System/104 (xóa log khác) của YAML cũ chưa có rule'
+  note: '0/1 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''63103 (level 5: The audit log was cleared)'']; rule dự án 105002 (0965-windows.xml, con của 63104): nhánh System/104 (log Windows khác bị xóa) thiếu ở rule gốc, level 12, chạy bóng; riêng 1102 chỉ khác 63103 ở mức độ (level 5 so với critical), Task 12 nâng level'
 WIN-003:
   wazuh:
   - 60109
@@ -158,7 +158,7 @@ WIN-006:
   wazuh:
   - 91837
   decision: approx
-  note: '0/1 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''91837 (level 4: Powershell executed "Get-Content -Stream or Invoke-Expresion". Possible string execution as code)'']; không có rule dự án: chỉ khác 91837 ở mức độ (level 4), Task 12 nâng level; nhánh dòng lệnh Sysmon 1 (downloadstring, iwr | iex, -nop -w hidden) cũng chưa có rule'
+  note: '0/1 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''91837 (level 4: Powershell executed "Get-Content -Stream or Invoke-Expresion". Possible string execution as code)'']; rule dự án 105006 (0965-windows.xml, con của 61603): nhánh dòng lệnh Sysmon 1 (downloadstring(, iwr | iex, invoke-webrequest | iex, -nop -w hidden) thiếu ở rule gốc, level 12, chạy bóng, loại -EncodedCommand (thuộc 105005); nhánh script block 4104 chỉ khác 91837 ở mức độ (level 4), Task 12 nâng level'
 WIN-007:
   wazuh: []
   decision: convert
@@ -170,7 +170,7 @@ WIN-008:
 WIN-009:
   wazuh: []
   decision: convert
-  note: 'chỉ trúng rule chung 61138 (New Windows Service Created), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7; rule dự án 105009 (0965-windows.xml, con của 61138): ImagePath chứa thư mục ghi được, powershell, cmd /c hoặc %comspec%, chạy bóng; che 61138 cho service đáng ngờ; nhánh Security 4697 chưa có'
+  note: 'chỉ trúng rule chung 61138 (New Windows Service Created), không chỉnh; 0/1 ca dương có rule gốc cụ thể level>=7; rule dự án 105009 (0965-windows.xml, con của 61138): ImagePath chứa thư mục ghi được, powershell, cmd /c hoặc %comspec%, chạy bóng; che 61138 cho service đáng ngờ; rule 105109 (con của 60103) cho nhánh Security 4697 (ServiceFileName đáng ngờ)'
 WIN-010:
   wazuh: []
   decision: convert

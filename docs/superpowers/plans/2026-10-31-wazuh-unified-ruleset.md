@@ -109,7 +109,7 @@ Dải id theo file (lint ở Task 4 đọc bảng này từ `wazuh_rules.ID_RANG
 | `0102-linux.xml` | 102000–102999 |
 | `0103-network.xml` | 103000–103999 |
 | `0104-web.xml` | 104000–104999 |
-| `0105-windows.xml` | 105000–105999 |
+| `0965-windows.xml` | 105000–105999 |
 | `0106-fim.xml` | 106000–106999 |
 | `0107-ti.xml` | 107000–107999 |
 | `0108-sigmahq.xml` | 108000–108999 |
@@ -275,7 +275,7 @@ Mỗi task một file, cùng một quy trình. Chỉ chuyển các mã có `deci
 | 7 | `0102-linux.xml` + `decoders/0102-siem-procs.xml` | LNX-001..006 | Decoder cho dòng `siem-proc:` (ra trường `pid`, `ppid`, `uid`, `name`, `parent`, `exe`, `cmd`). Chỉ áp cho `location` khớp `siem-procs`, giống `_SIEM_PROC_LOC`, để chặn telemetry giả. |
 | 8 | `0103-network.xml` | NET-001..005 | Nguồn mặc định: syslog vào wazuh-manager (cổng 514, agent 000, `location` = IP người gửi); agent OPNsense chỉ là lựa chọn, không phải đường mặc định. filterlog qua decoder `pf`. NET-003 dùng `<srcip negate="yes">` dải nội bộ. NET-004 là rule con của nhóm Suricata, lọc `alert.severity`, nên cần agent OPNsense đọc `/var/log/suricata/eve.json` (`log_format json`); theo S6, Suricata qua syslog 514 không có decoder Wazuh (cả RFC 3164 lẫn 5424) nên đường đó chỉ nuôi parser Suricata của analyzer YAML, không chạy rule Suricata của Wazuh (86601...) hay NET-004 XML. NET-001, NET-005 theo S4. |
 | 9 | `0104-web.xml` | WEB-001..009 | Regex bắt cả dạng mã hóa (S5). Ca test mỗi rule có ≥ 1 dạng thô + ≥ 1 dạng `%xx`. |
-| 10 | `0105-windows.xml` | WIN-001..013 | Trường `win.eventdata.*` (camelCase). WIN-005 giữ ngoại lệ lớp vỏ Ansible/WinRM. WIN-013 giữ giới hạn schtasks. |
+| 10 | `0965-windows.xml` | WIN-001..013 | Trường `win.eventdata.*` (camelCase). WIN-005 giữ ngoại lệ lớp vỏ Ansible/WinRM. WIN-013 giữ giới hạn schtasks. |
 | 11 | `0106-fim.xml`, `0107-ti.xml` + `tools/misp_to_cdb.py` | FIM-001, TI-001 | FIM là con của 550/554 lọc theo đường dẫn. TI: SOAR xuất IOC MISP ra `etc/lists/malicious-ioc/malicious-ip` mỗi chu kỳ đồng bộ, rồi reload. |
 
 Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info type="text">shadow_since=<ngày></info>`.

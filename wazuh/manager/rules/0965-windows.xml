@@ -5,10 +5,12 @@
   R51: mọi rule đều là hậu duệ của chuỗi eventchannel gốc (60000 / 61600 / 62100 / 61100...), KHÔNG bao giờ của decoder json. Thiết bị syslog gửi JSON có
   trường win.* vẫn không tạo được cảnh báo Windows (ca âm location 10.10.40.254 trong 0965-windows.yml).
   Cha chọn theo rule gốc ĐANG khớp event đó (rule con đứng cạnh anh em gốc nạp trước thì thua anh em), nên treo thẳng dưới rule gốc cụ thể:
-    4625 -> 60122, 4728/4732 -> 60141/60144, 7045 -> 61138, Sysmon 1 -> 61603, Sysmon 10 -> 61612, Defender 1117 -> 62124, 4698 -> 60228.
-  KHÔNG có rule ở đây (đã chuyển Task 12, chỉ khác mức độ so với rule gốc): WIN-002 (63103 level 5), WIN-003 (60109 level 8), WIN-006 (91837 level 4).
-  Giới hạn so với YAML cũ: WIN-002 nhánh System/104 và WIN-009 nhánh Security/4697 (service cài qua Security log) không có rule; WIN-006 nhánh dòng lệnh
-  (downloadstring, iwr | iex, -nop -w hidden trong Sysmon 1) chưa có rule (Task 12).
+    4625 -> 60122, 4728/4732 -> 60141/60144, 7045 -> 61138, Sysmon 1 -> 61603, Sysmon 10 -> 61612, Defender 1117 -> 62124, 4698 -> 60228, System 104 -> 63104, 4697 -> 60103.
+  Nhánh thiếu của rule gốc có rule ở đây: WIN-002 System/104 (log khác bị xóa; 1102 chỉ khác 63103 ở mức độ), WIN-006 dòng lệnh Sysmon 1, WIN-009 Security/4697.
+  Phần chỉ khác MỨC ĐỘ so với rule gốc để Task 12: WIN-002 1102 (63103 level 5), WIN-003 (60109 level 8), WIN-006 script block 4104 (91837 level 4).
+  99919 (rule gốc 0999, level 9, 4625 từ IP trong danh sách malicious-ip) là con của 60122 và nạp SAU 0965 (0999 > 0965): bộ đếm 105001 chỉ móc vào 60122 nên KHÔNG đếm event đã
+  thành 99919. Hệ quả: với IP trong danh sách đen, MỌI 4625 ra 99919 (level 9, shadow) và 105001 không bao giờ báo cho IP đó (R44 tương tự: rule IOC gốc thắng, không mất cảnh báo;
+  ca trong 0965-windows.yml). Muốn 105001 đếm cả 99919 thì file phải xếp sau 0999 và dùng if_matched_sid 99919 (không làm: 99919 đã là cảnh báo brute-force từ IP xấu).
 -->
 <group name="windows,sysmon,">
   <!-- WIN-001: >= 5 lần 4625 từ cùng IP trong 60s. Đếm theo win.eventdata.ipAddress (không dùng srcip: decoder eventchannel không đặt srcip). Không same_location:
@@ -24,6 +26,18 @@
     </mitre>
     <info type="text">shadow_since=2026-11-03</info>
     <group>siem,windows,shadow,legacy_WIN-001,</group>
+  </rule>
+
+  <!-- WIN-002: nhánh System/104 (một log Windows khác bị xóa) mà rule gốc 63104 chỉ báo level 5. Event 1102 (xóa log Security) giữ 63103, Task 12 nâng level. -->
+  <rule id="105002" level="12">
+    <if_sid>63104</if_sid>
+    <field name="win.system.eventID" type="pcre2">^104$</field>
+    <description>WIN-002 Nhật ký Windows bị xóa (System 104, $(win.system.channel))</description>
+    <mitre>
+      <id>T1070.001</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,windows,shadow,legacy_WIN-002,</group>
   </rule>
 
   <!-- WIN-004: thiếu nhánh Enterprise Admins ở rule gốc cho 4728 / 4732 (60141 / 60144 level 5 chỉ lọc theo loại event; 60154/60159/60179 cho Administrators, Domain Admins,
@@ -45,7 +59,7 @@
   <rule id="105005" level="10">
     <if_sid>61603</if_sid>
     <field name="win.eventdata.image" type="pcre2">(?i)(^|\\)(powershell|pwsh)\.exe$</field>
-    <field name="win.eventdata.commandLine" type="pcre2">(?i)\s-(e|en|enc|enco|encod|encode|encoded|encodedcommand)\s+[A-Za-z0-9+/=]{20,}</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)\s-(e|ec|en|enc|enco|encod|encode|encoded|encodedcommand)\s+[A-Za-z0-9+/=]{20,}</field>
     <field name="win.eventdata.commandLine" type="pcre2" negate="yes">(?i)-NoProfile\s+-NonInteractive\s+-ExecutionPolicy\s+Unrestricted\s+-EncodedCommand\s</field>
     <field name="win.eventdata.commandLine" type="pcre2" negate="yes">(?i)-noninteractive\s+-encodedcommand\s+WwBDAG8AbgBzAG8AbABlAF0AOgA6AEkAbgBwAHUAdABFAG4AYwBvAGQAaQBuAGcA</field>
     <description>WIN-005 PowerShell chạy lệnh mã hóa base64 (-EncodedCommand)</description>
@@ -55,6 +69,22 @@
     </mitre>
     <info type="text">shadow_since=2026-11-03</info>
     <group>siem,windows,shadow,legacy_WIN-005,</group>
+  </rule>
+
+  <!-- WIN-006: nhánh dòng lệnh (Sysmon 1) của YAML cũ: powershell/pwsh có downloadstring(, iwr | iex, invoke-webrequest | iex hoặc -nop ... -w hidden.
+       Nhánh script block 4104 (91837 level 4) chỉ khác mức độ, Task 12.
+       Lệnh -EncodedCommand (WIN-005, 105005) bị loại khỏi rule này để hai rule không tranh nhau cùng một event (anh em: rule nào đứng trước thắng, không theo thứ tự file). -->
+  <rule id="105006" level="12">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)(^|\\)(powershell|pwsh)\.exe$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)downloadstring\(|iwr\s+.*\|\s*iex|invoke-webrequest.*\|\s*iex|-nop.*-w\s+hidden</field>
+    <field name="win.eventdata.commandLine" type="pcre2" negate="yes">(?i)\s-(e|ec|en|enc|enco|encod|encode|encoded|encodedcommand)\s+[A-Za-z0-9+/=]{20,}</field>
+    <description>WIN-006 PowerShell độc hại trên dòng lệnh (download cradle / ẩn cửa sổ)</description>
+    <mitre>
+      <id>T1059.001</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,windows,shadow,legacy_WIN-006,</group>
   </rule>
 
   <!-- WIN-007: Mimikatz / dump LSASS, ba nhánh của YAML cũ: dòng lệnh (105007), tên file mimikatz.exe (105107), Sysmon 10 mở LSASS với quyền đọc bộ nhớ (105207).
@@ -112,6 +142,19 @@
     <if_sid>61138</if_sid>
     <field name="win.eventdata.imagePath" type="pcre2">(?i)\\(temp|appdata|public|programdata)\\|powershell|cmd(\.exe)?\s+/c|%comspec%</field>
     <description>WIN-009 Cài đặt service đáng ngờ ($(win.eventdata.serviceName))</description>
+    <mitre>
+      <id>T1543.003</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,windows,shadow,legacy_WIN-009,</group>
+  </rule>
+
+  <!-- WIN-009 nhánh Security 4697 (service cài qua Security log, cùng ImagePath đáng ngờ); rule gốc không có rule cho 4697 nên đứng cạnh 60103. -->
+  <rule id="105109" level="10">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID" type="pcre2">^4697$</field>
+    <field name="win.eventdata.serviceFileName" type="pcre2">(?i)\\(temp|appdata|public|programdata)\\|powershell|cmd(\.exe)?\s+/c|%comspec%</field>
+    <description>WIN-009 Cài đặt service đáng ngờ (Security 4697: $(win.eventdata.serviceName))</description>
     <mitre>
       <id>T1543.003</id>
     </mitre>
