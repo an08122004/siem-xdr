@@ -4,7 +4,8 @@
 
 `siem-soar` (SOAR): chạy active response trên agent (`active-response:command`) và đọc danh sách agent (`agent:read`).
 `siem-rules` (console, nạp rule): `manager:read` + `manager:restart` (để PUT /manager/analysisd/reload; quyền này cũng
-mở restart manager, Wazuh không có quyền hẹp hơn), `rules:read`, `logtest:run`. Không sửa được cấu hình hay user.
+mở restart manager, Wazuh không có quyền hẹp hơn), `rules:read`, `logtest:run`, và ghi đè đúng danh sách `siem-misp-ip`
+(`lists:update` + `lists:delete` chỉ trên file đó; TI-001). Không sửa được cấu hình hay user.
 Không user nào có quyền sửa rule, decoder, cấu hình, user... Script tạo user mặc định của image (create_user.py) cấp
 role administrator nên không dùng. Hai user mặc định `wazuh` / `wazuh-wui` (mật khẩu mặc định công khai) bị đổi
 sang mật khẩu ngẫu nhiên không ai biết = vô hiệu hóa.
@@ -37,6 +38,12 @@ ACCOUNTS = {
                                "effect": "allow"},
         "siem_rules_read": {"actions": ["rules:read"], "resources": ["rule:file:*"], "effect": "allow"},
         "siem_rules_logtest": {"actions": ["logtest:run"], "resources": ["*:*:*"], "effect": "allow"},
+        # SOAR đẩy IOC MISP lên danh sách siem-misp-ip (TI-001): PUT /lists/files?overwrite=true. Wazuh ghi đè bằng cách xóa file cũ rồi ghi
+        # file mới, nên cần 2 quyền: `lists:update` theo resource `*:*:*` (không giới hạn được; trùng nội dung policy mặc định
+        # lists_all_resourceless nên setup() dùng lại policy đó) và `lists:delete` CHỈ trên list:file:siem-misp-ip. Nhờ vậy user không ghi đè
+        # được danh sách gốc malicious-ioc/* (R50). Tạo file mới tên khác thì được: file lạ không có <list> trong ossec.conf nên vô hại.
+        "siem_rules_lists": {"actions": ["lists:update"], "resources": ["*:*:*"], "effect": "allow"},
+        "siem_rules_misp_list": {"actions": ["lists:delete"], "resources": ["list:file:siem-misp-ip"], "effect": "allow"},
     }),
 }
 DEFAULT_USERS = ("wazuh", "wazuh-wui")

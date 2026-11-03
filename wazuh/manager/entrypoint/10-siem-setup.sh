@@ -81,7 +81,11 @@ echo "[siem-setup] đã chuẩn bị /var/log/siem-console"
 #    được, group wazuh để analysisd đọc. Làm mỗi lần khởi động, không làm ở install.sh (volume có tên, không phải thư mục host).
 D=/var/ossec/etc/rules-dynamic
 install -d -o 10001 -g wazuh -m 0755 "$D"
-# 9. File rule hỏng còn trên đĩa thì wazuh-analysisd không lên, kéo theo remoted và apid. Kiểm tra cả ruleset trước khi
+# 8b. Danh sách IOC từ MISP (TI-001, rule 0542-ti.xml): <list> trong ossec.conf trỏ tới file này; thiếu file thì analysisd không lên.
+#     Tạo file rỗng nếu chưa có (không đè bản SOAR đã đẩy lên). SOAR ghi đè qua API PUT /lists/files/siem-misp-ip. Không đụng
+#     danh sách gốc malicious-ioc/malicious-ip của Wazuh (R50).
+[ -e /var/ossec/etc/lists/siem-misp-ip ] || install -m 0660 -o wazuh -g wazuh /dev/null /var/ossec/etc/lists/siem-misp-ip
+# 9.File rule hỏng còn trên đĩa thì wazuh-analysisd không lên, kéo theo remoted và apid. Kiểm tra cả ruleset trước khi
 #    start; hỏng thì cách ly file động (AI / ngoại lệ) để manager vẫn khởi động được.
 if ! /var/ossec/bin/wazuh-analysisd -t >/tmp/analysisd-test.log 2>&1; then
   if [ -n "$(ls -A "$D")" ]; then

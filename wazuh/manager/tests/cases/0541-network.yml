@@ -861,3 +861,15 @@
   location: (fw01) any->/var/log/suricata/eve.json
   events:
   - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"198.51.100.50","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
+
+- rule: 99916   # Task 11 (hoãn từ Task 8): IP ĐÍCH trong danh sách malicious-ip gốc, severity 1 -> rule IOC gốc 99916 thắng NET-004
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"10.0.0.5","src_port":4444,"dest_ip":"196.251.85.62","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
+
+- none: [103004]   # cùng sự kiện: NET-004 nhường 99916
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"10.0.0.5","src_port":4444,"dest_ip":"196.251.85.62","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
