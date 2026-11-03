@@ -201,3 +201,46 @@ def test_catalog_metadata_false_positive_rate_detectors_and_coverage():
     assert len(cov) == 12 and cov["T1486"]["covered_text"] == "CHƯA CÓ" and "WIN-007" in cov["T1003"]["rules_text"]
     # bản ghi mới không làm lệch đếm "rule đang chạy" (e2e so số rule YAML với origin:rule)
     assert sum(d["origin"] == "rule" for d in docs.values()) == len(rep.rules)
+
+
+class FakeWazuh:
+    """GET /rules giả lập: 2 trang (limit 1) để kiểm tra phân trang."""
+    def __init__(self, fail=False):
+        self.fail, self.calls = fail, []
+        self.items = [
+            {"id": 5710, "level": 5, "description": "sshd: thử đăng nhập user không tồn tại", "groups": ["syslog", "sshd"],
+             "mitre": {"id": ["T1110"], "tactic": ["Credential Access"]}, "status": "enabled",
+             "filename": "0095-sshd_rules.xml", "relative_dirname": "ruleset/rules"},
+            {"id": 101010, "level": 10, "description": "Brute-force đăng nhập", "groups": ["auth", "shadow", "legacy_AUTH-001"],
+             "mitre": {"id": ["T1110"], "tactic": ["Credential Access"]}, "status": "disabled",
+             "filename": "ai.xml", "relative_dirname": "etc/rules-dynamic"}]
+
+    def rules(self, offset=0, limit=500):
+        self.calls.append(offset)
+        if self.fail:
+            raise ConnectionError("Wazuh API tắt")
+        return {"data": {"affected_items": self.items[offset:offset + 1], "total_affected_items": 2}}
+
+
+def test_wazuh_rule_docs_pages_and_maps(monkeypatch):
+    monkeypatch.setattr(rc, "WAZUH_PAGE", 1)
+    api = FakeWazuh()
+    docs = {d["rule"]["id"]: d for d in rc.wazuh_rule_docs(api, {"WZH-5710": {"d7": 3}})}
+    assert api.calls == [0, 1] and set(docs) == {"WZH-5710", "WZH-101010"}
+    stock, proj = docs["WZH-5710"], docs["WZH-101010"]
+    assert stock["severity"] == "low" and stock["shadow"] is True and stock["mode"] == "shadow"   # rule gốc level 5 ngoài nhóm cũ
+    assert stock["alerts"]["d7"] == 3 and stock["mitre"]["technique"] == ["T1110"] and stock["file"] == "ruleset/rules/0095-sshd_rules.xml"
+    assert proj["severity"] == "high" and proj["shadow"] is True and proj["legacy_id"] == "AUTH-001"
+    assert proj["mode"] == "off" and proj["status"] == "disabled" and proj["source"] == "wazuh" and proj["origin"] == "rule"
+
+
+def test_sync_includes_wazuh_and_keeps_old_on_api_error(rules_dir, monkeypatch):
+    monkeypatch.setattr(rc, "_last_sig", None)
+    es = FakeES()
+    rc.sync(es, rules_dir, api=FakeWazuh())
+    ids = [op["index"]["_id"] for op in es.bulks[0] if "index" in op]
+    assert "rule:WZH-5710" in ids and "rule:WEB-001" in ids
+    rc.sync(es, rules_dir, api=FakeWazuh(fail=True), force=True)               # API tắt: vẫn ghi phần còn lại, không xóa rule Wazuh
+    ids2 = [op["index"]["_id"] for op in es.bulks[1] if "index" in op]
+    assert "rule:WZH-5710" not in ids2 and "rule:WEB-001" in ids2
+    assert {"term": {"source": "wazuh"}} in es.deleted[1]["bool"]["must_not"]

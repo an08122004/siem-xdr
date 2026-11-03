@@ -307,9 +307,16 @@ def catalog_count(query):
 
 n_files = sum(1 for f in Path("server/rules").glob("**/*.y*ml") if not {"exceptions", "cases"} & set(f.parts)
               for line in f.read_text(encoding="utf-8").splitlines() if line.startswith("- id:"))
-n_rules = catalog_count("origin:rule")
+n_rules = catalog_count("origin:rule AND source:(builtin OR ai)")
 check("grafana", "Thư viện rule liệt kê đủ rule trong server/rules (Grafana đọc qua siem-rules)", n_rules == n_files,
       f"{n_rules}/{n_files} rule")
+n_wzh = catalog_count("origin:rule AND source:wazuh")
+wzh_total = manager_py("""
+from siem.wazuh_rules import WazuhApi
+print(WazuhApi.from_settings().rules(0, 1)['data']['total_affected_items'])
+""").stdout.strip()
+check("grafana", "Thư viện rule liệt kê đủ rule của Wazuh (tổng theo Wazuh API)", wzh_total.isdigit() and n_wzh == int(wzh_total),
+      f"{n_wzh}/{wzh_total} rule Wazuh")
 n_prop, n_cmp = catalog_count("origin:ai_proposal"), catalog_count("origin:comparison")
 check("grafana", "đề xuất AI có trong thư viện, kèm cặp so sánh với rule hiện có", n_prop == 0 or n_cmp > 0,
       f"{n_prop} đề xuất, {n_cmp} cặp so sánh")
