@@ -246,6 +246,7 @@ def test_shadow_group_marks_alert_shadow(enricher):
         "id": "104001", "level": 10, "description": "x", "groups": ["siem", "web", "shadow", "legacy_WEB-001"]})
     a = bridge.to_alert(enricher.enrich(normalize(raw)))
     assert a["alert"]["shadow"] is True and a["rule"]["mode"] == "shadow" and a["rule"]["legacy_id"] == "WEB-001"
+    assert a["rule"]["legacy_ids"] == ["WEB-001"]
     assert a["rule"]["id"] == "WZH-104001" and a["rule"]["groups"] == ["siem", "web", "shadow", "legacy_WEB-001"]
 
 
@@ -256,7 +257,7 @@ def _alert(enricher, rid, level, groups, **kw):
 
 def test_non_shadow_wazuh_alert_is_active(enricher):
     a = _alert(enricher, "101002", 8, ["siem", "sshd"])                      # rule riêng không có nhóm shadow
-    assert not get(a, "alert.shadow") and a["rule"]["legacy_id"] is None and a["rule"]["groups"] == ["siem", "sshd"]
+    assert not get(a, "alert.shadow") and "legacy_id" not in a["rule"] and "legacy_ids" not in a["rule"] and a["rule"]["groups"] == ["siem", "sshd"]
 
 
 def test_stock_rule_outside_old_groups_is_shadow_until_gate(enricher):
@@ -748,3 +749,8 @@ def test_ar_arguments_validation():
                 {"type": "kill_process", "params": {"name": "xmrig", "expect": "xmrig"}}):   # expect chỉ đi với PID
         with pytest.raises(ValueError):
             soar_wazuh.ar_arguments({"id": "x", **bad})
+
+
+def test_several_legacy_groups_keep_first_and_all(enricher):
+    a = _alert(enricher, "104002", 10, ["siem", "legacy_NET-004", "legacy_NET-005"])
+    assert a["rule"]["legacy_id"] == "NET-004" and a["rule"]["legacy_ids"] == ["NET-004", "NET-005"]
