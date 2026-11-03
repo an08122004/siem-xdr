@@ -768,6 +768,7 @@ def go(kind: str, doc_id: str) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 
 from ..ai import deploy as ai_deploy  # noqa: E402
+from .. import wazuh_exceptions, wazuh_rules  # noqa: E402
 
 
 class AIDecision(BaseModel):
@@ -847,6 +848,48 @@ def ai_rollback(pid: str, body: AIDecision, s: Session = Depends(rules_perm)) ->
     if len(body.reason.strip()) < 3:
         raise HTTPException(400, "gỡ phải ghi lý do")
     return _ai(ai_deploy.rollback, es(), pid, s.username, body.reason.strip(), settings.RULES_DIR, now=store.now_iso())
+
+
+class WazuhCondition(BaseModel):
+    field: str = Field(max_length=64)
+    value: str = Field(max_length=500)
+    decoder: str | None = Field(None, max_length=64)
+
+
+class WazuhException(BaseModel):
+    rule: str = Field(max_length=32)                      # vd WZH-31103
+    conditions: list[WazuhCondition] = Field(max_length=10)
+    reason: str = Field(max_length=500)
+
+
+def _exc(fn, *args):
+    try:
+        return fn(*args)
+    except wazuh_rules.WazuhRuleError as e:               # Wazuh không nạp được: file cũ đã được giữ nguyên (là ValueError: bắt trước)
+        raise HTTPException(409, str(e))
+    except (ValueError, KeyError) as e:                   # đầu vào sai: điều kiện rỗng, trường lạ, IP sai...
+        raise HTTPException(400, f"ngoại lệ không hợp lệ: {e}")
+
+
+@app.get("/api/v1/exceptions", dependencies=[Depends(current_user)])
+def exceptions_list() -> list[dict[str, Any]]:
+    return wazuh_exceptions.items()
+
+
+@app.post("/api/v1/exceptions")
+def exceptions_add(body: WazuhException, s: Session = Depends(rules_perm)) -> dict[str, Any]:
+    """Ngoại lệ cho rule Wazuh = rule level 0 trong rules-dynamic/exceptions.xml. Phải có điều kiện (400 nếu không)."""
+    if len(body.reason.strip()) < 3:
+        raise HTTPException(400, "ngoại lệ phải ghi lý do")
+    return _exc(wazuh_exceptions.add, body.rule, [c.model_dump() for c in body.conditions], body.reason.strip(),
+                s.username, wazuh_rules.WazuhApi.from_settings())
+
+
+@app.delete("/api/v1/exceptions/{eid}")
+def exceptions_remove(eid: int, s: Session = Depends(rules_perm)) -> dict[str, Any]:
+    if not _exc(wazuh_exceptions.remove, eid, wazuh_rules.WazuhApi.from_settings()):
+        raise HTTPException(404, "không có ngoại lệ này")
+    return {"removed": eid}
 
 
 @app.post("/api/v1/ai/run")

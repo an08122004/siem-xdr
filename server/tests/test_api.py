@@ -1154,3 +1154,42 @@ def test_ai_assist_jobs_and_feedback(env):
     fake.docs[(settings.IDX_AI_JOBS, r["_id"])]["status"] = "done"
     assert fb(False).json()["feedback"]["useful"] is False and fake.docs[(settings.IDX_AI_JOBS, r["_id"])]["feedback"]["by"] == "an"
     assert env.get("/api/v1/ai/assist/khong-co").status_code == 404
+
+
+# ------------------------------------------------------------------ ngoại lệ thành rule Wazuh level 0 (Task 16)
+def test_wazuh_exceptions_api(env, monkeypatch, tmp_path):
+    from siem import wazuh_exceptions
+    from siem.wazuh_rules import WazuhRuleError
+
+    class Api:
+        fail = None
+
+        def reload(self):
+            if self.fail:
+                raise WazuhRuleError(self.fail)
+    a = Api()
+    monkeypatch.setattr(wazuh_exceptions, "DYNAMIC_DIR", tmp_path)
+    monkeypatch.setattr("siem.wazuh_rules.WazuhApi.from_settings", classmethod(lambda cls: a))
+    pw = activate(env, "an", "analyst")
+    login(env, "an", pw)
+    body = {"rule": "WZH-31103", "conditions": [{"field": "source.ip", "value": "10.10.40.50"}], "reason": "máy quét"}
+    assert env.post("/api/v1/exceptions", json=body, headers=H).status_code == 403
+    pw = activate(env, "de", "detection")
+    login(env, "de", pw)
+    r = env.post("/api/v1/exceptions", json=body, headers=H)
+    assert r.status_code == 200 and r.json()["id"] == 110000
+    xml = (tmp_path / "exceptions.xml").read_text(encoding="utf-8")
+    assert 'id="110000" level="0"' in xml and "<srcip>10.10.40.50</srcip>" in xml
+    # chỉ có rule cha: một ngoại lệ tắt cả rule không được phép
+    assert env.post("/api/v1/exceptions", json=body | {"conditions": []}, headers=H).status_code == 400
+    assert env.post("/api/v1/exceptions", json=body | {"conditions": [{"field": "host.name", "value": "x"}]},
+                    headers=H).status_code == 400
+    # Wazuh nạp lại hỏng -> 409, file cũ còn nguyên
+    a.fail = "Failed to reload"
+    r = env.post("/api/v1/exceptions", json=body | {"conditions": [{"field": "user.name", "value": "svc"}]}, headers=H)
+    assert r.status_code == 409 and (tmp_path / "exceptions.xml").read_text(encoding="utf-8") == xml
+    a.fail = None
+    assert [e["id"] for e in env.get("/api/v1/exceptions").json()] == [110000]
+    assert env.delete("/api/v1/exceptions/110000", headers=H).status_code == 200
+    assert env.delete("/api/v1/exceptions/110000", headers=H).status_code == 404
+    assert env.get("/api/v1/exceptions").json() == []
