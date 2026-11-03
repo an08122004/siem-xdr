@@ -9,7 +9,8 @@ hiện giá trị mới nhất (tô màu theo đích) và xu hướng; console �
   Báo nhầm   alert kết luận báo nhầm / alert đã đóng
   Tải        alert mỗi analyst mỗi ca (SOC_SHIFTS_PER_DAY ca / ngày, analyst = người đã xử lý alert / case trong kỳ)
   Làm giàu   % alert có ngữ cảnh tài sản (asset.*) từ danh mục tài sản
-  ATT&CK     % kỹ thuật ưu tiên (config/threat_profile.yml) có rule chạy chính thức đã kiểm thử (detection/lint.py)
+  ATT&CK     % kỹ thuật ưu tiên (config/threat_profile.yml) có ít nhất một rule đang bật trong siem-rules: YAML chính thức đã
+             kiểm thử hoặc rule Wazuh không bóng / không tắt (rules_catalog.attack_coverage); ghi nguồn yaml / wazuh / both
   Nguồn log  % nguồn đã onboard không im lặng (siem-sources, soar/health.py)
   Hunting    số cuộc hunt hoàn thành trong kỳ (siem-hunts)
 Alert của rule chạy bóng không tính vào KPI."""
@@ -163,8 +164,16 @@ def compute(es, rules_dir: Path | None = None, config_dir: Path | None = None, d
     if rules_dir:
         from ..detection.lint import lint
         rep = lint(rules_dir, config_dir)
-        doc["attack_coverage_pct"] = rep.coverage_pct()
-        doc["attack_coverage"] = [{k: c[k] for k in ("id", "name", "covered", "rules")} for c in rep.coverage]
+        cov = rep.coverage
+        try:   # R49: rule YAML đang bật HOẶC rule Wazuh đang bật (thư viện siem-rules); ES lỗi thì dùng kết quả lint (chỉ YAML)
+            from ..rules_catalog import attack_coverage
+            hits = es.search(index=settings.IDX_RULES, size=10000, query={"terms": {"origin": ["rule", "wazuh_rule"]}},
+                             _source=["origin", "source", "rule.id", "mode", "shadow", "status", "tests", "mitre.technique"])
+            cov = attack_coverage([h["_source"] for h in hits["hits"]["hits"]], rep.profile)
+        except Exception as e:  # noqa: BLE001
+            log.warning("độ phủ ATT&CK: không đọc được %s, dùng kết quả lint YAML: %s", settings.IDX_RULES, e)
+        doc["attack_coverage_pct"] = _pct(sum(c["covered"] for c in cov), len(cov)) or 0.0
+        doc["attack_coverage"] = [{k: c.get(k) for k in ("id", "name", "covered", "rules", "rules_n", "sources")} for c in cov]
         doc["rules"] = {"total": len(rep.rules), "shadow": sum(r.mode == "shadow" for r in rep.rules.values()),
                         "tested": sum(r.tested for r in rep.rules.values()), "lint_errors": len(rep.errors)}
     doc["grade"] = {k: grade(k, doc.get(k)) for k in TARGETS}
