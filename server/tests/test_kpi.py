@@ -71,3 +71,62 @@ def test_kpi_grade_directions():
     assert kpi.grade("sla_pct", 96) == "gd4" and kpi.grade("sla_pct", 90) == "gd2" and kpi.grade("sla_pct", 80) == "below"
     assert kpi.grade("mtta_p1_s", 20 * 60) == "gd2" and kpi.grade("mtta_p1_s", 40 * 60) == "below"
     assert kpi.grade("fp_rate_pct", None) is None and kpi.grade("không-có", 1) is None
+
+
+def _doc(rid, tech, origin="rule", source="builtin", **kw):
+    return {"origin": origin, "source": source, "rule": {"id": rid}, "mitre": {"technique": [tech]}, **kw}
+
+
+def test_attack_coverage_from_library_docs():
+    """R49: phủ khi có ít nhất một rule thật sự bật, từ YAML hoặc Wazuh; rule bóng / tắt không tính; nhãn nguồn đúng."""
+    from siem.rules_catalog import attack_coverage
+    prof = {"techniques": [{"id": t} for t in ("T1190", "T1486", "T1110", "T1059", "T1003", "T1078")]}
+    docs = [
+        _doc("WEB-001", "T1190", mode="active"),                                          # chỉ YAML
+        _doc("WZH-100", "T1486", origin="wazuh_rule", source="wazuh", mode="shadow", shadow=True, bridged=True),   # bóng
+        _doc("WZH-101", "T1110", origin="wazuh_rule", source="wazuh", mode="active", shadow=False, status="enabled", bridged=True),
+        _doc("AUTH-001", "T1110.001", mode="active", tests={"tested": True}),            # kỹ thuật con tính cho gốc; cả hai nguồn
+        _doc("WZH-102", "T1059", origin="wazuh_rule", source="wazuh", mode="off", status="disabled", bridged=True),   # tắt
+        _doc("WZH-5712", "T1003", origin="wazuh_rule", source="wazuh", mode="shadow", shadow=True, bridged=True),     # rule gốc bóng
+        _doc("X-001", "T1078", mode="active", tests={"tested": False}),                  # YAML chưa qua kiểm thử
+    ]
+    cov = {c["id"]: c for c in attack_coverage(docs, prof)}
+    assert {t for t, c in cov.items() if c["covered"]} == {"T1190", "T1110"}
+    assert cov["T1190"]["sources"] == "yaml" and cov["T1110"]["sources"] == "both"
+    assert cov["T1486"]["sources"] == "" and cov["T1486"]["shadow"] == ["WZH-100"]
+    only_wazuh = attack_coverage([docs[2]], prof)
+    assert next(c for c in only_wazuh if c["id"] == "T1110")["sources"] == "wazuh"
+
+
+def test_kpi_coverage_reads_rule_library(monkeypatch):
+    es = KES()
+    orig = es.search
+
+    def search(index, **kw):
+        if index == settings.IDX_RULES:
+            return {"hits": {"total": {"value": 1}, "hits": [{"_source": _doc("WZH-101", "T1190", origin="wazuh_rule", source="wazuh", mode="active", bridged=True)}]}}
+        return orig(index, **kw)
+    es.search = search
+    d = kpi.compute(es, ROOT / "rules", ROOT / "config", days=30, now=NOW)
+    assert d["attack_coverage_source"] == "siem-rules" and d["attack_coverage_pct"] == 8.3 and [c["id"] for c in d["attack_coverage"] if c["covered"]] == ["T1190"]
+    assert d["attack_coverage"][0]["sources"] == "wazuh"
+
+
+def test_kpi_coverage_fallback_is_reported():
+    """ES lỗi, hoặc siem-rules chưa có rule Wazuh nào: lùi về lint YAML và nói rõ trong bản ghi KPI."""
+    for fake in (lambda: (_ for _ in ()).throw(ConnectionError("ES")), lambda: {"hits": {"total": {"value": 0}, "hits": []}}):
+        es = KES()
+        orig = es.search
+
+        def search(index, _f=fake, _o=orig, **kw):
+            return _f() if index == settings.IDX_RULES else _o(index, **kw)
+        es.search = search
+        d = kpi.compute(es, ROOT / "rules", ROOT / "config", days=30, now=NOW)
+        assert d["attack_coverage_source"] == "lint-yaml" and d["attack_coverage_pct"] == 83.3
+
+
+def test_attack_coverage_requires_bridged_for_wazuh():
+    from siem.rules_catalog import attack_coverage
+    w = _doc("WZH-1", "T1190", origin="wazuh_rule", source="wazuh", mode="active", shadow=False, status="enabled")
+    assert not attack_coverage([w], {"techniques": [{"id": "T1190"}]})[0]["covered"]
+    assert attack_coverage([{**w, "bridged": True}], {"techniques": [{"id": "T1190"}]})[0]["covered"]

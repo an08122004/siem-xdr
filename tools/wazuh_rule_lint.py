@@ -1,11 +1,14 @@
 """Lint rule XML của repo (wazuh/manager/rules/*.xml) so với ca test (wazuh/manager/tests/cases).
 
     python tools/wazuh_rule_lint.py
+    python tools/wazuh_rule_lint.py --layer build/attack-layer.json   # kèm layer cho MITRE ATT&CK Navigator
+    (--layer: CHỈ rule XML dự án đang bật; khác KPI độ phủ, vốn tính cả rule YAML và rule gốc Wazuh có ra alert)
 
 Mỗi dòng: `file:rule_id: thông điệp`; cảnh báo có tiền tố `WARNING: `. Thoát mã 1 khi có LỖI, cảnh báo thì mã 0.
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -123,9 +126,38 @@ def check(files: dict[str, str], cases: list[dict]) -> list[str]:
     return out
 
 
+def attack_layer(files: dict[str, str], profile: dict | None = None, name: str = "SIEM/XDR - độ phủ rule Wazuh") -> dict:
+    """Layer cho ATT&CK Navigator từ rule dự án trong repo đang bật (không nhóm `shadow`, level > 0): điểm = số rule.
+    Chỉ đọc XML của repo; rule gốc của Wazuh (cần API) không có trong layer. Kỹ thuật ưu tiên chưa có rule tô đỏ."""
+    from siem.wazuh_rules import parse
+    by_tech: dict[str, list[str]] = defaultdict(list)
+    for text in files.values():
+        for r in parse(text):
+            if r["level"] > 0 and "shadow" not in r["groups"]:
+                for t in r["mitre"]:
+                    by_tech[t].append(str(r["id"]))
+    priority = [str(t["id"]) for t in (profile or {}).get("techniques") or []]
+    techniques = [{"techniqueID": t, "score": len(ids), "comment": ", ".join(sorted(ids)),
+                   **({"color": "#2e7d32"} if t.split(".")[0] in priority else {})} for t, ids in sorted(by_tech.items())]
+    techniques += [{"techniqueID": t, "score": 0, "color": "#e2474b",
+                    "comment": "kỹ thuật ưu tiên (threat_profile.yml) chưa có rule dự án đang bật"}
+                   for t in priority if not any(k.split(".")[0] == t for k in by_tech)]
+    return {"name": name, "domain": "enterprise-attack", "versions": {"layer": "4.5", "navigator": "5.1.0"},
+            "description": "Sinh bởi tools/wazuh_rule_lint.py từ wazuh/manager/rules (rule dự án đang bật, không tính rule gốc).",
+            "techniques": techniques, "gradient": {"colors": ["#ffffff", "#66b1ff"], "minValue": 0, "maxValue": 3},
+            "legendItems": [{"label": "Kỹ thuật ưu tiên có rule", "color": "#2e7d32"},
+                            {"label": "Kỹ thuật ưu tiên chưa có rule", "color": "#e2474b"}]}
+
+
 def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")      # console Windows cp1252
+    layer = sys.argv[sys.argv.index("--layer") + 1] if "--layer" in sys.argv[1:-1] else None
     files = {f.name: f.read_text(encoding="utf-8") for f in sorted(RULES_DIR.glob("*.xml"))}
+    if layer:
+        import yaml
+        profile = yaml.safe_load((ROOT / "server/config/threat_profile.yml").read_text(encoding="utf-8"))
+        Path(layer).parent.mkdir(parents=True, exist_ok=True)
+        Path(layer).write_text(json.dumps(attack_layer(files, profile), ensure_ascii=False, indent=2), encoding="utf-8")
     problems = check(files, load_cases(CASES_DIR))
     for p in problems:
         print(p)
