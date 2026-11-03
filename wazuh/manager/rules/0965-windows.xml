@@ -1,0 +1,185 @@
+<!--
+  Rule Windows (WIN-001..013 của bộ rule cũ), chạy BÓNG. Dải ID 105000-105999. Event của agent Windows (eventchannel): trường win.system.* / win.eventdata.*.
+  TÊN FILE 0965: phải nạp SAU mọi file rule gốc mà rule ở đây treo vào (0580 security, 0590 system, 0595 sysmon, 0600 defender, 0610, 0800 sysmon_id_1,
+  0945 sysmon_id_10) vì if_sid chỉ trỏ tới rule đã nạp. "0105-windows" trong kế hoạch đứng TRƯỚC các file đó nên rule con bị bỏ ("Signature ID not found").
+  R51: mọi rule đều là hậu duệ của chuỗi eventchannel gốc (60000 / 61600 / 62100 / 61100...), KHÔNG bao giờ của decoder json. Thiết bị syslog gửi JSON có
+  trường win.* vẫn không tạo được cảnh báo Windows (ca âm location 10.10.40.254 trong 0965-windows.yml).
+  Cha chọn theo rule gốc ĐANG khớp event đó (rule con đứng cạnh anh em gốc nạp trước thì thua anh em), nên treo thẳng dưới rule gốc cụ thể:
+    4625 -> 60122, 4728/4732 -> 60141/60144, 7045 -> 61138, Sysmon 1 -> 61603, Sysmon 10 -> 61612, Defender 1117 -> 62124, 4698 -> 60228.
+  KHÔNG có rule ở đây (đã chuyển Task 12, chỉ khác mức độ so với rule gốc): WIN-002 (63103 level 5), WIN-003 (60109 level 8), WIN-006 (91837 level 4).
+  Giới hạn so với YAML cũ: WIN-002 nhánh System/104 và WIN-009 nhánh Security/4697 (service cài qua Security log) không có rule; WIN-006 nhánh dòng lệnh
+  (downloadstring, iwr | iex, -nop -w hidden trong Sysmon 1) chưa có rule (Task 12).
+-->
+<group name="windows,sysmon,">
+  <!-- WIN-001: >= 5 lần 4625 từ cùng IP trong 60s. Đếm theo win.eventdata.ipAddress (không dùng srcip: decoder eventchannel không đặt srcip). Không same_location:
+       YAML cũ gộp theo source.ip qua mọi máy, kẻ dò mật khẩu nhiều máy Windows vẫn bị cộng dồn. IP "-" / "::1" / rỗng (đăng nhập cục bộ) không đếm. -->
+  <rule id="105001" level="10" frequency="5" timeframe="60" ignore="60">
+    <if_matched_sid>60122</if_matched_sid>
+    <same_field>win.eventdata.ipAddress</same_field>
+    <field name="win.eventdata.ipAddress" type="pcre2">^[0-9a-fA-F:.]{7,}$</field>
+    <field name="win.eventdata.ipAddress" type="pcre2" negate="yes">^(::1|127\.0\.0\.1)$</field>
+    <description>WIN-001 Brute-force đăng nhập Windows: &gt;= 5 lần 4625 từ $(win.eventdata.ipAddress) trong 60 giây</description>
+    <mitre>
+      <id>T1110.001</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,windows,shadow,legacy_WIN-001,</group>
+  </rule>
+
+  <!-- WIN-004: thiếu nhánh Enterprise Admins ở rule gốc cho 4728 / 4732 (60141 / 60144 level 5 chỉ lọc theo loại event; 60154/60159/60179 cho Administrators, Domain Admins,
+       Remote Desktop Users). Nhận theo SID nhóm -519 (không phụ thuộc ngôn ngữ tên nhóm), treo dưới 60141 và 60144. 4756 (nhóm universal) đã có rule gốc 60167
+       "Enterprise Admins Group Changed" level 12 nên không treo thêm (rule con của 60151 đứng sau 60167 sẽ không bao giờ báo). -->
+  <rule id="105004" level="10">
+    <if_sid>60141, 60144</if_sid>
+    <field name="win.eventdata.targetSid" type="pcre2">^S-1-5-\S+-519$</field>
+    <description>WIN-004 Thêm tài khoản vào nhóm Enterprise Admins ($(win.eventdata.targetUserName))</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,windows,shadow,legacy_WIN-004,</group>
+  </rule>
+
+  <!-- WIN-005: PowerShell -EncodedCommand (mọi dạng viết tắt), trừ lớp vỏ của Ansible qua WinRM (hai lệnh nền ghi thật của Splunk Attack Range, 12/10/2026; kẻ tấn
+       công chép đúng chuỗi tham số này sẽ lọt, máy không quản trị bằng Ansible / WinRM thì xóa hai dòng negate). -->
+  <rule id="105005" level="10">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)(^|\\)(powershell|pwsh)\.exe$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)\s-(e|en|enc|enco|encod|encode|encoded|encodedcommand)\s+[A-Za-z0-9+/=]{20,}</field>
+    <field name="win.eventdata.commandLine" type="pcre2" negate="yes">(?i)-NoProfile\s+-NonInteractive\s+-ExecutionPolicy\s+Unrestricted\s+-EncodedCommand\s</field>
+    <field name="win.eventdata.commandLine" type="pcre2" negate="yes">(?i)-noninteractive\s+-encodedcommand\s+WwBDAG8AbgBzAG8AbABlAF0AOgA6AEkAbgBwAHUAdABFAG4AYwBvAGQAaQBuAGcA</field>
+    <description>WIN-005 PowerShell chạy lệnh mã hóa base64 (-EncodedCommand)</description>
+    <mitre>
+      <id>T1059.001</id>
+      <id>T1027</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,windows,shadow,legacy_WIN-005,</group>
+  </rule>
+
+  <!-- WIN-007: Mimikatz / dump LSASS, ba nhánh của YAML cũ: dòng lệnh (105007), tên file mimikatz.exe (105107), Sysmon 10 mở LSASS với quyền đọc bộ nhớ (105207).
+       Rule gốc 92900 (level 12) đứng trước 105207 và nhận riêng 0x1010 / 0x40 khi nguồn không nằm trong Program Files; 105207 báo các quyền còn lại và 0x1010 từ Program Files. -->
+  <rule id="105007" level="12">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)sekurlsa::|lsadump::|procdump.*lsass|comsvcs\.dll.*minidump|rundll32.*comsvcs.*#24</field>
+    <description>WIN-007 Đánh cắp thông tin đăng nhập (Mimikatz / dump LSASS) qua dòng lệnh</description>
+    <mitre>
+      <id>T1003.001</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,windows,shadow,legacy_WIN-007,</group>
+  </rule>
+
+  <rule id="105107" level="12">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)(^|\\)mimikatz\.exe$</field>
+    <description>WIN-007 Tiến trình mimikatz.exe được chạy</description>
+    <mitre>
+      <id>T1003.001</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,windows,shadow,legacy_WIN-007,</group>
+  </rule>
+
+  <rule id="105207" level="12">
+    <if_sid>61612</if_sid>
+    <field name="win.eventdata.targetImage" type="pcre2">(?i)(^|\\)lsass\.exe$</field>
+    <field name="win.eventdata.grantedAccess" type="pcre2">(?i)^0x(1010|1410|1fffff|143a)$</field>
+    <description>WIN-007 Tiến trình $(win.eventdata.sourceImage) mở LSASS với quyền đọc bộ nhớ ($(win.eventdata.grantedAccess))</description>
+    <mitre>
+      <id>T1003.001</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,windows,shadow,legacy_WIN-007,</group>
+  </rule>
+
+  <!-- WIN-008: ứng dụng Office sinh ra shell / trình thông dịch. -->
+  <rule id="105008" level="10">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.parentImage" type="pcre2">(?i)(^|\\)(winword|excel|powerpnt|outlook|mspub)\.exe$</field>
+    <field name="win.eventdata.image" type="pcre2">(?i)(^|\\)(cmd|powershell|pwsh|wscript|cscript|mshta|rundll32|regsvr32)\.exe$</field>
+    <description>WIN-008 Ứng dụng Office ($(win.eventdata.parentImage)) sinh ra shell ($(win.eventdata.image))</description>
+    <mitre>
+      <id>T1204.002</id>
+      <id>T1566.001</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,windows,shadow,legacy_WIN-008,</group>
+  </rule>
+
+  <!-- WIN-009: service mới (System 7045) có ImagePath đáng ngờ: thư mục ghi được, powershell, cmd /c, %comspec%. -->
+  <rule id="105009" level="10">
+    <if_sid>61138</if_sid>
+    <field name="win.eventdata.imagePath" type="pcre2">(?i)\\(temp|appdata|public|programdata)\\|powershell|cmd(\.exe)?\s+/c|%comspec%</field>
+    <description>WIN-009 Cài đặt service đáng ngờ ($(win.eventdata.serviceName))</description>
+    <mitre>
+      <id>T1543.003</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,windows,shadow,legacy_WIN-009,</group>
+  </rule>
+
+  <!-- WIN-010: xóa shadow copy / tắt phục hồi (dấu hiệu ransomware). -->
+  <rule id="105010" level="12">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)vssadmin(\.exe)?\s+delete\s+shadows|wmic(\.exe)?\s+shadowcopy\s+delete|bcdedit.*recoveryenabled\s+no|wbadmin\s+delete\s+catalog</field>
+    <description>WIN-010 Xóa Shadow Copy / vô hiệu hóa phục hồi (dấu hiệu ransomware)</description>
+    <mitre>
+      <id>T1490</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,windows,shadow,legacy_WIN-010,</group>
+  </rule>
+
+  <!-- WIN-011: thiếu nhánh 1117 (Defender đã xử lý mã độc); 1116 là rule gốc 62123 (level 12). Cha 62124 (1117 mức Information như Defender thật ghi, level 3). Ca legacy ghi 1117 ở mức Warning (Level 3) lọt vào 62101 và KHÔNG nhận: treo thêm dưới 62101 sẽ cướp event khỏi bộ đếm gốc 62104 / 62105 (if_matched_sid 62101). -->
+  <rule id="105011" level="10">
+    <if_sid>62124</if_sid>
+    <field name="win.system.eventID" type="pcre2">^1117$</field>
+    <description>WIN-011 Windows Defender đã xử lý mã độc ($(win.eventdata.threatName))</description>
+    <mitre>
+      <id>T1204</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,windows,shadow,legacy_WIN-011,</group>
+  </rule>
+
+  <!-- WIN-012: bốn nhánh LOLBin mà rule gốc thiếu (mshta, regsvr32 /i:http, rundll32 javascript:, bitsadmin /transfer); certutil -urlcache / -decode đã có rule gốc 92018 / 92075 (level >= 7). -->
+  <rule id="105012" level="10">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)mshta(\.exe)?\s+(http|javascript|vbscript)|regsvr32(\.exe)?.*/i:http|rundll32(\.exe)?.*javascript:|bitsadmin(\.exe)?.*/transfer</field>
+    <description>WIN-012 Lạm dụng LOLBin để tải / thực thi mã (mshta, regsvr32, rundll32, bitsadmin)</description>
+    <mitre>
+      <id>T1218</id>
+      <id>T1105</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,windows,shadow,legacy_WIN-012,</group>
+  </rule>
+
+  <!-- WIN-013: schtasks /create chạy trình thông dịch, LOLBin, file script hoặc file trong thư mục người dùng ghi được (105013, từ dòng lệnh Sysmon 1), và mọi sự kiện
+       4698 (105113, con của rule gốc 60228 level 4; nhánh event.action = scheduled_task_created của YAML cũ, không lọc nội dung nên rộng hơn). Giới hạn của YAML cũ giữ nguyên: tác vụ ghi file .bat / .exe
+       trong thư mục thường (vd C:\Scripts\backup.bat) bị bỏ qua. -->
+  <rule id="105013" level="7">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)(^|\\)schtasks\.exe$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)/create</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(^|[\\/\s"'])(cmd|powershell|pwsh|wscript|cscript|mshta|rundll32|regsvr32|certutil|bitsadmin|javaw?)(\.exe)?([\s"']|$)|\.(msc|js|jse|vbs|vbe|hta|ps1)([\s"']|$)|%(temp|tmp|appdata|localappdata|public|programdata)%|\\(appdata|users\\public|programdata|windows\\temp)\\</field>
+    <description>WIN-013 Tạo Scheduled Task đáng ngờ bằng schtasks (cơ chế duy trì truy cập)</description>
+    <mitre>
+      <id>T1053.005</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,windows,shadow,legacy_WIN-013,</group>
+  </rule>
+
+  <rule id="105113" level="7">
+    <if_sid>60228</if_sid>
+    <field name="win.system.eventID" type="pcre2">^4698$</field>
+    <description>WIN-013 Tạo Scheduled Task (Security 4698: $(win.eventdata.taskName))</description>
+    <mitre>
+      <id>T1053.005</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,windows,shadow,legacy_WIN-013,</group>
+  </rule>
+</group>
