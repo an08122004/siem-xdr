@@ -41,7 +41,7 @@
       "gridPos": {
         "x": 0,
         "y": 1,
-        "w": 4,
+        "w": 3,
         "h": 4
       },
       "targets": [
@@ -108,9 +108,9 @@
         "uid": "siem-rules"
       },
       "gridPos": {
-        "x": 4,
+        "x": 3,
         "y": 1,
-        "w": 4,
+        "w": 3,
         "h": 4
       },
       "targets": [
@@ -177,9 +177,9 @@
         "uid": "siem-rules"
       },
       "gridPos": {
-        "x": 8,
+        "x": 6,
         "y": 1,
-        "w": 4,
+        "w": 3,
         "h": 4
       },
       "targets": [
@@ -246,9 +246,9 @@
         "uid": "siem-rules"
       },
       "gridPos": {
-        "x": 12,
+        "x": 9,
         "y": 1,
-        "w": 4,
+        "w": 3,
         "h": 4
       },
       "targets": [
@@ -315,9 +315,9 @@
         "uid": "siem-rules"
       },
       "gridPos": {
-        "x": 16,
+        "x": 12,
         "y": 1,
-        "w": 4,
+        "w": 3,
         "h": 4
       },
       "targets": [
@@ -384,9 +384,9 @@
         "uid": "siem-rules"
       },
       "gridPos": {
-        "x": 20,
+        "x": 15,
         "y": 1,
-        "w": 4,
+        "w": 3,
         "h": 4
       },
       "targets": [
@@ -446,6 +446,144 @@
     },
     {
       "id": 57,
+      "type": "stat",
+      "title": "Rule Wazuh (tổng)",
+      "datasource": {
+        "type": "elasticsearch",
+        "uid": "siem-rules"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 1,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "elasticsearch",
+            "uid": "siem-rules"
+          },
+          "query": "origin:wazuh_rule",
+          "alias": "",
+          "timeField": "@timestamp",
+          "metrics": [
+            {
+              "id": "1",
+              "type": "count"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "id": "2",
+              "type": "date_histogram",
+              "field": "@timestamp",
+              "settings": {
+                "interval": "auto",
+                "min_doc_count": "0"
+              }
+            }
+          ]
+        }
+      ],
+      "maxDataPoints": 30,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#6b7280"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 58,
+      "type": "stat",
+      "title": "Rule Wazuh chạy bóng",
+      "datasource": {
+        "type": "elasticsearch",
+        "uid": "siem-rules"
+      },
+      "gridPos": {
+        "x": 21,
+        "y": 1,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "elasticsearch",
+            "uid": "siem-rules"
+          },
+          "query": "origin:wazuh_rule AND shadow:true",
+          "alias": "",
+          "timeField": "@timestamp",
+          "metrics": [
+            {
+              "id": "1",
+              "type": "count"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "id": "2",
+              "type": "date_histogram",
+              "field": "@timestamp",
+              "settings": {
+                "interval": "auto",
+                "min_doc_count": "0"
+              }
+            }
+          ]
+        }
+      ],
+      "maxDataPoints": 30,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#6b7280"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 59,
       "type": "table",
       "title": "Rule theo MITRE tactic",
       "datasource": {
@@ -549,7 +687,7 @@
       }
     },
     {
-      "id": 58,
+      "id": 60,
       "type": "table",
       "title": "Đề xuất AI theo trạng thái",
       "datasource": {
@@ -653,7 +791,7 @@
       }
     },
     {
-      "id": 59,
+      "id": 61,
       "type": "table",
       "title": "Rule kêu nhiều nhất (7 ngày)",
       "datasource": {
@@ -758,7 +896,7 @@
       }
     },
     {
-      "id": 60,
+      "id": 62,
       "type": "row",
       "title": "Danh sách rule, ngoại lệ, đề xuất AI — lọc bằng các ô phía trên",
       "collapsed": false,
@@ -771,7 +909,7 @@
       "panels": []
     },
     {
-      "id": 61,
+      "id": 63,
       "type": "table",
       "title": "Rule và đề xuất AI — bấm mã rule xem cảnh báo của rule, bấm trạng thái đề xuất để mở trên console",
       "datasource": {
@@ -1065,7 +1203,7 @@
       }
     },
     {
-      "id": 62,
+      "id": 64,
       "type": "row",
       "title": "So sánh đề xuất AI với rule hiện có — chọn đề xuất ở ô “Đề xuất cần so sánh”",
       "collapsed": false,
@@ -1078,7 +1216,7 @@
       "panels": []
     },
     {
-      "id": 63,
+      "id": 65,
       "type": "table",
       "title": "Đề xuất đã chọn",
       "datasource": {
@@ -1321,7 +1459,7 @@
       }
     },
     {
-      "id": 64,
+      "id": 66,
       "type": "table",
       "title": "Rule hiện có liên quan — điều kiện hai bên đặt cạnh nhau, xếp theo mức liên quan",
       "datasource": {
@@ -1624,10 +1762,10 @@
         "type": "custom",
         "name": "origin",
         "label": "Hiển thị",
-        "query": "Tất cả : (rule OR ai_proposal OR exception),Rule đang chạy : rule,Đề xuất AI : ai_proposal,Ngoại lệ : exception",
+        "query": "Tất cả : (rule OR wazuh_rule OR ai_proposal OR exception),Rule đang chạy : rule,Rule Wazuh : wazuh_rule,Đề xuất AI : ai_proposal,Ngoại lệ : exception",
         "current": {
           "text": "Tất cả",
-          "value": "(rule OR ai_proposal OR exception)"
+          "value": "(rule OR wazuh_rule OR ai_proposal OR exception)"
         }
       },
       {
@@ -1640,7 +1778,7 @@
         },
         "refresh": 1,
         "sort": 1,
-        "query": "{\"find\": \"terms\", \"field\": \"mitre.tactic\", \"query\": \"origin:(rule OR ai_proposal OR exception)\", \"size\": 300}",
+        "query": "{\"find\": \"terms\", \"field\": \"mitre.tactic\", \"query\": \"origin:(rule OR wazuh_rule OR ai_proposal OR exception)\", \"size\": 300}",
         "includeAll": true,
         "multi": true,
         "allValue": "*",
@@ -1659,7 +1797,7 @@
         },
         "refresh": 1,
         "sort": 1,
-        "query": "{\"find\": \"terms\", \"field\": \"tags\", \"query\": \"origin:(rule OR ai_proposal OR exception)\", \"size\": 300}",
+        "query": "{\"find\": \"terms\", \"field\": \"tags\", \"query\": \"origin:(rule OR wazuh_rule OR ai_proposal OR exception)\", \"size\": 300}",
         "includeAll": true,
         "multi": true,
         "allValue": "*",
@@ -1678,7 +1816,7 @@
         },
         "refresh": 1,
         "sort": 1,
-        "query": "{\"find\": \"terms\", \"field\": \"fields\", \"query\": \"origin:(rule OR ai_proposal OR exception)\", \"size\": 300}",
+        "query": "{\"find\": \"terms\", \"field\": \"fields\", \"query\": \"origin:(rule OR wazuh_rule OR ai_proposal OR exception)\", \"size\": 300}",
         "includeAll": true,
         "multi": true,
         "allValue": "*",

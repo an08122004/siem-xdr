@@ -311,7 +311,7 @@ CATALOG = "origin:${origin:raw} AND mitre.tactic:$tactic AND tags:$tag AND field
 PICKED = "proposal.pick:${proposal:lucene}"
 
 
-def terms_var(name, label, field, query="origin:(rule OR ai_proposal OR exception)", all_=True, size=300):
+def terms_var(name, label, field, query="origin:(rule OR wazuh_rule OR ai_proposal OR exception)", all_=True, size=300):
     return {"type": "query", "name": name, "label": label, "datasource": RU, "refresh": 1, "sort": 1,
             "query": json.dumps({"find": "terms", "field": field, "query": query, "size": size}, ensure_ascii=False),
             "includeAll": all_, "multi": all_, "allValue": "*" if all_ else None,
@@ -320,8 +320,8 @@ def terms_var(name, label, field, query="origin:(rule OR ai_proposal OR exceptio
 
 rules_vars = [
     {"type": "custom", "name": "origin", "label": "Hiển thị",
-     "query": "Tất cả : (rule OR ai_proposal OR exception),Rule đang chạy : rule,Đề xuất AI : ai_proposal,Ngoại lệ : exception",
-     "current": {"text": "Tất cả", "value": "(rule OR ai_proposal OR exception)"}},
+     "query": "Tất cả : (rule OR wazuh_rule OR ai_proposal OR exception),Rule đang chạy : rule,Rule Wazuh : wazuh_rule,Đề xuất AI : ai_proposal,Ngoại lệ : exception",
+     "current": {"text": "Tất cả", "value": "(rule OR wazuh_rule OR ai_proposal OR exception)"}},
     terms_var("tactic", "MITRE tactic", "mitre.tactic"),
     terms_var("tag", "Tag", "tags"),
     terms_var("field", "Trường log", "fields"),
@@ -335,12 +335,16 @@ CATALOG_COLS = ["origin_label", "rule.id", "rule.name", "severity", "type", "mod
                 "proposal.id"]
 rules_lib = [
     row("Tổng quan thư viện", 0),
-    stat("Rule đang chạy", RU, "origin:rule", 0, 1),
-    stat("Rule do AI viết (đã duyệt)", RU, "origin:rule AND source:ai", 4, 1),
-    stat("Ngoại lệ đang áp dụng", RU, "origin:exception", 8, 1),
-    stat("Đề xuất AI chờ duyệt", RU, "origin:ai_proposal AND proposal.status:pending", 12, 1),
-    stat("Đề xuất không đạt kiểm định", RU, "origin:ai_proposal AND proposal.passed:false", 16, 1),
-    stat("Rule im lặng 7 ngày", RU, "origin:rule AND alerts.d7:0", 20, 1),
+    stat("Rule đang chạy", RU, "origin:rule", 0, 1, w=3),
+    stat("Rule do AI viết (đã duyệt)", RU, "origin:rule AND source:ai", 3, 1, w=3),
+    stat("Ngoại lệ đang áp dụng", RU, "origin:exception", 6, 1, w=3),
+    stat("Đề xuất AI chờ duyệt", RU, "origin:ai_proposal AND proposal.status:pending", 9, 1, w=3),
+    stat("Đề xuất không đạt kiểm định", RU, "origin:ai_proposal AND proposal.passed:false", 12, 1, w=3),
+    stat("Rule im lặng 7 ngày", RU, "origin:rule AND alerts.d7:0", 15, 1, w=3),
+    # rule của Wazuh (GET /rules) có origin riêng nên không lẫn vào các ô "origin:rule" ở trên và bảng tra cứu
+    stat("Rule Wazuh (tổng)", RU, "origin:wazuh_rule", 18, 1, w=3),
+    stat("Rule Wazuh chạy bóng", RU, "origin:wazuh_rule AND shadow:true", 21, 1, w=3),
+    # cố ý chỉ rule YAML/AI, cùng nhóm với ô "Rule đang chạy"; rule Wazuh xem qua bảng tra cứu (lọc theo tactic)
     bars("Rule theo MITRE tactic", RU, "origin:rule", "mitre.tactic", 0, 5, w=8),
     bars("Đề xuất AI theo trạng thái", RU, "origin:ai_proposal", "proposal.status_label", 8, 5, w=8),
     bars("Rule kêu nhiều nhất (7 ngày)", RU, "origin:rule AND alerts.d7:>0", "rule.name", 16, 5, w=8,
