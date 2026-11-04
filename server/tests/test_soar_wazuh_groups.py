@@ -38,14 +38,29 @@ def blocked(results):
     return any(r["action"] == "block_ip" and r["status"] == "queued" for r in results)
 
 
-def test_group_sql_injection_level_10_blocks_ip(monkeypatch):
-    res, es = run(wazuh_alert(31152, 10, ["web", "attack", "sql_injection"]), monkeypatch)
-    assert blocked(res) and any(a["params"]["ip"] == "203.0.113.9" for a in es.docs["siem-actions"].values())
+@pytest.mark.parametrize("rid,groups", [(5712, ["syslog", "authentication_failures"]), (5720, ["syslog", "authentication_failures"]),
+                                        (5763, ["syslog", "authentication_failures"]),
+                                        (31151, ["web", "web_scan"]), (31152, ["web", "attack", "sql_injection"])])
+def test_approved_stock_ids_block_ip_on_origin_agent_only(rid, groups, monkeypatch):
+    res, es = run(wazuh_alert(rid, 10, groups), monkeypatch)
+    assert blocked(res) and {a["agent_id"] for a in es.docs["siem-actions"].values()} == {"web-01"}
+    assert any(a["params"]["ip"] == "203.0.113.9" for a in es.docs["siem-actions"].values())
 
 
-def test_group_below_min_severity_or_unlisted_group_does_not_block(monkeypatch):
-    assert not blocked(run(wazuh_alert(31103, 7, ["web", "sql_injection"]), monkeypatch)[0])     # medium
-    assert not blocked(run(wazuh_alert(31153, 10, ["web", "attack"]), monkeypatch)[0])           # `attack` rộng, không map
+@pytest.mark.parametrize("rid,groups", [(3357, ["postfix", "authentication_failures"]),
+                                        (9551, ["wordpress", "authentication_failures"]),
+                                        (9750, ["dovecot", "authentication_failures"]),
+                                        (60204, ["windows", "authentication_failures"]),
+                                        (31161, ["web", "web_scan"]), (31163, ["web", "web_scan"])])
+def test_other_stock_rules_in_groups_never_block(rid, groups, monkeypatch):
+    res, es = run(wazuh_alert(rid, 10, groups), monkeypatch)
+    assert not blocked(res) and "siem-actions" not in es.docs
+    assert any(r["action"] == "create_case" for r in res)                 # vẫn thông báo / mở case
+
+
+def test_level_7_or_attack_group_does_not_block(monkeypatch):
+    assert not blocked(run(wazuh_alert(31103, 7, ["web", "sql_injection"]), monkeypatch)[0])
+    assert not blocked(run(wazuh_alert(31153, 10, ["web", "attack"]), monkeypatch)[0])
 
 
 def test_shadow_alert_runs_no_playbook(monkeypatch):
@@ -66,7 +81,6 @@ def test_syslog_source_never_triggers_block_ip_but_still_notifies_and_cases(rid,
 
 
 def test_agent_source_blocks_for_auth_and_rule_ids(monkeypatch):
-    assert blocked(run(wazuh_alert(5712, 10, ["syslog", "authentication_failures"]), monkeypatch)[0])
     assert blocked(run(wazuh_alert(101001, 10, ["siem", "auth", "legacy_AUTH-001"]), monkeypatch)[0])
     assert blocked(run(wazuh_alert(104095, 14, ["siem", "web", "accesslog", "attack"]), monkeypatch)[0])
 
@@ -113,4 +127,39 @@ def test_every_playbook_rule_id_exists_in_repo_xml():
     xml_ids = {m for f in RULES_XML.glob("*.xml") for m in re.findall(r'<rule id="(\d+)"', f.read_text(encoding="utf-8"))}
     pbs = yaml.safe_load((ROOT / "config" / "playbooks.yml").read_text(encoding="utf-8"))["playbooks"]
     explicit = {i[4:] for p in pbs for i in (p.get("when") or {}).get("rule_ids", []) if re.fullmatch(r"WZH-\d+", str(i))}
-    assert explicit and explicit <= xml_ids, sorted(explicit - xml_ids)
+    stock = {"5712", "5720", "5763", "31151", "31152"}          # rule gốc đã duyệt (R60), không nằm trong repo
+    assert explicit and explicit - stock <= xml_ids, sorted(explicit - stock - xml_ids)
+    assert not stock & xml_ids
+
+
+def _xml_rules():
+    out = []
+    for f in sorted(RULES_XML.glob("*.xml")):
+        for m in re.finditer(r'<rule id="(\d+)"[^>]*>(.*?)</rule>', f.read_text(encoding="utf-8"), re.S):
+            if g := re.search(r"<group>(.*?)</group>", m.group(2)):
+                out.append((m.group(1), [x.strip() for x in g.group(1).split(",") if x.strip()]))
+    return out
+
+
+@pytest.mark.parametrize("rid,groups", [r for r in _xml_rules() if any(g.startswith("legacy_") for g in r[1])])
+def test_xml_twin_gets_same_case_playbook_as_yaml_code(rid, groups):
+    cp = CasePlaybooks(ROOT / "config" / "case_playbooks.yml")
+    a = alert_builder.from_wazuh({"@timestamp": "2026-11-04T00:00:00+00:00", "event": {"id": "e"},
+                                  "wazuh": {"rule": {"id": rid, "level": 10, "groups": groups}}}, "high")
+    code = a["rule"]["legacy_id"]
+    got = cp.select(a["rule"]["id"], [], a["rule"]["tags"], a["rule"]["groups"], a["rule"]["legacy_ids"])[0]["id"]
+    assert got == cp.select(code)[0]["id"], (rid, code)
+
+
+# nhóm của rule gốc dùng trong cấu hình (stock-groups-soar.txt, manager 4.14.8)
+STOCK_GROUPS = {"authentication_failures", "sql_injection", "web_scan", "attack"}
+
+
+def test_every_configured_group_exists_somewhere():
+    known = {g for _, gs in _xml_rules() for g in gs} | STOCK_GROUPS
+    used = set()
+    for name, key in (("playbooks.yml", "playbooks"), ("case_playbooks.yml", "playbooks")):
+        for p in yaml.safe_load((ROOT / "config" / name).read_text(encoding="utf-8"))[key]:
+            used |= set((p.get("when") or p).get("groups") or [])
+    dead = {g for g in used if not any(re.fullmatch(g.replace("*", ".*"), k) for k in known)}
+    assert used and not dead, dead

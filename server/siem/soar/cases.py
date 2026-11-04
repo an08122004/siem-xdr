@@ -1,7 +1,7 @@
 """Case playbook: chọn quy trình xử lý sự cố phù hợp cho alert và dựng checklist task.
 
 Cấu hình: config/case_playbooks.yml. Chọn playbook theo thứ tự:
-  1. `match`: mã rule (wildcard), playbook đầu tiên trong file khớp; mẫu "*" của playbook mặc định để dành cho bước 4
+  1. `match`: mã rule (wildcard), kể cả mã YAML cũ `legacy_id` của rule XML, playbook đầu tiên trong file khớp; mẫu "*" của playbook mặc định để dành cho bước 4
   2. `techniques`: kỹ thuật MITRE ATT&CK của rule, khớp cụ thể nhất thắng (T1098.004 thắng T1098; T1003 khớp T1003.001)
   3. `groups`: nhóm rule Wazuh (wildcard; rule XML của dự án mang nhóm `legacy_<mã YAML cũ>`), playbook đầu tiên khớp
   4. `tags`: tag của rule (vd nhóm rule Wazuh: syscheck, rootcheck, virustotal...)
@@ -61,12 +61,14 @@ class CasePlaybooks:
         log.info("đã nạp %d case playbook, %d nhóm task chung", len(self.playbooks), len(self.common))
 
     def select(self, rule_id: str, techniques: Iterable[str] = (), tags: Iterable[str] = (),
-               groups: Iterable[str] = ()) -> tuple[dict[str, Any] | None, str]:
+               groups: Iterable[str] = (), legacy_ids: Iterable[str] = ()) -> tuple[dict[str, Any] | None, str]:
         """(playbook, lý do chọn) theo thứ tự trong docstring của module."""
-        for pb in self.playbooks:
-            for p in pb.get("match", []):
-                if str(p) != "*" and fnmatch.fnmatch(rule_id, str(p)):
-                    return pb, f"mã rule {p}"
+        # rule XML của dự án mang cả mã YAML cũ (legacy_id): cùng quy trình với rule YAML tương ứng
+        for code in [rule_id, *map(str, legacy_ids or [])]:
+            for pb in self.playbooks:
+                for p in pb.get("match", []):
+                    if str(p) != "*" and fnmatch.fnmatch(code, str(p)):
+                        return pb, f"mã rule {p}"
         techniques = [str(t) for t in techniques or []]
         best: tuple[dict[str, Any], str] | None = None
         for pb in self.playbooks:
@@ -91,7 +93,7 @@ class CasePlaybooks:
         return None, ""
 
     def build(self, rule_id: str, severity: str, techniques: Iterable[str] = (), tags: Iterable[str] = (),
-              groups: Iterable[str] = (), priority: str | None = None, created: str | None = None) -> dict[str, Any]:
+              groups: Iterable[str] = (), legacy_ids: Iterable[str] = (), priority: str | None = None, created: str | None = None) -> dict[str, Any]:
         """Trả về các trường gắn vào case mới: playbook, tasks, priority, hạn SLA. `priority`: ưu tiên của alert (đã
         tính theo mức quan trọng tài sản, xem priority.py); không có thì tính theo severity."""
         level = priority if priority in prio.PRIORITIES else prio.policy().priority(severity)
@@ -104,7 +106,7 @@ class CasePlaybooks:
             "playbook": None,
             "tasks": [],
         }
-        pb, why = self.select(rule_id, techniques, tags, groups)
+        pb, why = self.select(rule_id, techniques, tags, groups, legacy_ids)
         if not pb:
             return fields
         fields["playbook"] = {"id": pb["id"], "name": pb["name"], "matched_by": why}

@@ -921,7 +921,7 @@ playbooks:
   - id: PB-04
     name: Thay đổi tài khoản và đặc quyền trái phép
     match: [WIN-003, WIN-004, AUTH-005, AUTH-006]
-    groups: [legacy_WIN-003, legacy_WIN-004, legacy_AUTH-005, legacy_AUTH-006]
+    groups: [legacy_WIN-004, legacy_AUTH-006]
     techniques: [T1136, T1098, T1548]
     references:
       - {title: "CERT Société Générale - IRM-12 Insider Abuse", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-12-InsiderAbuse.pdf"}
@@ -1011,7 +1011,7 @@ playbooks:
   - id: PB-05
     name: Trinh sát / quét mạng
     match: [NET-001, NET-002, NET-003]
-    groups: [legacy_NET-001, legacy_NET-002, legacy_NET-003]
+    groups: [legacy_NET-001, legacy_NET-003]
     techniques: [T1046, T1595, T1590]
     references:
       - {title: "CERT Société Générale - IRM-5 Malicious Network Behaviour", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-5-MaliciousNetworkBehaviour.pdf"}

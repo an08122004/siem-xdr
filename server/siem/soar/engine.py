@@ -332,6 +332,7 @@ class Soar:
             **self.case_playbooks.build(str(get(alert, "rule.id", "")), alert.get("severity", "medium"),
                                         techniques=[techniques] if isinstance(techniques, str) else techniques,
                                         tags=get(alert, "rule.tags") or [], groups=get(alert, "rule.groups") or [],
+                                        legacy_ids=get(alert, "rule.legacy_ids") or [],
                                         priority=level, created=now),
         })
         return {"status": "created", "case_id": case_id}
