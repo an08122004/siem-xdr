@@ -87,27 +87,27 @@ WEB-001:
   - 31103
   - 31106
   decision: approx
-  note: '1/2 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 ''A web attack returned code 200 (success)'': con chung của 31103/31104/31105, không nói loại tấn công]; rule dự án 104001/104011/104012/104013/104014 (0271-web.xml, con của 31100-31123), level 10, chạy bóng: phủ cả dạng mã hóa (%27, %2527, %u0027, +, %55NION) mà rule gốc 31103/31106 không bắt; CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R54: srcip trong danh sách IOC bị loại bằng <list not_match_key> để 99905/99906 gốc thắng (có ca 200 -> 99906, 404 -> 99905); dòng từ IP IOC mà rule gốc 31103-31106 không bắt thì không ra alert WEB'
+  note: '1/2 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 ''A web attack returned code 200 (success)'': con chung của 31103/31104/31105, không nói loại tấn công]; rule dự án 104001/104011/104012/104013/104014 (0271-web.xml, con của 31100-31123), level 10, chạy bóng: phủ cả dạng mã hóa (%27, %2527, %u0027, +, %55NION) mà rule gốc 31103/31106 không bắt; CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R56: IP trong danh sách IOC + status 200 -> 104095 (bản sao 99906, level 14, không shadow); 404 -> rule WEB này'
 WEB-002:
   wazuh:
   - 31105
   - 31106
   decision: approx
-  note: '0/2 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''31105 (level 6: XSS (Cross Site Scripting) attempt.)'']; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 ''A web attack returned code 200 (success)'': con chung của 31103/31104/31105, không nói loại tấn công]; rule dự án 104002/104021 (0271-web.xml), level 7, chạy bóng: phủ cả dạng mã hóa (%3C, %253C, %u003c, %3A, %3D); CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R54: srcip trong danh sách IOC bị loại bằng <list not_match_key> để 99905/99906 gốc thắng (có ca 200 -> 99906, 404 -> 99905); dòng từ IP IOC mà rule gốc 31103-31106 không bắt thì không ra alert WEB'
+  note: '0/2 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''31105 (level 6: XSS (Cross Site Scripting) attempt.)'']; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 ''A web attack returned code 200 (success)'': con chung của 31103/31104/31105, không nói loại tấn công]; rule dự án 104002/104021 (0271-web.xml), level 7, chạy bóng: phủ cả dạng mã hóa (%3C, %253C, %u003c, %3A, %3D); CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R56: IP trong danh sách IOC + status 200 -> 104095 (bản sao 99906, level 14, không shadow); 404 -> rule WEB này'
 WEB-003:
   wazuh:
   - 31104
   - 31106
   decision: approx
-  note: '0/2 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''31104 (level 6: Common web attack.)'']; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 ''A web attack returned code 200 (success)'': con chung của 31103/31104/31105, không nói loại tấn công]; rule dự án 104003/104031 (0271-web.xml), level 10, chạy bóng: phủ cả dạng mã hóa (..%2f, %2e%2e, %252e, ..%5c); CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R54: srcip trong danh sách IOC bị loại bằng <list not_match_key> để 99905/99906 gốc thắng (có ca 200 -> 99906, 404 -> 99905); dòng từ IP IOC mà rule gốc 31103-31106 không bắt thì không ra alert WEB'
+  note: '0/2 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''31104 (level 6: Common web attack.)'']; rule chung, không tính phủ: 31106 (level 6: A web attack returned code 200 (success).) [level 6 ''A web attack returned code 200 (success)'': con chung của 31103/31104/31105, không nói loại tấn công]; rule dự án 104003/104031 (0271-web.xml), level 10, chạy bóng: phủ cả dạng mã hóa (..%2f, %2e%2e, %252e, ..%5c); CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R56: IP trong danh sách IOC + status 200 -> 104095 (bản sao 99906, level 14, không shadow); 404 -> rule WEB này'
 WEB-004:
   wazuh: []
   decision: convert
-  note: 'chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/4 ca dương có rule gốc cụ thể level>=7; rule dự án 104004/104041 (0271-web.xml), level 12, chạy bóng, kể cả dạng mã hóa (%3b, %26%26, %7c, %24%28); CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R54: srcip trong danh sách IOC bị loại bằng <list not_match_key> để 99905/99906 gốc thắng (có ca 200 -> 99906, 404 -> 99905); dòng từ IP IOC mà rule gốc 31103-31106 không bắt thì không ra alert WEB'
+  note: 'chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/4 ca dương có rule gốc cụ thể level>=7; rule dự án 104004/104041 (0271-web.xml), level 12, chạy bóng, kể cả dạng mã hóa (%3b, %26%26, %7c, %24%28); CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R56: IP trong danh sách IOC + status 200 -> 104095 (bản sao 99906, level 14, không shadow); 404 -> rule WEB này'
 WEB-005:
   wazuh: []
   decision: convert
-  note: 'chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7; rule dự án 104005 (0271-web.xml), level 7, chạy bóng: khớp chuỗi trong ngoặc kép CUỐI của dòng (User-Agent, decoder gốc không tách trường này); CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R54: srcip trong danh sách IOC bị loại bằng <list not_match_key> để 99905/99906 gốc thắng (có ca 200 -> 99906, 404 -> 99905); dòng từ IP IOC mà rule gốc 31103-31106 không bắt thì không ra alert WEB'
+  note: 'chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7; rule dự án 104005 (0271-web.xml), level 7, chạy bóng: khớp chuỗi trong ngoặc kép CUỐI của dòng (User-Agent, decoder gốc không tách trường này); CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R56: IP trong danh sách IOC + status 200 -> 104095 (bản sao 99906, level 14, không shadow); 404 -> rule WEB này'
 WEB-006:
   wazuh:
   - 31151
@@ -123,7 +123,7 @@ WEB-007:
 WEB-008:
   wazuh: []
   decision: convert
-  note: 'chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7; rule dự án 104008 (0271-web.xml), level 12, chạy bóng, kể cả dấu = mã hóa %3d; CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R54: srcip trong danh sách IOC bị loại bằng <list not_match_key> để 99905/99906 gốc thắng (có ca 200 -> 99906, 404 -> 99905); dòng từ IP IOC mà rule gốc 31103-31106 không bắt thì không ra alert WEB'
+  note: 'chỉ trúng rule chung 31101 (Web server 400 error code.), không chỉnh; 0/2 ca dương có rule gốc cụ thể level>=7; rule dự án 104008 (0271-web.xml), level 12, chạy bóng, kể cả dấu = mã hóa %3d; CHỈ nhận log từ agent (vị trí dạng (tên) ip->đường dẫn): decoder gốc web-accesslog khớp theo nội dung nên syslog có thể giả mạo, rule ràng vị trí để chặn (có ca); R56: IP trong danh sách IOC + status 200 -> 104095 (bản sao 99906, level 14, không shadow); 404 -> rule WEB này'
 WEB-009:
   wazuh: []
   decision: convert

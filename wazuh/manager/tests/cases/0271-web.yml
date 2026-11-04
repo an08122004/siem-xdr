@@ -1842,31 +1842,56 @@
   events:
   - 'Jan  5 09:00:00 fw01 apache: 203.0.113.61 - - [05/Jan/2026:09:00:00 +0000] "GET /p.php?id=1%20UNION%20SELECT%20a,b%20FROM%20users HTTP/1.1" 200 512 "-" "sqlmap/1.7"'
 
-# R54: IP nguồn nằm trong danh sách IOC gốc (etc/lists/malicious-ioc/malicious-ip có 196.251.85.62). Rule payload của file này loại IP đó (<list not_match_key>) để 99905
-# (level 9) / 99906 (level 14, status 200) gốc thắng; IP sạch thì rule dự án thắng (ca 104001 phía trên). Dòng thường từ IP IOC vẫn vào bộ đếm 104090.
-- rule: 99906   # IOC: UNION SELECT status 200 từ IP IOC -> 99906 (level 14) của rule gốc
+# R56: IP nguồn nằm trong danh sách IOC gốc (etc/lists/malicious-ioc/malicious-ip có 196.251.85.62). 104095 là bản sao 99906 (level 14) cho nhánh rule WEB:
+# IOC + tấn công rule WEB bắt + 200 -> 104095; + 404 -> rule WEB (không 104095); tấn công chỉ rule gốc bắt -> 99906 gốc; IP sạch + 200 -> rule WEB, không 104095.
+
+- rule: 104095   # IOC: UNION SELECT 200 từ IP IOC -> 104095 (level 14, bản sao 99906)
   log_format: apache
   location: (demo-web) any->/usr/local/apache2/logs/access_log
   events:
   - '196.251.85.62 - - [05/Jan/2026:09:00:00 +0000] "GET /p.php?id=1%20UNION%20SELECT%20a,b%20FROM%20users HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
 
-- none: [104001, 104002, 104003, 104004, 104005, 104008, 104011, 104012, 104013, 104014, 104021, 104031, 104041]   # IOC: không rule WEB nào ra (200)
+- rule: 104001   # IP sạch: UNION SELECT 200 -> 104001, không 104095 (ca dương 104001 ở trên là IP sạch; ca này nhắc lại với IP khác)
   log_format: apache
   location: (demo-web) any->/usr/local/apache2/logs/access_log
   events:
-  - '196.251.85.62 - - [05/Jan/2026:09:00:00 +0000] "GET /p.php?id=1%20UNION%20SELECT%20a,b%20FROM%20users HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+  - '198.51.100.77 - - [05/Jan/2026:09:00:00 +0000] "GET /p.php?id=1%20UNION%20SELECT%20a,b%20FROM%20users HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
 
-- rule: 99905   # IOC: UNION SELECT status 404 từ IP IOC -> 99905 (level 9)
+- none: [104095]   # IP sạch + 200: không 104095
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - '198.51.100.78 - - [05/Jan/2026:09:00:00 +0000] "GET /p.php?id=1%20UNION%20SELECT%20a,b%20FROM%20users HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+
+- rule: 104001   # IOC: UNION SELECT 404 từ IP IOC -> rule WEB 104001
   log_format: apache
   location: (demo-web) any->/usr/local/apache2/logs/access_log
   events:
   - '196.251.85.62 - - [05/Jan/2026:09:00:00 +0000] "GET /p.php?id=1%20UNION%20SELECT%20a,b%20FROM%20users HTTP/1.1" 404 512 "-" "Mozilla/5.0"'
 
-- none: [104001, 104002, 104003, 104004, 104005, 104008, 104011, 104012, 104013, 104014, 104021, 104031, 104041]   # IOC: không rule WEB nào ra (404)
+- none: [104095]   # IOC + 404: không 104095
   log_format: apache
   location: (demo-web) any->/usr/local/apache2/logs/access_log
   events:
   - '196.251.85.62 - - [05/Jan/2026:09:00:00 +0000] "GET /p.php?id=1%20UNION%20SELECT%20a,b%20FROM%20users HTTP/1.1" 404 512 "-" "Mozilla/5.0"'
+
+- rule: 104095   # IOC: RCE ;cat 200 (chỉ rule WEB bắt) -> 104095
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - '196.251.85.62 - - [05/Jan/2026:09:00:00 +0000] "GET /x?c=%3Bcat%20/etc/passwd HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+
+- rule: 99906   # IOC: tấn công chỉ rule gốc bắt, 200 -> 99906 gốc
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - '196.251.85.62 - - [05/Jan/2026:09:00:00 +0000] "GET /p.php?id=1;select%20*%20from%20users HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+
+- none: [104095, 104001, 104002, 104003, 104004, 104005, 104008, 104011, 104012, 104013, 104014, 104021, 104031, 104041]   # IOC: dòng chỉ rule gốc bắt, không rule WEB
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - '196.251.85.62 - - [05/Jan/2026:09:00:00 +0000] "GET /p.php?id=1;select%20*%20from%20users HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
 
 - rule: 104090   # IOC: dòng thường từ IP IOC vẫn vào bộ đếm WEB-009
   log_format: apache
