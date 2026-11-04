@@ -1,0 +1,146 @@
+# Ca test cho wazuh/manager/rules/0106-fim.xml (FIM-001). FIM là message nội bộ của syscheckd, logtest không giải mã được
+# -> log_format: syscheck (bơm hàng đợi, xem đầu tools/wazuh_rule_test.py). Ca registry dùng thêm khóa value_name.
+# Chỉ thấy rule có alert (level >= 3): rule gốc 550 / 554 / 750 / 752 (level 5-7) cũng ra alert, nên ca âm khẳng định rõ id 106xxx.
+
+- rule: 106001   # file cron mới
+  legacy: FIM-001
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /etc/cron.d/backup-sync, type: added}
+
+- rule: 106001   # authorized_keys của root bị sửa
+  legacy: FIM-001
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /root/.ssh/authorized_keys, type: modified}
+
+- rule: 106001   # authorized_keys của user thường
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /home/bob/.ssh/authorized_keys2, type: added}
+
+- rule: 106001   # sudoers.d mới
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /etc/sudoers.d/90-backdoor, type: added}
+
+- rule: 106001   # ld.so.preload bị sửa
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /etc/ld.so.preload, type: modified}
+
+- rule: 106001   # passwd bị sửa
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /etc/passwd, type: modified}
+
+- rule: 106001   # unit systemd mới
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /etc/systemd/system/evil.service, type: added}
+
+- rule: 106001   # cấu hình SSH bị sửa
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /etc/ssh/sshd_config, type: modified}
+
+- none: [106001, 106002, 106003]   # known_hosts đổi sau khi SSH ra ngoài
+  legacy: FIM-001
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /root/.ssh/known_hosts, type: modified}
+
+- none: [106001]   # xóa file cron: 553 gốc, không phải cài cơ chế duy trì
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /etc/cron.d/backup-sync, type: deleted}
+
+- none: [106001]   # khóa máy chủ SSH sinh lại; file lạ trong /etc; authorized_keys.bak không khớp neo cuối
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /etc/ssh/ssh_host_ed25519_key, type: modified}
+    - {path: /etc/hostname, type: modified}
+    - {path: /root/.ssh/authorized_keys.bak, type: modified}
+    - {path: /home/a/b/.ssh/authorized_keys, type: modified}
+
+- none: [106001, 106002, 106003]   # nội dung web: rule 100101 lo
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /var/www/html/index.html, type: modified}
+
+- rule: 106002   # lối tắt mới trong thư mục Startup của Windows
+  legacy: FIM-001
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: 'c:\programdata\microsoft\windows\start menu\programs\startup\updater.lnk', type: added}
+
+- rule: 106002   # không phân biệt hoa thường
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: 'C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp\Updater.LNK', type: modified}
+
+- none: [106002]   # thư mục Start Menu khác Startup; xóa lối tắt
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: 'c:\programdata\microsoft\windows\start menu\programs\notepad.lnk', type: added}
+    - {path: 'c:\programdata\microsoft\windows\start menu\programs\startup\updater.lnk', type: deleted}
+
+- rule: 106003   # giá trị mới ở khóa Run
+  legacy: FIM-001
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: 'HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Run', value_name: Updater, type: added}
+
+- rule: 106003   # giá trị sửa ở khóa RunOnce của user
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: 'HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\RunOnce', value_name: Updater, type: modified}
+
+- none: [106003]   # khóa khác (RunServices không thuộc danh sách; Uninstall)
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: 'HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Uninstall', value_name: App, type: added}
+    - {path: 'HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Run\Sub', value_name: App, type: added}
+
+# Rule gốc 99901 (mã độc theo sha256 trong malicious-ioc/malware-hashes, level 14, alert thật) phải thắng FIM-001 (level 10) trên đường dẫn nhạy cảm
+- rule: 99901
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /etc/cron.d/backup-sync, type: added, sha256: 2fe6a7ae63c878bd84d7b829349b309e7c84194ddbb6a779816f5b84cd8ad45d}
+
+- none: [106001]
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /etc/cron.d/backup-sync, type: added, sha256: 2fe6a7ae63c878bd84d7b829349b309e7c84194ddbb6a779816f5b84cd8ad45d}
+
+- rule: 99901   # file sửa (550) trên đường dẫn nhạy cảm
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /root/.ssh/authorized_keys, type: modified, sha256: b82b7a6c942551964c3bd0b159dc4af1fb7deb945476183279092328228bd7a9}
+
+- rule: 106001   # sha256 lạ (không trong danh sách) thì FIM-001 vẫn báo
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /etc/cron.d/backup-sync, type: added, sha256: 0000000000000000000000000000000000000000000000000000000000000000}

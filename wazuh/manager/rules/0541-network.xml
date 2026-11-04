@@ -106,7 +106,7 @@
 
   <!-- NET-004: cảnh báo Suricata severity <= 2 (1 = cao nhất). Con của 86601 (event_type alert).
        R44: loại IP nằm trong danh sách IOC (cùng danh sách, cùng trường src_ip/dest_ip với 99915/99916 của 0999) để rule IOC gốc thắng; thứ tự file KHÔNG quyết định được (đã thử nạp 103004 sau 0999: vẫn thắng 99915),
-       nên dùng lookup phủ định. IP sạch vẫn ra NET-004. -->
+       nên dùng lookup phủ định. IP sạch vẫn ra NET-004. IP trong danh sách IOC từ MISP: TI-001 (107006 / 107007 trong 0845-ti.xml) là CON của rule này. -->
   <rule id="103004" level="10">
     <if_sid>86601</if_sid>
     <list field="src_ip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>

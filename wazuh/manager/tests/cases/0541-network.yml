@@ -982,3 +982,15 @@
     - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.172,10.0.2.18,50000,445,0,S,123456,,64240,,mss'
     - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.172,10.0.2.19,50000,445,0,S,123456,,64240,,mss'
     - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.172,10.0.2.20,50000,445,0,S,123456,,64240,,mss'
+
+- rule: 99916   # Task 11 (hoãn từ Task 8): IP ĐÍCH trong danh sách malicious-ip gốc, severity 1 -> rule IOC gốc 99916 thắng NET-004
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"10.0.0.5","src_port":4444,"dest_ip":"196.251.85.62","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
+
+- none: [103004]   # cùng sự kiện: NET-004 nhường 99916
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"10.0.0.5","src_port":4444,"dest_ip":"196.251.85.62","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'

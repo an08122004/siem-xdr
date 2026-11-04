@@ -2,7 +2,8 @@
 
     python3 siem_api_user.py /run/secrets/wazuh_api_password /run/secrets/wazuh_rules_api_password
 
-`siem-soar` (SOAR): chạy active response trên agent (`active-response:command`) và đọc danh sách agent (`agent:read`).
+`siem-soar` (SOAR): chạy active response trên agent (`active-response:command`), đọc danh sách agent (`agent:read`), ghi đè đúng danh sách
+`siem-misp-ip` (`lists:update` + `lists:delete` chỉ trên file đó) và nạp lại ruleset (`manager:read` + `manager:restart`) cho TI-001.
 `siem-rules` (console, nạp rule): `manager:read` + `manager:restart` (để PUT /manager/analysisd/reload; quyền này cũng
 mở restart manager, Wazuh không có quyền hẹp hơn), `rules:read`, `logtest:run`. Không sửa được cấu hình hay user.
 Không user nào có quyền sửa rule, decoder, cấu hình, user... Script tạo user mặc định của image (create_user.py) cấp
@@ -31,6 +32,15 @@ ACCOUNTS = {
         "siem_soar_active_response": {"actions": ["active-response:command"], "resources": ["agent:id:*"],
                                       "effect": "allow"},
         "siem_soar_agents_read": {"actions": ["agent:read"], "resources": ["agent:id:*"], "effect": "allow"},
+        # Đẩy IOC IP lên danh sách siem-misp-ip (TI-001): PUT /lists/files?overwrite=true. Wazuh ghi đè = xóa file cũ rồi ghi file mới, nên cần
+        # `lists:update` (resource `*:*:*`, không hẹp hơn được; trùng policy mặc định lists_all_resourceless nên setup() dùng lại) và
+        # `lists:delete` CHỈ trên list:file:siem-misp-ip: không ghi đè được danh sách gốc malicious-ioc/* (R50). Tạo file MỚI tên khác thì được,
+        # vô hại vì không có <list> trỏ tới.
+        "siem_soar_lists_update": {"actions": ["lists:update"], "resources": ["*:*:*"], "effect": "allow"},
+        "siem_soar_misp_list": {"actions": ["lists:delete"], "resources": ["list:file:siem-misp-ip"], "effect": "allow"},
+        # Nạp lại ruleset sau khi đẩy (PUT /manager/analysisd/reload). GIÁ: Wazuh không có quyền reload riêng, `manager:restart` cũng mở
+        # PUT /manager/restart -> token siem-soar có thể khởi động lại manager (cùng đánh đổi với siem-rules).
+        "siem_soar_manager": {"actions": ["manager:read", "manager:restart"], "resources": ["*:*:*"], "effect": "allow"},
     }),
     "siem-rules": ("siem_rules", {
         "siem_rules_manager": {"actions": ["manager:read", "manager:restart"], "resources": ["*:*:*"],
@@ -74,6 +84,11 @@ def setup(user: str, role: str, policies: dict, password: str) -> None:
         for pid in policy_ids:
             if rpm.exist_role_policy(role_id, pid) is not True:
                 rpm.add_policy_to_role(role_id=role_id, policy_id=pid)
+        # role của repo chỉ giữ đúng các policy khai báo: quyền đã bỏ khỏi ACCOUNTS (vd quyền danh sách của siem-rules) bị gỡ khi nâng cấp
+        for old in rpm.get_all_policies_from_role(role_id):
+            old_id = old if isinstance(old, int) else getattr(old, "id", old)
+            if old_id not in policy_ids:
+                rpm.remove_policy_in_role(role_id=role_id, policy_id=old_id)
 
     with AuthenticationManager() as auth:
         found = auth.get_user(user)

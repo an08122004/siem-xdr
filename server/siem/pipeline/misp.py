@@ -74,10 +74,11 @@ def parse(attributes: list[dict[str, Any]], ttl: dict[str, int] | None = None,
 
 class MispFeed:
     def __init__(self, url: str, key: str, ca_file: str = "", verify: bool = True, interval_minutes: float = 60,
-                 ttl: dict[str, int] | None = None, timeout: int = 60, opener=None):
+                 ttl: dict[str, int] | None = None, timeout: int = 60, opener=None, on_refresh=None):
         self.url, self.key, self.interval = url.rstrip("/"), key, interval_minutes * 60
         self.ttl = ttl or DEFAULT_TTL
         self.timeout = timeout
+        self.on_refresh = on_refresh        # gọi với danh sách IOC sau mỗi lần tải xong (vd đẩy sang danh sách CDB của Wazuh)
         if not verify:
             self.ctx = ssl._create_unverified_context()     # noqa: S323 - chỉ khi người dùng tắt rõ ràng (lab)
         else:
@@ -111,6 +112,11 @@ class MispFeed:
             self._set = s
         self.last_ok, self.last_error = time.time(), None
         log.info("MISP: %s IOC còn hạn", s.counts())
+        if self.on_refresh:
+            try:
+                self.on_refresh(items)
+            except Exception as e:  # noqa: BLE001 - Wazuh lỗi không được làm mất bộ IOC vừa tải; chu kỳ sau thử lại
+                log.warning("hook on_refresh lỗi: %s", e)
         return len(items)
 
     def snapshot(self) -> IOCSet | None:

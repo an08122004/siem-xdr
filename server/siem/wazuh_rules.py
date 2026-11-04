@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -23,7 +24,7 @@ RELOAD_OK = "Ruleset reload request sent successfully."
 ID_RANGES: dict[str, tuple[int, int]] = {
     "0100-platform.xml": (100000, 100999), "0101-auth.xml": (101000, 101999), "0102-linux.xml": (102000, 102499), "0851-linux-audit.xml": (102500, 102999),
     "0541-network.xml": (103000, 103999), "0104-web.xml": (104000, 104999), "0965-windows.xml": (105000, 105999),
-    "0106-fim.xml": (106000, 106999), "0107-ti.xml": (107000, 107999), "0108-sigmahq.xml": (108000, 108999),
+    "0106-fim.xml": (106000, 106999), "0845-ti.xml": (107000, 107999), "0108-sigmahq.xml": (108000, 108999),
     "rules-dynamic/ai.xml": (109000, 109999), "rules-dynamic/exceptions.xml": (110000, 110999),
 }
 TUNING_FILE = "0190-tuning.xml"
@@ -100,6 +101,18 @@ class WazuhApi(WazuhAPI):
             raise WazuhUnavailable(f"không hỏi được Wazuh API: {e}") from e
         items = (res.get("data") or {}).get("affected_items") or []
         return items[0] if items else None
+
+    def put_list(self, name: str, text: str) -> None:
+        """PUT /lists/files/{name}?overwrite=true với thân text thô (API kiểm cú pháp CDB; file rỗng bị từ chối). Lỗi -> WazuhRuleError."""
+        req = urllib.request.Request(f"{self.url}/lists/files/{name}?overwrite=true", method="PUT", data=text.encode(),
+                                     headers={"Authorization": f"Bearer {self.token()}", "Content-Type": "application/octet-stream"})
+        try:
+            res = self._open(req)
+        except WazuhError as e:
+            raise WazuhRuleError(f"gọi Wazuh API lỗi: {e}") from e
+        if res.get("error") or (res.get("data") or {}).get("failed_items"):
+            failed = [str((f.get("error") or {}).get("message") or f) for f in (res.get("data") or {}).get("failed_items") or []]
+            raise WazuhRuleError(f"Wazuh không nhận danh sách {name}: " + ("; ".join(failed) or str(res.get("message"))))
 
     def rules(self, offset: int = 0, limit: int = 500) -> dict:
         return self.request("GET", f"/rules?offset={offset}&limit={limit}")

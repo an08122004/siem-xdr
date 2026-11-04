@@ -111,7 +111,7 @@ Dải id theo file (lint ở Task 4 đọc bảng này từ `wazuh_rules.ID_RANG
 | `0104-web.xml` | 104000–104999 |
 | `0965-windows.xml` | 105000–105999 |
 | `0106-fim.xml` | 106000–106999 |
-| `0107-ti.xml` | 107000–107999 |
+| `0845-ti.xml` | 107000–107999 (đổi tên từ `0107-ti.xml`: phải xếp sau 0840-win_event_channel.xml và 0541-network.xml) |
 | `0108-sigmahq.xml` | 108000–108999 |
 | `rules-dynamic/ai.xml` | 109000–109999 |
 | `rules-dynamic/exceptions.xml` | 110000–110999 |
@@ -276,7 +276,7 @@ Mỗi task một file, cùng một quy trình. Chỉ chuyển các mã có `deci
 | 8 | `0103-network.xml` | NET-001..005 | Nguồn mặc định: syslog vào wazuh-manager (cổng 514, agent 000, `location` = IP người gửi); agent OPNsense chỉ là lựa chọn, không phải đường mặc định. filterlog qua decoder `pf`. NET-003 dùng `<srcip negate="yes">` dải nội bộ. NET-004 là rule con của nhóm Suricata, lọc `alert.severity`, nên cần agent OPNsense đọc `/var/log/suricata/eve.json` (`log_format json`); theo S6, Suricata qua syslog 514 không có decoder Wazuh (cả RFC 3164 lẫn 5424) nên đường đó chỉ nuôi parser Suricata của analyzer YAML, không chạy rule Suricata của Wazuh (86601...) hay NET-004 XML. NET-001, NET-005 theo S4. |
 | 9 | `0104-web.xml` | WEB-001..009 | Regex bắt cả dạng mã hóa (S5). Ca test mỗi rule có ≥ 1 dạng thô + ≥ 1 dạng `%xx`. |
 | 10 | `0965-windows.xml` | WIN-001..013 | Trường `win.eventdata.*` (camelCase). WIN-005 giữ ngoại lệ lớp vỏ Ansible/WinRM. WIN-013 giữ giới hạn schtasks. |
-| 11 | `0106-fim.xml`, `0107-ti.xml` + `tools/misp_to_cdb.py` | FIM-001, TI-001 | FIM là con của 550/554 lọc theo đường dẫn. TI: SOAR xuất IOC MISP ra `etc/lists/malicious-ioc/malicious-ip` mỗi chu kỳ đồng bộ, rồi reload. |
+| 11 | `0106-fim.xml`, `0845-ti.xml` + `tools/misp_to_cdb.py` | FIM-001, TI-001 | FIM là con của 550/554 lọc theo đường dẫn. TI: SOAR xuất IOC MISP ra `etc/lists/malicious-ioc/malicious-ip` mỗi chu kỳ đồng bộ, rồi reload. |
 
 Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info type="text">shadow_since=<ngày></info>`.
 
@@ -372,7 +372,8 @@ Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info 
 - (c) E2E 44/44 với SOAR theo playbook mới
 
 **Đạt:**
-- [ ] bỏ nhóm `shadow` ở các file 0101–0107 (trừ rule có `shadow_since` < 7 ngày, giữ đúng tiêu chí chạy bóng của SOC-OPERATIONS mục 4)
+- [ ] TI-001 domain/hash IOC chỉ có ở analyzer — người dùng quyết trước khi tắt rule YAML (Wazuh mới phủ IP: firewall, Suricata, sshd, web, Windows; tên file TI là `0845-ti.xml`)
+- [ ] bỏ nhóm `shadow` ở các file 0101–0106 và 0845 (trừ rule có `shadow_since` < 7 ngày, giữ đúng tiêu chí chạy bóng của SOC-OPERATIONS mục 4)
 - [ ] `RULE_ENGINE_ENABLED=false` (biến mới trong `settings.py`, analyzer không chạy engine của `detection/rules.py`) + test `test_engine_disabled_no_yaml_alerts`
 - [ ] xóa mục playbook theo mã YAML
 - [ ] E2E 44/44, commit `chuyển phát hiện sang Wazuh: tắt engine YAML`

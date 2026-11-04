@@ -28,7 +28,8 @@ Chạy thế nào:
     eventchannel: mỗi dòng là JSON agent gửi {"Message": ..., "Event": "<Event>...</Event>"}; bộ chạy đổi
                   EventRecordID thành số riêng của ca để ghép alert với ca (phần còn lại giữ nguyên).
     syscheck:     mỗi dòng là map {path: /var/www/html/a.php, type: added|modified}; bộ chạy thêm thuộc tính file
-                  mẫu, và đặt inode riêng của ca để ghép alert.
+                  mẫu, và đặt inode riêng của ca để ghép alert. Registry: thêm khóa value_name (giá trị bất kỳ, bộ chạy đổi
+                  thành "v<số của ca>"), path là đường dẫn khóa (vd HKEY_LOCAL_MACHINE...CurrentVersion Run), type added|modified.
 """
 from __future__ import annotations
 
@@ -53,6 +54,9 @@ Failure = namedtuple("Failure", "file index expected got_ids")
 INJECT = {"eventchannel", "syscheck"}
 CASES_DIR = ROOT / "wazuh/manager/tests/cases"
 RETRIES, WAIT = 12, 10          # HTTP 429: API mặc định 300 lời gọi / phút
+LIST_API = None                 # WazuhApi của user có quyền ghi danh sách (siem-soar; siem-rules không có quyền này), đặt bởi main()
+LISTS: dict[str, str] = {}      # list_file đã đẩy lên (tên -> nội dung), cho manager tạm của inject()
+RELOAD_WAIT = 6                 # giây chờ analysisd nạp xong sau PUT /manager/analysisd/reload (list_file)
 
 
 def load_cases(path: Path) -> list[dict]:
@@ -114,8 +118,16 @@ def _message(fmt: str, ev, ident: int) -> str:
         if not n:
             raise ValueError("ca eventchannel: Event thiếu <EventRecordID>")
         return "f:EventChannel:" + text
+    if "value_name" in ev:      # registry: không có inode, ghép alert qua value_name "v<ident>" (xem _alert_ident)
+        data = {"path": ev["path"], "arch": "[x64]", "value_name": f"v{ident}", "mode": "scheduled", "type": ev["type"],
+                "timestamp": 1767225600, "attributes": {"type": "registry_value", "size": 10, "hash_md5": _FILE["hash_md5"],
+                "hash_sha1": _FILE["hash_sha1"], "hash_sha256": _FILE["hash_sha256"], "checksum": "abc"}}
+        if ev["type"] == "modified":
+            data["changed_attributes"] = ["size"]
+            data["old_attributes"] = {**data["attributes"], "size": 5}
+        return "8:syscheck:" + json.dumps({"type": "event", "data": data})
     data = {"path": ev["path"], "mode": "scheduled", "type": ev["type"], "timestamp": 1767225600,
-            "attributes": {**_FILE, "inode": ident}}
+            "attributes": {**_FILE, "inode": ident, **({"hash_sha256": ev["sha256"]} if "sha256" in ev else {})}}
     if ev["type"] == "modified":
         data["changed_attributes"] = ["size", "mtime"]
         data["old_attributes"] = {**data["attributes"], "size": 5}
@@ -126,7 +138,8 @@ def _alert_ident(fmt: str, alert: dict) -> int | None:
     if fmt == "eventchannel":
         v = (((alert.get("data") or {}).get("win") or {}).get("system") or {}).get("eventRecordID")
     else:
-        v = (alert.get("syscheck") or {}).get("inode_after")
+        sc = alert.get("syscheck") or {}
+        v = sc.get("inode_after") or (re.fullmatch(r"v(\d+)", sc.get("value_name") or "") or [None, None])[1]
     return int(v) if v else None
 
 
@@ -153,7 +166,7 @@ def inject(cases: list[dict]) -> list[set[int]]:
     try:
         with tempfile.TemporaryDirectory() as tmp:
             try:
-                noise.start(Path(tmp))
+                noise.start(Path(tmp), LISTS.get("siem-misp-ip", "240.0.0.0:empty\n"))
                 alerts = cov.run_wazuh(items)
             finally:
                 subprocess.run(["docker", "rm", "-f", noise.NAME], env=cov.ENV, capture_output=True)
@@ -174,7 +187,21 @@ def inject(cases: list[dict]) -> list[set[int]]:
 
 
 # ---------------------------------------------------------------- chạy cả bộ
+def _load_lists(cases: list[dict], api) -> list[dict]:
+    """Phần tử `list_file: {name, content}` (không phải ca) = đẩy danh sách CDB lên manager thử rồi nạp lại ruleset, trước khi chạy các ca.
+    Cần cho rule dùng danh sách do SOAR cập nhật lúc chạy thật (vd siem-misp-ip của TI-001). Trả về các ca còn lại."""
+    setup = [c["list_file"] for c in cases if "list_file" in c]
+    for lf in setup:
+        (LIST_API or api).put_list(lf["name"], lf["content"])
+        LISTS[lf["name"]] = lf["content"]        # manager tạm của chế độ bơm (eventchannel / syscheck) cũng cần danh sách này
+    if setup:
+        (LIST_API or api).reload()
+        time.sleep(RELOAD_WAIT)          # reload của analysisd chạy nền, API trả lời trước khi nạp xong
+    return [c for c in cases if "list_file" not in c]
+
+
 def run(cases: list[dict], api) -> list[Failure]:
+    cases = _load_lists(cases, api)
     got: dict[int, set[int]] = {}
     batch = [i for i, c in enumerate(cases) if c["log_format"] in INJECT]
     if batch:
@@ -310,6 +337,8 @@ def main() -> int:
     ap.add_argument("--url", default="https://localhost:55000")
     ap.add_argument("--user", default="siem-rules")
     ap.add_argument("--password-file", default=str(ROOT / "secrets/wazuh_rules_api_password"))
+    ap.add_argument("--list-user", default="siem-soar", help="user ghi danh sách CDB cho phần tử list_file (có lists:update / lists:delete)")
+    ap.add_argument("--list-password-file", default=str(ROOT / "secrets/wazuh_api_password"))
     ap.add_argument("--report", action="store_true",
                     help="đối chiếu ca legacy (mặc định tests/legacy) với ruleset đang chạy, ghi tests/legacy_map.yml")
     ap.add_argument("--out", default=str(LEGACY_MAP), help="file legacy_map.yml của --report")
@@ -320,6 +349,11 @@ def main() -> int:
     api = WazuhApi(a.url, a.user, Path(a.password_file).read_text(encoding="utf-8").strip(), a.ca)
     if a.insecure:
         api.ctx.check_hostname, api.ctx.verify_mode = False, 0      # ssl.CERT_NONE
+    global LIST_API
+    if (lp := Path(a.list_password_file)).exists():
+        LIST_API = WazuhApi(a.url, a.list_user, lp.read_text(encoding="utf-8").strip(), a.ca)
+        if a.insecure:
+            LIST_API.ctx.check_hostname, LIST_API.ctx.verify_mode = False, 0
     if a.report:
         import cases_to_raw
         cases = load_cases(LEGACY_DIR if a.path == str(CASES_DIR) else Path(a.path))
