@@ -310,7 +310,7 @@
   events:
   - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /index.html HTTP/1.1" 200 12 "-" "curl/8"'
 
-- rule: 99906   # R57 KHÔNG MẤT alert thật: IP có ở CẢ HAI danh sách + SQLi + 200 -> cây gốc 31103 -> 99905 -> 99906 (level 14), TI-001 nhường
+- rule: 104095   # R57 KHÔNG MẤT alert thật: IP có ở CẢ HAI danh sách + SQLi + 200 -> alert level 14 vẫn ra, TI-001 nhường. Từ khi gộp Task 9, dòng SQLi này do rule WEB bắt nên ra 104095 (bản sao 99906 trên nhánh WEB, R56) thay 99906
   log_format: apache
   location: (web01) any->/var/log/apache2/access.log
   events:

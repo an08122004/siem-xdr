@@ -240,6 +240,8 @@ Cột *Dataset* là số mẫu tấn công rule bắt được / số mẫu bìn
 | WIN-012 | Lạm dụng LOLBin để tải / thực thi mã | high | so khớp | T1218, T1105 | thông báo, case | PB-03 | 47 / 0 |
 | WIN-013 | Tạo scheduled task (cơ chế duy trì truy cập) | medium | so khớp | T1053.005 | case | PB-13 | 14 / 0 |
 
+**Giới hạn đã biết (rule WEB dạng XML của Wazuh):** web server đẩy log truy cập qua syslog (không qua agent) KHÔNG được các rule WEB phủ, vì rule ràng vị trí agent để thiết bị syslog không giả mạo được alert web; cần cài agent trên web server.
+
 Ngày 12/10/2026 đã chỉnh 3 rule sau khi tập bình thường mở rộng lộ ra báo nhầm (`AI-README.md` mục 9.1):
 - WIN-005 bỏ qua lớp vỏ PowerShell của Ansible khi quản trị qua WinRM;
 - WIN-013 chỉ bắt tác vụ chạy trình thông dịch, LOLBin, file script hoặc file trong thư mục người dùng ghi được;

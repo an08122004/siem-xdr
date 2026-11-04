@@ -11,7 +11,7 @@ volume với hệ thống (không lẫn vào ES / dashboard, không kích hoạt
     docker rm -f wazuh-bench
 
 Định dạng như agent gửi:
-  web     : dòng access log Apache (CSIC 2010), hàng đợi '1', location /var/log/apache2/access.log
+  web     : dòng access log Apache (CSIC 2010), hàng đợi '1', location dạng agent "[001] (demo-web) any->/var/log/apache2/access.log" (rule dự án ràng vị trí agent)
   windows : Sysmon EventID 1 dạng {"Message", "Event": <XML>} như agent Windows, hàng đợi 'f' (eventchannel)
   linux   : bản ghi auditd SYSCALL + EXECVE + CWD, key audit-wazuh-c (quy tắc audit Wazuh hướng dẫn để ghi lệnh root),
             hàng đợi '1', location /var/log/audit/audit.log
@@ -138,14 +138,14 @@ def load_items(extra_normal: bool = False) -> list[dict]:
         line = r["data"]["message"]
         assert get(x.doc, "source.ip") == line.split(" ", 1)[0]
         items.append({"domain": "web", "class": "attack", "group": g.attack_type(x), "line": line,
-                      "msg": "1:/var/log/apache2/access.log:" + line, "doc": x.doc})
+                      "msg": "1:[001] (demo-web) any->/var/log/apache2/access.log:" + line, "doc": x.doc})
     web_normal = [x for x in g.normal if x.label.get("dataset") == "csic2010"]
     raw_normal = list(_read("csic_normal.jsonl.gz"))
     assert len(web_normal) == len(raw_normal)
     for x, r in zip(web_normal, raw_normal):
         line = r["data"]["message"]
         items.append({"domain": "web", "class": "normal", "group": "normal", "line": line,
-                      "msg": "1:/var/log/apache2/access.log:" + line, "doc": x.doc})
+                      "msg": "1:[001] (demo-web) any->/var/log/apache2/access.log:" + line, "doc": x.doc})
     atomic = [x for x in g.attack if x.label.get("dataset") == "atomic-red-team"]
     raw_atomic = list(_read("atomic.jsonl.gz"))
     assert len(atomic) == len(raw_atomic)
