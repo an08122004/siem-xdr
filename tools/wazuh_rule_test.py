@@ -53,6 +53,8 @@ Failure = namedtuple("Failure", "file index expected got_ids")
 INJECT = {"eventchannel", "syscheck"}
 CASES_DIR = ROOT / "wazuh/manager/tests/cases"
 RETRIES, WAIT = 12, 10          # HTTP 429: API mặc định 300 lời gọi / phút
+LIST_API = None                 # WazuhApi của user có quyền ghi danh sách (siem-soar; siem-rules không có quyền này), đặt bởi main()
+LISTS: dict[str, str] = {}      # list_file đã đẩy lên (tên -> nội dung), cho manager tạm của inject()
 RELOAD_WAIT = 6                 # giây chờ analysisd nạp xong sau PUT /manager/analysisd/reload (list_file)
 
 
@@ -123,7 +125,7 @@ def _message(fmt: str, ev, ident: int) -> str:
             data["old_attributes"] = {**data["attributes"], "size": 5}
         return "8:syscheck:" + json.dumps({"type": "event", "data": data})
     data = {"path": ev["path"], "mode": "scheduled", "type": ev["type"], "timestamp": 1767225600,
-            "attributes": {**_FILE, "inode": ident}}
+            "attributes": {**_FILE, "inode": ident, **({"hash_sha256": ev["sha256"]} if "sha256" in ev else {})}}
     if ev["type"] == "modified":
         data["changed_attributes"] = ["size", "mtime"]
         data["old_attributes"] = {**data["attributes"], "size": 5}
@@ -162,7 +164,7 @@ def inject(cases: list[dict]) -> list[set[int]]:
     try:
         with tempfile.TemporaryDirectory() as tmp:
             try:
-                noise.start(Path(tmp))
+                noise.start(Path(tmp), LISTS.get("siem-misp-ip", "240.0.0.0:empty\n"))
                 alerts = cov.run_wazuh(items)
             finally:
                 subprocess.run(["docker", "rm", "-f", noise.NAME], env=cov.ENV, capture_output=True)
@@ -188,9 +190,10 @@ def _load_lists(cases: list[dict], api) -> list[dict]:
     Cần cho rule dùng danh sách do SOAR cập nhật lúc chạy thật (vd siem-misp-ip của TI-001). Trả về các ca còn lại."""
     setup = [c["list_file"] for c in cases if "list_file" in c]
     for lf in setup:
-        api.put_list(lf["name"], lf["content"])
+        (LIST_API or api).put_list(lf["name"], lf["content"])
+        LISTS[lf["name"]] = lf["content"]        # manager tạm của chế độ bơm (eventchannel / syscheck) cũng cần danh sách này
     if setup:
-        api.reload()
+        (LIST_API or api).reload()
         time.sleep(RELOAD_WAIT)          # reload của analysisd chạy nền, API trả lời trước khi nạp xong
     return [c for c in cases if "list_file" not in c]
 
@@ -332,6 +335,8 @@ def main() -> int:
     ap.add_argument("--url", default="https://localhost:55000")
     ap.add_argument("--user", default="siem-rules")
     ap.add_argument("--password-file", default=str(ROOT / "secrets/wazuh_rules_api_password"))
+    ap.add_argument("--list-user", default="siem-soar", help="user ghi danh sách CDB cho phần tử list_file (có lists:update / lists:delete)")
+    ap.add_argument("--list-password-file", default=str(ROOT / "secrets/wazuh_api_password"))
     ap.add_argument("--report", action="store_true",
                     help="đối chiếu ca legacy (mặc định tests/legacy) với ruleset đang chạy, ghi tests/legacy_map.yml")
     ap.add_argument("--out", default=str(LEGACY_MAP), help="file legacy_map.yml của --report")
@@ -342,6 +347,11 @@ def main() -> int:
     api = WazuhApi(a.url, a.user, Path(a.password_file).read_text(encoding="utf-8").strip(), a.ca)
     if a.insecure:
         api.ctx.check_hostname, api.ctx.verify_mode = False, 0      # ssl.CERT_NONE
+    global LIST_API
+    if (lp := Path(a.list_password_file)).exists():
+        LIST_API = WazuhApi(a.url, a.list_user, lp.read_text(encoding="utf-8").strip(), a.ca)
+        if a.insecure:
+            LIST_API.ctx.check_hostname, LIST_API.ctx.verify_mode = False, 0
     if a.report:
         import cases_to_raw
         cases = load_cases(LEGACY_DIR if a.path == str(CASES_DIR) else Path(a.path))

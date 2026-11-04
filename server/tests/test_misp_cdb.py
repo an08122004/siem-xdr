@@ -124,3 +124,12 @@ def test_put_list_raises_on_api_rejection(monkeypatch):
     api.put_list("siem-misp-ip", "45.9.9.1:misp\n")
     assert sent[0].get_method() == "PUT" and sent[0].full_url.endswith("/lists/files/siem-misp-ip?overwrite=true")
     assert sent[0].data == b"45.9.9.1:misp\n"
+
+
+def test_local_intel_and_feed_are_merged_and_documentation_ranges_kept(tmp_path):
+    from siem.pipeline.enrich import IOCSet, ThreatIntel
+    lines = ["# c", "203.0.113.66  # C2 mẫu", "10.0.0.9", "8.8.8.8/24", "không-phải-ip"]
+    (tmp_path / "bad_ips.txt").write_text("\n".join(lines), encoding="utf-8")
+    feed = type("F", (), {"snapshot": lambda self: IOCSet(items(" 45.9.9.1"))})()
+    text = misp_cdb.render(ThreatIntel(tmp_path, feed=feed).indicators())
+    assert text.splitlines() == ["45.9.9.1:misp", "203.0.113.66:misp"]     # IP riêng 10.0.0.9, bit máy 8.8.8.8/24, rác: bị loại

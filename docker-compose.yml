@@ -332,10 +332,8 @@ services:
       WAZUH_API_USER: siem-soar
       WAZUH_API_PASSWORD_FILE: /run/secrets/wazuh_api_password
       MISP_API_KEY_FILE: /run/secrets/misp_api_key   # dò ngược log cũ cả với IOC mới từ MISP (soar/retrohunt.py)
-      # đẩy IOC IP từ MISP sang danh sách siem-misp-ip của Wazuh (pipeline/misp_cdb.py, TI-001): cần ghi danh sách + nạp lại ruleset
-      WAZUH_RULES_API_USER: siem-rules
-      WAZUH_RULES_API_PASSWORD_FILE: /run/secrets/wazuh_rules_api_password
-    secrets: [soar_es_password, wazuh_api_password, misp_api_key, wazuh_rules_api_password]
+      # user siem-soar cũng đẩy IOC IP (MISP + config/intel) sang danh sách siem-misp-ip của Wazuh (pipeline/misp_cdb.py, TI-001)
+    secrets: [soar_es_password, wazuh_api_password, misp_api_key]
     volumes:
       - ./server/config:/app/config:ro
       - *ca-mount

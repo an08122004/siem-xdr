@@ -161,7 +161,7 @@ def _fake_docker(monkeypatch, alerts_for, sent=None):
     """Thay manager tạm: alerts_for(msgs) -> list alert; sent = số event 'gửi được' (mặc định đủ)."""
     import wazuh_coverage as cov
     import wazuh_noise as noise
-    monkeypatch.setattr(noise, "start", lambda tmp: None)
+    monkeypatch.setattr(noise, "start", lambda tmp, *a: None)
     monkeypatch.setattr(wrt.subprocess, "run", lambda *a, **k: None)
 
     def run_wazuh(items):

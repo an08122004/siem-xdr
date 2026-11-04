@@ -119,3 +119,28 @@
   events:
     - {path: 'HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Uninstall', value_name: App, type: added}
     - {path: 'HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Run\Sub', value_name: App, type: added}
+
+# Rule gốc 99901 (mã độc theo sha256 trong malicious-ioc/malware-hashes, level 14, alert thật) phải thắng FIM-001 (level 10) trên đường dẫn nhạy cảm
+- rule: 99901
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /etc/cron.d/backup-sync, type: added, sha256: 2fe6a7ae63c878bd84d7b829349b309e7c84194ddbb6a779816f5b84cd8ad45d}
+
+- none: [106001]
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /etc/cron.d/backup-sync, type: added, sha256: 2fe6a7ae63c878bd84d7b829349b309e7c84194ddbb6a779816f5b84cd8ad45d}
+
+- rule: 99901   # file sửa (550) trên đường dẫn nhạy cảm
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /root/.ssh/authorized_keys, type: modified, sha256: b82b7a6c942551964c3bd0b159dc4af1fb7deb945476183279092328228bd7a9}
+
+- rule: 106001   # sha256 lạ (không trong danh sách) thì FIM-001 vẫn báo
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /etc/cron.d/backup-sync, type: added, sha256: 0000000000000000000000000000000000000000000000000000000000000000}

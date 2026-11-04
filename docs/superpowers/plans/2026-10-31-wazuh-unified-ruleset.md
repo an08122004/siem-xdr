@@ -372,6 +372,7 @@ Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info 
 - (c) E2E 44/44 với SOAR theo playbook mới
 
 **Đạt:**
+- [ ] TI-001 domain/hash IOC chỉ có ở analyzer — người dùng quyết trước khi tắt rule YAML (Wazuh mới phủ IP: firewall, Suricata, sshd, web, Windows; tên file TI là `0845-ti.xml`)
 - [ ] bỏ nhóm `shadow` ở các file 0101–0107 (trừ rule có `shadow_since` < 7 ngày, giữ đúng tiêu chí chạy bóng của SOC-OPERATIONS mục 4)
 - [ ] `RULE_ENGINE_ENABLED=false` (biến mới trong `settings.py`, analyzer không chạy engine của `detection/rules.py`) + test `test_engine_disabled_no_yaml_alerts`
 - [ ] xóa mục playbook theo mã YAML

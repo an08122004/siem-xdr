@@ -7,7 +7,7 @@ from .. import bus, settings, store
 from ..pipeline import misp
 from ..pipeline.enrich import AssetDB, ThreatIntel
 from ..pipeline.misp_cdb import MispListSync
-from ..wazuh_rules import WazuhApi as RulesApi        # user siem-rules (khác WazuhAPI của SOAR bên dưới: user siem-soar)
+from ..wazuh_rules import WazuhApi as RulesApi        # cùng lớp WazuhAPI + put_list / reload; đăng nhập bằng user siem-soar
 from . import risk
 from .cases import CasePlaybooks
 from .engine import Notifier, Soar, load_playbooks
@@ -58,14 +58,19 @@ def main() -> None:
                                kafka_lag=kafka_lag_reader({"siem-analyzer": [settings.TOPIC_RAW],
                                                            "siem-soar": [settings.TOPIC_ALERTS]}))
         tasks.append(Every(60, "giám sát sức khỏe nguồn log / nền tảng", health.run))
-    if settings.RETROHUNT_ENABLED:
-        feed = misp.from_settings()
-        if feed and settings.WAZUH_RULES_API_PASSWORD:      # TI-001 (rule Wazuh 0542-ti.xml) đọc IOC IP từ danh sách siem-misp-ip
-            feed.on_refresh = MispListSync(RulesApi.from_settings()).push
-        elif feed:
-            log.warning("chưa cấu hình WAZUH_RULES_API_PASSWORD: IOC MISP KHÔNG được đẩy sang danh sách của Wazuh (TI-001 không khớp)")
-        ti = ThreatIntel(settings.CONFIG_DIR / "intel", feed=feed.start() if feed else None)
+    # IOC (file config/intel + feed MISP) dùng chung cho dò ngược log cũ VÀ cho TI-001 của Wazuh; tạo độc lập với RETROHUNT_ENABLED
+    feed = misp.from_settings()
+    ti = ThreatIntel(settings.CONFIG_DIR / "intel", feed=feed.start() if feed else None)
+    if settings.WAZUH_API_PASSWORD:
+        sync = MispListSync(RulesApi(settings.WAZUH_API_URL, settings.WAZUH_API_USER, settings.WAZUH_API_PASSWORD, settings.WAZUH_API_CA))
 
+        def export_ioc() -> None:                   # TI-001 (rule Wazuh 0845-ti.xml) đọc IP từ danh sách siem-misp-ip; push() bỏ qua nếu nội dung không đổi
+            if feed is not None and feed.snapshot() is None:
+                return                              # MISP chưa tải xong lần đầu: chưa đẩy, kẻo ghi đè danh sách bằng bộ IOC cục bộ thiếu
+            ti.maybe_reload()
+            sync.push(ti.indicators())
+        tasks.append(Every(60, "xuất IOC IP sang danh sách Wazuh (TI-001)", export_ioc))
+    if settings.RETROHUNT_ENABLED:
         def indicators() -> list:
             ti.maybe_reload()                       # file IOC vừa sửa / IOC vừa hết hạn
             return ti.indicators()

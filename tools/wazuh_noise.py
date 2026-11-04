@@ -33,11 +33,14 @@ GATE = 1.0          # alert / 100 event bình thường
 # thay entrypoint của repo (cần secrets/chứng chỉ): chỉ tắt filebeat + tạo thư mục rule động như entrypoint thật
 SETUP = ("#!/bin/bash\nprintf '#!/bin/sh\\nexec sleep infinity\\n' > /etc/services.d/filebeat/run\n"
          "install -d -o root -g wazuh -m 0755 /var/ossec/etc/rules-dynamic\n"
-         "install -d -m 0755 /var/log/siem-console\n")   # ossec.conf có <localfile> console: giữ ossec.log sạch cảnh báo logcollector
+         "install -d -m 0755 /var/log/siem-console\n"
+         "install -m 0660 -o wazuh -g wazuh /entrypoint-scripts/siem-misp-ip /var/ossec/etc/lists/siem-misp-ip\n")   # ossec.conf có <localfile> console: giữ ossec.log sạch cảnh báo logcollector
 
 
-def start(tmp: Path) -> None:
+def start(tmp: Path, misp_list: str = "240.0.0.0:empty\n") -> None:
+    """misp_list: nội dung danh sách siem-misp-ip (ossec.conf khai báo nó; thiếu file thì rule dùng nó bị bỏ). Mặc định = dòng giữ chỗ của entrypoint."""
     (tmp / "10-setup.sh").write_text(SETUP, encoding="utf-8", newline="\n")
+    (tmp / "siem-misp-ip").write_text(misp_list, encoding="utf-8", newline="\n")
     cov.docker("run", "-d", "--rm", "--name", NAME, "--network", "none",
                "-v", f"{tmp}:/entrypoint-scripts:ro",
                "-v", f"{ROOT / 'wazuh/manager/rules'}:/var/ossec/etc/rules:ro",
