@@ -12,7 +12,7 @@
   `&` viết \x26, `<` `>` viết \x3c \x3e trong regex (XML).
 
   THỨ TỰ KHỚP (đã thử trên 4.14.8): các rule anh em dưới cùng cha được thử theo LEVEL GIẢM DẦN (cùng level: theo thứ tự nạp), nên rule của file này (level 7-12) thắng
-  rule gốc 31101/31103-5/31501-31516 (level 3-7); chỉ 31115 (13) và 31168/31169 (15) đứng trước. Rule cha là mọi rule gốc có thể là rule cuối của một request tấn công
+  rule gốc 31101/31103-5/31501-31516 (level 3-7); 31115 (13, URL quá dài có dấu ?) vẫn thắng rule WEB; 31168/31169 (15, Shellshock, con của 31108) vẫn tới được vì 104090/104005 cũng là con của 31108 (level thấp hơn) - đều CÓ ca, kể cả khi UA có thêm tên công cụ quét. Request không đơn giản (có ?) không bao giờ vào 31108 nên 31168/31169 vốn không với tới, có file này hay không. Rule cha là mọi rule gốc có thể là rule cuối của một request tấn công
   (31100 31101 31103 31104 31105 31106 31108 31120-31123): 404 vào 31101 trước 31103, status 200 vào 31106 (con của 31103-31105), 5xx vào 31120-31123, nên phải treo vào tất cả.
   Thứ tự trong file đi theo mức độ (critical trước): request vừa có RCE vừa có SQLi ra WEB-004; scanner UA (WEB-005, medium) đứng sau các rule payload.
 
@@ -39,8 +39,8 @@
 
   RULE IOC GỐC (R56, 0999-malicious-ioc-rules.xml, nạp SAU file này): 99905 (level 9, con của 31103-31171) và 99906 (level 14, status 200, THẬT đang báo) báo khi srcip nằm trong
   etc/lists/malicious-ioc/malicious-ip. Rule WEB là con của 31100 ở level 10-12 nên thắng mọi rule tấn công gốc và 99905/99906 không còn thấy dòng đó. Loại IP IOC khỏi rule WEB
-  (R54) bị bỏ vì làm mất dòng chỉ rule WEB bắt. Thay vào đó 104095 là BẢN SAO 1:1 của 99906 cho nhánh rule WEB: con của mọi rule payload/UA, list match_key + <id>^200</id>, level 14,
-  không `shadow` (hành vi gốc đang chạy thật, không phải phát hiện mới; <info>port_of_stock=99906</info>; lint hiện không bắt buộc nhóm shadow). Hệ quả đã đo:
+  (R54) bị bỏ vì làm mất dòng chỉ rule WEB bắt. Thay vào đó 104095 cổng 99906 sang nhánh rule WEB VÀ mở rộng nó (cố ý, cho IP đã biết là độc) tới cả tấn công chỉ rule WEB bắt, rule gốc 31103-31106 không bắt: con của mọi rule payload/UA, list match_key + <id>^200</id>, level 14,
+  không `shadow` (phần cổng là hành vi gốc đang chạy thật, không phải phát hiện mới; <info>port_of_stock=99906</info>; lint hiện không bắt buộc nhóm shadow). Hệ quả đã đo:
   IP IOC + tấn công rule WEB bắt + 200 -> 104095 (14); + 404 -> rule WEB (99905 level 9 gốc không còn báo dòng đó); tấn công chỉ rule gốc bắt -> 99905/99906 như cũ.
   KHÔNG dùng `ignore` (Ràng buộc 7, R55): nó dập cả rule nên nguồn thứ hai trong cửa sổ bị lỡ; khử trùng ở cầu nối (Suppressor). Hệ quả: 104007/104009 báo ở MỌI event vượt ngưỡng
   trong cửa sổ (có ca hai nguồn cùng lúc đều báo).
