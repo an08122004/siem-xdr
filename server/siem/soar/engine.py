@@ -95,7 +95,12 @@ class Playbook:
     def __init__(self, d: dict[str, Any]):
         self.name = d["name"]
         w = d.get("when") or {}
-        self.rule_ids = [str(x) for x in w.get("rule_ids", ["*"])]
+        self.groups = [str(x) for x in w.get("groups") or []]
+        # `rule_ids` + `groups` cùng có: khớp MỘT trong hai (rule XML của dự án chọn theo id, rule gốc theo nhóm);
+        # chỉ có `groups`: chỉ theo nhóm; không có cả hai: mọi rule
+        self.rule_ids = [str(x) for x in w.get("rule_ids", [] if self.groups else ["*"])]
+        # true: bỏ alert từ nguồn syslog (agent.id `syslog-<ip>`): IP nguồn qua UDP syslog giả được (R59)
+        self.no_syslog = bool(w.get("no_syslog"))
         self.min_severity = SEVERITY_SCORE[w.get("min_severity", "low")]
         self.sources = w.get("sources")          # ["rule", "ml"]
         self.tags_any = set(w.get("tags_any") or [])
@@ -103,7 +108,10 @@ class Playbook:
 
     def matches(self, alert: dict[str, Any]) -> bool:
         rid = str(get(alert, "rule.id", ""))
-        if not any(fnmatch.fnmatch(rid, p) for p in self.rule_ids):
+        groups = {str(g) for g in get(alert, "rule.groups") or []}
+        if not (any(fnmatch.fnmatch(rid, p) for p in self.rule_ids) or groups & set(self.groups)):
+            return False
+        if self.no_syslog and str(get(alert, "agent.id") or "").startswith("syslog-"):
             return False
         if alert.get("severity_score", 0) < self.min_severity:
             return False
@@ -323,7 +331,9 @@ class Soar:
             "asset": {k: get(alert, f"asset.{k}") for k in ("id", "criticality") if get(alert, f"asset.{k}")} or None,
             **self.case_playbooks.build(str(get(alert, "rule.id", "")), alert.get("severity", "medium"),
                                         techniques=[techniques] if isinstance(techniques, str) else techniques,
-                                        tags=get(alert, "rule.tags") or [], priority=level, created=now),
+                                        tags=get(alert, "rule.tags") or [], groups=get(alert, "rule.groups") or [],
+                                        legacy_ids=get(alert, "rule.legacy_ids") or [],
+                                        priority=level, created=now),
         })
         return {"status": "created", "case_id": case_id}
 

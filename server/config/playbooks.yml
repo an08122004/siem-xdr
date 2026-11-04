@@ -1,5 +1,10 @@
 # Playbook SOAR: khi alert khớp điều kiện `when` -> thực hiện lần lượt `steps`.
 #   rule_ids: hỗ trợ wildcard (WEB-*; WZH-* là cảnh báo của ruleset Wazuh), min_severity: low|medium|high|critical
+#   groups: nhóm rule Wazuh (alert.rule.groups), khớp 1 trong các nhóm. Có cả rule_ids và groups: khớp MỘT trong hai.
+#     R60: hành động phá hủy (block_ip, kill, isolate) CHỈ chọn theo rule_ids rõ ràng đã duyệt, KHÔNG dùng groups:
+#     nhóm như authentication_failures có 50+ rule gốc (Postfix, WordPress, VPN...) mà srcip thường là proxy / NAT
+#   no_syslog: true -> bỏ alert từ nguồn syslog (agent.id `syslog-<ip>`): IP nguồn qua UDP syslog giả được, kẻ tấn công
+#     có thể khiến hệ thống chặn nạn nhân (R59). Bắt buộc cho playbook block_ip chọn theo rule / nhóm Wazuh
 #   sources: [rule, ml, wazuh]
 # Các action: block_ip, kill_process, isolate_host, notify, create_case
 #   block_ip: target (trường chứa IP, mặc định source.ip), scope: origin|all, duration (giây, 0 = vĩnh viễn)
@@ -46,6 +51,61 @@ playbooks:
       rule_ids: [TI-001]
     steps:
       - {action: block_ip, target: threat.indicator.value, scope: all, duration: 86400}
+      - {action: notify}
+      - {action: create_case}
+
+  # ---- Rule Wazuh (XML, thay dần rule YAML; Task 15). Giữ song song với mục YAML ở trên tới Task 18: rule YAML mang mã
+  # AUTH-/WEB-/LNX-/WIN-, rule XML mang WZH-<id>, hai bên không khớp chung playbook nào. Bản XML tương ứng chạy BÓNG
+  # (alert.shadow -> engine.handle bỏ qua hoàn toàn) tới khi chuyển nhánh nên không chặn / kill trùng.
+  - name: Chặn IP brute-force (rule Wazuh)
+    when:
+      rule_ids: [WZH-101001, WZH-101003, WZH-105001]     # AUTH-001, AUTH-003, WIN-001
+      min_severity: high
+      no_syslog: true
+    steps:
+      - {action: block_ip, target: source.ip, scope: all, duration: 3600}
+      - {action: notify}
+      - {action: create_case}
+
+  # Rule gốc đã duyệt (R60), chỉ đích danh từng id, scope origin (chỉ agent thấy alert), không chặn mọi agent
+  - name: Chặn IP brute-force sshd / web quét (rule gốc Wazuh đã duyệt)
+    when:
+      rule_ids: [WZH-5712, WZH-5720, WZH-5763, WZH-31151, WZH-31152]
+      min_severity: high
+      no_syslog: true
+    steps:
+      - {action: block_ip, target: source.ip, scope: origin, duration: 3600}
+      - {action: notify}
+      - {action: create_case}
+
+  - name: Tài khoản có thể đã bị chiếm (rule Wazuh)
+    when:
+      rule_ids: [WZH-101002]                             # AUTH-002
+      no_syslog: true
+    steps:
+      - {action: block_ip, target: source.ip, scope: all, duration: 86400}
+      - {action: isolate_host, approval: true}
+      - {action: notify}
+      - {action: create_case}
+
+  - name: Chặn nguồn tấn công Web nghiêm trọng (rule Wazuh)
+    when:
+      rule_ids: [WZH-104001, WZH-104003, WZH-104004, WZH-104007, WZH-104008, WZH-104009, WZH-104011, WZH-104012,
+                 WZH-104013, WZH-104014, WZH-104031, WZH-104041, WZH-104095]
+      min_severity: high
+      no_syslog: true
+    steps:
+      - {action: block_ip, target: source.ip, scope: origin, duration: 1800}
+      - {action: notify}
+      - {action: create_case}
+
+  - name: Diệt tiến trình độc hại trên endpoint (rule Wazuh)
+    when:
+      rule_ids: [WZH-102001, WZH-102002, WZH-102004, WZH-102014, WZH-102501, WZH-102504, WZH-102511,
+                 WZH-105006, WZH-105007, WZH-105107, WZH-105207, WZH-105010]
+    steps:
+      - {action: kill_process}
+      - {action: isolate_host, approval: true}
       - {action: notify}
       - {action: create_case}
 
