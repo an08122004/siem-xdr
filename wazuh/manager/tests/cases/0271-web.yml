@@ -1518,6 +1518,37 @@
   - '198.51.100.101 - - [05/Jan/2026:09:00:08 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
   - '198.51.100.101 - - [05/Jan/2026:09:00:09 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
 
+# R55 (không `ignore`): hai nguồn cùng đập trong 60 s, CẢ HAI đều phải ra 104007 (hai ca liền nhau, ca sau chạy ngay sau ca trước).
+- rule: 104007   # WEB-007 hai nguồn cùng lúc: nguồn A
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - '198.51.100.201 - - [05/Jan/2026:09:00:00 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.201 - - [05/Jan/2026:09:00:01 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.201 - - [05/Jan/2026:09:00:02 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.201 - - [05/Jan/2026:09:00:03 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.201 - - [05/Jan/2026:09:00:04 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.201 - - [05/Jan/2026:09:00:05 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.201 - - [05/Jan/2026:09:00:06 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.201 - - [05/Jan/2026:09:00:07 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.201 - - [05/Jan/2026:09:00:08 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.201 - - [05/Jan/2026:09:00:09 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+
+- rule: 104007   # WEB-007 hai nguồn cùng lúc: nguồn B (ngay sau A, vẫn báo)
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - '198.51.100.202 - - [05/Jan/2026:09:00:00 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.202 - - [05/Jan/2026:09:00:01 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.202 - - [05/Jan/2026:09:00:02 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.202 - - [05/Jan/2026:09:00:03 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.202 - - [05/Jan/2026:09:00:04 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.202 - - [05/Jan/2026:09:00:05 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.202 - - [05/Jan/2026:09:00:06 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.202 - - [05/Jan/2026:09:00:07 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.202 - - [05/Jan/2026:09:00:08 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.202 - - [05/Jan/2026:09:00:09 +0000] "POST /login HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+
 - rule: 104007   # WEB-007 10 POST /api/auth/signin
   log_format: apache
   location: (demo-web) any->/usr/local/apache2/logs/access_log
@@ -1811,26 +1842,31 @@
   events:
   - 'Jan  5 09:00:00 fw01 apache: 203.0.113.61 - - [05/Jan/2026:09:00:00 +0000] "GET /p.php?id=1%20UNION%20SELECT%20a,b%20FROM%20users HTTP/1.1" 200 512 "-" "sqlmap/1.7"'
 
-# R52: IP nguồn nằm trong danh sách IOC gốc (etc/lists/malicious-ioc/malicious-ip có 196.251.85.62). Rule gốc 99905 (level 9, con của 31103-31106...) và 99906 (level 14, status 200)
-# xếp SAU rule dự án (anh em thử theo level giảm dần: 104001/104003/104004 level 10-12 > 99905 level 9), nên với dòng tấn công mà rule dự án khớp thì rule dự án thắng và 99905/99906
-# KHÔNG ra (đo bằng ca này). Dòng thường (không tấn công) không là con của 99905: bộ đếm 104090/104009 vẫn nhận bình thường.
-- rule: 104001   # IOC: UNION SELECT (200) từ IP trong danh sách IOC -> 104001 thắng 99906
+# R54: IP nguồn nằm trong danh sách IOC gốc (etc/lists/malicious-ioc/malicious-ip có 196.251.85.62). Rule payload của file này loại IP đó (<list not_match_key>) để 99905
+# (level 9) / 99906 (level 14, status 200) gốc thắng; IP sạch thì rule dự án thắng (ca 104001 phía trên). Dòng thường từ IP IOC vẫn vào bộ đếm 104090.
+- rule: 99906   # IOC: UNION SELECT status 200 từ IP IOC -> 99906 (level 14) của rule gốc
   log_format: apache
   location: (demo-web) any->/usr/local/apache2/logs/access_log
   events:
   - '196.251.85.62 - - [05/Jan/2026:09:00:00 +0000] "GET /p.php?id=1%20UNION%20SELECT%20a,b%20FROM%20users HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
 
-- none: [99905, 99906]   # IOC: cùng dòng, rule gốc IOC không ra
+- none: [104001, 104002, 104003, 104004, 104005, 104008, 104011, 104012, 104013, 104014, 104021, 104031, 104041]   # IOC: không rule WEB nào ra (200)
   log_format: apache
   location: (demo-web) any->/usr/local/apache2/logs/access_log
   events:
   - '196.251.85.62 - - [05/Jan/2026:09:00:00 +0000] "GET /p.php?id=1%20UNION%20SELECT%20a,b%20FROM%20users HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
 
-- rule: 104004   # IOC: RCE ;cat (200) từ IP IOC -> 104004
+- rule: 99905   # IOC: UNION SELECT status 404 từ IP IOC -> 99905 (level 9)
   log_format: apache
   location: (demo-web) any->/usr/local/apache2/logs/access_log
   events:
-  - '196.251.85.62 - - [05/Jan/2026:09:00:00 +0000] "GET /x?c=%3Bcat%20/etc/passwd HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+  - '196.251.85.62 - - [05/Jan/2026:09:00:00 +0000] "GET /p.php?id=1%20UNION%20SELECT%20a,b%20FROM%20users HTTP/1.1" 404 512 "-" "Mozilla/5.0"'
+
+- none: [104001, 104002, 104003, 104004, 104005, 104008, 104011, 104012, 104013, 104014, 104021, 104031, 104041]   # IOC: không rule WEB nào ra (404)
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - '196.251.85.62 - - [05/Jan/2026:09:00:00 +0000] "GET /p.php?id=1%20UNION%20SELECT%20a,b%20FROM%20users HTTP/1.1" 404 512 "-" "Mozilla/5.0"'
 
 - rule: 104090   # IOC: dòng thường từ IP IOC vẫn vào bộ đếm WEB-009
   log_format: apache

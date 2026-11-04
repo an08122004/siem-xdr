@@ -37,10 +37,13 @@
   dòng giống access log sẽ ra alert WEB giả. Mọi rule ở đây vì thế có <location type="pcre2">^\(</location>: chỉ nhận log từ AGENT (vị trí dạng `(tên) ip->đường dẫn`, S7).
   Hệ quả: web server chỉ đẩy log qua syslog (không có agent) KHÔNG được phủ; muốn phủ phải cài agent.
 
-  RULE IOC GỐC (R52, 0999-malicious-ioc-rules.xml, nạp SAU file này): 99905 (level 9, con của 31103-31106...) và 99906 (level 14, status 200) báo khi srcip nằm trong
-  etc/lists/malicious-ioc/malicious-ip. Với dòng tấn công mà rule WEB khớp (level 10-12 > 9) thì rule WEB thắng và 99905/99906 KHÔNG ra (đã đo bằng ca với 196.251.85.62):
-  mất alert level 14 "tấn công thành công từ IP độc" của rule gốc đối với những dòng đó, chấp nhận theo R52, không đổi thứ tự file. Dòng thường (không tấn công) không là con
-  của 99905, nên bộ đếm 104090/104009 vẫn nhận. `ignore` của rule tần suất (104007, 104009) tính theo giờ thật và dùng chung mọi IP: hai nguồn lũ trong 60 s chỉ ra một alert.
+  RULE IOC GỐC (R52/R54, 0999-malicious-ioc-rules.xml, nạp SAU file này): 99905 (level 9, con của 31103-31106...) và 99906 (level 14, status 200) báo khi srcip nằm trong
+  etc/lists/malicious-ioc/malicious-ip. Rule WEB level 10-12 là anh em của 99905 dưới 31103-31106 và thắng nó (thử theo level giảm dần), làm mất alert level 14 THẬT của 99906.
+  Vì vậy mọi rule payload ở đây có <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>: IP trong danh sách IOC bị loại, rule gốc 99905/99906
+  thắng (có ca 200 -> 99906, 404 -> 99905). Đổi lại, dòng từ IP IOC mà rule gốc 31103-31106 không bắt (ví dụ RCE chỉ rule WEB bắt) không ra alert WEB; chấp nhận (IP đó đã bị
+  IOC báo ở các dòng khác). Mỗi rule chỉ 1 <list> (analysisd sai khi >= 3). Bộ đếm 104070/104090 không là anh em của 99905 nên vẫn nhận IP IOC.
+  KHÔNG dùng `ignore` (Ràng buộc 7, R55): nó dập cả rule nên nguồn thứ hai trong cửa sổ bị lỡ; khử trùng ở cầu nối (Suppressor). Hệ quả: 104007/104009 báo ở MỌI event vượt ngưỡng
+  trong cửa sổ (có ca hai nguồn cùng lúc đều báo).
 
   Mọi bộ đếm đều có <same_source_ip /> vì agent 000 dùng chung cho mọi thiết bị syslog, console và manager.
 -->
@@ -48,6 +51,7 @@
   <rule id="104004" level="12">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
+    <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <url type="pcre2">(?i)(?:[;|`\x26]|%(?:3b|7c|60|26))(?:[+\s]|%(?:25)?20){0,8}(?:cat|ls|id|whoami|uname|wget|curl|nc|bash|sh|powershell|cmd)\b(?!(?:[+\s]|%(?:25)?20){0,8}(?:=|%3d))|(?:\$|%24)(?:\(|%28)(?:id|whoami|cat|curl|wget)</url>
     <description>WEB-004 Chèn lệnh / RCE qua web: $(srcip) gửi $(url)</description>
     <mitre>
@@ -61,6 +65,7 @@
   <rule id="104041" level="12">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
+    <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <url type="pcre2">(?i)(?:\$|%24)(?:\{|%7b)jndi(?::|%3a)|cmd(?:\.|%(?:25)?2e)exe|(?:/|%(?:25)?2f)bin(?:/|%(?:25)?2f)(?:ba)?sh</url>
     <description>WEB-004 Chèn lệnh / RCE qua web (jndi, cmd.exe, /bin/sh): $(srcip) gửi $(url)</description>
     <mitre>
@@ -74,6 +79,7 @@
   <rule id="104008" level="12">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
+    <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <url type="pcre2">(?i)^(?:[^?]{0,200}/(?:uploads?|images?|tmp|files)/[^/?]{1,100}\.(?:php|phtml|jsp|aspx?)|[^?]{0,200}(?:c99|r57|b374k|wso|shell|cmd)\.(?:php|jsp|aspx?))\?(?:[^#]{0,300}\x26)?(?:cmd|exec|command|c)(?:=|%3d)</url>
     <description>WEB-008 Truy cập webshell: $(srcip) gọi $(url)</description>
     <mitre>
@@ -86,6 +92,7 @@
   <rule id="104001" level="10">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
+    <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <url type="pcre2">(?i)(?:u|%[57]5)(?:n|%[46]e)(?:i|%[46]9)(?:o|%[46]f)(?:n|%[46]e)(?:[\s\x2b]|%20|/\x2a\x2a/){1,8}(?:(?:a|%[46]1)(?:l|%[46]c)(?:l|%[46]c)(?:[\s\x2b]|%20|/\x2a\x2a/){1,8})?(?:s|%[57]3)(?:e|%[46]5)(?:l|%[46]c)(?:e|%[46]5)(?:c|%[46]3)(?:t|%[57]4)</url>
     <description>WEB-001 SQL injection (UNION SELECT): $(srcip) gửi $(url)</description>
     <mitre>
@@ -98,6 +105,7 @@
   <rule id="104013" level="10">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
+    <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <url type="pcre2">(?i)waitfor(?:[+\s]|%(?:25)?20){1,8}delay|(?:information_schema|sysobjects|(?:@|%40){2}version)</url>
     <description>WEB-001 SQL injection (WAITFOR DELAY, information_schema, @@version): $(srcip) gửi $(url)</description>
     <mitre>
@@ -110,6 +118,7 @@
   <rule id="104011" level="10">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
+    <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <url type="pcre2">(?i)(?:'|%(?:25)?27|%u0027)(?:[+\s]|%(?:25)?20){0,8}(?:or|and)(?:[+\s]|%(?:25)?20){0,8}(?:'|%(?:25)?27|%u0027)?\d{1,10}(?:'|%(?:25)?27|%u0027)?(?:[+\s]|%(?:25)?20){0,8}(?:=|%3d)(?:[+\s]|%(?:25)?20){0,8}(?:'|%(?:25)?27|%u0027)?\d</url>
     <description>WEB-001 SQL injection (điều kiện luôn đúng ' OR 1=1): $(srcip) gửi $(url)</description>
     <mitre>
@@ -122,6 +131,7 @@
   <rule id="104014" level="10">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
+    <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <url type="pcre2">(?i)(?:'|%(?:25)?27|%u0027)(?:[+\s]|%(?:25)?20){0,8}(?:or|and)(?:[+\s]|%(?:25)?20){1,8}(?:'|%(?:25)?27|%u0027)[^']{0,60}?(?:'|%(?:25)?27|%u0027)(?:[+\s]|%(?:25)?20){0,8}(?:=|%3d)(?:[+\s]|%(?:25)?20){0,8}(?:'|%(?:25)?27|%u0027)</url>
     <description>WEB-001 SQL injection (điều kiện luôn đúng ' OR 'a'='a): $(srcip) gửi $(url)</description>
     <mitre>
@@ -134,6 +144,7 @@
   <rule id="104012" level="10">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
+    <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <url type="pcre2">(?i)(?:^|[^a-z_])(?:sleep|benchmark|pg_sleep)(?:[+\s]|%(?:25)?20){0,8}(?:\(|%28)|(?:(?:;|%3b)|(?:'|%(?:25)?27|%u0027))(?:[+\s]|%(?:25)?20){0,8}(?:drop|insert|update|delete)(?:[+\s]|%(?:25)?20){1,8}|(?:'|%(?:25)?27|%u0027)(?:[+\s]|%(?:25)?20){0,8}(?:--|#|%23)</url>
     <description>WEB-001 SQL injection (SLEEP/BENCHMARK, ;DROP, chú thích sau dấu nháy): $(srcip) gửi $(url)</description>
     <mitre>
@@ -146,6 +157,7 @@
   <rule id="104003" level="10">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
+    <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <url type="pcre2">(?i)(?:\.|%(?:25)?2e)(?:\.|%(?:25)?2e)(?:(?:/|%(?:25)?2f)|(?:\\|%(?:25)?5c))(?:\.|%(?:25)?2e)(?:\.|%(?:25)?2e)(?:(?:/|%(?:25)?2f)|(?:\\|%(?:25)?5c))|(?:/|%(?:25)?2f)etc(?:/|%(?:25)?2f)(?:passwd|shadow|hosts)</url>
     <description>WEB-003 Path traversal / LFI (../, /etc/passwd): $(srcip) gửi $(url)</description>
     <mitre>
@@ -158,6 +170,7 @@
   <rule id="104031" level="10">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
+    <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <url type="pcre2">(?i)c(?::|%3a)(?:\\|%(?:25)?5c)windows(?:\\|%(?:25)?5c)win(?:\.|%(?:25)?2e)ini|php(?::|%3a)(?:/|%(?:25)?2f)(?:/|%(?:25)?2f)(?:filter|input)|file(?::|%3a)(?:/|%(?:25)?2f)(?:/|%(?:25)?2f)|(?:/|%(?:25)?2f)proc(?:/|%(?:25)?2f)self(?:/|%(?:25)?2f)environ</url>
     <description>WEB-003 Path traversal / LFI (win.ini, php://, file://, /proc): $(srcip) gửi $(url)</description>
     <mitre>
@@ -170,6 +183,7 @@
   <rule id="104002" level="7">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
+    <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <url type="pcre2">(?i)(?:\x3c|%(?:25)?3c|%u003c)(?:[+\s]|%(?:25)?20){0,8}script|javascript(?:[+\s]|%(?:25)?20){0,8}(?::|%3a)|on(?:error|load|mouseover|focus)(?:[+\s]|%(?:25)?20){0,8}(?:=|%3d)</url>
     <description>WEB-002 XSS (script, javascript:, onerror=): $(srcip) gửi $(url)</description>
     <mitre>
@@ -182,6 +196,7 @@
   <rule id="104021" level="7">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
+    <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <url type="pcre2">(?i)(?:\x3c|%(?:25)?3c|%u003c)(?:[+\s]|%(?:25)?20){0,8}(?:img|svg|iframe)[^\x3e]{0,100}?(?:\x3e|%(?:25)?3e|%u003e)|document(?:\.|%(?:25)?2e)cookie|alert(?:[+\s]|%(?:25)?20){0,8}(?:\(|%28)</url>
     <description>WEB-002 XSS (thẻ img/svg/iframe, document.cookie, alert): $(srcip) gửi $(url)</description>
     <mitre>
@@ -194,6 +209,7 @@
   <rule id="104005" level="7">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
+    <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <regex type="pcre2">(?i)"[^"]{0,300}?(?:sqlmap|nikto|nmap|masscan|gobuster|dirbuster|dirb|wfuzz|ffuf|wpscan|acunetix|nessus|openvas|zgrab|hydra|nuclei|burp)[^"]{0,300}"\s*$</regex>
     <description>WEB-005 Công cụ quét lỗ hổng web trong User-Agent: $(srcip)</description>
     <mitre>
@@ -216,7 +232,7 @@
     <group>siem,web,shadow,legacy_WEB-007,</group>
   </rule>
 
-  <rule id="104007" level="10" frequency="10" timeframe="60" ignore="60">
+  <rule id="104007" level="10" frequency="10" timeframe="60">
     <if_matched_sid>104070</if_matched_sid>
     <same_source_ip />
     <description>WEB-007 Brute-force form đăng nhập web: $(srcip) POST &gt;= 10 lần trong 60 giây</description>
@@ -239,7 +255,7 @@
     <group>siem,web,shadow,legacy_WEB-009,</group>
   </rule>
 
-  <rule id="104009" level="10" frequency="300" timeframe="60" ignore="60">
+  <rule id="104009" level="10" frequency="300" timeframe="60">
     <if_matched_sid>104090</if_matched_sid>
     <same_source_ip />
     <description>WEB-009 HTTP flood: $(srcip) gửi &gt;= 300 request trong 60 giây</description>
