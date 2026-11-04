@@ -669,3 +669,32 @@
   location: 10.10.40.254
   events:
   - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=xmrig parent=bash exe=/usr/bin/xmrig cmd=./xmrig -o stratum+tcp://pool.example:3333'
+
+# Ràng buộc 7: hai máy (location) liên tiếp, mỗi máy 4 lệnh trinh sát khác tên; máy thứ hai vẫn ra alert ở dòng cuối
+- rule: 102005
+  last: true
+  log_format: syslog
+  location: l5-two-a/siem-procs
+  events:
+    - {event: 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=whoami parent=bash exe=/usr/bin/whoami cmd=whoami', location: l5-two-a/siem-procs}
+    - {event: 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=id parent=bash exe=/usr/bin/id cmd=id', location: l5-two-a/siem-procs}
+    - {event: 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=uname parent=bash exe=/usr/bin/uname cmd=uname', location: l5-two-a/siem-procs}
+    - {event: 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=hostname parent=bash exe=/usr/bin/hostname cmd=hostname', location: l5-two-a/siem-procs}
+    - {event: 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=whoami parent=bash exe=/usr/bin/whoami cmd=whoami', location: l5-two-b/siem-procs}
+    - {event: 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=id parent=bash exe=/usr/bin/id cmd=id', location: l5-two-b/siem-procs}
+    - {event: 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=uname parent=bash exe=/usr/bin/uname cmd=uname', location: l5-two-b/siem-procs}
+    - {event: 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=hostname parent=bash exe=/usr/bin/hostname cmd=hostname', location: l5-two-b/siem-procs}
+
+- rule: 102505   # LNX-005 auditd: hai máy (location) liên tiếp, mỗi máy 4 lệnh khác nhau; máy thứ hai vẫn ra alert ở dòng cuối
+  last: true
+  log_format: audit
+  location: /var/log/audit/l5-two-a/audit.log
+  events:
+    - {event: 'type=SYSCALL msg=audit(1767225600.301:301): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4200 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="whoami" exe="/usr/bin/whoami" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.301:301): argc=1 a0="whoami" type=CWD msg=audit(1767225600.301:301): cwd="/root"', location: /var/log/audit/l5-two-a/audit.log}
+    - {event: 'type=SYSCALL msg=audit(1767225600.302:302): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4201 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="id" exe="/usr/bin/id" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.302:302): argc=1 a0="id" type=CWD msg=audit(1767225600.302:302): cwd="/root"', location: /var/log/audit/l5-two-a/audit.log}
+    - {event: 'type=SYSCALL msg=audit(1767225600.303:303): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4202 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="uname" exe="/usr/bin/uname" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.303:303): argc=1 a0="uname" type=CWD msg=audit(1767225600.303:303): cwd="/root"', location: /var/log/audit/l5-two-a/audit.log}
+    - {event: 'type=SYSCALL msg=audit(1767225600.304:304): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4203 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="hostname" exe="/usr/bin/hostname" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.304:304): argc=1 a0="hostname" type=CWD msg=audit(1767225600.304:304): cwd="/root"', location: /var/log/audit/l5-two-a/audit.log}
+    - {event: 'type=SYSCALL msg=audit(1767225600.305:305): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4200 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="whoami" exe="/usr/bin/whoami" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.305:305): argc=1 a0="whoami" type=CWD msg=audit(1767225600.305:305): cwd="/root"', location: /var/log/audit/l5-two-b/audit.log}
+    - {event: 'type=SYSCALL msg=audit(1767225600.306:306): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4201 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="id" exe="/usr/bin/id" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.306:306): argc=1 a0="id" type=CWD msg=audit(1767225600.306:306): cwd="/root"', location: /var/log/audit/l5-two-b/audit.log}
+    - {event: 'type=SYSCALL msg=audit(1767225600.307:307): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4202 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="uname" exe="/usr/bin/uname" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.307:307): argc=1 a0="uname" type=CWD msg=audit(1767225600.307:307): cwd="/root"', location: /var/log/audit/l5-two-b/audit.log}
+    - {event: 'type=SYSCALL msg=audit(1767225600.308:308): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4203 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="hostname" exe="/usr/bin/hostname" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.308:308): argc=1 a0="hostname" type=CWD msg=audit(1767225600.308:308): cwd="/root"', location: /var/log/audit/l5-two-b/audit.log}

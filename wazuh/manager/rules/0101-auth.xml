@@ -71,7 +71,7 @@
        khai cả hai different_*; trường vắng mặt luôn tính là "khác" nên chỉ trường có giá trị quyết định. -->
   <!-- Giới hạn (spike S4): đếm "event trước có user khác event hiện tại", không đếm số user phân biệt; 2 user xen kẽ vẫn báo sau ~2N event.
        Cũng vì vậy user thật "a" và user giả "a" xen nhau được tính là khác nhau. -->
-  <rule id="101003" level="10" frequency="5" timeframe="120" ignore="120">
+  <rule id="101003" level="10" frequency="5" timeframe="120">
     <if_matched_sid>101000</if_matched_sid>
     <same_source_ip />
     <different_user />
@@ -85,7 +85,7 @@
   </rule>
 
   <!-- AUTH-001: >= 5 lần sai (user thật hoặc không tồn tại) từ cùng IP trong 60s. -->
-  <rule id="101001" level="10" frequency="5" timeframe="60" ignore="60">
+  <rule id="101001" level="10" frequency="5" timeframe="60">
     <if_matched_sid>101000</if_matched_sid>
     <same_source_ip />
     <description>AUTH-001 Brute-force đăng nhập: &gt;= 5 lần thất bại từ $(srcip) trong 60 giây</description>

@@ -25,7 +25,7 @@
        rule level <= 10 đếm trên 87701 sẽ không báo được sau đó. Vì thế NET-001 nhánh block (103002) đặt level 11, và vì event thứ 18 (rule cuối 87702) không nằm trong lịch sử 87701 nên nó
        báo ở dòng thứ 21 thay vì 20 (khi quét nhanh hơn 18 block/45 s). NET-005 KHÔNG có nhánh block: level 10 của nó sẽ đánh dấu event và làm MẤT 87702 gốc.
     3. <dstport> dùng OS_Regex (không có nhóm "(a|b)", chỉ ^a$|^b$); <field name="dstport"> bị từ chối (trường tĩnh).
-    4. `ignore` chỉ có tác dụng với rule frequency, không giảm tần suất rule match thường (NET-003, NET-004); luật cũ có suppress 600/120 s, việc dập trùng để console làm.
+    4. KHÔNG dùng `ignore` (ràng buộc toàn cục 7, lint cấm): nó tắt cả rule N giây nên nguồn tấn công thứ hai bị bỏ sót. Rule frequency có thể báo lại ở event sau trong cửa sổ; cầu nối (Suppressor, WAZUH_ALERT_SUPPRESS) dập trùng theo rule + nguồn.
   Mọi rule frequency dưới đây: giới hạn spike S4 — Wazuh đếm "event trước có giá trị khác event hiện tại", không đếm số giá trị phân biệt; 2 giá trị xen kẽ vẫn báo sau ~2N-2 event.
   5. Event khớp một rule con (NET-003, rule cuối 103003) không còn là event của 103000 trong lịch sử đếm: NET-001/NET-005 không đếm chúng (giới hạn đã biết, đã có ca test).
   Rule frequency 103001/103002/103005 chỉ chạy trên MỘT nhánh (pass/khác block hoặc block), không cộng gộp hai nhánh: quét lẫn pass và block mà mỗi nhánh dưới ngưỡng thì không báo.
@@ -43,7 +43,7 @@
   </rule>
 
   <!-- NET-001 (pass/khác block): >= 20 cổng đích khác nhau từ một nguồn trong 60 s. Mức 7 (medium). -->
-  <rule id="103001" level="7" frequency="20" timeframe="60" ignore="60">
+  <rule id="103001" level="7" frequency="20" timeframe="60">
     <if_matched_sid>103000</if_matched_sid>
     <same_source_ip />
     <different_dstport />
@@ -56,7 +56,7 @@
   </rule>
 
   <!-- NET-001 (block): level 11 vì 87702 (level 10) đánh dấu event; xem mục 2 ở đầu file. Báo ở dòng thứ 21 khi 87702 đã báo trước. -->
-  <rule id="103002" level="11" frequency="20" timeframe="60" ignore="60">
+  <rule id="103002" level="11" frequency="20" timeframe="60">
     <if_matched_sid>87701</if_matched_sid>
     <same_source_ip />
     <different_dstport />
@@ -70,7 +70,7 @@
 
   <!-- NET-005: một nguồn nối cổng 445 tới >= 10 IP đích khác nhau trong 60 s (chỉ kết nối không bị chặn). Event có rule cuối 103003 (NET-003: nguồn public, cổng quản trị gồm 445)
        không vào lịch sử của 103000, nên NET-005/NET-001 không đếm chúng; quét SMB từ IP public đã được NET-003 báo từng event. NET-005 thực chất phủ quét từ nguồn nội bộ (di chuyển ngang). -->
-  <rule id="103005" level="10" frequency="10" timeframe="60" ignore="60">
+  <rule id="103005" level="10" frequency="10" timeframe="60">
     <if_matched_sid>103000</if_matched_sid>
     <dstport>^445$</dstport>
     <same_source_ip />

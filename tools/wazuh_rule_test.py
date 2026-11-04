@@ -12,6 +12,7 @@ Thoát mã 1 khi có ca sai, mã 2 khi bơm hàng đợi hỏng (InjectionError)
       log_format: apache      # syslog | json | apache | eventchannel | syscheck
       location: /var/log/apache2/access.log
       # (tùy chọn) một dòng có thể là map {event: '...', location: ..., log_format: ...} để ghi đè nguồn của riêng dòng đó (chỉ syslog/json/apache)
+      last: true              # (tùy chọn, syslog/json/apache) chỉ tính rule của DÒNG CUỐI: ca "nguồn thứ hai vẫn báo" (ràng buộc 7, không dùng ignore)
       delay: 16               # (tùy chọn, syslog/json/apache) giây nghỉ sau mỗi dòng, để thử timeframe thật
       events:                 # NHIỀU DÒNG = CÙNG MỘT session logtest (rule đếm ngưỡng frequency/timeframe)
         - '203.0.113.5 - - [31/Oct/2026:10:00:00 +0700] "GET /p.php?id=1%27 HTTP/1.1" 200 12 "-" "curl/8"'
@@ -77,7 +78,7 @@ def fired(case: dict, api) -> set[int]:
     """Id các rule đã báo cho MỘT ca (mọi dòng trong một session logtest). Chỉ gọi API, không ghi gì khác."""
     if case["log_format"] in INJECT:
         return inject([case])[0]
-    ids, token = set(), None
+    ids, token, seq = set(), None, []
     try:
         for n, ev in enumerate(case["events"]):
             if n and case.get("delay"):
@@ -89,13 +90,14 @@ def fired(case: dict, api) -> set[int]:
             token = res.get("token") or token
             if (rid := ((res.get("output") or {}).get("rule") or {}).get("id")):
                 ids.add(int(rid))
+            seq.append(int(rid) if rid else None)
     finally:
         if token:
             try:
                 _retry(lambda: api.request("DELETE", f"/logtest/sessions/{token}"))
             except WazuhError:
                 pass                # session tự hết hạn; không để lỗi dọn dẹp che kết quả
-    return ids
+    return {seq[-1]} - {None} if case.get("last") and seq else ids
 
 
 # ---------------------------------------------------------------- bơm hàng đợi (eventchannel, syscheck)

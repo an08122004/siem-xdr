@@ -159,3 +159,8 @@ def test_attack_layer_counts_only_rules_that_are_on():
     got = {t["techniqueID"]: t for t in layer["techniques"]}
     assert got["T1110"]["score"] == 1 and got["T1110.001"]["score"] == 1 and got["T1110"]["color"] == "#2e7d32"
     assert got["T1486"]["score"] == 0 and got["T1486"]["color"] == "#e2474b"     # chỉ có rule bóng -> chưa phủ
+
+
+def test_ignore_attribute_is_forbidden():
+    assert has(run(rule(attrs=' frequency="5" timeframe="60" ignore="60"')), "ràng buộc toàn cục 7")
+    assert not has(run(rule(attrs=' frequency="5" timeframe="60"')), "ignore")
