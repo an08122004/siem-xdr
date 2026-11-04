@@ -12,7 +12,7 @@
 #   2. `techniques`: kỹ thuật MITRE ATT&CK của rule, khớp cụ thể nhất thắng (T1098.004 thắng T1098; T1003 khớp T1003.001)
 #   3. `tags`: tag của rule (cảnh báo ruleset Wazuh mang tag là nhóm rule: syscheck, rootcheck, sca, virustotal, yara...)
 #   4. PB-00 (match "*")
-# Bước 2, 3 cho rule không biết trước mã: rule do AI viết (AI-xxx), cảnh báo ruleset Wazuh (WZH-<id>).
+# Bước 2-4 cho rule không biết trước mã: rule do AI viết (AI-xxx), cảnh báo ruleset Wazuh (WZH-<id>).
 #
 # Task: `title` (ngắn), `detail` (cách làm cụ thể: lệnh, event ID, chỗ xem trên console; hiện thu gọn dưới task),
 # `approval` (hành động cần người có thẩm quyền; API chỉ cho tài khoản đủ quyền đánh dấu, README mục 4):
@@ -111,6 +111,7 @@ playbooks:
   - id: PB-07
     name: Ransomware / mã hóa dữ liệu
     match: [WIN-010]
+    groups: [legacy_WIN-010]
     techniques: [T1486, T1490]
     references:
       - {title: "CERT Société Générale - IRM-17 Ransomware", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-17-Ransomware.pdf"}
@@ -242,6 +243,7 @@ playbooks:
   - id: PB-17
     name: Xóa dấu vết / vô hiệu hóa cơ chế phòng thủ
     match: [WIN-002]
+    groups: [legacy_WIN-002]
     techniques: [T1070, T1562]
     references:
       - {title: "CERT Société Générale - IRM-2 Windows Intrusion Detection", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-2-WindowsIntrusion.pdf"}
@@ -286,6 +288,7 @@ playbooks:
   - id: PB-09
     name: Tài khoản có thể đã bị chiếm / đăng nhập đặc quyền bất thường
     match: [AUTH-002, AUTH-004]
+    groups: [legacy_AUTH-002, legacy_AUTH-004]
     techniques: [T1078]
     references:
       - {title: "Microsoft - Password spray investigation (phần account compromise)", url: "https://learn.microsoft.com/en-us/security/operations/incident-response-playbook-password-spray"}
@@ -343,6 +346,7 @@ playbooks:
   - id: PB-01
     name: Tấn công dò mật khẩu / password spraying (chưa đăng nhập được)
     match: [AUTH-001, AUTH-003, WIN-001, WEB-007]
+    groups: [legacy_AUTH-001, legacy_AUTH-003, legacy_WIN-001, legacy_WEB-007, authentication_failures]
     techniques: [T1110]
     references:
       - {title: "Microsoft - Password spray investigation", url: "https://learn.microsoft.com/en-us/security/operations/incident-response-playbook-password-spray"}
@@ -437,6 +441,7 @@ playbooks:
   - id: PB-12
     name: Webshell / thực thi mã trên máy chủ web
     match: [WEB-008, LNX-002, WZH-100100]
+    groups: [legacy_WEB-008, legacy_LNX-002]
     techniques: [T1505.003]
     references:
       - {title: "CERT Société Générale - IRM-6 Website Defacement (phần điều tra web server)", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-6-Website-Defacement.pdf"}
@@ -488,6 +493,7 @@ playbooks:
   - id: PB-15
     name: Từ chối dịch vụ (DoS / DDoS)
     match: [WEB-009]
+    groups: [legacy_WEB-009]
     techniques: [T1498, T1499]
     references:
       - {title: "CERT Société Générale - IRM-4 DDoS", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-4-DDOS.pdf"}
@@ -546,6 +552,7 @@ playbooks:
   - id: PB-18
     name: Hành vi mạng độc hại / cảnh báo IDS
     match: [NET-004]
+    groups: [legacy_NET-004]
     tags: [suricata, ids]
     references:
       - {title: "CERT Société Générale - IRM-5 Malicious Network Behaviour", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-5-MaliciousNetworkBehaviour.pdf"}
@@ -589,6 +596,7 @@ playbooks:
   - id: PB-02
     name: Tấn công ứng dụng Web
     match: ["WEB-*"]
+    groups: ["legacy_WEB-*", sql_injection, web_scan]
     techniques: [T1190, T1595.002]
     references:
       - {title: "CERT Société Générale - IRM-6 Website Defacement (phần điều tra web server)", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-6-Website-Defacement.pdf"}
@@ -636,6 +644,7 @@ playbooks:
   - id: PB-14
     name: Đào tiền ảo trái phép (cryptojacking)
     match: [LNX-004]
+    groups: [legacy_LNX-004]
     techniques: [T1496]
     references:
       - {title: "CERT Société Générale - IRM-3 Unix/Linux Intrusion Detection", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-3-UnixLinuxIntrusionDetection.pdf"}
@@ -684,6 +693,7 @@ playbooks:
   - id: PB-13
     name: Cài cơ chế duy trì truy cập (persistence)
     match: [LNX-006, WIN-009, WIN-013]
+    groups: [legacy_LNX-006, legacy_WIN-009, legacy_WIN-013]
     techniques: [T1053, T1543, T1547, T1546, T1098.004]
     references:
       - {title: "CERT Société Générale - IRM-2 Windows Intrusion Detection", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-2-WindowsIntrusion.pdf"}
@@ -723,6 +733,7 @@ playbooks:
   - id: PB-10
     name: Đánh cắp thông tin đăng nhập (dump LSASS / Mimikatz / NTDS)
     match: [WIN-007]
+    groups: [legacy_WIN-007]
     techniques: [T1003, T1555, T1552, T1558]
     references:
       - {title: "CISA Eviction Strategies - CM0050 Reset KRBTGT Password Twice", url: "https://www.cisa.gov/eviction-strategies-tool/info-countermeasures/CM0050"}
@@ -779,6 +790,7 @@ playbooks:
   - id: PB-11
     name: Phishing / tài liệu độc hại
     match: [WIN-008]
+    groups: [legacy_WIN-008]
     techniques: [T1566, T1204]
     references:
       - {title: "CERT Société Générale - IRM-16 Phishing", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-16-Phishing.pdf"}
@@ -832,6 +844,7 @@ playbooks:
   - id: PB-03
     name: Thực thi mã độc / hành vi độc hại trên endpoint
     match: ["LNX-*", WIN-005, WIN-006, WIN-011, WIN-012]
+    groups: ["legacy_LNX-*", legacy_WIN-005, legacy_WIN-006, legacy_WIN-011, legacy_WIN-012]
     techniques: [T1059, T1105, T1218, T1027, T1082]
     tags: [virustotal, yara]
     references:
@@ -908,6 +921,7 @@ playbooks:
   - id: PB-04
     name: Thay đổi tài khoản và đặc quyền trái phép
     match: [WIN-003, WIN-004, AUTH-005, AUTH-006]
+    groups: [legacy_WIN-003, legacy_WIN-004, legacy_AUTH-005, legacy_AUTH-006]
     techniques: [T1136, T1098, T1548]
     references:
       - {title: "CERT Société Générale - IRM-12 Insider Abuse", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-12-InsiderAbuse.pdf"}
@@ -945,6 +959,7 @@ playbooks:
   - id: PB-16
     name: Di chuyển ngang / lây lan trong mạng nội bộ (lateral movement, worm)
     match: [NET-005]
+    groups: [legacy_NET-005]
     techniques: [T1021, T1570, T1210, T1550]
     references:
       - {title: "CERT Société Générale - IRM-1 Worm Infection", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-1-WormInfection.pdf"}
@@ -996,6 +1011,7 @@ playbooks:
   - id: PB-05
     name: Trinh sát / quét mạng
     match: [NET-001, NET-002, NET-003]
+    groups: [legacy_NET-001, legacy_NET-002, legacy_NET-003]
     techniques: [T1046, T1595, T1590]
     references:
       - {title: "CERT Société Générale - IRM-5 Malicious Network Behaviour", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-5-MaliciousNetworkBehaviour.pdf"}
@@ -1025,6 +1041,7 @@ playbooks:
   - id: PB-06
     name: Kết nối tới IOC đã biết (Threat Intel)
     match: [TI-001, TI-002]          # TI-002: IOC mới khớp log cũ (dò ngược, soar/retrohunt.py)
+    groups: [legacy_TI-001]
     techniques: [T1071, T1568, T1573]
     references:
       - {title: "CERT Société Générale - IRM-5 Malicious Network Behaviour", url: "https://github.com/certsocietegenerale/IRM/blob/main/EN/IRM-5-MaliciousNetworkBehaviour.pdf"}

@@ -375,6 +375,7 @@ Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info 
 - [ ] TI-001 domain/hash IOC chỉ có ở analyzer — người dùng quyết trước khi tắt rule YAML (Wazuh mới phủ IP: firewall, Suricata, sshd, web, Windows; tên file TI là `0845-ti.xml`)
 - [ ] bỏ nhóm `shadow` ở các file 0101–0106 và 0845 (trừ rule có `shadow_since` < 7 ngày, giữ đúng tiêu chí chạy bóng của SOC-OPERATIONS mục 4)
 - [ ] `RULE_ENGINE_ENABLED=false` (biến mới trong `settings.py`, analyzer không chạy engine của `detection/rules.py`) + test `test_engine_disabled_no_yaml_alerts`
+- [ ] Map SOAR theo nhóm/rule Wazuh sẽ tác động cả alert THẬT của rule gốc khi nhánh triển khai: chặn IP (`block_ip`, bỏ qua nguồn `syslog-*`, từ level 10) theo nhóm `authentication_failures` = rule gốc 5712, 5763, 5551, 2502, 60204 (và mọi rule gốc level >= 10 cùng nhóm); theo nhóm `sql_injection` / `web_scan` = 31151, 31152 (level 10); theo mã rõ ràng = 104095 (bản sao 99906, level 14, không bóng); nhóm `attack` KHÔNG ánh xạ (sẽ kéo 31115, 31153, 31154, 31168, 31169...). Danh sách rule gốc lấy theo trí nhớ, kiểm lại bằng `grep` trên image manager — duyệt trước khi bật
 - [ ] xóa mục playbook theo mã YAML
 - [ ] E2E 44/44, commit `chuyển phát hiện sang Wazuh: tắt engine YAML`
 

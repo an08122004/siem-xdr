@@ -3,9 +3,10 @@
 Cấu hình: config/case_playbooks.yml. Chọn playbook theo thứ tự:
   1. `match`: mã rule (wildcard), playbook đầu tiên trong file khớp; mẫu "*" của playbook mặc định để dành cho bước 4
   2. `techniques`: kỹ thuật MITRE ATT&CK của rule, khớp cụ thể nhất thắng (T1098.004 thắng T1098; T1003 khớp T1003.001)
-  3. `tags`: tag của rule (vd nhóm rule Wazuh: syscheck, rootcheck, virustotal...)
-  4. playbook có `match: ["*"]`
-Bước 2, 3 dành cho rule không biết trước mã: rule do AI viết (AI-xxx), cảnh báo ruleset Wazuh (WZH-<id>).
+  3. `groups`: nhóm rule Wazuh (wildcard; rule XML của dự án mang nhóm `legacy_<mã YAML cũ>`), playbook đầu tiên khớp
+  4. `tags`: tag của rule (vd nhóm rule Wazuh: syscheck, rootcheck, virustotal...)
+  5. playbook có `match: ["*"]`
+Bước 2-4 dành cho rule không biết trước mã: rule do AI viết (AI-xxx), cảnh báo ruleset Wazuh (WZH-<id>).
 
 Mỗi task có `title`, tùy chọn `approval` (ai được quyết định) và `detail` (cách làm cụ thể: lệnh, event ID, chỗ xem
 trên console). `common`: task chung cho MỌI playbook (ghi chứng cứ, timeline, báo cáo sau sự cố...), đặt đầu
@@ -59,8 +60,8 @@ class CasePlaybooks:
                         raise ValueError(f"{pb['id']}: mã kỹ thuật MITRE không hợp lệ '{t}'")
         log.info("đã nạp %d case playbook, %d nhóm task chung", len(self.playbooks), len(self.common))
 
-    def select(self, rule_id: str, techniques: Iterable[str] = (), tags: Iterable[str] = ()
-               ) -> tuple[dict[str, Any] | None, str]:
+    def select(self, rule_id: str, techniques: Iterable[str] = (), tags: Iterable[str] = (),
+               groups: Iterable[str] = ()) -> tuple[dict[str, Any] | None, str]:
         """(playbook, lý do chọn) theo thứ tự trong docstring của module."""
         for pb in self.playbooks:
             for p in pb.get("match", []):
@@ -75,6 +76,11 @@ class CasePlaybooks:
                     best = (pb, t)
         if best:
             return best[0], f"kỹ thuật MITRE {best[1]}"
+        groups = [str(g) for g in groups or []]
+        for pb in self.playbooks:
+            for p in pb.get("groups", []):
+                if hit := next((g for g in groups if fnmatch.fnmatch(g, str(p))), None):
+                    return pb, f"nhóm {hit}"
         tags = {str(t) for t in tags or []}
         for pb in self.playbooks:
             if hit := sorted(tags & {str(t) for t in pb.get("tags", [])}):
@@ -85,7 +91,7 @@ class CasePlaybooks:
         return None, ""
 
     def build(self, rule_id: str, severity: str, techniques: Iterable[str] = (), tags: Iterable[str] = (),
-              priority: str | None = None, created: str | None = None) -> dict[str, Any]:
+              groups: Iterable[str] = (), priority: str | None = None, created: str | None = None) -> dict[str, Any]:
         """Trả về các trường gắn vào case mới: playbook, tasks, priority, hạn SLA. `priority`: ưu tiên của alert (đã
         tính theo mức quan trọng tài sản, xem priority.py); không có thì tính theo severity."""
         level = priority if priority in prio.PRIORITIES else prio.policy().priority(severity)
@@ -98,7 +104,7 @@ class CasePlaybooks:
             "playbook": None,
             "tasks": [],
         }
-        pb, why = self.select(rule_id, techniques, tags)
+        pb, why = self.select(rule_id, techniques, tags, groups)
         if not pb:
             return fields
         fields["playbook"] = {"id": pb["id"], "name": pb["name"], "matched_by": why}
