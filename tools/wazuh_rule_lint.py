@@ -100,6 +100,8 @@ def check(files: dict[str, str], cases: list[dict]) -> list[str]:
                             err(rid, "thiếu ca test dương (rule: id)")
                         if rid not in neg:
                             err(rid, "thiếu ca test âm (none: [id])")
+            if el.get("ignore") is not None:
+                err(lab, "thuộc tính ignore bị cấm (ràng buộc toàn cục 7): nó tắt cả rule N giây nên nguồn thứ hai bị bỏ sót; dập trùng làm ở cầu nối (Suppressor)")
             if overwrite and not tuning:
                 err(lab, 'overwrite="yes" chỉ được dùng trong ' + TUNING_FILE)
             if not tuning:

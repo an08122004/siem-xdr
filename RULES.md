@@ -146,6 +146,10 @@ tay. Cầu nối chuyển MỌI cảnh báo level ≥ 7 trong `alerts.json` (m�
 Trùng rule YAML ↔ rule gốc (NET-001/002 ↔ 87702, AUTH-001 ↔ 5758/2502, NET-004 ↔ 1003) vì thế KHÔNG ra 2 case: phía rule gốc là
 bóng; T13 đếm các cặp này. Khóa chống trùng: `(rule.id, source.ip hoặc agent.id, agent.id)`.
 
+Rule XML riêng KHÔNG dùng thuộc tính `ignore` của Wazuh (nó tắt cả rule N giây nên nguồn thứ hai bị bỏ sót; `tools/wazuh_rule_lint.py` báo lỗi). Rule frequency
+có thể báo lại ở các event sau trong cùng cửa sổ; cầu nối dập trùng theo khóa trên (`WAZUH_ALERT_SUPPRESS`). Riêng alert bóng không bị dập trùng,
+nên số đếm của T13 có thể cao hơn trước với rule frequency bóng.
+
 Level Wazuh (0–15) đổi sang mức độ: 7–9 medium, 10–11 high, ≥ 12 critical. Kết quả đánh giá cấu hình SCA (CIS) không thành
 alert. Hai rule Wazuh riêng trong `wazuh/manager/rules/0100-platform.xml`: 100100 (file mới trong thư mục web, có thể là webshell) và
 100101 (nội dung web bị sửa), cùng level 10.

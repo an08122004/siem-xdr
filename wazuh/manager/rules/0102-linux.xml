@@ -115,7 +115,7 @@
   <!-- LNX-005: >= 4 lệnh trinh sát KHÁC TÊN trong 60s trên một máy. Mặc định analysisd đếm theo agent (global_frequency mới đếm chéo agent); same_location phân
        biệt thêm nguồn (production: luôn là siem-procs / audit.log nên không đổi gì; ca test dùng location riêng để lịch sử không trộn).
        Giới hạn (spike S4): Wazuh đếm "event trước có tên khác event hiện tại", không đếm số tên phân biệt; 2 tên xen kẽ vẫn báo sau ~2N-2 dòng (dòng 6). -->
-  <rule id="102005" level="7" frequency="4" timeframe="60" ignore="60">
+  <rule id="102005" level="7" frequency="4" timeframe="60">
     <if_matched_sid>102090</if_matched_sid>
     <same_location />
     <different_field>name</different_field>

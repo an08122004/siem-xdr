@@ -1,6 +1,6 @@
 # Ca test cho wazuh/manager/rules/0965-windows.xml (event eventchannel của agent Windows, bơm hàng đợi analysisd). Nguồn: tests/legacy/windows.yml + ca biên.
 # Bơm KHÔNG giữ thứ tự dòng: ca đếm (WIN-001) chỉ khẳng định rule báo ít nhất một lần; ca âm đếm dùng IP riêng cho từng ca (lịch sử đếm giữ qua các lần chạy -> khởi động lại manager thử trước mỗi lượt cả bộ).
-# CHẠY LẠI CỤC BỘ: lịch sử đếm của analysisd (4625 theo IP, `ignore=60` của 105001) còn giữ trong manager thử, nên khởi động lại manager thử trước mỗi lượt chạy cả bộ.
+# CHẠY LẠI CỤC BỘ: lịch sử đếm của analysisd (4625 theo IP) còn giữ trong manager thử, nên khởi động lại manager thử trước mỗi lượt chạy cả bộ.
 # CI (job wazuh-rules) dựng container manager mới mỗi lần chạy (`docker run`, không giữ volume) nên không bị ảnh hưởng; bơm eventchannel dùng container tạm riêng.
 # Ca đếm dùng 160 dòng vì bơm hàng đợi chia event cho 16 luồng khớp rule, mỗi luồng giữ danh sách đếm riêng.
 # R51: ca cuối là ca âm GIẢ MẠO (mỗi rule một event giả khớp đúng trường của nó, riêng 105001 có 160 event 4625): cùng các event dưới dạng JSON gửi qua syslog (location = IP thiết bị) không được ra rule nào của file này.

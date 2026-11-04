@@ -134,7 +134,7 @@
   </rule>
 
   <!-- LNX-005: >= 4 lệnh trinh sát KHÁC TÊN trong 60s trên một máy (cùng cách đếm và giới hạn S4 như 102005: ~2N-2 dòng khi chỉ 2 tên xen kẽ). -->
-  <rule id="102505" level="7" frequency="4" timeframe="60" ignore="60">
+  <rule id="102505" level="7" frequency="4" timeframe="60">
     <if_matched_sid>102590</if_matched_sid>
     <same_location />
     <different_field>audit.command</different_field>

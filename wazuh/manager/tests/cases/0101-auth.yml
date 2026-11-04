@@ -619,3 +619,36 @@
     - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
     - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
     - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80"}'
+
+# Ràng buộc 7 (không dùng `ignore`): NGUỒN THỨ HAI trong cùng cửa sổ vẫn phải báo. `last: true` = chỉ tính rule của dòng cuối.
+- rule: 101001   # AUTH-001: hai IP liên tiếp mỗi IP 5 lần sai; IP thứ hai vẫn ra alert ở dòng cuối
+  last: true
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.100 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.100 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.100 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.100 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.100 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.101 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.101 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.101 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.101 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.101 port 4444 ssh2'
+
+- rule: 101003   # AUTH-003: hai IP liên tiếp mỗi IP 5 tài khoản khác nhau; IP thứ hai vẫn ra alert ở dòng cuối
+  last: true
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for u0 from 203.0.113.102 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for u1 from 203.0.113.102 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for u2 from 203.0.113.102 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for u3 from 203.0.113.102 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for u4 from 203.0.113.102 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for v0 from 203.0.113.103 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for v1 from 203.0.113.103 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for v2 from 203.0.113.103 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for v3 from 203.0.113.103 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for v4 from 203.0.113.103 port 4444 ssh2'
