@@ -82,10 +82,13 @@ def test_quarantine_restores_files_when_error_is_outside_rules_dynamic(tmp_path,
     d.mkdir(parents=True)
     (d / "bad.xml").write_text("x")
     (d / "ai.xml").write_text("y")
+    (ossec / "etc" / "lists").mkdir()       # bước 8b ghi danh sách IOC giữ chỗ vào đây (image Wazuh có sẵn thư mục)
     step = (step.replace("/var/ossec", ossec.as_posix()).replace("/tmp/analysisd-test.log", (tmp_path / "t.log").as_posix())
-            .replace('install -d -o 10001 -g wazuh -m 0755 "$D"', 'mkdir -p "$D"'))
+            .replace('install -d -o 10001 -g wazuh -m 0755 "$D"', 'mkdir -p "$D"')
+            .replace("chown wazuh:wazuh ", ": "))   # máy CI không có user wazuh
     r = subprocess.run(["bash", "-c", "set -euo pipefail\n" + step], capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert r.returncode == 0, r.stdout + r.stderr
+    assert (ossec / "etc" / "lists" / "siem-misp-ip").read_text() == "240.0.0.0:empty\n"   # bước 8b
     q = list((ossec / "etc" / "rules-dynamic.quarantine").glob("*/*"))
     if always_fails:
         assert sorted(p.name for p in d.iterdir()) == ["ai.xml", "bad.xml"] and not q and "đã chuyển về" in r.stdout
