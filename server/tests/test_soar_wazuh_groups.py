@@ -163,3 +163,17 @@ def test_every_configured_group_exists_somewhere():
             used |= set((p.get("when") or p).get("groups") or [])
     dead = {g for g in used if not any(re.fullmatch(g.replace("*", ".*"), k) for k in known)}
     assert used and not dead, dead
+
+
+def test_destructive_playbooks_match_explicit_rule_ids_only() -> None:
+    """R60: hành động phá hủy chỉ theo id rule cụ thể — không theo nhóm, không mẫu `*` / `WZH-*` (nhóm Wazuh như
+    authentication_failures kéo theo hàng chục rule gốc có srcip là proxy / relay / NAT). Mẫu mã YAML của dự án
+    (vd `WEB-*`) vẫn được: chỉ khớp rule viết tay, bỏ cùng rule YAML ở Task 18."""
+    pbs = yaml.safe_load((ROOT / "config" / "playbooks.yml").read_text(encoding="utf-8"))["playbooks"]
+    destructive = [p for p in pbs if {s["action"] for s in p["steps"]} & {"block_ip", "kill_process", "isolate_host"}]
+    assert destructive
+    for p in destructive:
+        when = p.get("when") or {}
+        assert not when.get("groups"), p["name"]
+        assert when.get("rule_ids") and not any(r == "*" or (r.startswith("WZH-") and "*" in r)
+                                                for r in when["rule_ids"]), p["name"]
