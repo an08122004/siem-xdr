@@ -9,21 +9,21 @@
   Suricata (NET-004) CHỈ tới rule Wazuh qua agent OPNsense đọc /var/log/suricata/eve.json (log_format json, location `(fw01) any->/var/log/suricata/eve.json`);
   Suricata qua syslog 514 không có decoder Wazuh (S6) nên không chạy NET-004 (có ca âm), chỉ analyzer YAML đọc được đường đó.
   Decoder gốc `pf` (0455-pfsense_decoders.xml) giải filterlog IPv4 thành srcip, dstip, srcport, dstport, protocol, action (pass/block/reject), id, length. Rule gốc 87700 (level 0) bắt
-  `filterlog`, 87701 (level 5, no_log) là action=block, 87702 (level 10, 18 block/45 s cùng nguồn) cộng dồn. filterlog IPv6 có cột khác nên decoder gốc ra trường sai: chưa phủ
+  `filterlog`, 87701 (level 5, no_log) là action=block, 87702 (T12: level 7, 50 block/60 s cùng nguồn; gốc 18/45 s level 10) cộng dồn. filterlog IPv6 có cột khác nên decoder gốc ra trường sai: chưa phủ
   (parse_firewall cũ cũng chỉ nhận IPv4). Suricata: decoder `json` + rule gốc 86600/86601 (level 3); eve.json KHÔNG đặt srcip, chỉ có data.src_ip, alert.severity (số), alert.signature_id.
   Mọi bộ đếm đều có <same_source_ip /> vì agent 000 dùng chung cho mọi thiết bị syslog, console và manager.
 
   Rule gốc bị treo con: 87700 (103000, level 2) và 86601 (103004). 86601 có anh em 99915/99916 (0999-malicious-ioc-rules.xml, level 9, IP nguồn/đích trong danh sách IOC): 103004 loại các IP đó bằng
   lookup phủ định cùng danh sách (R44) để rule IOC gốc (nhóm/ngữ cảnh threat-intel cho TI-001) là rule cuối; thử đổi thứ tự file không đổi kết quả nên không dùng cách đó.
 
-  NET-002 (>= 50 chặn / 60 s, cùng nguồn) KHÔNG có rule ở đây: chỉ khác 87702 ở ngưỡng (18/45 s), nên chuyển sang 0190-tuning (Task 12), cùng việc sửa 87702.
+  NET-002 (>= 50 chặn / 60 s, cùng nguồn) KHÔNG có rule ở đây: chỉ khác 87702 ở ngưỡng; Task 12 đã đè 87702 thành 50 block/60 s, level 7 trong 0999-tuning.xml.
 
   Phát hiện về analysisd 4.14.8 (đã thử trên wzhdev):
     1. Event có rule cuối cùng level 0 (87700) KHÔNG vào lịch sử đếm, nên không đếm được bằng if_matched_sid 87700. Rule 103000 (level 2, dưới log_alert_level 3 nên không ra alert)
        là bộ đếm cho mọi dòng filterlog không phải block. Nó chỉ đổi rule cuối của event từ 87700 (level 0) sang 103000; không rule gốc nào dùng 87700 làm if_matched, nên không mất rule gốc.
-    2. Rule frequency bỏ qua event đã được rule frequency khác báo với level >= level của nó ("lf->matched"). 87702 (level 10) báo khi thấy 18 block, đánh dấu các event trước;
-       rule level <= 10 đếm trên 87701 sẽ không báo được sau đó. Vì thế NET-001 nhánh block (103002) đặt level 11, và vì event thứ 18 (rule cuối 87702) không nằm trong lịch sử 87701 nên nó
-       báo ở dòng thứ 21 thay vì 20 (khi quét nhanh hơn 18 block/45 s). NET-005 KHÔNG có nhánh block: level 10 của nó sẽ đánh dấu event và làm MẤT 87702 gốc.
+    2. Rule frequency bỏ qua event đã được rule frequency khác báo với level >= level của nó ("lf->matched"). 87702 (T12: level 7, 50 block/60 s; gốc level 10, 18 block/45 s) đánh dấu các event trước khi báo;
+       rule level <= 7 đếm trên 87701 sẽ không báo được sau đó (trước T12: <= 10, nên NET-001 nhánh block (103002) đặt level 11, giữ nguyên). 87702 chỉ báo từ block thứ 50 nên 103002 báo ở dòng thứ 20.
+       Trước T12 (87702 báo ở dòng 18) thì 103002 báo ở dòng 21. NET-005 KHÔNG có nhánh block: level 10 của nó sẽ đánh dấu event và làm MẤT 87702.
     3. <dstport> dùng OS_Regex (không có nhóm "(a|b)", chỉ ^a$|^b$); <field name="dstport"> bị từ chối (trường tĩnh).
     4. KHÔNG dùng `ignore` (ràng buộc toàn cục 7, lint cấm): nó tắt cả rule N giây nên nguồn tấn công thứ hai bị bỏ sót. Rule frequency có thể báo lại ở event sau trong cửa sổ; cầu nối (Suppressor, WAZUH_ALERT_SUPPRESS) dập trùng theo rule + nguồn.
   Mọi rule frequency dưới đây: giới hạn spike S4 — Wazuh đếm "event trước có giá trị khác event hiện tại", không đếm số giá trị phân biệt; 2 giá trị xen kẽ vẫn báo sau ~2N-2 event.
@@ -55,7 +55,7 @@
     <group>siem,network,shadow,legacy_NET-001,</group>
   </rule>
 
-  <!-- NET-001 (block): level 11 vì 87702 (level 10) đánh dấu event; xem mục 2 ở đầu file. Báo ở dòng thứ 21 khi 87702 đã báo trước. -->
+  <!-- NET-001 (block): level 11 (giữ từ trước T12 khi 87702 còn level 10); xem mục 2 ở đầu file. Báo ở dòng thứ 20. -->
   <rule id="103002" level="11" frequency="20" timeframe="60">
     <if_matched_sid>87701</if_matched_sid>
     <same_source_ip />

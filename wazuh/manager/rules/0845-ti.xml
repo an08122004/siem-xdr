@@ -131,7 +131,7 @@
 
   <!-- TI-001 web access log: con của 31101 (lỗi 4xx) và 31108 (request 2xx/3xx đơn giản, level 0). Thử: con trực tiếp của 31100 KHÔNG bao giờ được xét
        (31101 / 31108 khớp trước), nên phải treo vào hai lá này. Các rule tấn công khác con của 31100 (31103 SQLi, 31105 XSS, 31115 URL quá dài level 13, 31168 / 31169 level 15...)
-       KHÔNG bị TI-001 thay thế. IP có trong CẢ danh sách gốc malicious-ip: TI-001 nhường (cây gốc 31103 -> 99905 -> 99906, level 14, alert thật, R57). 31151... (if_matched_sid 31101, level 10) không đếm event của IP MISP. Chỉ nhận log của agent (location `(agent) any->path`):
+       KHÔNG bị TI-001 thay thế. IP có trong CẢ danh sách gốc malicious-ip: TI-001 nhường (cây gốc 31103 -> 99905 -> 99906, level 14, alert thật, R57). 31151... (if_matched_sid 31101, level 7 sau T12, 30 lần/60 s) không đếm event của IP MISP. Chỉ nhận log của agent (location `(agent) any->path`):
        decoder web chạy theo nội dung nên thiết bị syslog (agent 000) giả được dòng access log. -->
   <rule id="107009" level="10">
     <if_sid>31101, 31108</if_sid>

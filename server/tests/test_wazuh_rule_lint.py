@@ -164,3 +164,13 @@ def test_attack_layer_counts_only_rules_that_are_on():
 def test_ignore_attribute_is_forbidden():
     assert has(run(rule(attrs=' frequency="5" timeframe="60" ignore="60"')), "ràng buộc toàn cục 7")
     assert not has(run(rule(attrs=' frequency="5" timeframe="60"')), "ignore")
+
+
+def test_tuning_level12_needs_shadow_or_real_before():
+    """R58: overwrite có hiệu lực ngay; level >= 12 phải chạy bóng (shadow) hoặc ghi real_before=yes nếu rule gốc vốn đã là alert thật."""
+    def tune(grp, info=""):
+        return rule(rid=5712, level=12, attrs=' overwrite="yes"', grp=grp).replace("</group></rule>", "</group>" + info + "</rule>")
+    real = '<info type="text">real_before=yes</info>'
+    assert has(lint.check({lint.TUNING_FILE: tune("x,")}, []), "R58")
+    assert not has(lint.check({lint.TUNING_FILE: tune("shadow,")}, []), "R58")
+    assert not has(lint.check({lint.TUNING_FILE: tune("x,", real)}, []), "R58")

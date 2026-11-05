@@ -65,7 +65,7 @@ NET-002:
   - 87702
   - 87701
   decision: approx
-  note: '1/1 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 87701 (level 5: pfSense firewall drop event.) [level 5 ''pfSense firewall drop event.'': MỘT gói bị chặn, không có ngưỡng]; ca âm báo level>=7: [87702]; không có rule dự án: chỉ khác 87702 ở ngưỡng (18/45 s so với 50/60 s), Task 12 chỉnh ngưỡng bằng 0190-tuning'
+  note: '1/1 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 87701 (level 5: pfSense firewall drop event.) [level 5 ''pfSense firewall drop event.'': MỘT gói bị chặn, không có ngưỡng]; ca âm báo level>=7: [87702]; không có rule dự án: chỉ khác 87702 ở ngưỡng (18/45 s so với 50/60 s), Task 12 ĐÃ chỉnh: 0999-tuning.xml đè 87702 thành 50 chặn/60 s, level 7 (medium), bỏ ignore, nhóm legacy_NET-002'
 NET-003:
   wazuh: []
   decision: convert
@@ -113,7 +113,7 @@ WEB-006:
   - 31151
   - 31101
   decision: approx
-  note: '1/1 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 31101 (level 5: Web server 400 error code.) [level 5 ''Web server 400 error code.'': mọi phản hồi 4xx, không nhìn URL hay payload]; ca âm báo level>=7: [31151]; KHÔNG có rule ở 0271-web.xml: chỉ khác 31151 (14 phản hồi 4xx/90 s, level 10) ở ngưỡng (30/60 s); để Task 12 (0190-tuning)'
+  note: '1/1 ca dương có rule gốc cụ thể level>=7; rule chung, không tính phủ: 31101 (level 5: Web server 400 error code.) [level 5 ''Web server 400 error code.'': mọi phản hồi 4xx, không nhìn URL hay payload]; ca âm báo level>=7: [31151]; KHÔNG có rule ở 0271-web.xml: chỉ khác 31151 (14 phản hồi 4xx/90 s, level 10) ở ngưỡng (30/60 s); Task 12 ĐÃ chỉnh: 0999-tuning.xml đè 31151 thành 30 phản hồi 4xx/60 s, level 7 (medium), nhóm legacy_WEB-006 (đếm mọi 4xx, rộng hơn YAML chỉ 404)'
 WEB-007:
   wazuh:
   - 31509
@@ -136,12 +136,12 @@ WIN-002:
   wazuh:
   - 63103
   decision: approx
-  note: '0/1 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''63103 (level 5: The audit log was cleared)'']; rule dự án 105002 (0965-windows.xml, con của 63104): nhánh System/104 (log Windows khác bị xóa) thiếu ở rule gốc, level 12, chạy bóng; riêng 1102 chỉ khác 63103 ở mức độ (level 5 so với critical), Task 12 nâng level'
+  note: '0/1 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''63103 (level 5: The audit log was cleared)'']; rule dự án 105002 (0965-windows.xml, con của 63104): nhánh System/104 (log Windows khác bị xóa) thiếu ở rule gốc, level 12, chạy bóng; riêng 1102 chỉ khác 63103 ở mức độ (level 5 so với critical): Task 12 ĐÃ nâng 63103 lên level 12 trong 0999-tuning.xml, nhóm shadow + legacy_WIN-002 (alert thật mới nên chạy bóng, R58)'
 WIN-003:
   wazuh:
   - 60109
   decision: approx
-  note: '1/1 ca dương có rule gốc cụ thể level>=7; ca âm báo level>=7: [60109]; không có rule dự án: 60109 level 8 đã đủ, Task 12 chỉ cần loại 4722 (bật lại tài khoản)'
+  note: '1/1 ca dương có rule gốc cụ thể level>=7; ca âm báo level>=7: [60109]; không có rule dự án: 60109 level 8 đã đủ; Task 12 ĐÃ loại 4722 (bật lại tài khoản) bằng 0999-tuning.xml, nhóm legacy_WIN-003'
 WIN-004:
   wazuh:
   - 60141
@@ -149,7 +149,7 @@ WIN-004:
   - 60159
   - 60179
   decision: approx
-  note: '3/4 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: administrators, domain admins, remote desktop users; thiếu: enterprise admins; level<7 (ứng viên nâng level): [''60141 (level 5: Security Enabled Global Group Member Added $(win.eventdata.memberSid))'']; rule dự án 105004 (0965-windows.xml, con của 60141 và 60144): nhánh Enterprise Admins theo SID -519 cho 4728 / 4732, chạy bóng; 4756 (universal) đã có rule gốc 60167 level 12; mức độ của 60141 (level 5) là việc của Task 12'
+  note: '3/4 ca dương có rule gốc cụ thể level>=7; chỉ chứng minh: administrators, domain admins, remote desktop users; thiếu: enterprise admins; level<7 (ứng viên nâng level): [''60141 (level 5: Security Enabled Global Group Member Added $(win.eventdata.memberSid))'']; rule dự án 105004 (0965-windows.xml, con của 60141 và 60144): nhánh Enterprise Admins theo SID -519 cho 4728 / 4732, chạy bóng; 4756 (universal) đã có rule gốc 60167 level 12; Task 12 quyết định KHÔNG nâng 60141 (level 5): đó là cha chung của mọi nhóm global; các nhóm quản trị đã có con level 10-12 (60154/60159/60167/60179) và 105004'
 WIN-005:
   wazuh: []
   decision: convert
@@ -158,7 +158,7 @@ WIN-006:
   wazuh:
   - 91837
   decision: approx
-  note: '0/1 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''91837 (level 4: Powershell executed "Get-Content -Stream or Invoke-Expresion". Possible string execution as code)'']; rule dự án 105006 (0965-windows.xml, con của 61603): nhánh dòng lệnh Sysmon 1 (downloadstring(, iwr | iex, invoke-webrequest | iex, -nop -w hidden) thiếu ở rule gốc, level 12, chạy bóng, loại -EncodedCommand (thuộc 105005); nhánh script block 4104 chỉ khác 91837 ở mức độ (level 4), Task 12 nâng level'
+  note: '0/1 ca dương có rule gốc cụ thể level>=7; level<7 (ứng viên nâng level): [''91837 (level 4: Powershell executed "Get-Content -Stream or Invoke-Expresion". Possible string execution as code)'']; rule dự án 105006 (0965-windows.xml, con của 61603): nhánh dòng lệnh Sysmon 1 (downloadstring(, iwr | iex, invoke-webrequest | iex, -nop -w hidden) thiếu ở rule gốc, level 12, chạy bóng, loại -EncodedCommand (thuộc 105005); nhánh script block 4104: Task 12 ĐÃ đè 91837 thành level 12 với regex theo YAML cũ (regex gốc khớp IEX trần và gõ sai Invoke-Expresion), nhóm shadow + legacy_WIN-006 (R58)'
 WIN-007:
   wazuh: []
   decision: convert

@@ -390,7 +390,7 @@ auditd (key `audit-wazuh-c`). Không dùng `wazuh-logtest`: bản 4.14 không ch
   không có rule nào cho định dạng này). Đây là chỗ thiếu lớn nhất của cả hai bộ rule.
 - **Lỗi trong ruleset gốc phát hiện được khi đo:** 92041 (level 10, "giá trị registry dạng Base64") có regex mà mọi nhóm sau
   `/d` đều tùy chọn, nên khớp mọi `reg add ... /d`. 92021 ("PowerShell xóa file") thiếu `\b` đầu nhánh `ri|rd|rm...`, nên khớp
-  cả `Invoke-WebRequest -Uri`.
+  cả `Invoke-WebRequest -Uri`. Cả hai đã sửa bằng overwrite ở 0999-tuning.xml (Task 12).
 - **Rule khớp theo cấu trúc, không tính là phát hiện:** 80792 (mọi lệnh auditd), 92032 (mọi tiến trình con của `cmd.exe /c`),
   92036 (`net.exe` con của `cmd /c`), 92041 (lỗi regex ở trên).
 - **Giới hạn:** event Windows dựng lại không có hash, Description / Company, cũng không có event registry / file / mạng /
