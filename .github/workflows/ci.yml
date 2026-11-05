@@ -87,6 +87,10 @@ jobs:
           done
           docker logs wazuh-rules-ci | tail -n 80
           exit 1
+      - name: Mọi alert thật của rule gốc dưới rule cha bị rule dự án móc đều có ca ghim
+        run: |
+          docker cp wazuh-rules-ci:/var/ossec/ruleset/rules stock-rules
+          python tools/wazuh_stock_reach.py stock-rules
       - name: Chạy ca test log gốc qua Wazuh
         run: python tools/wazuh_rule_test.py --url https://localhost:55000 --insecure wazuh/manager/tests/cases
       - name: Log manager khi lỗi
