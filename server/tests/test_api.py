@@ -1220,3 +1220,15 @@ def test_wazuh_exceptions_api(env, monkeypatch, tmp_path):
     ops = [(x[3]["op"], x[1]) for x in env.audit if x[0] == "activity" and x[3]["op"].startswith("exception_")]
     assert ("exception_added", "success") in ops and ("exception_approved", "failure") in ops
     assert ("exception_approved", "success") in ops and ("exception_removed", "success") in ops
+
+
+def test_refresh_catalog_passes_a_wazuh_api(monkeypatch):
+    """Thư viện rule phải nhận một WazuhApi thật (lỗi 05/11: tên WazuhApi chưa import -> NameError bị nuốt, thư viện không đồng bộ)."""
+    from siem import wazuh_rules
+    from siem.manager import api
+    seen = {}
+    monkeypatch.setattr(api.rules_catalog, "sync", lambda es, rules_dir, api=None: seen.setdefault("api", api))
+    monkeypatch.setattr(api, "es", lambda: object())
+    monkeypatch.setattr(wazuh_rules.WazuhApi, "from_settings", classmethod(lambda cls: "wazuh-api"))
+    api.refresh_catalog()
+    assert seen["api"] == "wazuh-api"
