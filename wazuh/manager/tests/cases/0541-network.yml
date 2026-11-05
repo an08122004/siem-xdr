@@ -1,0 +1,995 @@
+# Ca test cho wazuh/manager/rules/0541-network.xml (log gốc qua Wazuh thật). Nguồn: tests/legacy/network.yml + ca biên.
+# HAI ĐƯỜNG VÀO của filterlog (R43): (1) agent OPNsense: syslog-ng ghi /var/ossec/logs/opnsense_syslog.log, agent đọc log_format syslog, rule thấy
+# location `(fw01) any->/var/ossec/logs/opnsense_syslog.log` (S7); (2) thiết bị syslog gửi thẳng cổng 514 của manager (RFC 3164, agent 000), location = IP người gửi
+# (10.10.40.254). Phần lớn ca chạy đường (1); đường (2) có ca riêng ở cuối file cho từng rule. Suricata chỉ tới rule qua agent (eve.json, log_format json);
+# Suricata qua syslog không có decoder (S6) nên có ca âm ghi lại điều đó.
+# CA ĐẾM (NET-001, NET-005): lịch sử đếm của analysisd còn giữ qua các lần chạy và logtest luôn là agent 000, nên mỗi ca đếm dùng
+# một IP nguồn riêng (rule khai same_source_ip); phải khởi động lại manager thử (wzhdev) giữa hai lần chạy cả bộ.
+# NET-002 (>= 50 chặn / 60 s) không có rule ở đây: chỉ khác 87702 ở ngưỡng, đã chuyển sang 0999-tuning.xml (Task 12; ca trong 0999-tuning.yml).
+
+- rule: 103000   # NET-000: dòng pass đi vào bộ đếm (rule cuối 103000)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.60,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+
+- none: [103000]   # NET-000: dòng block vẫn là 87701 gốc, không vào 103000
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.19,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+
+- rule: 103001   # NET-001: 20 cổng đích khác nhau (không có cổng quản trị), được cho phép
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8001,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8002,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8003,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8004,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8005,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8006,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8007,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8008,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8009,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8010,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8011,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8012,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8013,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8014,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8015,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8016,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8017,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8018,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8019,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.20,10.0.0.5,50000,8020,0,S,123456,,64240,,mss'
+
+- none: [103001]   # NET-001: 20 cổng có 7 cổng quản trị từ IP public: event của NET-003 (rule cuối 103003) không vào lịch sử 103000 nên NET-001 chưa báo (giới hạn đã biết, NET-003 đã báo từng event)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,21,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,22,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,25,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,53,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,110,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,135,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,139,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,143,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,993,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,995,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,1433,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,3306,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,3389,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,5432,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,5900,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.26,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+
+- rule: 103001   # NET-001: 20 cổng từ nguồn nội bộ 10.0.0.77 (NET-001 không phân biệt nội/ngoại)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,21,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,22,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,25,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,53,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,110,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,135,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,139,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,143,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,993,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,995,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,1433,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,3306,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,3389,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,5432,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,5900,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.77,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+
+- none: [103001]   # NET-001: 19 cổng (dưới ngưỡng)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,21,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,22,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,25,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,53,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,110,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,135,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,139,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,143,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,993,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,995,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,1433,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,3306,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,3389,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,5432,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.21,10.0.0.5,50000,5900,0,S,123456,,64240,,mss'
+
+- none: [103001]   # NET-001: bản chất, 40 gói pass tới MỘT cổng
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.27,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+
+- none: [103001]   # NET-001: 2 cổng xen kẽ, 36 dòng pass (< 2N-2 = 38, giới hạn S4)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.23,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+
+- none: [103001]   # NET-001: 20 cổng nhưng chia xen kẽ cho 2 nguồn (mỗi nguồn 10 cổng)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.24,10.0.0.5,50000,21,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.25,10.0.0.5,50000,22,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.24,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.25,10.0.0.5,50000,25,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.24,10.0.0.5,50000,53,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.25,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.24,10.0.0.5,50000,110,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.25,10.0.0.5,50000,135,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.24,10.0.0.5,50000,139,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.25,10.0.0.5,50000,143,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.24,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.25,10.0.0.5,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.24,10.0.0.5,50000,993,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.25,10.0.0.5,50000,995,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.24,10.0.0.5,50000,1433,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.25,10.0.0.5,50000,3306,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.24,10.0.0.5,50000,3389,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.25,10.0.0.5,50000,5432,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.24,10.0.0.5,50000,5900,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.25,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+
+- rule: 103002   # NET-001 (block): 22 cổng đích khác nhau bị chặn; 103002 báo ở dòng 20 (87702 chỉ báo từ dòng 50 sau Task 12; level 11)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1001,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1002,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1003,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1004,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1005,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1006,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1007,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1008,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1009,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1010,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1011,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1012,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1013,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1014,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1015,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1016,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1017,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1018,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1019,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1020,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1021,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1022,0,S,123456,,64240,,mss'
+
+- rule: 103002   # NET-001 (block): 20 cổng bị chặn: 87702 (50 chặn/60 s sau Task 12) chưa đánh dấu event nên 103002 báo ngay ở dòng 20
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,21,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,22,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,25,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,53,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,110,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,135,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,139,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,143,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,993,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,995,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,1433,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,3306,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,3389,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,5432,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,5900,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.28,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
+
+- none: [103002]   # NET-001 (block): 19 cổng bị chặn (dưới ngưỡng)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,21,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,22,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,25,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,53,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,110,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,135,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,139,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,143,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,993,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,995,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,1433,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,3306,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,3389,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,5432,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.29,10.0.0.5,50000,5900,0,S,123456,,64240,,mss'
+
+- none: [103002]   # NET-001 (block): bản chất, 40 gói chặn tới MỘT cổng (87702 báo, NET-001 không)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.22,10.0.0.5,50000,23,0,S,123456,,64240,,mss'
+
+- none: [103002]   # NET-001 (block): 2 cổng xen kẽ, 36 dòng chặn (< 2N-2)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.30,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+
+- rule: 103003   # NET-003: IP public vào RDP được cho phép (ca legacy)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.12,10.0.0.5,50000,3389,0,S,123456,,64240,,mss'
+
+- rule: 103003   # NET-003: SSH từ IP public, đường syslog manager (location = IP thiết bị gửi)
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.9,10.0.0.5,50000,22,0,S,123456,,64240,,mss'
+
+- rule: 103003   # NET-003: 172.32.0.1 nằm NGOÀI 172.16/12 nên là public
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,172.32.0.1,10.0.0.5,50000,5432,0,S,123456,,64240,,mss'
+
+- rule: 103003   # NET-003: 172.15.255.1 nằm ngoài 172.16/12 nên là public
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,172.15.255.1,10.0.0.5,50000,6379,0,S,123456,,64240,,mss'
+
+- none: [103003]   # NET-003: máy nội bộ 10.0.0.30 vào RDP (ca legacy)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.30,10.0.0.5,50000,3389,0,S,123456,,64240,,mss'
+
+- none: [103003]   # NET-003: nguồn nội bộ/loopback 172.16.0.9
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,172.16.0.9,10.0.0.5,50000,445,0,S,123456,,64240,,mss'
+
+- none: [103003]   # NET-003: nguồn nội bộ/loopback 172.31.255.254
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,172.31.255.254,10.0.0.5,50000,445,0,S,123456,,64240,,mss'
+
+- none: [103003]   # NET-003: nguồn nội bộ/loopback 192.168.1.5
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,192.168.1.5,10.0.0.5,50000,445,0,S,123456,,64240,,mss'
+
+- none: [103003]   # NET-003: nguồn nội bộ/loopback 100.64.3.3
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,100.64.3.3,10.0.0.5,50000,445,0,S,123456,,64240,,mss'
+
+- none: [103003]   # NET-003: nguồn nội bộ/loopback 169.254.1.1
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,169.254.1.1,10.0.0.5,50000,445,0,S,123456,,64240,,mss'
+
+- none: [103003]   # NET-003: nguồn nội bộ/loopback 127.0.0.1
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,127.0.0.1,10.0.0.5,50000,445,0,S,123456,,64240,,mss'
+
+- none: [103003]   # NET-003: IP public nhưng firewall CHẶN
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.12,10.0.0.5,50000,3389,0,S,123456,,64240,,mss'
+
+- none: [103003]   # NET-003: IP public vào cổng 443 (không phải cổng quản trị)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.12,10.0.0.5,50000,443,0,S,123456,,64240,,mss'
+
+- rule: 103004   # NET-004: chữ ký mức 1 (ca legacy)
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"203.0.113.13","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
+
+- rule: 103004   # NET-004: chữ ký mức 2 (biên)
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"203.0.113.13","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010936,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":2}}'
+
+- none: [103004]   # NET-004: chữ ký mức 3 thông tin (ca legacy)
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"203.0.113.13","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2210054,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":3}}'
+
+- none: [103004]   # NET-004: event_type khác alert có alert.severity 1 (flow)
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"flow","src_ip":"203.0.113.13","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010937,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
+
+- rule: 103005   # NET-005: một máy tới 10 IP khác nhau cổng 445 (ca legacy)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.11,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.12,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.13,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.14,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.15,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.16,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.17,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.18,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.19,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.50,10.0.0.20,50000,445,0,S,123456,,64240,,mss'
+
+- none: [103005]   # NET-005: 10 IP đích bị chặn: không có nhánh block (87702 gốc lo; rule level 10 sẽ làm mất 87702)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.51,10.0.0.11,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.51,10.0.0.12,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.51,10.0.0.13,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.51,10.0.0.14,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.51,10.0.0.15,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.51,10.0.0.16,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.51,10.0.0.17,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.51,10.0.0.18,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.51,10.0.0.19,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.51,10.0.0.20,50000,445,0,S,123456,,64240,,mss'
+
+- none: [103005]   # NET-005: nguồn public quét 445 tới 10 IP: NET-003 báo từng event (rule cuối 103003 không vào lịch sử đếm) nên NET-005 chưa báo (giới hạn đã biết)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.57,10.0.0.11,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.57,10.0.0.12,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.57,10.0.0.13,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.57,10.0.0.14,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.57,10.0.0.15,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.57,10.0.0.16,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.57,10.0.0.17,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.57,10.0.0.18,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.57,10.0.0.19,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.57,10.0.0.20,50000,445,0,S,123456,,64240,,mss'
+
+- none: [103005]   # NET-005: 9 IP đích (dưới ngưỡng)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.52,10.0.0.11,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.52,10.0.0.12,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.52,10.0.0.13,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.52,10.0.0.14,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.52,10.0.0.15,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.52,10.0.0.16,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.52,10.0.0.17,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.52,10.0.0.18,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.52,10.0.0.19,50000,445,0,S,123456,,64240,,mss'
+
+- none: [103005]   # NET-005: bản chất, 10 phiên SMB tới MỘT file server (ca legacy)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.53,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.53,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.53,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.53,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.53,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.53,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.53,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.53,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.53,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.53,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+
+- none: [103005]   # NET-005: 2 IP đích xen kẽ, 17 dòng (< 2N-2 = 18, giới hạn S4)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.3,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.3,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.3,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.3,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.3,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.3,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.3,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.3,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.54,10.0.0.2,50000,445,0,S,123456,,64240,,mss'
+
+- none: [103005]   # NET-005: 10 IP đích khác nhau nhưng cổng 80
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.55,10.0.0.11,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.55,10.0.0.12,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.55,10.0.0.13,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.55,10.0.0.14,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.55,10.0.0.15,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.55,10.0.0.16,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.55,10.0.0.17,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.55,10.0.0.18,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.55,10.0.0.19,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.55,10.0.0.20,50000,80,0,S,123456,,64240,,mss'
+
+- none: [103005]   # NET-005: 10 IP đích trộn cổng 445 và 80 (chỉ 5 phiên 445)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.56,10.0.0.11,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.56,10.0.0.12,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.56,10.0.0.13,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.56,10.0.0.14,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.56,10.0.0.15,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.56,10.0.0.16,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.56,10.0.0.17,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.56,10.0.0.18,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.56,10.0.0.19,50000,80,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.56,10.0.0.20,50000,445,0,S,123456,,64240,,mss'
+
+# ===== ĐƯỜNG SYSLOG MANAGER (location = IP thiết bị gửi, agent 000, dòng RFC 3164) =====
+
+- rule: 103000   # NET-000 (syslog): dòng pass vào bộ đếm
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.61,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+
+- none: [103000]   # NET-000 (syslog): dòng block vẫn là 87701 gốc
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.31,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+
+- rule: 103001   # NET-001 (syslog): 20 cổng đích khác nhau, pass
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8001,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8002,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8003,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8004,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8005,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8006,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8007,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8008,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8009,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8010,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8011,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8012,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8013,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8014,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8015,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8016,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8017,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8018,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.32,10.0.0.5,50000,8019,0,S,123456,,64240,,mss'
+
+- none: [103001]   # NET-001 (syslog): 19 cổng (dưới ngưỡng)
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8001,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8002,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8003,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8004,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8005,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8006,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8007,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8008,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8009,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8010,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8011,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8012,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8013,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8014,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8015,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8016,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8017,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.33,10.0.0.5,50000,8018,0,S,123456,,64240,,mss'
+
+- none: [103001]   # NET-001 (syslog): bản chất, 40 gói pass tới MỘT cổng
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.34,10.0.0.5,50000,8443,0,S,123456,,64240,,mss'
+
+- rule: 103002   # NET-001 (syslog, block): 22 cổng đích khác nhau bị chặn
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1001,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1002,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1003,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1004,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1005,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1006,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1007,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1008,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1009,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1010,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1011,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1012,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1013,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1014,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1015,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1016,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1017,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1018,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1019,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1020,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1021,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.35,10.0.0.5,50000,1022,0,S,123456,,64240,,mss'
+
+- rule: 103005   # NET-005 (syslog): một máy tới 10 IP khác nhau cổng 445
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.88,10.0.1.10,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.88,10.0.1.11,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.88,10.0.1.12,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.88,10.0.1.13,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.88,10.0.1.14,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.88,10.0.1.15,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.88,10.0.1.16,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.88,10.0.1.17,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.88,10.0.1.18,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.88,10.0.1.19,50000,445,0,S,123456,,64240,,mss'
+
+- none: [103005]   # NET-005 (syslog): 9 IP đích (dưới ngưỡng)
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.89,10.0.1.10,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.89,10.0.1.11,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.89,10.0.1.12,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.89,10.0.1.13,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.89,10.0.1.14,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.89,10.0.1.15,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.89,10.0.1.16,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.89,10.0.1.17,50000,445,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.89,10.0.1.18,50000,445,0,S,123456,,64240,,mss'
+
+- rule: 103003   # NET-003 (syslog): RDP từ IP public được cho phép
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.36,10.0.0.5,50000,3389,0,S,123456,,64240,,mss'
+
+- none: [103003]   # NET-003 (syslog): nguồn nội bộ 10.0.0.30 vào RDP
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.30,10.0.0.5,50000,3389,0,S,123456,,64240,,mss'
+
+- none: [103004, 86601, 86600]   # NET-004 (syslog): EVE JSON qua syslog 514 có tiền tố `suricata[99]:` — Wazuh không có decoder (S6), NET-004 không chạy; chỉ analyzer đọc được đường này
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+  - 'Oct 31 10:00:00 suricata[99]: {"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"198.51.100.37","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
+
+# ===== RULE GỐC KHÔNG BỊ MẤT khi treo con dưới 87700 / 86601 (bằng chứng cho Task 8) =====
+
+- rule: 87701   # gốc: một gói chặn vẫn ra 87701
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.41,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+
+- none: [87702]   # 87702 đã chỉnh ở 0999-tuning.xml (50 chặn/60 s): 18 gói chặn/45 s cùng nguồn KHÔNG còn báo (ca dương 50 gói ở 0999-tuning.yml)
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.42,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+
+- rule: 86601   # gốc: cảnh báo Suricata severity 3 vẫn ra 86601 (không bị 103004 che)
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"198.51.100.43","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":3}}'
+
+- rule: 99915   # R44: severity 1 từ IP trong danh sách malicious-ip -> rule IOC gốc thắng
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"196.251.85.62","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
+
+- rule: 99915   # IOC gốc vẫn chạy với cảnh báo severity 3 (NET-004 không nhận)
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"196.251.85.62","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":3}}'
+
+- none: [103004]   # R44: IP malicious + severity 1 KHÔNG ra NET-004 (99915 thắng)
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"196.251.85.62","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
+
+- rule: 103004   # R44: IP sạch + severity 1 vẫn ra NET-004
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"198.51.100.50","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
+
+# Ràng buộc 7: hai nguồn liên tiếp quét cùng kiểu; nguồn thứ hai vẫn ra alert ở dòng cuối (last: true = chỉ tính rule của dòng cuối)
+- rule: 103001   # NET-001: hai nguồn nội bộ liên tiếp mỗi nguồn 20 cổng được phép
+  last: true
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8001,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8002,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8003,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8004,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8005,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8006,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8007,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8008,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8009,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8010,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8011,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8012,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8013,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8014,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8015,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8016,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8017,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8018,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8019,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.161,10.0.0.5,50000,8020,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8001,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8002,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8003,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8004,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8005,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8006,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8007,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8008,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8009,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8010,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8011,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8012,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8013,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8014,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8015,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8016,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8017,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8018,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8019,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8020,0,S,123456,,64240,,mss'
+
+- rule: 103002   # NET-001 (block): hai nguồn liên tiếp mỗi nguồn 21 dòng chặn tới 21 cổng khác nhau (Task 12: mỗi nguồn báo ở dòng thứ 20 của nó, nên dòng cuối là cổng thứ 20 của nguồn thứ hai)
+  last: true
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9001,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9002,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9003,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9004,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9005,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9006,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9007,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9008,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9009,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9010,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9011,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9012,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9013,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9014,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9015,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9016,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9017,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9018,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9019,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9020,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.101,10.0.0.5,50000,9021,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9001,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9002,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9003,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9004,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9005,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9006,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9007,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9008,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9009,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9010,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9011,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9012,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9013,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9014,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9015,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9016,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9017,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9018,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9019,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9020,0,S,123456,,64240,,mss'
+
+- rule: 103005   # NET-005: hai máy nội bộ liên tiếp mỗi máy tới 10 IP khác nhau cổng 445
+  last: true
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.171,10.0.2.11,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.171,10.0.2.12,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.171,10.0.2.13,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.171,10.0.2.14,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.171,10.0.2.15,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.171,10.0.2.16,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.171,10.0.2.17,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.171,10.0.2.18,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.171,10.0.2.19,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.171,10.0.2.20,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.172,10.0.2.11,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.172,10.0.2.12,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.172,10.0.2.13,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.172,10.0.2.14,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.172,10.0.2.15,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.172,10.0.2.16,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.172,10.0.2.17,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.172,10.0.2.18,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.172,10.0.2.19,50000,445,0,S,123456,,64240,,mss'
+    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.172,10.0.2.20,50000,445,0,S,123456,,64240,,mss'
+
+- rule: 99916   # Task 11 (hoãn từ Task 8): IP ĐÍCH trong danh sách malicious-ip gốc, severity 1 -> rule IOC gốc 99916 thắng NET-004
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"10.0.0.5","src_port":4444,"dest_ip":"196.251.85.62","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
+
+- none: [103004]   # cùng sự kiện: NET-004 nhường 99916
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"10.0.0.5","src_port":4444,"dest_ip":"196.251.85.62","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'

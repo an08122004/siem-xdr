@@ -745,6 +745,14 @@ def test_audit_writes_one_json_line(tmp_path, monkeypatch):
     assert rec["event_type"] == "console_auth" and rec["timestamp"] and len(lines) == 2
 
 
+def test_audit_writes_srcip_equal_to_ip(tmp_path, monkeypatch):
+    """Decoder json của Wazuh không biến `ip` thành `srcip`, mà <same_source_ip/> cần `srcip`: Audit ghi sẵn cả hai khóa."""
+    a = _audit_to(monkeypatch, tmp_path / "console.json")
+    a("login", "failure", "bob", "1.2.3.4")
+    rec = json.loads((tmp_path / "console.json").read_text(encoding="utf-8"))
+    assert rec["srcip"] == rec["ip"] == "1.2.3.4"
+
+
 def test_audit_username_cannot_inject_a_second_line(tmp_path, monkeypatch):
     a = _audit_to(monkeypatch, tmp_path / "console.json")
     a("login", "failure", 'x"\n{"action":"login"}\n{"a":1}', "1.2.3.4")
@@ -801,6 +809,34 @@ def test_wazuh_console_event_normalizes_like_before():
               "source.ip", "agent.id", "agent.hostname", "agent.name", "host.name", "message", "@timestamp"):
         assert get(new, f) == get(old, f), f
     assert get(new, "agent.id") == "soc-console" and get(new, "event.module") == "console"
+
+
+def _alert_without_full_log(location, line, agent_id="000"):
+    """Alert của rule console: rule gốc có no_full_log nên alerts.json không có full_log, `data` là trường đã giải mã."""
+    ev = wazuh_console_event(location, line, agent_id)
+    ev["data"].pop("full_log")
+    ev["data"]["data"]["srcip"] = line["ip"]
+    return ev
+
+
+def test_wazuh_console_alert_without_full_log_is_rebuilt_from_data():
+    from siem.pipeline.normalize import get, normalize
+    line = {"timestamp": "2026-11-01T08:00:00+00:00", "event_type": "console_auth", **LOGIN_FAIL}
+    with_log = normalize(wazuh_console_event(settings.CONSOLE_AUDIT_WAZUH_PATH, line))
+    rebuilt = normalize(_alert_without_full_log(settings.CONSOLE_AUDIT_WAZUH_PATH, line))
+    for f in ("event.module", "event.category", "event.type", "event.outcome", "event.action", "event.reason", "user.name",
+              "source.ip", "agent.id", "host.name", "message"):
+        assert get(rebuilt, f) == get(with_log, f), f
+    assert get(rebuilt, "event.module") == "console" and get(rebuilt, "source.ip") == "1.2.3.4"
+
+
+@pytest.mark.parametrize("location,agent", [("/var/log/apache2/access.log", "000"), ("10.10.40.254", "000"),
+                                            (None, "001")])
+def test_console_alert_without_full_log_is_not_trusted_elsewhere(location, agent):
+    from siem.pipeline.normalize import get, normalize
+    d = normalize(_alert_without_full_log(location or settings.CONSOLE_AUDIT_WAZUH_PATH,
+                                          {"event_type": "console_auth", **LOGIN_FAIL}, agent))
+    assert get(d, "event.module") != "console" and get(d, "agent.id") != "soc-console"
 
 
 def test_console_location_from_enrolled_agent_is_not_trusted():
@@ -1118,3 +1154,69 @@ def test_ai_assist_jobs_and_feedback(env):
     fake.docs[(settings.IDX_AI_JOBS, r["_id"])]["status"] = "done"
     assert fb(False).json()["feedback"]["useful"] is False and fake.docs[(settings.IDX_AI_JOBS, r["_id"])]["feedback"]["by"] == "an"
     assert env.get("/api/v1/ai/assist/khong-co").status_code == 404
+
+
+# ------------------------------------------------------------------ ngoại lệ thành rule Wazuh level 0 (Task 16)
+
+
+def test_wazuh_exceptions_api(env, monkeypatch, tmp_path):
+    from siem import wazuh_exceptions, wazuh_rules
+    from siem.wazuh_rules import WazuhRuleError
+
+    class Api:
+        fail, down = None, False
+
+        def reload(self):
+            if self.fail:
+                raise WazuhRuleError(self.fail)
+
+        def rule(self, rid):
+            if self.down:
+                raise wazuh_rules.WazuhUnavailable("API đóng")
+            return {"id": rid, "level": 5} if rid == 31103 else None
+    a = Api()
+    monkeypatch.setattr(wazuh_exceptions, "DYNAMIC_DIR", tmp_path)
+    monkeypatch.setattr("siem.wazuh_rules.WazuhApi.from_settings", classmethod(lambda cls: a))
+    body = {"rule": "WZH-31103", "conditions": [{"field": "source.ip", "value": "10.10.40.50"}], "reason": "máy quét"}
+
+    def xml():
+        p = tmp_path / "exceptions.xml"
+        return p.read_text(encoding="utf-8") if p.exists() else ""
+    pw = activate(env, "an", "analyst")
+    login(env, "an", pw)
+    assert env.post("/api/v1/exceptions", json=body, headers=H).status_code == 403
+    assert env.delete("/api/v1/exceptions/110000?reason=abc", headers=H).status_code == 403
+    pw2 = activate(env, "de", "detection")
+    pw3 = activate(env, "de3", "detection")
+    login(env, "de", pw2)
+    r = env.post("/api/v1/exceptions", json=body, headers=H)
+    assert r.status_code == 200 and r.json()["id"] == 110000 and r.json()["status"] == "pending"
+    assert xml() == ""                                                                      # chưa đủ 2 người duyệt
+    assert env.post("/api/v1/exceptions", json=body, headers=H).status_code == 409           # trùng
+    assert env.post("/api/v1/exceptions/110000/approve", headers=H).status_code == 400       # cùng người
+    assert env.post("/api/v1/exceptions", json=body | {"conditions": []}, headers=H).status_code == 400
+    assert env.post("/api/v1/exceptions", json=body | {"conditions": [{"field": "host.name", "value": "x"}]},
+                    headers=H).status_code == 400
+    assert env.post("/api/v1/exceptions", json=body | {"rule": "WZH-1"}, headers=H).status_code == 400   # cha không có
+    other = body | {"conditions": [{"field": "user.name", "value": "svc"}]}
+    a.down = True
+    assert env.post("/api/v1/exceptions", json=other, headers=H).status_code == 503
+    a.down = False
+    login(env, "de3", pw3)
+    a.fail = "Failed to reload"
+    assert env.post("/api/v1/exceptions/110000/approve", headers=H).status_code == 409     # Wazuh nạp lỗi: giữ file cũ
+    assert xml() == "" and env.get("/api/v1/exceptions").json()[0]["status"] == "failed"
+    a.fail = None
+    r = env.post("/api/v1/exceptions", json=other, headers=H)
+    assert r.json()["id"] == 110001                                                         # 110000 không tái dùng
+    login(env, "de", pw2)
+    assert env.post("/api/v1/exceptions/110001/approve", headers=H).status_code == 200
+    assert 'id="110001" level="0"' in xml() and 'id="110000"' not in xml()
+    assert env.delete("/api/v1/exceptions/110001", headers=H).status_code == 400            # thiếu lý do
+    r = env.delete("/api/v1/exceptions/110001?reason=hết cần", headers=H)
+    assert r.status_code == 200 and r.json()["status"] == "removed" and r.json()["removed_by"] == "de"
+    assert 'id="110001"' not in xml()
+    assert env.delete("/api/v1/exceptions/110001?reason=hết cần", headers=H).status_code == 404
+    ops = [(x[3]["op"], x[1]) for x in env.audit if x[0] == "activity" and x[3]["op"].startswith("exception_")]
+    assert ("exception_added", "success") in ops and ("exception_approved", "failure") in ops
+    assert ("exception_approved", "success") in ops and ("exception_removed", "success") in ops

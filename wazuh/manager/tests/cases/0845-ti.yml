@@ -1,0 +1,556 @@
+# Ca test cho wazuh/manager/rules/0845-ti.xml (TI-001). Rule đọc danh sách etc/lists/siem-misp-ip, nội dung do SOAR đẩy lên lúc chạy thật
+# (server/siem/pipeline/misp_cdb.py); ở đây phần tử `list_file` đầu file đẩy một danh sách thử qua Wazuh API rồi nạp lại ruleset (bộ chạy làm).
+# 45.9.9.77, 45.9.9.8 và 45.9.9.9 chỉ có trong danh sách MISP (CIDR do SOAR triển khai thành từng địa chỉ: Wazuh 4.14.8 không khớp khóa CIDR); 196.251.85.62 có trong CẢ danh sách MISP lẫn danh sách gốc malicious-ip của Wazuh (99915 / 99916).
+# Hai đường vào của filterlog như 0541-network.xml: agent OPNsense (location (fw01) any->...) và syslog 514 (location = IP thiết bị).
+# Suricata chỉ qua agent (eve.json, log_format json).
+# Danh sách thử còn lại trên manager sau khi chạy: dùng dải 45.9.9.x vì ca của file khác dùng 192.0.2.x / 198.51.100.x / 203.0.113.x và sẽ trúng TI-001 nếu IP trùng.
+
+- list_file:
+    name: siem-misp-ip
+    content: |
+      45.9.9.77:misp
+      45.9.9.8:misp
+      45.9.9.9:misp
+      196.251.85.62:misp
+      127.0.0.1:misp
+
+# ---------------------------------------------------------------- firewall (107001 nguồn, 107002 đích)
+- rule: 107001   # block: nguồn là IOC
+  legacy: TI-001
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,45.9.9.77,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+
+- rule: 107001   # pass: nguồn là địa chỉ IOC thứ hai
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,45.9.9.9,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+
+- rule: 107001   # đường syslog 514 của manager
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,45.9.9.77,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+
+- rule: 107002   # pass: máy nội bộ nối ra IP IOC
+  legacy: TI-001
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,out,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.60,45.9.9.77,50000,443,0,S,123456,,64240,,mss'
+
+- rule: 107002   # block: đích là địa chỉ IOC; đường syslog 514
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,out,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.60,45.9.9.8,50000,443,0,S,123456,,64240,,mss'
+
+- rule: 107003   # nguồn IOC được cho phép vào SSH (cổng quản trị): NET-003 báo, TI-001 là con của nó nên vẫn là rule cuối
+  legacy: TI-001
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,45.9.9.77,10.0.0.5,50000,22,0,S,123456,,64240,,mss'
+
+- none: [107001, 107002, 107003]   # IP sát địa chỉ IOC (45.9.9.10, 45.9.9.78), IP nội bộ
+  legacy: TI-001
+  log_format: syslog
+  location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
+  events:
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,45.9.9.10,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,45.9.9.78,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+  - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,out,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.60,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
+
+# ---------------------------------------------------------------- Suricata (107004/5 severity khác 0-2, 107006/7 severity 0-2 là con của NET-004)
+- rule: 107004   # IP nguồn trong danh sách MISP, severity 3 (TI-001 không xét severity)
+  legacy: TI-001
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"45.9.9.77","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":3}}'
+
+- rule: 107004   # địa chỉ IOC thứ hai
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"45.9.9.9","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":3}}'
+
+- rule: 107005   # IP đích trong danh sách MISP
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"10.0.0.5","src_port":4444,"dest_ip":"45.9.9.77","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":3}}'
+
+- rule: 107006   # severity 1 từ IP MISP: TI-001 (con của NET-004) là rule cuối
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"45.9.9.9","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
+
+- rule: 107007   # severity 2 tới IP MISP
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"10.0.0.5","src_port":4444,"dest_ip":"45.9.9.77","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":2}}'
+
+- none: [107004, 107005, 107006, 107007]   # IP nguồn có ở CẢ HAI danh sách, severity 3: rule IOC gốc 99915 giữ ngữ cảnh
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"196.251.85.62","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":3}}'
+
+- rule: 99915   # cùng sự kiện: rule gốc là rule cuối
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"196.251.85.62","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":3}}'
+
+- none: [107004, 107005, 107006, 107007]   # như trên nhưng severity 1: NET-004 đã loại IP danh sách gốc, TI-001 cũng nhường 99915
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"196.251.85.62","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
+
+- rule: 99915   # cùng sự kiện severity 1
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"196.251.85.62","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
+
+- rule: 107004   # GIỚI HẠN đã biết: nguồn MISP + đích trong danh sách gốc, TI-001 (level 10) thắng 99916 (level 9); xem đầu 0845-ti.xml
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"45.9.9.77","src_port":4444,"dest_ip":"196.251.85.62","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":3}}'
+
+- none: [107004, 107005, 107006, 107007]   # IP sạch sát địa chỉ IOC
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"45.9.9.10","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":3}}'
+
+- rule: 103004   # IP sạch severity 1: NET-004 vẫn là rule cuối, TI-001 không báo
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-10-31T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"alert","src_ip":"45.9.9.10","src_port":4444,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET TEST signature","category":"Misc Attack","severity":1}}'
+
+# ---------------------------------------------------------------- R53: sshd, web, Windows (107008-107010)
+- rule: 107008   # sshd: đăng nhập thất bại từ IP MISP (5760 level 5 -> TI-001)
+  legacy: TI-001
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4444 ssh2'
+
+- rule: 107008   # sshd: đăng nhập thành công từ IP MISP (5715 level 3)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov  3 10:00:00 host sshd[1234]: Accepted password for bob from 45.9.9.9 port 5555 ssh2'
+
+- rule: 107008   # sshd: user không tồn tại (5710)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for invalid user admin from 45.9.9.8 port 4444 ssh2'
+
+- none: [107008]   # sshd: IP sạch sát IOC
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.10 port 4444 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Accepted password for bob from 45.9.9.10 port 5555 ssh2'
+
+- rule: 101001   # KHÔNG MẤT alert thật: 8 lần thất bại từ IP sạch vẫn ra alert brute force (101001 AUTH của dự án, thay 5763 gốc)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.11 port 4000 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.11 port 4001 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.11 port 4002 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.11 port 4003 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.11 port 4004 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.11 port 4005 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.11 port 4006 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.11 port 4007 ssh2'
+
+- none: [5763, 101001]   # GIỚI HẠN đã biết (R52/R53): 8 lần thất bại từ IP MISP ra TI-001 từng event, không đếm sang 5763 / 101001
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4000 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4001 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4002 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4003 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4004 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4005 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4006 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4007 ssh2'
+
+- rule: 107008   # cùng chuỗi: event cuối vẫn là TI-001 (alert level 10 mỗi event)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4000 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4001 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4002 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4003 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4004 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4005 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4006 ssh2'
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 45.9.9.77 port 4007 ssh2'
+
+- rule: 107009   # web: IP MISP truy cập bình thường
+  legacy: TI-001
+  log_format: apache
+  location: (web01) any->/var/log/apache2/access.log
+  events:
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /index.html HTTP/1.1" 200 12 "-" "curl/8"'
+
+- rule: 107009   # web: IP MISP gửi request 404
+  log_format: apache
+  location: (web01) any->/var/log/apache2/access.log
+  events:
+  - '45.9.9.8 - - [31/Oct/2026:10:00:00 +0700] "GET /nope HTTP/1.1" 404 12 "-" "curl/8"'
+
+- none: [107009]   # web: IP sạch
+  log_format: apache
+  location: (web01) any->/var/log/apache2/access.log
+  events:
+  - '45.9.9.10 - - [31/Oct/2026:10:00:00 +0700] "GET /index.html HTTP/1.1" 200 12 "-" "curl/8"'
+
+- rule: 31168   # KHÔNG MẤT alert thật: Shellshock (level 15, con của 31108 như TI-001) từ IP MISP vẫn là rule gốc 31168, TI-001 (level 10) thua
+  log_format: apache
+  location: (web01) any->/var/log/apache2/access.log
+  events:
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /cgi-bin/x.cgi HTTP/1.1" 200 12 "-" "() { :;}; /bin/bash -c id"'
+
+- rule: 31151   # KHÔNG MẤT alert thật: 30 lỗi 400 từ IP sạch vẫn ra 31151
+  log_format: apache
+  location: (web01) any->/var/log/apache2/access.log
+  events:
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x0 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x1 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x2 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x3 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x4 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x5 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x6 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x7 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x8 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x9 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x10 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x11 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x12 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x13 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x14 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x15 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x16 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x17 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x18 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x19 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x20 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x21 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x22 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x23 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x24 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x25 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x26 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x27 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x28 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.12 - - [31/Oct/2026:10:00:00 +0700] "GET /x29 HTTP/1.1" 400 12 "-" "curl/8"'
+
+- none: [31151]   # GIỚI HẠN đã biết (R52/R53): 30 lỗi 400 từ IP MISP ra TI-001 từng event, không đếm sang 31151
+  log_format: apache
+  location: (web01) any->/var/log/apache2/access.log
+  events:
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x0 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x1 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x2 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x3 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x4 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x5 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x6 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x7 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x8 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x9 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x10 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x11 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x12 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x13 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x14 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x15 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x16 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x17 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x18 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x19 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x20 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x21 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x22 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x23 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x24 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x25 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x26 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x27 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x28 HTTP/1.1" 400 12 "-" "curl/8"'
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /x29 HTTP/1.1" 400 12 "-" "curl/8"'
+
+# Windows qua bơm hàng đợi (eventchannel): ca nhiều dòng chỉ khẳng định rule báo ÍT NHẤT MỘT LẦN.
+- rule: 107010   # Windows: 4625 từ IP MISP
+  legacy: TI-001
+  log_format: eventchannel
+  location: EventChannel
+  events:
+  - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 45.9.9.77\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>45.9.9.77</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+
+- rule: 107010   # Windows: 4624 thành công từ IP MISP
+  log_format: eventchannel
+  location: EventChannel
+  events:
+  - '{"Message": "Event 4624:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 45.9.9.8\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4624</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8020000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>45.9.9.8</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+
+- none: [107010]   # Windows: 4625 và 4624 từ IP sạch
+  log_format: eventchannel
+  location: EventChannel
+  events:
+  - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 45.9.9.10\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>45.9.9.10</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+  - '{"Message": "Event 4624:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 45.9.9.10\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4624</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8020000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>45.9.9.10</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+
+- rule: 105001   # bộ đếm brute-force vẫn ra với IP sạch: từ khi gộp Task 10, rule dự án WIN-001 105001 (bản chạy bóng của 60204) nhận sự kiện ngưỡng thay 60204 (0965-windows.xml); TI-001 không chen vào
+  log_format: eventchannel
+  location: EventChannel
+  events:
+  - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 45.9.9.13\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>45.9.9.13</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+  - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 45.9.9.13\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>45.9.9.13</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+  - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 45.9.9.13\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>45.9.9.13</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+  - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 45.9.9.13\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>45.9.9.13</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+  - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 45.9.9.13\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>45.9.9.13</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+  - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 45.9.9.13\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>45.9.9.13</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+  - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 45.9.9.13\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>45.9.9.13</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+  - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 45.9.9.13\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>45.9.9.13</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+  - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 45.9.9.13\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>45.9.9.13</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+  - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 45.9.9.13\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>45.9.9.13</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+  - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 45.9.9.13\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>45.9.9.13</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+  - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 45.9.9.13\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>45.9.9.13</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+
+- none: [107009]   # cùng dòng access log nhưng đến từ syslog 514 (location = IP thiết bị, agent 000): không phải log của agent, TI-001 không báo
+  log_format: apache
+  location: 10.10.40.254
+  events:
+  - '45.9.9.77 - - [31/Oct/2026:10:00:00 +0700] "GET /index.html HTTP/1.1" 200 12 "-" "curl/8"'
+
+- rule: 104095   # R57 KHÔNG MẤT alert thật: IP có ở CẢ HAI danh sách + SQLi + 200 -> alert level 14 vẫn ra, TI-001 nhường. Từ khi gộp Task 9, dòng SQLi này do rule WEB bắt nên ra 104095 (bản sao 99906 trên nhánh WEB, R56) thay 99906
+  log_format: apache
+  location: (web01) any->/var/log/apache2/access.log
+  events:
+  - '196.251.85.62 - - [31/Oct/2026:10:00:00 +0700] "GET /index.php?id=1%27%20union%20select%20password%20from%20users-- HTTP/1.1" 200 12 "-" "curl/8"'
+
+- none: [107009]   # cùng sự kiện
+  log_format: apache
+  location: (web01) any->/var/log/apache2/access.log
+  events:
+  - '196.251.85.62 - - [31/Oct/2026:10:00:00 +0700] "GET /index.php?id=1%27%20union%20select%20password%20from%20users-- HTTP/1.1" 200 12 "-" "curl/8"'
+
+- rule: 92656   # R-fix2 KHÔNG MẤT alert thật: RDP (LogonType 10) từ loopback 127.0.0.1 (cũng nằm trong danh sách thử) -> rule gốc 92656 (level 15), TI-001 thua
+  log_format: eventchannel
+  location: EventChannel
+  events:
+  - '{"Message": "Event 4624:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 10\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 127.0.0.1\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4624</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8020000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>10</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>127.0.0.1</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+
+- none: [107010]   # cùng sự kiện: TI-001 không phải rule cuối
+  log_format: eventchannel
+  location: EventChannel
+  events:
+  - '{"Message": "Event 4624:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 10\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 127.0.0.1\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4624</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8020000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>10</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>127.0.0.1</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+
+- rule: 99903   # sshd đăng nhập thành công (5715) từ IP có ở CẢ HAI danh sách -> rule gốc 99903 (level 14), TI-001 nhường
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov  3 10:00:00 host sshd[1234]: Accepted password for bob from 196.251.85.62 port 5555 ssh2'
+
+- none: [107008]   # cùng sự kiện
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov  3 10:00:00 host sshd[1234]: Accepted password for bob from 196.251.85.62 port 5555 ssh2'
+
+# ---------------------------------------------------------------- R63: sshd / Windows nhường IOC gốc khi IP có ở CẢ HAI danh sách (196.251.85.62)
+- rule: 99904   # sshd đăng nhập thất bại (5716) từ IP có ở CẢ HAI danh sách -> rule gốc 99904 (level 9); trước R63, 107008 (level 10) thắng và thay ngữ cảnh IOC gốc
+  none: [107008]
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 196.251.85.62 port 4444 ssh2'
+
+- rule: 99919   # Windows 4625 từ IP có ở CẢ HAI danh sách -> 99919 (con trực tiếp của 60105, thắng cây con 60122 nơi 107010 treo); 107010 nhường
+  none: [107010]
+  log_format: eventchannel
+  location: EventChannel
+  events:
+  - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 203.0.113.20\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>196.251.85.62</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+
+# ================================================================ R64: domain (107011 DNS, 107012 HTTP, 107013 Sysmon 22) và hash (107014 sha256, 107015 sha1, 107016 md5)
+# Danh sách thử lấy IOC demo của server/config/intel (bad_domains.txt, bad_hashes.txt: EICAR md5 / sha1 / sha256) cộng một domain và một sha256 có SẴN trong danh sách gốc
+# malicious-domains / malware-hashes của Wazuh (ca nhường rule gốc 99917 / 99918 / 99901). Khóa CDB khớp chính xác: subdomain và chữ hoa KHÔNG khớp (ca âm bên dưới ghi lại giới hạn này).
+- list_file:
+    name: siem-misp-domain
+    content: |
+      evil-c2.example:misp
+      malware-download.test:misp
+      netflix-clone-two-opal.vercel.app:misp
+
+- list_file:
+    name: siem-misp-hash
+    content: |
+      44d88612fea8a8f36de82e1278abb02f:misp
+      3395856ce81f2b7382dee72602f798b642f14140:misp
+      275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f:misp
+      2fe6a7ae63c878bd84d7b829349b309e7c84194ddbb6a779816f5b84cd8ad45d:misp
+
+- rule: 107011   # Suricata DNS: truy vấn domain IOC
+  legacy: TI-001
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"evil-c2.example","rrtype":"A","tx_id":0}}'
+
+- rule: 107011   # domain IOC thứ hai
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"malware-download.test","rrtype":"A","tx_id":0}}'
+
+- none: [107011, 107012]   # domain sạch; subdomain của domain IOC (giới hạn: không khớp); chữ hoa (CDB phân biệt hoa thường)
+  legacy: TI-001
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"example.org","rrtype":"A","tx_id":0}}'
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"www.evil-c2.example","rrtype":"A","tx_id":0}}'
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"EVIL-C2.example","rrtype":"A","tx_id":0}}'
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"evil-c2.example.org","rrtype":"A","tx_id":0}}'
+
+- rule: 99918   # R64 nhường rule gốc: domain có ở CẢ danh sách gốc lẫn siem-misp-domain -> 99918 (level 9, alert gốc) giữ ngữ cảnh
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"netflix-clone-two-opal.vercel.app","rrtype":"A","tx_id":0}}'
+
+- none: [107011]   # cùng sự kiện: TI-001 loại domain nằm trong danh sách gốc
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"netflix-clone-two-opal.vercel.app","rrtype":"A","tx_id":0}}'
+
+- none: [107011, 107012]   # giả mạo qua syslog 514 (location = IP thiết bị, agent 000): cùng dòng JSON không ra TI-001
+  legacy: TI-001
+  log_format: json
+  location: 10.10.40.254
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"evil-c2.example","rrtype":"A","tx_id":0}}'
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"http","src_ip":"10.0.0.5","src_port":50000,"dest_ip":"203.0.113.9","dest_port":80,"proto":"TCP","http":{"hostname":"evil-c2.example","url":"/","http_user_agent":"curl/8","http_method":"GET","protocol":"HTTP/1.1","status":200,"length":12}}'
+
+- rule: 107012   # Suricata HTTP: Host là domain IOC
+  legacy: TI-001
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"http","src_ip":"10.0.0.5","src_port":50000,"dest_ip":"203.0.113.9","dest_port":80,"proto":"TCP","http":{"hostname":"evil-c2.example","url":"/","http_user_agent":"curl/8","http_method":"GET","protocol":"HTTP/1.1","status":200,"length":12}}'
+
+- none: [107012]   # Host sạch
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"http","src_ip":"10.0.0.5","src_port":50000,"dest_ip":"203.0.113.9","dest_port":80,"proto":"TCP","http":{"hostname":"example.org","url":"/","http_user_agent":"curl/8","http_method":"GET","protocol":"HTTP/1.1","status":200,"length":12}}'
+
+- rule: 99917   # nhường rule gốc 99917
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"http","src_ip":"10.0.0.5","src_port":50000,"dest_ip":"203.0.113.9","dest_port":80,"proto":"TCP","http":{"hostname":"netflix-clone-two-opal.vercel.app","url":"/","http_user_agent":"curl/8","http_method":"GET","protocol":"HTTP/1.1","status":200,"length":12}}'
+
+- none: [107012]   # cùng sự kiện
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"http","src_ip":"10.0.0.5","src_port":50000,"dest_ip":"203.0.113.9","dest_port":80,"proto":"TCP","http":{"hostname":"netflix-clone-two-opal.vercel.app","url":"/","http_user_agent":"curl/8","http_method":"GET","protocol":"HTTP/1.1","status":200,"length":12}}'
+
+- rule: 107013   # Sysmon 22: tiến trình hỏi DNS domain IOC
+  legacy: TI-001
+  log_format: eventchannel
+  location: EventChannel
+  events:
+  - '{"Message": "Dns query:", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Sysmon'' Guid=''{5770385f-c22a-43e0-bf4c-06f5698ffbd9}''/><EventID>22</EventID><Version>5</Version><Level>4</Level><Task>22</Task><Opcode>0</Opcode><Keywords>0x8000000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''3000'' ThreadID=''4000''/><Channel>Microsoft-Windows-Sysmon/Operational</Channel><Computer>bench-win</Computer><Security UserID=''S-1-5-18''/></System><EventData><Data Name=''RuleName''>-</Data><Data Name=''UtcTime''>2026-02-01 00:00:01.000</Data><Data Name=''ProcessGuid''>{00000000-0000-0000-0000-000000000000}</Data><Data Name=''ProcessId''>4001</Data><Data Name=''QueryName''>evil-c2.example</Data><Data Name=''QueryStatus''>0</Data><Data Name=''QueryResults''>type: 1 203.0.113.9;</Data><Data Name=''Image''>C:\\Windows\\System32\\cmd.exe</Data><Data Name=''User''>WIN\\an</Data></EventData></Event>"}'
+
+- none: [107013]   # Sysmon 22: domain sạch, subdomain của domain IOC (giới hạn)
+  log_format: eventchannel
+  location: EventChannel
+  events:
+  - '{"Message": "Dns query:", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Sysmon'' Guid=''{5770385f-c22a-43e0-bf4c-06f5698ffbd9}''/><EventID>22</EventID><Version>5</Version><Level>4</Level><Task>22</Task><Opcode>0</Opcode><Keywords>0x8000000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''3000'' ThreadID=''4000''/><Channel>Microsoft-Windows-Sysmon/Operational</Channel><Computer>bench-win</Computer><Security UserID=''S-1-5-18''/></System><EventData><Data Name=''RuleName''>-</Data><Data Name=''UtcTime''>2026-02-01 00:00:01.000</Data><Data Name=''ProcessGuid''>{00000000-0000-0000-0000-000000000000}</Data><Data Name=''ProcessId''>4001</Data><Data Name=''QueryName''>example.org</Data><Data Name=''QueryStatus''>0</Data><Data Name=''QueryResults''>type: 1 203.0.113.9;</Data><Data Name=''Image''>C:\\Windows\\System32\\cmd.exe</Data><Data Name=''User''>WIN\\an</Data></EventData></Event>"}'
+  - '{"Message": "Dns query:", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Sysmon'' Guid=''{5770385f-c22a-43e0-bf4c-06f5698ffbd9}''/><EventID>22</EventID><Version>5</Version><Level>4</Level><Task>22</Task><Opcode>0</Opcode><Keywords>0x8000000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''3000'' ThreadID=''4000''/><Channel>Microsoft-Windows-Sysmon/Operational</Channel><Computer>bench-win</Computer><Security UserID=''S-1-5-18''/></System><EventData><Data Name=''RuleName''>-</Data><Data Name=''UtcTime''>2026-02-01 00:00:01.000</Data><Data Name=''ProcessGuid''>{00000000-0000-0000-0000-000000000000}</Data><Data Name=''ProcessId''>4001</Data><Data Name=''QueryName''>www.evil-c2.example</Data><Data Name=''QueryStatus''>0</Data><Data Name=''QueryResults''>type: 1 203.0.113.9;</Data><Data Name=''Image''>C:\\Windows\\System32\\cmd.exe</Data><Data Name=''User''>WIN\\an</Data></EventData></Event>"}'
+
+- rule: 107014   # FIM: file mới có sha256 IOC
+  legacy: TI-001
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /tmp/dropper.bin, type: added, sha256: 275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f}
+
+- rule: 107014   # FIM: file sửa (550)
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /opt/app/tool.bin, type: modified, sha256: 275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f}
+
+- rule: 107015   # FIM: sha1 IOC
+  legacy: TI-001
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /tmp/dropper.bin, type: added, sha1: 3395856ce81f2b7382dee72602f798b642f14140}
+
+- rule: 107016   # FIM: md5 IOC
+  legacy: TI-001
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /tmp/dropper.bin, type: added, md5: 44d88612fea8a8f36de82e1278abb02f}
+
+- none: [107014, 107015, 107016]   # hash không có trong danh sách (sha256 và md5)
+  legacy: TI-001
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /tmp/clean.bin, type: added, sha256: 0000000000000000000000000000000000000000000000000000000000000001}
+    - {path: /tmp/clean2.bin, type: added, md5: 0123456789abcdef0123456789abcdef}
+
+- rule: 99901   # nhường rule gốc: sha256 có ở CẢ hai danh sách -> 99901 (level 14, alert thật) thắng
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /tmp/dropper.bin, type: added, sha256: 2fe6a7ae63c878bd84d7b829349b309e7c84194ddbb6a779816f5b84cd8ad45d}
+
+- none: [107014]   # cùng sự kiện
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /tmp/dropper.bin, type: added, sha256: 2fe6a7ae63c878bd84d7b829349b309e7c84194ddbb6a779816f5b84cd8ad45d}
+
+
+- none: [107013]   # giả mạo qua syslog 514: JSON mang trường win.* không được decoder eventchannel nhận, không tới 61650 nên TI-001 không báo (đã thử: cùng JSON ở location EventChannel cũng không tới 61650)
+  legacy: TI-001
+  log_format: json
+  location: 10.10.40.254
+  events:
+  - '{"win":{"system":{"providerName":"Microsoft-Windows-Sysmon","eventID":"22","channel":"Microsoft-Windows-Sysmon/Operational"},"eventdata":{"queryName":"evil-c2.example","image":"cmd.exe"}}}'
+
+- none: [107014, 107015, 107016]   # giả mạo qua syslog 514: dòng `8:syscheck:{...}` không được decoder syscheck nhận từ thiết bị syslog (không ra 554 / 550)
+  legacy: TI-001
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+  - '8:syscheck:{"type":"event","data":{"path":"/tmp/x","mode":"scheduled","type":"added","timestamp":1767225600,"attributes":{"type":"file","size":10,"hash_md5":"44d88612fea8a8f36de82e1278abb02f","hash_sha256":"275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f","inode":1}}}'

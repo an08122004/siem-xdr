@@ -9,9 +9,12 @@ hiện giá trị mới nhất (tô màu theo đích) và xu hướng; console �
   Báo nhầm   alert kết luận báo nhầm / alert đã đóng
   Tải        alert mỗi analyst mỗi ca (SOC_SHIFTS_PER_DAY ca / ngày, analyst = người đã xử lý alert / case trong kỳ)
   Làm giàu   % alert có ngữ cảnh tài sản (asset.*) từ danh mục tài sản
-  ATT&CK     % kỹ thuật ưu tiên (config/threat_profile.yml) có rule chạy chính thức đã kiểm thử (detection/lint.py)
+  ATT&CK     % kỹ thuật ưu tiên (config/threat_profile.yml) có ít nhất một rule đang bật trong siem-rules: YAML chính thức đã
+             kiểm thử hoặc rule Wazuh không bóng / không tắt (rules_catalog.attack_coverage); ghi nguồn yaml / wazuh / both
   Nguồn log  % nguồn đã onboard không im lặng (siem-sources, soar/health.py)
   Hunting    số cuộc hunt hoàn thành trong kỳ (siem-hunts)
+Mọi KPI có mẫu số là "alert" chỉ tính alert PHÁT HIỆN (R62): alert.source rule / wazuh / ml, không bóng. Loại rba (cộng dồn
+điểm rủi ro, TTD tính từ event đầu cửa sổ tích lũy), health (sự cố nền tảng), retrohunt (TI-002, dò lại event cũ).
 Alert của rule chạy bóng không tính vào KPI."""
 from __future__ import annotations
 
@@ -28,6 +31,7 @@ IDX_KPI = "siem-kpi"
 IDX_SOURCES = "siem-sources"
 IDX_HUNTS = "siem-hunts"
 NOT_SHADOW = {"term": {"alert.shadow": True}}
+DETECTION_SOURCES = ["rule", "wazuh", "ml"]          # R62: nguồn alert dùng làm mẫu số / TTD của KPI
 # Đích theo kế hoạch SOC (bảng KPI): (cuối giai đoạn 2, cuối giai đoạn 4, hướng tốt: "low" = càng thấp càng tốt)
 TARGETS: dict[str, tuple[float | None, float, str]] = {
     "mttd_critical_s": (30 * 60, 15 * 60, "low"),
@@ -72,7 +76,8 @@ def compute(es, rules_dir: Path | None = None, config_dir: Path | None = None, d
 
     # ---------------------------------------------------------------- alert
     a = es.search(index=settings.IDX_ALERTS, size=0, query={"bool": {
-        "filter": [{"range": {"@timestamp": {"gte": since}}}], "must_not": [NOT_SHADOW]}}, aggs={
+        "filter": [{"range": {"@timestamp": {"gte": since}}}, {"terms": {"alert.source": DETECTION_SOURCES}}],
+        "must_not": [NOT_SHADOW]}}, aggs={
         "ttd_crit": {"filter": {"term": {"severity": "critical"}}, "aggs": {"v": {"avg": {"field": "metrics.ttd_seconds"}}}},
         "ttd": {"avg": {"field": "metrics.ttd_seconds"}},
         "closed": {"filter": {"terms": {"alert.status": ["closed", "false_positive"]}}},
@@ -163,8 +168,24 @@ def compute(es, rules_dir: Path | None = None, config_dir: Path | None = None, d
     if rules_dir:
         from ..detection.lint import lint
         rep = lint(rules_dir, config_dir)
-        doc["attack_coverage_pct"] = rep.coverage_pct()
-        doc["attack_coverage"] = [{k: c[k] for k in ("id", "name", "covered", "rules")} for c in rep.coverage]
+        cov, doc["attack_coverage_source"] = rep.coverage, "lint-yaml"
+        try:   # R49: rule YAML đang bật HOẶC rule Wazuh đang bật và ra alert (thư viện siem-rules)
+            from ..rules_catalog import attack_coverage
+            hits = es.search(index=settings.IDX_RULES, size=10000, track_total_hits=True, sort=[{"_doc": "asc"}],
+                             query={"terms": {"origin": ["rule", "wazuh_rule"]}},
+                             _source=["origin", "source", "rule.id", "mode", "shadow", "bridged", "status", "tests", "mitre.technique"])
+            rows = [h["_source"] for h in hits["hits"]["hits"]]
+            total = hits["hits"]["total"]["value"]
+            if total > len(rows):
+                log.warning("độ phủ ATT&CK: siem-rules có %s rule, chỉ đọc %s", total, len(rows))
+            if any(r.get("origin") == "wazuh_rule" for r in rows) or not settings.RULE_ENGINE_ENABLED:      # chưa có rule Wazuh (khởi động đầu, API Wazuh tắt) = lùi về lint
+                cov, doc["attack_coverage_source"] = attack_coverage(rows, rep.profile), "siem-rules"
+            else:
+                log.warning("độ phủ ATT&CK: siem-rules chưa có rule Wazuh, dùng kết quả lint YAML")
+        except Exception as e:  # noqa: BLE001
+            log.warning("độ phủ ATT&CK: không đọc được %s, dùng kết quả lint YAML: %s", settings.IDX_RULES, e)
+        doc["attack_coverage_pct"] = _pct(sum(c["covered"] for c in cov), len(cov)) or 0.0
+        doc["attack_coverage"] = [{k: c.get(k) for k in ("id", "name", "covered", "rules", "rules_n", "sources")} for c in cov]
         doc["rules"] = {"total": len(rep.rules), "shadow": sum(r.mode == "shadow" for r in rep.rules.values()),
                         "tested": sum(r.tested for r in rep.rules.values()), "lint_errors": len(rep.errors)}
     doc["grade"] = {k: grade(k, doc.get(k)) for k in TARGETS}

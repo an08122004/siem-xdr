@@ -1,0 +1,49 @@
+<!--
+  FIM-001 (toàn vẹn file / registry ở nơi kẻ tấn công duy trì truy cập), bật từ 05/11/2026 (R65). Dải ID 106000-106999.
+  Ruleset gốc chấm file mới (554) level 5, file sửa (550) level 7, giá trị registry mới / sửa (752 / 750) level 5 cho MỌI đường dẫn; ở đây là rule CON của các rule đó, lọc theo
+  đường dẫn (trường `file`: với registry là đường dẫn khóa), nâng lên level 10. Rule con cùng cha nhưng khác đường dẫn với 100100 / 100101 (thư mục web, 0100-platform.xml) nên không tranh nhau.
+  File xếp SAU 0015-ossec_rules.xml (chứa 550 / 554 / 750 / 752) và 0100-platform.xml. Wazuh nạp theo tên file, rule con phải nằm sau cha.
+  Như rule cũ: chỉ file / giá trị MỚI hoặc SỬA (không xóa: 553 vẫn là rule gốc); bỏ thư mục nhị phân (/usr/bin, System32) và known_hosts vì đổi theo mỗi lần cập nhật gói / SSH ra ngoài.
+  Windows so khớp không phân biệt hoa thường ((?i)); Linux phân biệt. Ca registry bơm bằng value_name riêng của ca (tools/wazuh_rule_test.py).
+-->
+<group name="local,syscheck,siem-xdr,">
+  <!-- FIM-001 Linux: cron, unit systemd, PAM, ld.so.preload, profile.d, rc.local, tài khoản, sudoers, authorized_keys, cấu hình SSH -->
+  <rule id="106001" level="10">
+    <if_sid>550, 554</if_sid>
+    <field name="file" type="pcre2">^/etc/(passwd|shadow|group|gshadow|sudoers|crontab|rc\.local|ld\.so\.preload)$|^/etc/(sudoers\.d|cron\.[a-z]+|pam\.d|systemd/system|profile\.d)/|^/var/spool/cron/|^/etc/ssh/sshd_config|^/(root|home/[^/]+)/\.ssh/authorized_keys2?$</field>
+    <description>FIM-001 Thay đổi file duy trì truy cập (Linux): $(file)</description>
+    <mitre>
+      <id>T1053.003</id>
+      <id>T1543.002</id>
+      <id>T1098.004</id>
+      <id>T1556.003</id>
+      <id>T1574.006</id>
+      <id>T1546.004</id>
+      <id>T1037.004</id>
+      <id>T1548.003</id>
+    </mitre>
+    <group>siem,fim,legacy_FIM-001,</group>
+  </rule>
+
+  <!-- FIM-001 Windows: lối tắt / file trong thư mục Startup -->
+  <rule id="106002" level="10">
+    <if_sid>550, 554</if_sid>
+    <field name="file" type="pcre2">(?i)\\start menu\\programs\\startup\\</field>
+    <description>FIM-001 Thay đổi file trong thư mục Startup (Windows): $(file)</description>
+    <mitre>
+      <id>T1547.001</id>
+    </mitre>
+    <group>siem,fim,legacy_FIM-001,</group>
+  </rule>
+
+  <!-- FIM-001 registry: giá trị mới / sửa trong khóa Run / RunOnce (750 sửa, 752 mới) -->
+  <rule id="106003" level="10">
+    <if_sid>750, 752</if_sid>
+    <field name="file" type="pcre2">(?i)\\currentversion\\run(once)?$</field>
+    <description>FIM-001 Giá trị mới / sửa trong khóa Run (registry): $(file)</description>
+    <mitre>
+      <id>T1547.001</id>
+    </mitre>
+    <group>siem,fim,legacy_FIM-001,</group>
+  </rule>
+</group>

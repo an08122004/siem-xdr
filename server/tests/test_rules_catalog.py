@@ -163,9 +163,14 @@ class FakeES:
             return {"hits": {"hits": [{"_id": p["id"], "_source": p} for p in PROPOSALS]}}
         raise ConnectionError("chưa có alert")                                   # danh mục vẫn dựng được
 
+    fail_ids: set = frozenset()
+
     def bulk(self, operations, refresh=None):
         self.bulks.append(operations)
-        return {"errors": False, "items": []}
+        ids = [op["index"]["_id"] for op in operations if "index" in op]
+        return {"errors": bool(self.fail_ids & set(ids)),
+                "items": [{"index": {"_id": i, **({"status": 400, "error": "x"} if i in self.fail_ids else {"status": 200})}}
+                          for i in ids]}
 
     def delete_by_query(self, index, query, **kw):
         self.deleted.append(query)
@@ -173,15 +178,16 @@ class FakeES:
 
 def test_sync_writes_once_and_removes_stale(rules_dir, monkeypatch):
     monkeypatch.setattr(rc, "_last_sig", None)
+    monkeypatch.setattr(rc, "_doc_sigs", {})
     es = FakeES()
     n = rc.sync(es, rules_dir)
     ids = [op["index"]["_id"] for op in es.bulks[0] if "index" in op]
     assert n == len(ids) and "rule:WEB-001" in ids and "proposal:p-sqli" in ids
-    assert es.deleted[0] == {"bool": {"must_not": [{"ids": {"values": ids}}]}}   # rule bị xóa / gỡ -> bản ghi cũ bị xóa
+    assert es.deleted[0] == {"bool": {"must_not": [{"ids": {"values": ids}}, {"term": {"origin": "wazuh_rule"}}]}}   # rule bị xóa / gỡ -> bản ghi cũ bị xóa
     assert rc.sync(es, rules_dir) == 0 and len(es.bulks) == 1                     # không đổi gì -> không ghi lại
     (rules_dir / "ai" / "AI-021.yml").unlink()                                    # gỡ rule AI
     rc.sync(es, rules_dir)
-    assert "rule:AI-021" not in [op["index"]["_id"] for op in es.bulks[1] if "index" in op]
+    assert "rule:AI-021" not in es.deleted[-1]["bool"]["must_not"][0]["ids"]["values"]   # chỉ xóa, không bản ghi nào đổi để gửi lại
 
 
 def test_catalog_metadata_false_positive_rate_detectors_and_coverage():
@@ -201,3 +207,117 @@ def test_catalog_metadata_false_positive_rate_detectors_and_coverage():
     assert len(cov) == 12 and cov["T1486"]["covered_text"] == "CHƯA CÓ" and "WIN-007" in cov["T1003"]["rules_text"]
     # bản ghi mới không làm lệch đếm "rule đang chạy" (e2e so số rule YAML với origin:rule)
     assert sum(d["origin"] == "rule" for d in docs.values()) == len(rep.rules)
+
+
+class FakeWazuh:
+    """GET /rules giả lập: 2 trang (limit 1) để kiểm tra phân trang."""
+    def __init__(self, fail=False):
+        self.fail, self.calls = fail, []
+        self.items = [
+            {"id": 5710, "level": 5, "description": "sshd: thử đăng nhập user không tồn tại", "groups": ["syslog", "sshd"],
+             "mitre": {"id": ["T1110"], "tactic": ["Credential Access"]}, "status": "enabled",
+             "filename": "0095-sshd_rules.xml", "relative_dirname": "ruleset/rules"},
+            {"id": 101010, "level": 10, "description": "Brute-force đăng nhập", "groups": ["auth", "shadow", "legacy_AUTH-001"],
+             "mitre": {"id": ["T1110"], "tactic": ["Credential Access"]}, "status": "disabled",
+             "filename": "ai.xml", "relative_dirname": "etc/rules-dynamic"}]
+
+    def rules(self, offset=0, limit=500):
+        self.calls.append(offset)
+        if self.fail:
+            raise ConnectionError("Wazuh API tắt")
+        return {"data": {"affected_items": self.items[offset:offset + 1], "total_affected_items": 2}}
+
+
+def test_wazuh_rule_docs_pages_and_maps(monkeypatch):
+    monkeypatch.setattr(rc, "WAZUH_PAGE", 1)
+    api = FakeWazuh()
+    docs = {d["rule"]["id"]: d for d in rc.wazuh_rule_docs(api, {"WZH-5710": {"d7": 3}})}
+    assert api.calls == [0, 1] and set(docs) == {"WZH-5710", "WZH-101010"}
+    stock, proj = docs["WZH-5710"], docs["WZH-101010"]
+    assert stock["severity"] == "low" and stock["shadow"] is False and stock["mode"] == "nobridge"   # R65: không còn bóng; level 5 < 7 không ra alert
+    assert stock["alerts"]["d7"] == 3 and stock["mitre"]["technique"] == ["T1110"] and stock["file"] == "ruleset/rules/0095-sshd_rules.xml"
+    assert proj["severity"] == "high" and proj["shadow"] is True and proj["legacy_id"] == "AUTH-001"
+    assert proj["mode"] == "off" and proj["status"] == "disabled" and proj["source"] == "wazuh" and proj["origin"] == "wazuh_rule" and "legacy_id" not in stock
+
+
+def test_wazuh_stock_docs_follow_shadow_setting(monkeypatch):
+    """Thư viện hiển thị rule gốc level 7-11 là chính thức (R65); WAZUH_STOCK_SHADOW=true thì lại là chạy bóng."""
+    api = FakeWazuh()
+    api.items[0]["level"] = 8
+    doc = next(d for d in rc.wazuh_rule_docs(api, {}) if d["rule"]["id"] == "WZH-5710")
+    assert doc["shadow"] is False and doc["mode"] == "active"
+    monkeypatch.setattr(rc.settings, "WAZUH_STOCK_SHADOW", True)
+    doc = next(d for d in rc.wazuh_rule_docs(FakeWazuh(), {}) if d["rule"]["id"] == "WZH-5710")
+    assert doc["shadow"] is True and doc["mode"] == "shadow"
+
+
+def test_sync_includes_wazuh_and_keeps_old_on_api_error(rules_dir, monkeypatch):
+    monkeypatch.setattr(rc, "_last_sig", None)
+    monkeypatch.setattr(rc, "_doc_sigs", {})
+    es = FakeES()
+    rc.sync(es, rules_dir, api=FakeWazuh())
+    ids = [op["index"]["_id"] for op in es.bulks[0] if "index" in op]
+    assert "rule:WZH-5710" in ids and "rule:WEB-001" in ids
+    rc.sync(es, rules_dir, api=FakeWazuh(fail=True), force=True)               # API tắt: vẫn ghi phần còn lại, không xóa rule Wazuh
+    ids2 = [op["index"]["_id"] for op in es.bulks[1] if "index" in op]
+    assert "rule:WZH-5710" not in ids2 and "rule:WEB-001" in ids2
+    assert {"term": {"origin": "wazuh_rule"}} in es.deleted[1]["bool"]["must_not"]
+    rc.sync(es, rules_dir, force=True)                                            # không truyền api: cũng không xóa rule Wazuh
+    assert {"term": {"origin": "wazuh_rule"}} in es.deleted[2]["bool"]["must_not"]
+    rc.sync(es, rules_dir, api=FakeWazuh(), force=True)                           # lấy thành công: được dọn bản ghi Wazuh thừa
+    assert es.deleted[3]["bool"]["must_not"] == [{"ids": {"values": [op["index"]["_id"] for op in es.bulks[3] if "index" in op]}}]
+
+
+def test_doc_signatures_only_for_stored_docs_and_pruned(rules_dir, monkeypatch):
+    monkeypatch.setattr(rc, "_last_sig", None)
+    monkeypatch.setattr(rc, "_doc_sigs", {})
+    es = FakeES()
+    es.fail_ids = {"rule:WEB-001"}
+    rc.sync(es, rules_dir)
+    sent = lambda n: [op["index"]["_id"] for op in es.bulks[n] if "index" in op]
+    assert "rule:WEB-001" not in rc._doc_sigs and "rule:AUTH-001" in rc._doc_sigs      # bản ghi lỗi không có chữ ký
+    es.fail_ids = set()
+    rc.sync(es, rules_dir)
+    assert sent(1) == ["rule:WEB-001"]                                                 # chỉ gửi lại bản ghi lỗi
+    (rules_dir / "auth.yml").rename(rules_dir / "auth.bak")                            # gỡ rule rồi trả lại y nguyên
+    rc.sync(es, rules_dir)
+    assert "rule:AUTH-001" not in rc._doc_sigs
+    (rules_dir / "auth.bak").rename(rules_dir / "auth.yml")
+    rc.sync(es, rules_dir)
+    assert "rule:AUTH-001" in sent(3)                                                  # xuất hiện lại -> gửi lại
+
+
+def test_doc_signatures_keep_wazuh_when_api_fails(rules_dir, monkeypatch):
+    monkeypatch.setattr(rc, "_last_sig", None)
+    monkeypatch.setattr(rc, "_doc_sigs", {})
+    es = FakeES()
+    rc.sync(es, rules_dir, api=FakeWazuh())
+    assert "rule:WZH-5710" in rc._doc_sigs
+    rc.sync(es, rules_dir, api=FakeWazuh(fail=True))
+    assert "rule:WZH-5710" in rc._doc_sigs                                             # API lỗi: không cắt chữ ký rule Wazuh
+
+
+def test_wazuh_rule_docs_not_bridged_never_counts_as_running():
+    """Rule bật nhưng cầu nối bỏ (syscheck level 5, sca mọi level, rule dự án level 2) không ra alert: không "chính thức"."""
+    from siem.rules_catalog import attack_coverage
+
+    class Api:
+        def rules(self, offset=0, limit=500):
+            mk = lambda i, lv, g, f="x.xml", d="ruleset/rules": {"id": i, "level": lv, "groups": g, "status": "enabled", "filename": f,
+                                                               "relative_dirname": d, "mitre": {"id": ["T1110"]}}
+            return {"data": {"total_affected_items": 4, "affected_items": [
+                mk(550, 5, ["syscheck"]), mk(19007, 12, ["sca"]), mk(101099, 2, ["auth"], "0101-auth.xml", "etc/rules"),
+                mk(101100, 5, ["auth"], "0101-auth.xml", "etc/rules")]}}
+    docs = {d["rule"]["id"]: d for d in rc.wazuh_rule_docs(Api(), {})}
+    for rid in ("WZH-550", "WZH-19007", "WZH-101099"):
+        assert docs[rid]["bridged"] is False and docs[rid]["mode"] == "nobridge" and docs[rid]["mode_label"] == "không tạo alert"
+    assert docs["WZH-101100"]["bridged"] is True and docs["WZH-101100"]["mode"] in ("active", "shadow")
+    only_bad = [docs[r] for r in ("WZH-550", "WZH-19007", "WZH-101099")]
+    assert not attack_coverage(only_bad, {"techniques": [{"id": "T1110"}]})[0]["covered"]
+
+
+def test_yaml_rule_docs_are_off_when_engine_disabled(rules_dir, monkeypatch):
+    """R65: engine YAML tắt -> thư viện ghi mode off, nhãn "đã tắt (engine YAML)"."""
+    monkeypatch.setattr(rc.settings, "RULE_ENGINE_ENABLED", False)
+    docs = rc.rule_docs(rules_dir, {})
+    assert docs and all(d["mode"] == "off" and d["mode_label"] == "đã tắt (engine YAML)" for d in docs)

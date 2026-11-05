@@ -18,9 +18,9 @@
   "graphTooltip": 1,
   "panels": [
     {
-      "id": 50,
+      "id": 54,
       "type": "row",
-      "title": "Tổng quan thư viện",
+      "title": "Tổng quan thư viện (rule YAML + rule Wazuh)",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -31,9 +31,9 @@
       "panels": []
     },
     {
-      "id": 51,
+      "id": 55,
       "type": "stat",
-      "title": "Rule đang chạy",
+      "title": "Rule đang chạy (YAML + Wazuh, tạo alert thật)",
       "datasource": {
         "type": "elasticsearch",
         "uid": "siem-rules"
@@ -51,7 +51,7 @@
             "type": "elasticsearch",
             "uid": "siem-rules"
           },
-          "query": "origin:rule",
+          "query": "origin:(rule OR wazuh_rule) AND mode:active",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -100,9 +100,9 @@
       }
     },
     {
-      "id": 52,
+      "id": 56,
       "type": "stat",
-      "title": "Rule do AI viết (đã duyệt)",
+      "title": "Rule chạy bóng (đo thử, không ra alert thật)",
       "datasource": {
         "type": "elasticsearch",
         "uid": "siem-rules"
@@ -111,6 +111,351 @@
         "x": 4,
         "y": 1,
         "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "elasticsearch",
+            "uid": "siem-rules"
+          },
+          "query": "origin:(rule OR wazuh_rule) AND mode:shadow",
+          "alias": "",
+          "timeField": "@timestamp",
+          "metrics": [
+            {
+              "id": "1",
+              "type": "count"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "id": "2",
+              "type": "date_histogram",
+              "field": "@timestamp",
+              "settings": {
+                "interval": "auto",
+                "min_doc_count": "0"
+              }
+            }
+          ]
+        }
+      ],
+      "maxDataPoints": 30,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#6b7280"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 57,
+      "type": "stat",
+      "title": "Rule Wazuh không cầu nối (không ra alert)",
+      "datasource": {
+        "type": "elasticsearch",
+        "uid": "siem-rules"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "elasticsearch",
+            "uid": "siem-rules"
+          },
+          "query": "origin:(rule OR wazuh_rule) AND mode:nobridge",
+          "alias": "",
+          "timeField": "@timestamp",
+          "metrics": [
+            {
+              "id": "1",
+              "type": "count"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "id": "2",
+              "type": "date_histogram",
+              "field": "@timestamp",
+              "settings": {
+                "interval": "auto",
+                "min_doc_count": "0"
+              }
+            }
+          ]
+        }
+      ],
+      "maxDataPoints": 30,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#6b7280"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 58,
+      "type": "stat",
+      "title": "Rule đã tắt",
+      "datasource": {
+        "type": "elasticsearch",
+        "uid": "siem-rules"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "elasticsearch",
+            "uid": "siem-rules"
+          },
+          "query": "origin:(rule OR wazuh_rule) AND mode:off",
+          "alias": "",
+          "timeField": "@timestamp",
+          "metrics": [
+            {
+              "id": "1",
+              "type": "count"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "id": "2",
+              "type": "date_histogram",
+              "field": "@timestamp",
+              "settings": {
+                "interval": "auto",
+                "min_doc_count": "0"
+              }
+            }
+          ]
+        }
+      ],
+      "maxDataPoints": 30,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#6b7280"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 59,
+      "type": "stat",
+      "title": "Rule Wazuh (tổng, mọi chế độ)",
+      "datasource": {
+        "type": "elasticsearch",
+        "uid": "siem-rules"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "elasticsearch",
+            "uid": "siem-rules"
+          },
+          "query": "origin:wazuh_rule",
+          "alias": "",
+          "timeField": "@timestamp",
+          "metrics": [
+            {
+              "id": "1",
+              "type": "count"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "id": "2",
+              "type": "date_histogram",
+              "field": "@timestamp",
+              "settings": {
+                "interval": "auto",
+                "min_doc_count": "0"
+              }
+            }
+          ]
+        }
+      ],
+      "maxDataPoints": 30,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#6b7280"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 60,
+      "type": "stat",
+      "title": "Rule im lặng 7 ngày (đang chạy)",
+      "datasource": {
+        "type": "elasticsearch",
+        "uid": "siem-rules"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "elasticsearch",
+            "uid": "siem-rules"
+          },
+          "query": "origin:(rule OR wazuh_rule) AND mode:active AND alerts.d7:0",
+          "alias": "",
+          "timeField": "@timestamp",
+          "metrics": [
+            {
+              "id": "1",
+              "type": "count"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "id": "2",
+              "type": "date_histogram",
+              "field": "@timestamp",
+              "settings": {
+                "interval": "auto",
+                "min_doc_count": "0"
+              }
+            }
+          ]
+        }
+      ],
+      "maxDataPoints": 30,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#6b7280"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 61,
+      "type": "stat",
+      "title": "Rule do AI viết (đã duyệt)",
+      "datasource": {
+        "type": "elasticsearch",
+        "uid": "siem-rules"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 6,
         "h": 4
       },
       "targets": [
@@ -169,7 +514,7 @@
       }
     },
     {
-      "id": 53,
+      "id": 62,
       "type": "stat",
       "title": "Ngoại lệ đang áp dụng",
       "datasource": {
@@ -177,9 +522,9 @@
         "uid": "siem-rules"
       },
       "gridPos": {
-        "x": 8,
-        "y": 1,
-        "w": 4,
+        "x": 6,
+        "y": 5,
+        "w": 6,
         "h": 4
       },
       "targets": [
@@ -238,7 +583,7 @@
       }
     },
     {
-      "id": 54,
+      "id": 63,
       "type": "stat",
       "title": "Đề xuất AI chờ duyệt",
       "datasource": {
@@ -247,8 +592,8 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 1,
-        "w": 4,
+        "y": 5,
+        "w": 6,
         "h": 4
       },
       "targets": [
@@ -307,7 +652,7 @@
       }
     },
     {
-      "id": 55,
+      "id": 64,
       "type": "stat",
       "title": "Đề xuất không đạt kiểm định",
       "datasource": {
@@ -315,9 +660,9 @@
         "uid": "siem-rules"
       },
       "gridPos": {
-        "x": 16,
-        "y": 1,
-        "w": 4,
+        "x": 18,
+        "y": 5,
+        "w": 6,
         "h": 4
       },
       "targets": [
@@ -327,7 +672,7 @@
             "type": "elasticsearch",
             "uid": "siem-rules"
           },
-          "query": "origin:ai_proposal AND proposal.passed:false",
+          "query": "origin:ai_proposal AND proposal.status:invalid",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -376,85 +721,16 @@
       }
     },
     {
-      "id": 56,
-      "type": "stat",
-      "title": "Rule im lặng 7 ngày",
-      "datasource": {
-        "type": "elasticsearch",
-        "uid": "siem-rules"
-      },
-      "gridPos": {
-        "x": 20,
-        "y": 1,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "elasticsearch",
-            "uid": "siem-rules"
-          },
-          "query": "origin:rule AND alerts.d7:0",
-          "alias": "",
-          "timeField": "@timestamp",
-          "metrics": [
-            {
-              "id": "1",
-              "type": "count"
-            }
-          ],
-          "bucketAggs": [
-            {
-              "id": "2",
-              "type": "date_histogram",
-              "field": "@timestamp",
-              "settings": {
-                "interval": "auto",
-                "min_doc_count": "0"
-              }
-            }
-          ]
-        }
-      ],
-      "maxDataPoints": 30,
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "sum"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "none",
-        "graphMode": "area",
-        "textMode": "value",
-        "justifyMode": "auto"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "#6b7280"
-          },
-          "unit": "short",
-          "decimals": 0
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 57,
+      "id": 65,
       "type": "table",
-      "title": "Rule theo MITRE tactic",
+      "title": "Rule đang chạy theo MITRE tactic",
       "datasource": {
         "type": "elasticsearch",
         "uid": "siem-rules"
       },
       "gridPos": {
         "x": 0,
-        "y": 5,
+        "y": 9,
         "w": 8,
         "h": 8
       },
@@ -465,7 +741,7 @@
             "type": "elasticsearch",
             "uid": "siem-rules"
           },
-          "query": "origin:rule",
+          "query": "origin:(rule OR wazuh_rule) AND mode:active",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -549,7 +825,7 @@
       }
     },
     {
-      "id": 58,
+      "id": 66,
       "type": "table",
       "title": "Đề xuất AI theo trạng thái",
       "datasource": {
@@ -558,7 +834,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 5,
+        "y": 9,
         "w": 8,
         "h": 8
       },
@@ -653,16 +929,16 @@
       }
     },
     {
-      "id": 59,
+      "id": 67,
       "type": "table",
-      "title": "Rule kêu nhiều nhất (7 ngày)",
+      "title": "Rule kêu nhiều nhất (7 ngày): mã rule và tên",
       "datasource": {
         "type": "elasticsearch",
         "uid": "siem-rules"
       },
       "gridPos": {
         "x": 16,
-        "y": 5,
+        "y": 9,
         "w": 8,
         "h": 8
       },
@@ -673,7 +949,7 @@
             "type": "elasticsearch",
             "uid": "siem-rules"
           },
-          "query": "origin:rule AND alerts.d7:>0",
+          "query": "origin:(rule OR wazuh_rule) AND alerts.d7:>0",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -687,11 +963,22 @@
             {
               "id": "3",
               "type": "terms",
-              "field": "rule.name",
+              "field": "rule.id",
               "settings": {
                 "size": "10",
                 "order": "desc",
                 "orderBy": "1",
+                "min_doc_count": "1"
+              }
+            },
+            {
+              "id": "4",
+              "type": "terms",
+              "field": "rule.name",
+              "settings": {
+                "size": "1",
+                "order": "desc",
+                "orderBy": "_count",
                 "min_doc_count": "1"
               }
             }
@@ -758,20 +1045,20 @@
       }
     },
     {
-      "id": 60,
+      "id": 68,
       "type": "row",
       "title": "Danh sách rule, ngoại lệ, đề xuất AI — lọc bằng các ô phía trên",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 13,
+        "y": 17,
         "w": 24,
         "h": 1
       },
       "panels": []
     },
     {
-      "id": 61,
+      "id": 69,
       "type": "table",
       "title": "Rule và đề xuất AI — bấm mã rule xem cảnh báo của rule, bấm trạng thái đề xuất để mở trên console",
       "datasource": {
@@ -780,7 +1067,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 14,
+        "y": 18,
         "w": 24,
         "h": 16
       },
@@ -1065,20 +1352,20 @@
       }
     },
     {
-      "id": 62,
+      "id": 70,
       "type": "row",
       "title": "So sánh đề xuất AI với rule hiện có — chọn đề xuất ở ô “Đề xuất cần so sánh”",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 30,
+        "y": 34,
         "w": 24,
         "h": 1
       },
       "panels": []
     },
     {
-      "id": 63,
+      "id": 71,
       "type": "table",
       "title": "Đề xuất đã chọn",
       "datasource": {
@@ -1087,7 +1374,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 31,
+        "y": 35,
         "w": 24,
         "h": 6
       },
@@ -1321,7 +1608,7 @@
       }
     },
     {
-      "id": 64,
+      "id": 72,
       "type": "table",
       "title": "Rule hiện có liên quan — điều kiện hai bên đặt cạnh nhau, xếp theo mức liên quan",
       "datasource": {
@@ -1330,7 +1617,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 37,
+        "y": 41,
         "w": 24,
         "h": 14
       },
@@ -1624,10 +1911,10 @@
         "type": "custom",
         "name": "origin",
         "label": "Hiển thị",
-        "query": "Tất cả : (rule OR ai_proposal OR exception),Rule đang chạy : rule,Đề xuất AI : ai_proposal,Ngoại lệ : exception",
+        "query": "Tất cả : (rule OR wazuh_rule OR ai_proposal OR exception),Rule YAML của dự án : rule,Rule Wazuh : wazuh_rule,Đề xuất AI : ai_proposal,Ngoại lệ : exception",
         "current": {
           "text": "Tất cả",
-          "value": "(rule OR ai_proposal OR exception)"
+          "value": "(rule OR wazuh_rule OR ai_proposal OR exception)"
         }
       },
       {
@@ -1640,7 +1927,7 @@
         },
         "refresh": 1,
         "sort": 1,
-        "query": "{\"find\": \"terms\", \"field\": \"mitre.tactic\", \"query\": \"origin:(rule OR ai_proposal OR exception)\", \"size\": 300}",
+        "query": "{\"find\": \"terms\", \"field\": \"mitre.tactic\", \"query\": \"origin:(rule OR wazuh_rule OR ai_proposal OR exception)\", \"size\": 300}",
         "includeAll": true,
         "multi": true,
         "allValue": "*",
@@ -1659,7 +1946,7 @@
         },
         "refresh": 1,
         "sort": 1,
-        "query": "{\"find\": \"terms\", \"field\": \"tags\", \"query\": \"origin:(rule OR ai_proposal OR exception)\", \"size\": 300}",
+        "query": "{\"find\": \"terms\", \"field\": \"tags\", \"query\": \"origin:(rule OR wazuh_rule OR ai_proposal OR exception)\", \"size\": 300}",
         "includeAll": true,
         "multi": true,
         "allValue": "*",
@@ -1678,7 +1965,7 @@
         },
         "refresh": 1,
         "sort": 1,
-        "query": "{\"find\": \"terms\", \"field\": \"fields\", \"query\": \"origin:(rule OR ai_proposal OR exception)\", \"size\": 300}",
+        "query": "{\"find\": \"terms\", \"field\": \"fields\", \"query\": \"origin:(rule OR wazuh_rule OR ai_proposal OR exception)\", \"size\": 300}",
         "includeAll": true,
         "multi": true,
         "allValue": "*",

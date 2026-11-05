@@ -11,7 +11,7 @@ volume với hệ thống (không lẫn vào ES / dashboard, không kích hoạt
     docker rm -f wazuh-bench
 
 Định dạng như agent gửi:
-  web     : dòng access log Apache (CSIC 2010), hàng đợi '1', location /var/log/apache2/access.log
+  web     : dòng access log Apache (CSIC 2010), hàng đợi '1', location dạng agent "[001] (demo-web) any->/var/log/apache2/access.log" (rule dự án ràng vị trí agent)
   windows : Sysmon EventID 1 dạng {"Message", "Event": <XML>} như agent Windows, hàng đợi 'f' (eventchannel)
   linux   : bản ghi auditd SYSCALL + EXECVE + CWD, key audit-wazuh-c (quy tắc audit Wazuh hướng dẫn để ghi lệnh root),
             hàng đợi '1', location /var/log/audit/audit.log
@@ -120,8 +120,10 @@ def audit_message(aid: int, exe: str, cmd: str, ppid: int = 3999, uid: int = 0) 
 
 
 # ---------------------------------------------------------------- dataset
-def load_items() -> list[dict]:
-    """Mỗi item: domain, class (attack / normal), group, msg (gửi Wazuh), doc (đã chuẩn hóa, cho rule tự viết)."""
+def load_items(extra_normal: bool = False) -> list[dict]:
+    """extra_normal: thêm lệnh endpoint bình thường ghi thật (splunk-background, scenario-background) cho tools/wazuh_noise.py;
+    báo cáo độ phủ không dùng (giữ nguyên số liệu của nó).
+    Mỗi item: domain, class (attack / normal), group, msg (gửi Wazuh), doc (đã chuẩn hóa, cho rule tự viết)."""
     from siem import settings
     from siem.ai.baseline import LINUX, WINDOWS, ordinary_processes
     from siem.ai.golden import PublicDatasets
@@ -136,14 +138,14 @@ def load_items() -> list[dict]:
         line = r["data"]["message"]
         assert get(x.doc, "source.ip") == line.split(" ", 1)[0]
         items.append({"domain": "web", "class": "attack", "group": g.attack_type(x), "line": line,
-                      "msg": "1:/var/log/apache2/access.log:" + line, "doc": x.doc})
-    web_normal = [x for x in g.normal if x.label.get("dataset") != "baseline-endpoint"]
+                      "msg": "1:[001] (demo-web) any->/var/log/apache2/access.log:" + line, "doc": x.doc})
+    web_normal = [x for x in g.normal if x.label.get("dataset") == "csic2010"]
     raw_normal = list(_read("csic_normal.jsonl.gz"))
     assert len(web_normal) == len(raw_normal)
     for x, r in zip(web_normal, raw_normal):
         line = r["data"]["message"]
         items.append({"domain": "web", "class": "normal", "group": "normal", "line": line,
-                      "msg": "1:/var/log/apache2/access.log:" + line, "doc": x.doc})
+                      "msg": "1:[001] (demo-web) any->/var/log/apache2/access.log:" + line, "doc": x.doc})
     atomic = [x for x in g.attack if x.label.get("dataset") == "atomic-red-team"]
     raw_atomic = list(_read("atomic.jsonl.gz"))
     assert len(atomic) == len(raw_atomic)
@@ -165,6 +167,21 @@ def load_items() -> list[dict]:
             it["build"] = (("windows", image, cmd, parent, parent, "COMPANY\\lan") if platform == "windows"
                            else ("linux", image, cmd))
             items.append(it)
+    if extra_normal:
+        for x in g.normal:
+            ds = x.label.get("dataset")
+            if ds not in ("splunk-background", "scenario-background"):
+                continue
+            d, platform = x.doc, x.label["platform"]
+            cmd = str(get(d, "process.command_line") or "")
+            exe = str(get(d, "process.executable") or get(d, "process.name") or "")
+            if not exe:
+                continue
+            it = {"domain": platform, "class": "normal", "group": "normal", "dataset": ds, "doc": d}
+            it["build"] = (("windows", exe, cmd, str(get(d, "process.parent.executable") or get(d, "process.parent.name") or ""),
+                            str(get(d, "process.parent.command_line") or ""), str(get(d, "user.name") or "COMPANY\\lan"))
+                           if platform == "windows" else ("linux", exe, cmd))
+            items.append(it)
     for i, it in enumerate(items):
         it["i"] = i
         b = it.pop("build", None)
@@ -183,6 +200,9 @@ def docker(*args: str, **kw) -> subprocess.CompletedProcess:
 def analysisd_counters() -> dict[str, float]:
     out = docker("exec", CONTAINER, "cat", "/var/ossec/var/run/wazuh-analysisd.state").stdout
     return {k: float(v.strip("'")) for k, v in re.findall(r"^(\w+)='?([\d.]+)'?$", out, re.M)}
+
+
+LAST_SENT = 0      # số event run_wazuh gửi được lần gần nhất (để bên gọi kiểm bơm có hỏng không)
 
 
 def run_wazuh(items: list[dict]) -> list[dict]:
@@ -205,6 +225,8 @@ def run_wazuh(items: list[dict]) -> list[dict]:
             done = c.get("events_processed", 0) - before.get("events_processed", 0)
             stable = stable + 1 if done == last else 0
             last = done
+        global LAST_SENT
+        LAST_SENT = int(sent)
         print(f"đã gửi {sent} event, analysisd xử lý {last:.0f}, bỏ {c.get('events_dropped', 0):.0f} "
               f"({time.time() - t0:.0f}s)")
         out = Path(tmp) / "alerts.json"

@@ -677,7 +677,7 @@ def parse_wazuh(ev: Doc, doc: Doc) -> None:
     elif isinstance(data.get("win"), dict):
         _wazuh_windows(data["win"], doc, ag.get("name"))
     # chỉ tin file do CHÍNH manager đọc (agent 000): agent đã enroll bị chiếm đặt được location giống hệt trong event của nó
-    elif ag.get("id") == "000" and loc == settings.CONSOLE_AUDIT_WAZUH_PATH and (rec := _console_line(full)) is not None:
+    elif ag.get("id") == "000" and loc == settings.CONSOLE_AUDIT_WAZUH_PATH and (rec := _console_rec(full, data)) is not None:
         _wazuh_console(rec, doc)
     elif full and _SIEM_XDR_LOC.search(loc) and (m := _SIEM_XDR.match(full)):
         _wazuh_response(m, doc)
@@ -717,6 +717,18 @@ def _console_line(full: str) -> Doc | None:
     except ValueError:
         return None
     return rec if isinstance(rec, dict) else None
+
+
+def _console_rec(full: str, data: Doc) -> Doc | None:
+    """Alert của rule console không có full_log (rule gốc no_full_log): dựng lại từ trường Wazuh đã giải mã (dstuser -> user)."""
+    if full:
+        return _console_line(full)
+    if not data.get("action"):
+        return None
+    rec = {("user" if k == "dstuser" else k): v for k, v in data.items() if k != "srcip"}
+    if "ip" not in rec and data.get("srcip"):
+        rec["ip"] = data["srcip"]
+    return rec
 
 
 def _wazuh_console(rec: Doc, doc: Doc) -> None:

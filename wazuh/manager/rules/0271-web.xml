@@ -1,0 +1,251 @@
+<!--
+  Rule web (WEB-001..005, 007..009 của bộ rule cũ), bật từ 05/11/2026 (R65). Dải ID 104000-104999. KHÔNG ĐỔI TÊN FILE: tên phải xếp SAU 0270-web_appsec_rules.xml
+  (rule con của 31530 nằm ở 0270; if_sid trỏ tới rule ở file nạp sau thì bị bỏ "Signature ID not found") nên file này mang số 0271, không phải 0104 như bảng kế hoạch.
+  Đường vào: agent demo-web đọc /usr/local/apache2/logs/access_log (log_format apache), rule thấy location `(demo-web) any->/usr/local/apache2/logs/access_log` (S7);
+  rule chỉ nhận vị trí dạng agent (xem mục GIẢ MẠO QUA SYSLOG). Decoder gốc web-accesslog giải thành srcip, protocol (= phương thức GET/POST), url (cả query), id (= mã trạng thái).
+  User-Agent KHÔNG được giải mã thành trường: WEB-005 khớp <regex> trên chuỗi trong ngoặc kép CUỐI của dòng (không khớp tên công cụ chỉ nằm trong URL).
+
+  URL MÃ HÓA (S5): Wazuh KHÔNG giải mã URL (trường url giữ nguyên %xx), còn rule cũ khớp url.decoded. Mỗi regex vì thế bắt cả dạng thô lẫn dạng mã hóa của dấu nháy
+  (' %27 %2527 %u0027), =, (, ), ;, :, ., /, \, <, >, $ và dấu cách (+ %20 %2520 %09 và comment SQL rỗng /**/); UNION/SELECT còn bắt mã hóa từng chữ (%55NION, %53ELECT).
+  Giới hạn: từ khóa khác (script, passwd, sleep...) chỉ viết thô (cờ (?i) lo hoa/thường) vì XML của Wazuh từ chối chuỗi dài quá ~2000 ký tự ("Maximum string size reached");
+  mã hóa HAI lần ngoài dạng %25XX, hoặc mã hóa Unicode lạ (%c0%af, %ef%bc%87), chưa phủ. Mọi quantifier đều có chặn trên, không lồng nhau (ReDoS: WEB-001 cũ từng treo analyzer).
+  `&` viết \x26, `<` `>` viết \x3c \x3e trong regex (XML).
+
+  THỨ TỰ KHỚP (đã thử trên 4.14.8): các rule anh em dưới cùng cha được thử theo LEVEL GIẢM DẦN (cùng level: theo thứ tự nạp), nên rule của file này (level 7-12) thắng
+  rule gốc 31101/31103-5/31501-31516 (level 3-7); 31115 (13, URL quá dài có dấu ?) vẫn thắng rule WEB; 31168/31169 (15, Shellshock, con của 31108) vẫn tới được vì 104090/104005 cũng là con của 31108 (level thấp hơn) - đều CÓ ca, kể cả khi UA có thêm tên công cụ quét. Request không đơn giản (có ?) không bao giờ vào 31108 nên 31168/31169 vốn không với tới, có file này hay không. Rule cha là mọi rule gốc có thể là rule cuối của một request tấn công
+  (31100 31101 31103 31104 31105 31106 31108 31120-31123): 404 vào 31101 trước 31103, status 200 vào 31106 (con của 31103-31105), 5xx vào 31120-31123, nên phải treo vào tất cả.
+  Thứ tự trong file đi theo mức độ (critical trước): request vừa có RCE vừa có SQLi ra WEB-004; scanner UA (WEB-005, medium) đứng sau các rule payload.
+
+  HỆ QUẢ VỚI RULE GỐC (đã đo bằng ca test): event khớp rule của file này không còn là event của rule gốc đã chiếm nó trong lịch sử đếm, nên các rule gốc đếm
+  (31151 nhiều 4xx (T12: 30 lần/60 s, level 7), 31152 nhiều SQLi, 31153 nhiều tấn công thường, 31154 nhiều XSS (level 10); bật từ 05/11/2026, R65) KHÔNG đếm những request ấy nữa: lặp lại cùng một tấn công
+  nay ra từng alert WEB (level 7-12) chứ không còn alert tổng hợp. 404/4xx thường (không payload) và 31102/31140 giữ nguyên: 31151 vẫn báo sau 30 lần/60 s (có ca).
+  WEB-007 (login POST, kể cả 4xx) cũng lấy event khỏi 31101/31530; 31533 (8 POST/20 s, level 10) không đếm POST vào đường dẫn đăng nhập nữa, thay bằng WEB-007.
+
+  WEB-006 (>= 30 phản hồi 404/60 s) KHÔNG có rule ở đây: chỉ khác 31151 ở ngưỡng; Task 12 đã đè 31151 thành 30 lần 4xx/60 s, level 7 trong 0999-tuning.xml.
+  WEB-007: wp-login.php và /administrator POST đã có 31509 -> 31510 (8 POST/30 s, level 8), nên 104070 loại hai đường dẫn đó (nếu không 104070 level 2 sẽ nuốt 31509 và 31510 mất đếm);
+  phần còn thiếu của rule cũ (login, signin, auth, admin) là 104070 -> 104007 (10 POST/60 s như rule cũ). "admin" khớp cả /wp-admin/admin-ajax.php như rule cũ.
+  104070 phải là con của 31530 (level 3, "POST request received", no_log) vì anh em level 3 thắng level 2: ngược lại POST có dấu ? sẽ vào 31530, không vào bộ đếm.
+
+  WEB-009 (>= 300 request/60 s cùng nguồn): event cuối ở rule level 0 (31108 "request đơn giản", 31100 chưa khớp gì) KHÔNG vào lịch sử đếm. 104090 (level 2, không ra alert vì
+  log_alert_level 3) là con của 31100 và 31108 và nhận các request đó (trừ POST wp-login và /administrator để 31509/31510 sống). Level 2 nên chỉ thắng anh em level 0 (31108, 31511 bỏ qua wget...),
+  KHÔNG thắng rule gốc level >= 3: request đã ra 31101 (4xx), 31120 (5xx), 31530, rule tấn công... không được 104009 đếm. 4xx hàng loạt đã có 31151 (30/60 s, level 7 sau T12); tấn công đã có alert từng event.
+  104009 vì thế = >= 300 request THƯỜNG (2xx/3xx, không dính rule gốc cấp >= 3) trong 60 s. Đã thử đếm theo NHÓM (if_matched_group web) để gom cả 4xx: analysisd đếm gấp đôi (báo ở event 151) và
+  31151 (level 10 lúc đó) đánh dấu các event 404 nên rule level 10 không đếm lại được; bỏ cách đó. if_matched_sid 104090 báo đúng ở event thứ 300.
+  Rule level 0 khác (31102 404 của ảnh/css/js, 31140 crawler, 31141, 31107) vẫn KHÔNG được đếm.
+
+  GIẢ MẠO QUA SYSLOG: decoder gốc web-accesslog khớp bằng prematch trên nội dung dòng, không nhìn vị trí, nên một thiết bị syslog (vị trí là IP, ví dụ 10.10.40.254) gửi
+  dòng giống access log sẽ ra alert WEB giả. Mọi rule ở đây vì thế có <location type="pcre2">^\(</location>: chỉ nhận log từ AGENT (vị trí dạng `(tên) ip->đường dẫn`, S7).
+  Hệ quả: web server chỉ đẩy log qua syslog (không có agent) KHÔNG được phủ; muốn phủ phải cài agent.
+
+  RULE IOC GỐC (R56, 0999-malicious-ioc-rules.xml, nạp SAU file này): 99905 (level 9, con của 31103-31171) và 99906 (level 14, status 200, THẬT đang báo) báo khi srcip nằm trong
+  etc/lists/malicious-ioc/malicious-ip. Rule WEB là con của 31100 ở level 10-12 nên thắng mọi rule tấn công gốc và 99905/99906 không còn thấy dòng đó. Loại IP IOC khỏi rule WEB
+  (R54) bị bỏ vì làm mất dòng chỉ rule WEB bắt. Thay vào đó 104095 cổng 99906 sang nhánh rule WEB VÀ mở rộng nó (cố ý, cho IP đã biết là độc) tới cả tấn công chỉ rule WEB bắt, rule gốc 31103-31106 không bắt: con của mọi rule payload/UA, list match_key + <id>^200</id>, level 14,
+  không chạy bóng (phần cổng là hành vi gốc đang chạy thật, không phải phát hiện mới; <info>port_of_stock=99906</info>). Hệ quả đã đo:
+  IP IOC + tấn công rule WEB bắt + 200 -> 104095 (14); + 404 -> rule WEB (99905 level 9 gốc không còn báo dòng đó); tấn công chỉ rule gốc bắt -> 99905/99906 như cũ.
+  KHÔNG dùng `ignore` (Ràng buộc 7, R55): nó dập cả rule nên nguồn thứ hai trong cửa sổ bị lỡ; khử trùng ở cầu nối (Suppressor). Hệ quả: 104007/104009 báo ở MỌI event vượt ngưỡng
+  trong cửa sổ (có ca hai nguồn cùng lúc đều báo).
+
+  Mọi bộ đếm đều có <same_source_ip /> vì agent 000 dùng chung cho mọi thiết bị syslog, console và manager.
+-->
+<group name="local,siem-xdr,">
+  <rule id="104004" level="12">
+    <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
+    <location type="pcre2">^\(</location>
+    <url type="pcre2">(?i)(?:[;|`\x26]|%(?:3b|7c|60|26))(?:[+\s]|%(?:25)?20){0,8}(?:cat|ls|id|whoami|uname|wget|curl|nc|bash|sh|powershell|cmd)\b(?!(?:[+\s]|%(?:25)?20){0,8}(?:=|%3d))|(?:\$|%24)(?:\(|%28)(?:id|whoami|cat|curl|wget)</url>
+    <description>WEB-004 Chèn lệnh / RCE qua web: $(srcip) gửi $(url)</description>
+    <mitre>
+      <id>T1059</id>
+      <id>T1190</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-004,</group>
+  </rule>
+
+  <rule id="104041" level="12">
+    <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
+    <location type="pcre2">^\(</location>
+    <url type="pcre2">(?i)(?:\$|%24)(?:\{|%7b)jndi(?::|%3a)|cmd(?:\.|%(?:25)?2e)exe|(?:/|%(?:25)?2f)bin(?:/|%(?:25)?2f)(?:ba)?sh</url>
+    <description>WEB-004 Chèn lệnh / RCE qua web (jndi, cmd.exe, /bin/sh): $(srcip) gửi $(url)</description>
+    <mitre>
+      <id>T1059</id>
+      <id>T1190</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-004,</group>
+  </rule>
+
+  <rule id="104008" level="12">
+    <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
+    <location type="pcre2">^\(</location>
+    <url type="pcre2">(?i)^(?:[^?]{0,200}/(?:uploads?|images?|tmp|files)/[^/?]{1,100}\.(?:php|phtml|jsp|aspx?)|[^?]{0,200}(?:c99|r57|b374k|wso|shell|cmd)\.(?:php|jsp|aspx?))\?(?:[^#]{0,300}\x26)?(?:cmd|exec|command|c)(?:=|%3d)</url>
+    <description>WEB-008 Truy cập webshell: $(srcip) gọi $(url)</description>
+    <mitre>
+      <id>T1505.003</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-008,</group>
+  </rule>
+
+  <rule id="104001" level="10">
+    <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
+    <location type="pcre2">^\(</location>
+    <url type="pcre2">(?i)(?:u|%[57]5)(?:n|%[46]e)(?:i|%[46]9)(?:o|%[46]f)(?:n|%[46]e)(?:[\s\x2b]|%20|/\x2a\x2a/){1,8}(?:(?:a|%[46]1)(?:l|%[46]c)(?:l|%[46]c)(?:[\s\x2b]|%20|/\x2a\x2a/){1,8})?(?:s|%[57]3)(?:e|%[46]5)(?:l|%[46]c)(?:e|%[46]5)(?:c|%[46]3)(?:t|%[57]4)</url>
+    <description>WEB-001 SQL injection (UNION SELECT): $(srcip) gửi $(url)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-001,</group>
+  </rule>
+
+  <rule id="104013" level="10">
+    <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
+    <location type="pcre2">^\(</location>
+    <url type="pcre2">(?i)waitfor(?:[+\s]|%(?:25)?20){1,8}delay|(?:information_schema|sysobjects|(?:@|%40){2}version)</url>
+    <description>WEB-001 SQL injection (WAITFOR DELAY, information_schema, @@version): $(srcip) gửi $(url)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-001,</group>
+  </rule>
+
+  <rule id="104011" level="10">
+    <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
+    <location type="pcre2">^\(</location>
+    <url type="pcre2">(?i)(?:'|%(?:25)?27|%u0027)(?:[+\s]|%(?:25)?20){0,8}(?:or|and)(?:[+\s]|%(?:25)?20){0,8}(?:'|%(?:25)?27|%u0027)?\d{1,10}(?:'|%(?:25)?27|%u0027)?(?:[+\s]|%(?:25)?20){0,8}(?:=|%3d)(?:[+\s]|%(?:25)?20){0,8}(?:'|%(?:25)?27|%u0027)?\d</url>
+    <description>WEB-001 SQL injection (điều kiện luôn đúng ' OR 1=1): $(srcip) gửi $(url)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-001,</group>
+  </rule>
+
+  <rule id="104014" level="10">
+    <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
+    <location type="pcre2">^\(</location>
+    <url type="pcre2">(?i)(?:'|%(?:25)?27|%u0027)(?:[+\s]|%(?:25)?20){0,8}(?:or|and)(?:[+\s]|%(?:25)?20){1,8}(?:'|%(?:25)?27|%u0027)[^']{0,60}?(?:'|%(?:25)?27|%u0027)(?:[+\s]|%(?:25)?20){0,8}(?:=|%3d)(?:[+\s]|%(?:25)?20){0,8}(?:'|%(?:25)?27|%u0027)</url>
+    <description>WEB-001 SQL injection (điều kiện luôn đúng ' OR 'a'='a): $(srcip) gửi $(url)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-001,</group>
+  </rule>
+
+  <rule id="104012" level="10">
+    <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
+    <location type="pcre2">^\(</location>
+    <url type="pcre2">(?i)(?:^|[^a-z_])(?:sleep|benchmark|pg_sleep)(?:[+\s]|%(?:25)?20){0,8}(?:\(|%28)|(?:(?:;|%3b)|(?:'|%(?:25)?27|%u0027))(?:[+\s]|%(?:25)?20){0,8}(?:drop|insert|update|delete)(?:[+\s]|%(?:25)?20){1,8}|(?:'|%(?:25)?27|%u0027)(?:[+\s]|%(?:25)?20){0,8}(?:--|#|%23)</url>
+    <description>WEB-001 SQL injection (SLEEP/BENCHMARK, ;DROP, chú thích sau dấu nháy): $(srcip) gửi $(url)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-001,</group>
+  </rule>
+
+  <rule id="104003" level="10">
+    <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
+    <location type="pcre2">^\(</location>
+    <url type="pcre2">(?i)(?:\.|%(?:25)?2e)(?:\.|%(?:25)?2e)(?:(?:/|%(?:25)?2f)|(?:\\|%(?:25)?5c))(?:\.|%(?:25)?2e)(?:\.|%(?:25)?2e)(?:(?:/|%(?:25)?2f)|(?:\\|%(?:25)?5c))|(?:/|%(?:25)?2f)etc(?:/|%(?:25)?2f)(?:passwd|shadow|hosts)</url>
+    <description>WEB-003 Path traversal / LFI (../, /etc/passwd): $(srcip) gửi $(url)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-003,</group>
+  </rule>
+
+  <rule id="104031" level="10">
+    <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
+    <location type="pcre2">^\(</location>
+    <url type="pcre2">(?i)c(?::|%3a)(?:\\|%(?:25)?5c)windows(?:\\|%(?:25)?5c)win(?:\.|%(?:25)?2e)ini|php(?::|%3a)(?:/|%(?:25)?2f)(?:/|%(?:25)?2f)(?:filter|input)|file(?::|%3a)(?:/|%(?:25)?2f)(?:/|%(?:25)?2f)|(?:/|%(?:25)?2f)proc(?:/|%(?:25)?2f)self(?:/|%(?:25)?2f)environ</url>
+    <description>WEB-003 Path traversal / LFI (win.ini, php://, file://, /proc): $(srcip) gửi $(url)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-003,</group>
+  </rule>
+
+  <rule id="104002" level="7">
+    <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
+    <location type="pcre2">^\(</location>
+    <url type="pcre2">(?i)(?:\x3c|%(?:25)?3c|%u003c)(?:[+\s]|%(?:25)?20){0,8}script|javascript(?:[+\s]|%(?:25)?20){0,8}(?::|%3a)|on(?:error|load|mouseover|focus)(?:[+\s]|%(?:25)?20){0,8}(?:=|%3d)</url>
+    <description>WEB-002 XSS (script, javascript:, onerror=): $(srcip) gửi $(url)</description>
+    <mitre>
+      <id>T1189</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-002,</group>
+  </rule>
+
+  <rule id="104021" level="7">
+    <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
+    <location type="pcre2">^\(</location>
+    <url type="pcre2">(?i)(?:\x3c|%(?:25)?3c|%u003c)(?:[+\s]|%(?:25)?20){0,8}(?:img|svg|iframe)[^\x3e]{0,100}?(?:\x3e|%(?:25)?3e|%u003e)|document(?:\.|%(?:25)?2e)cookie|alert(?:[+\s]|%(?:25)?20){0,8}(?:\(|%28)</url>
+    <description>WEB-002 XSS (thẻ img/svg/iframe, document.cookie, alert): $(srcip) gửi $(url)</description>
+    <mitre>
+      <id>T1189</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-002,</group>
+  </rule>
+
+  <rule id="104005" level="7">
+    <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
+    <location type="pcre2">^\(</location>
+    <regex type="pcre2">(?i)"[^"]{0,300}?(?:sqlmap|nikto|nmap|masscan|gobuster|dirbuster|dirb|wfuzz|ffuf|wpscan|acunetix|nessus|openvas|zgrab|hydra|nuclei|burp)[^"]{0,300}"\s*$</regex>
+    <description>WEB-005 Công cụ quét lỗ hổng web trong User-Agent: $(srcip)</description>
+    <mitre>
+      <id>T1595.002</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-005,</group>
+  </rule>
+
+  <rule id="104070" level="2">
+    <if_sid>31100,31101,31108,31530</if_sid>
+    <location type="pcre2">^\(</location>
+    <protocol>^POST$</protocol>
+    <url type="pcre2">(?i)^(?!/administrator)(?![^?]*wp-login\.php)[^?]*(?:login|signin|auth|admin)</url>
+    <description>WEB-007 Bộ đếm POST vào đường dẫn đăng nhập (cho WEB-007)</description>
+    <mitre>
+      <id>T1110.001</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-007,</group>
+  </rule>
+
+  <rule id="104007" level="10" frequency="10" timeframe="60">
+    <if_matched_sid>104070</if_matched_sid>
+    <same_source_ip />
+    <description>WEB-007 Brute-force form đăng nhập web: $(srcip) POST &gt;= 10 lần trong 60 giây</description>
+    <mitre>
+      <id>T1110.001</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-007,</group>
+  </rule>
+
+  <rule id="104090" level="2">
+    <if_sid>31100,31108</if_sid>
+    <location type="pcre2">^\(</location>
+    <url type="pcre2">^(?!/administrator)(?![^?]*wp-login\.php)</url>
+    <description>WEB-009 Bộ đếm mọi request web chưa có rule gốc cấp &gt;= 3 (cho WEB-009)</description>
+    <mitre>
+      <id>T1498</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-009,</group>
+  </rule>
+
+  <rule id="104009" level="10" frequency="300" timeframe="60">
+    <if_matched_sid>104090</if_matched_sid>
+    <same_source_ip />
+    <description>WEB-009 HTTP flood: $(srcip) gửi &gt;= 300 request trong 60 giây</description>
+    <mitre>
+      <id>T1498</id>
+      <id>T1499.002</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-009,</group>
+  </rule>
+
+  <rule id="104095" level="14">
+    <if_sid>104004,104041,104008,104001,104013,104011,104014,104012,104003,104031,104002,104021,104005</if_sid>
+    <list field="srcip" lookup="match_key">etc/lists/malicious-ioc/malicious-ip</list>
+    <id>^200</id>
+    <description>WEB-012 Tấn công web từ IP độc hại $(srcip) trả mã 200 (thành công): $(url)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <info type="text">port_of_stock=99906</info>
+    <group>siem,web,accesslog,attack,</group>
+  </rule>
+</group>

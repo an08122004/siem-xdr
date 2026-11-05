@@ -1,0 +1,654 @@
+# Ca test cho wazuh/manager/rules/0101-auth.xml (log gốc qua Wazuh thật). Nguồn: tests/legacy/auth.yml + ca biên.
+
+- rule: 101001   # AUTH-001: 5 lần sai cùng IP
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+
+- none: [101001]   # AUTH-001: 4 lần sai (dưới ngưỡng)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.7 port 4444 ssh2'
+
+- none: [101001]   # AUTH-001: 5 lần sai nhưng từ 5 IP khác nhau
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.10 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.11 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.12 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.13 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.14 port 4444 ssh2'
+
+- rule: 101002   # AUTH-002: 5 lần sai rồi đăng nhập được từ cùng IP
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for deploy from 203.0.113.8 port 4444 ssh2'
+
+- none: [101002]   # AUTH-002: sai từ một IP, thành công từ IP khác
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for deploy from 10.0.0.25 port 4444 ssh2'
+
+- none: [101002]   # AUTH-002: 4 lần sai rồi thành công (dưới ngưỡng)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.8 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for deploy from 203.0.113.8 port 4444 ssh2'
+
+- rule: 101003   # AUTH-003: 5 tài khoản khác nhau sai từ một IP
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for binh from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for chi from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for dung from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for em from 203.0.113.9 port 4444 ssh2'
+
+- none: [101003]   # AUTH-003: một tài khoản sai 5 lần
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+
+- none: [101003]   # AUTH-003: 4 tài khoản khác nhau (dưới ngưỡng)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for binh from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for chi from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for dung from 203.0.113.9 port 4444 ssh2'
+
+- none: [101003]   # AUTH-003: 5 tài khoản nhưng từ 5 IP khác nhau
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.20 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for binh from 203.0.113.21 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for chi from 203.0.113.22 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for dung from 203.0.113.23 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for em from 203.0.113.24 port 4444 ssh2'
+
+- none: [101003]   # AUTH-003: giới hạn S4: 2 tài khoản xen kẽ, 7 dòng < 2N-2 -> không báo
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for binh from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for binh from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for binh from 203.0.113.9 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for an from 203.0.113.9 port 4444 ssh2'
+
+- rule: 101004   # AUTH-004: SSH root thành công
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for root from 10.0.0.5 port 4444 ssh2'
+
+- none: [101004]   # AUTH-004: SSH tài khoản thường
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for deploy from 10.0.0.5 port 4444 ssh2'
+
+- none: [101004]   # AUTH-004: SSH root thất bại
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for root from 10.0.0.5 port 4444 ssh2'
+
+- none: [101004]   # AUTH-004: tên chứa root nhưng không phải root
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for rootkit from 10.0.0.5 port 4444 ssh2'
+
+- rule: 101006   # AUTH-006: sudo mở bash root
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/bin/bash'
+
+- rule: 101006   # AUTH-006: sudo -i
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/bin/su -'
+
+- rule: 101006   # AUTH-006: sudo sai mật khẩu
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sudo:   deploy : 1 incorrect password attempt ; TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/apt update'
+
+- none: [101006]   # AUTH-006: sudo chạy cập nhật gói
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/apt update'
+
+- none: [101006]   # AUTH-006: lệnh có chữ sh nằm trong tên (publish.sh... không phải shell)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/ssh-keygen'
+
+- rule: 101001   # AUTH-001: 5 lần sai user không tồn tại
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.30 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.30 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.30 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.30 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.30 port 4444 ssh2'
+
+- none: [101001]   # AUTH-001: 4 lần sai user không tồn tại (dưới ngưỡng)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.40 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.40 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.40 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.40 port 4444 ssh2'
+
+- rule: 101002   # AUTH-002: 5 lần sai user không tồn tại rồi thành công
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.32 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.32 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.32 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.32 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.32 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for ghost from 203.0.113.32 port 4444 ssh2'
+
+- none: [101002]   # AUTH-002: sai từ một IP, thành công từ IP khác (user không tồn tại)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.41 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.41 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.41 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.41 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.41 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for ghost from 10.0.0.26 port 4444 ssh2'
+
+- none: [101002]   # AUTH-002: 4 lần sai rồi thành công (N-1)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.42 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.42 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.42 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.42 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for deploy from 203.0.113.42 port 4444 ssh2'
+
+- rule: 101003   # AUTH-003: 5 user không tồn tại khác nhau từ một IP
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user a from 203.0.113.31 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user b from 203.0.113.31 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user c from 203.0.113.31 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user d from 203.0.113.31 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user e from 203.0.113.31 port 4444 ssh2'
+
+- none: [101003]   # AUTH-003: 4 user không tồn tại khác nhau (N-1)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user a from 203.0.113.43 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user b from 203.0.113.43 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user c from 203.0.113.43 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user d from 203.0.113.43 port 4444 ssh2'
+
+- none: [101003]   # AUTH-003: một tên không tồn tại gõ 5 lần, không phải spraying
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.44 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.44 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.44 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.44 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.44 port 4444 ssh2'
+
+- rule: 101002   # AUTH-002: 5 user khác nhau (spraying) rồi thành công -> vẫn phải báo (rule cũ báo AUTH-001+003+002)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.45 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for b from 203.0.113.45 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for c from 203.0.113.45 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for d from 203.0.113.45 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for e from 203.0.113.45 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for a from 203.0.113.45 port 4444 ssh2'
+
+- rule: 101002   # AUTH-002: như trên với user không tồn tại
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user a from 203.0.113.46 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user b from 203.0.113.46 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user c from 203.0.113.46 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user d from 203.0.113.46 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user e from 203.0.113.46 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for a from 203.0.113.46 port 4444 ssh2'
+
+- rule: 101001   # AUTH-001: 3 user thật + 3 user giả cùng IP vẫn cộng dồn (bộ đếm chung 101000); 101003 cũng báo vì 6 tên khác nhau
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.47 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.47 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.47 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.47 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.47 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user ghost from 203.0.113.47 port 4444 ssh2'
+
+- rule: 101003   # AUTH-003: 3 user thật + 3 user giả khác nhau cùng IP
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.48 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for b from 203.0.113.48 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for c from 203.0.113.48 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user d from 203.0.113.48 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user e from 203.0.113.48 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for invalid user f from 203.0.113.48 port 4444 ssh2'
+
+- rule: 101001   # AUTH-001: 2 user xen kẽ, 7 dòng từ một IP: AUTH-001 báo (>=5 lần sai), AUTH-003 không (xem ca 101003 âm)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.49 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for b from 203.0.113.49 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.49 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for b from 203.0.113.49 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.49 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for b from 203.0.113.49 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for a from 203.0.113.49 port 4444 ssh2'
+
+- rule: 101002   # AUTH-002: root đăng nhập sau brute-force ra 101002 (critical), không phải 101004
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for root from 203.0.113.50 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for root from 203.0.113.50 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for root from 203.0.113.50 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for root from 203.0.113.50 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for root from 203.0.113.50 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for root from 203.0.113.50 port 4444 ssh2'
+
+- none: [101006]   # AUTH-006: sudo thất bại qua PAM (authentication failure) chưa phủ - giới hạn đã ghi trong XML
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sudo: pam_unix(sudo:auth): authentication failure; logname=deploy uid=1000 euid=0 tty=/dev/pts/0 ruser=deploy rhost=  user=deploy'
+
+- rule: 101000   # AUTH-000: một lần sai SSH vào bộ đếm chung
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.60 port 4444 ssh2'
+
+- none: [101000]   # AUTH-000: đăng nhập thành công không vào bộ đếm
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for admin from 203.0.113.60 port 4444 ssh2'
+
+- rule: 101010   # AUTH-002 bộ đếm 600s: 5 lần sai cách nhau 16s (64s > 60s nên 101001 không báo), bộ đếm 600s báo
+  log_format: syslog
+  location: /var/log/auth.log
+  delay: 16
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.61 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.61 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.61 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.61 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.61 port 4444 ssh2'
+
+- rule: 101002   # AUTH-002: brute-force CHẬM (5 lần sai cách nhau 16s) rồi đăng nhập được
+  log_format: syslog
+  location: /var/log/auth.log
+  delay: 16
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.63 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.63 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.63 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.63 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.63 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for admin from 203.0.113.63 port 4444 ssh2'
+
+- none: [101010]   # AUTH-002 bộ đếm 600s: 4 lần sai chưa đủ
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.62 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.62 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.62 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.62 port 4444 ssh2'
+
+- none: [5763, 5712]   # GIỚI HẠN GHI NHẬN: 8 lần sai cách 16s trước đây báo 5763 (gốc); nay 101000 nhận thay nên không báo (xem comment 0101-auth.xml)
+  log_format: syslog
+  location: /var/log/auth.log
+  delay: 16
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.74 port 4444 ssh2'
+
+# ---------------------------------------------------------------------------------------------------------------
+# Console (lượt B3): dòng JSON đúng như server/siem/manager/auth.py `Audit` ghi (kể cả khóa srcip), location agent 000.
+# Rule gốc nhận dòng này là 86600 (Suricata messages, decoded_as json, level 0, no_full_log); 101021/101022 là con của nó.
+# Bộ đếm thất bại DÙNG CHUNG với sshd (101000): AUTH-001 nay đếm cả console, AUTH-002 nhận success console.
+# ---------------------------------------------------------------------------------------------------------------
+- rule: 101001   # AUTH-001 console: 5 lần sai cùng IP (bộ đếm chung 101000)
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.7","srcip":"198.51.100.7","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.7","srcip":"198.51.100.7","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.7","srcip":"198.51.100.7","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.7","srcip":"198.51.100.7","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.7","srcip":"198.51.100.7","reason":"bad_credentials"}'
+
+- none: [101001]   # AUTH-001 console: 4 lần sai (dưới ngưỡng)
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.8","srcip":"198.51.100.8","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.8","srcip":"198.51.100.8","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.8","srcip":"198.51.100.8","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.8","srcip":"198.51.100.8","reason":"bad_credentials"}'
+
+- none: [101001]   # AUTH-001 console: 5 lần sai từ 5 IP khác nhau (same_source_ip)
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.20","srcip":"198.51.100.20","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.21","srcip":"198.51.100.21","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.22","srcip":"198.51.100.22","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.23","srcip":"198.51.100.23","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.24","srcip":"198.51.100.24","reason":"bad_credentials"}'
+
+- rule: 101002   # AUTH-002 console: 5 lần sai rồi đăng nhập được cùng IP
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9"}'
+
+- none: [101002]   # AUTH-002 console: sai từ một IP, thành công từ IP khác
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"alice","ip":"198.51.100.9","srcip":"198.51.100.9","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"alice","ip":"10.10.40.50","srcip":"10.10.40.50"}'
+
+- none: [101002]   # AUTH-002 console: thành công đơn lẻ, không có chuỗi sai
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"alice","ip":"198.51.100.10","srcip":"198.51.100.10"}'
+
+- rule: 101003   # AUTH-003 console: 5 tài khoản khác nhau sai từ một IP
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"an","ip":"198.51.100.11","srcip":"198.51.100.11","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"binh","ip":"198.51.100.11","srcip":"198.51.100.11","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"chi","ip":"198.51.100.11","srcip":"198.51.100.11","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"dung","ip":"198.51.100.11","srcip":"198.51.100.11","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"em","ip":"198.51.100.11","srcip":"198.51.100.11","reason":"bad_credentials"}'
+
+- none: [101003]   # AUTH-003 console: một tài khoản sai 5 lần
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"an","ip":"198.51.100.12","srcip":"198.51.100.12","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"an","ip":"198.51.100.12","srcip":"198.51.100.12","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"an","ip":"198.51.100.12","srcip":"198.51.100.12","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"an","ip":"198.51.100.12","srcip":"198.51.100.12","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"an","ip":"198.51.100.12","srcip":"198.51.100.12","reason":"bad_credentials"}'
+
+- none: [101001, 101003, 101000, 101021]   # console: 5 dòng login sai nhưng action là logout/activity, không phải đăng nhập
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"logout","outcome":"failure","user":"bob","ip":"198.51.100.13","srcip":"198.51.100.13","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"logout","outcome":"failure","user":"bob","ip":"198.51.100.13","srcip":"198.51.100.13","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"logout","outcome":"failure","user":"bob","ip":"198.51.100.13","srcip":"198.51.100.13","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"activity","outcome":"failure","user":"bob","ip":"198.51.100.13","srcip":"198.51.100.13","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"activity","outcome":"failure","user":"bob","ip":"198.51.100.13","srcip":"198.51.100.13","reason":"bad_credentials"}'
+
+- none: [101000, 101001, 101002, 101003, 101010, 101020, 101021, 101022]   # console giả mạo: cùng dòng JSON nhưng location = IP thiết bị syslog
+  log_format: json
+  location: 10.10.40.254
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.14","srcip":"198.51.100.14","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.14","srcip":"198.51.100.14","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.14","srcip":"198.51.100.14","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.14","srcip":"198.51.100.14","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.14","srcip":"198.51.100.14","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"198.51.100.14","srcip":"198.51.100.14"}'
+
+- none: [101000, 101001, 101002, 101003, 101010, 101020, 101021, 101022]   # console giả mạo: cùng dòng JSON nằm trong access.log
+  log_format: json
+  location: /var/log/apache2/access.log
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.15","srcip":"198.51.100.15","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.15","srcip":"198.51.100.15","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.15","srcip":"198.51.100.15","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.15","srcip":"198.51.100.15","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.15","srcip":"198.51.100.15","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"198.51.100.15","srcip":"198.51.100.15"}'
+
+- none: [101000, 101001, 101002, 101003, 101010, 101020, 101021, 101022]   # console giả mạo: location của agent thật (tiền tố (host) any->)
+  log_format: json
+  location: (demo-web) any->/var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.16","srcip":"198.51.100.16","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.16","srcip":"198.51.100.16","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.16","srcip":"198.51.100.16","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.16","srcip":"198.51.100.16","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"198.51.100.16","srcip":"198.51.100.16","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"198.51.100.16","srcip":"198.51.100.16"}'
+
+# ---------------------------------------------------------------------------------------------------------------
+# B5: sshd tới qua đường syslog (agent 000, location = IP thiết bị gửi) vẫn vào bộ đếm 0101; đếm theo IP tấn công (srcip), không theo thiết bị.
+# ---------------------------------------------------------------------------------------------------------------
+- rule: 101001   # AUTH-001 qua syslog: 5 lần sai, location = IP thiết bị
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.40 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.40 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.40 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.40 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.40 port 4444 ssh2'
+
+- rule: 101002   # AUTH-002 qua syslog: 5 lần sai rồi thành công, location = IP thiết bị
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.41 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.41 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.41 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.41 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for deploy from 203.0.113.41 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for deploy from 203.0.113.41 port 4444 ssh2'
+
+- none: [101001]   # AUTH-001 qua syslog: 5 lần sai từ 5 IP tấn công khác nhau qua cùng một thiết bị (không trộn nguồn)
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.50 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.51 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.52 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.53 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.54 port 4444 ssh2'
+
+
+- rule: 101020   # console: dòng đăng nhập có outcome lạ dừng ở rule gốc console (101021/101022 không nhận)
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"unknown","user":"bob","ip":"198.51.100.30","srcip":"198.51.100.30"}'
+
+- rule: 101022   # console: đăng nhập thành công
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"198.51.100.30","srcip":"198.51.100.30"}'
+
+- none: [101021, 101022]   # console: đăng nhập thành công không phải thất bại / ngược lại
+  log_format: json
+  location: /var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"unknown","user":"bob","ip":"198.51.100.30","srcip":"198.51.100.30"}'
+
+- none: [101000, 101001]   # S6: 5 lần sai sshd dạng RFC 5424 (remoted đã bỏ <PRI>) -> sshd không được giải mã, bộ đếm không chạy; thiết bị phải gửi RFC 3164
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+    - '1 2026-11-02T10:00:04+07:00 host sshd 1235 - - Failed password for admin from 203.0.113.60 port 4444 ssh2'
+    - '1 2026-11-02T10:00:04+07:00 host sshd 1235 - - Failed password for admin from 203.0.113.60 port 4444 ssh2'
+    - '1 2026-11-02T10:00:04+07:00 host sshd 1235 - - Failed password for admin from 203.0.113.60 port 4444 ssh2'
+    - '1 2026-11-02T10:00:04+07:00 host sshd 1235 - - Failed password for admin from 203.0.113.60 port 4444 ssh2'
+    - '1 2026-11-02T10:00:04+07:00 host sshd 1235 - - Failed password for admin from 203.0.113.60 port 4444 ssh2'
+
+# Đếm CHUNG sshd + console (R42): cùng IP cộng dồn qua hai dịch vụ; log_format/location của ca là sshd qua syslog (IP thiết bị), dòng console ghi đè nguồn.
+- rule: 101001   # AUTH-001: 3 lần sai sshd + 2 lần sai console từ cùng một IP trong cửa sổ -> 5 lần, báo
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.71 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.71 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.71 port 4444 ssh2'
+    - {event: '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.71","srcip":"192.0.2.71","reason":"bad_credentials"}', location: /var/log/siem-console/console.json, log_format: json}
+    - {event: '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.71","srcip":"192.0.2.71","reason":"bad_credentials"}', location: /var/log/siem-console/console.json, log_format: json}
+
+- rule: 101002   # AUTH-002: 5 lần sai sshd rồi đăng nhập console được từ cùng IP -> critical (chéo dịch vụ có chủ ý)
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.72 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.72 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.72 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.72 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.72 port 4444 ssh2'
+    - {event: '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"192.0.2.72","srcip":"192.0.2.72"}', location: /var/log/siem-console/console.json, log_format: json}
+
+- none: [101002]   # AUTH-002: như trên nhưng console success từ IP khác (không chéo nguồn)
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.73 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.73 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.73 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.73 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 192.0.2.73 port 4444 ssh2'
+    - {event: '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"192.0.2.74","srcip":"192.0.2.74"}', location: /var/log/siem-console/console.json, log_format: json}
+
+- none: [101000, 101001, 101002, 101003, 101010, 101020, 101021, 101022]   # console giả mạo: tiền tố lạ /tmp
+  log_format: json
+  location: /tmp/var/log/siem-console/console.json
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80"}'
+
+- none: [101000, 101001, 101002, 101003, 101010, 101020, 101021, 101022]   # console giả mạo: file xoay vòng .1
+  log_format: json
+  location: /var/log/siem-console/console.json.1
+  events:
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"failure","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80","reason":"bad_credentials"}'
+    - '{"timestamp":"2026-11-01T08:00:00+00:00","event_type":"console_auth","action":"login","outcome":"success","user":"bob","ip":"192.0.2.80","srcip":"192.0.2.80"}'
+
+# Ràng buộc 7 (không dùng `ignore`): NGUỒN THỨ HAI trong cùng cửa sổ vẫn phải báo. `last: true` = chỉ tính rule của dòng cuối.
+- rule: 101001   # AUTH-001: hai IP liên tiếp mỗi IP 5 lần sai; IP thứ hai vẫn ra alert ở dòng cuối
+  last: true
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.100 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.100 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.100 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.100 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.100 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.101 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.101 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.101 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.101 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for admin from 203.0.113.101 port 4444 ssh2'
+
+- rule: 101003   # AUTH-003: hai IP liên tiếp mỗi IP 5 tài khoản khác nhau; IP thứ hai vẫn ra alert ở dòng cuối
+  last: true
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for u0 from 203.0.113.102 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for u1 from 203.0.113.102 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for u2 from 203.0.113.102 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for u3 from 203.0.113.102 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for u4 from 203.0.113.102 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for v0 from 203.0.113.103 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for v1 from 203.0.113.103 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for v2 from 203.0.113.103 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for v3 from 203.0.113.103 port 4444 ssh2'
+    - 'Oct 31 10:00:00 host sshd[1234]: Failed password for v4 from 203.0.113.103 port 4444 ssh2'

@@ -1,0 +1,18 @@
+# api.yaml của job CI `wazuh-rules` (.github/workflows/ci.yml): như wazuh/manager/api.yaml, thêm access.max_request_per_minute
+# cao hơn mặc định 300 để bộ chạy ca test (mỗi dòng log một lời gọi logtest) không bị HTTP 429.
+host: ['0.0.0.0']
+port: 55000
+
+https:
+  enabled: yes
+  key: "server.key"
+  cert: "server.crt"
+  use_ca: False
+  ssl_protocol: "auto"
+
+access:
+  max_request_per_minute: 100000
+
+logs:
+  level: "info"
+  format: "plain"

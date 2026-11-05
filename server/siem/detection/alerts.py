@@ -122,7 +122,7 @@ def from_wazuh(event: Doc, severity: str) -> Doc:
             "id": f"WZH-{r.get('id')}", "name": r.get("description") or f"Wazuh rule {r.get('id')}",
             "description": f"Cảnh báo từ ruleset Wazuh (rule {r.get('id')}, level {r.get('level')}, "
                            f"nhóm {', '.join(groups) or '—'})",
-            "type": "wazuh", "severity": severity, "tags": ["wazuh", *groups],
+            "type": "wazuh", "severity": severity, "tags": ["wazuh", *groups], "groups": groups,
             "mitre": {"tactic": (mitre.get("tactic") or [None])[0], "technique": list(mitre.get("id") or [])},
         },
         "severity": severity,
@@ -134,6 +134,13 @@ def from_wazuh(event: Doc, severity: str) -> Doc:
         "event_time": event.get("@timestamp"),
         "trigger_event": _trigger(event),
     }
+    # Mã rule YAML tương ứng (tools/parity_report.py đối chiếu theo mã này). Rule gộp nhiều mã thì legacy_id = mã ĐẦU
+    # (khóa đơn để lọc/nhóm), legacy_ids = đủ danh sách; không có nhóm legacy_* thì không có trường nào.
+    if legacy := [g[7:] for g in groups if g.startswith("legacy_") and len(g) > 7]:
+        alert["rule"]["legacy_id"], alert["rule"]["legacy_ids"] = legacy[0], legacy
+    if "shadow" in groups:      # như rule YAML chạy bóng: lưu để đo, SOAR bỏ qua (soar/engine.py)
+        alert["alert"]["shadow"] = True
+        alert["rule"]["mode"] = "shadow"
     _copy_entities(event, alert)
     for path in ("file.path", "registry.path", "sca.check.title"):
         if (v := get(event, path)) is not None:

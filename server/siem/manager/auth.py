@@ -495,8 +495,9 @@ class Audit:
         return lg
 
     def __call__(self, action: str, outcome: str, user: str, ip: str, **extra: Any) -> None:
+        # srcip trùng ip: decoder json của Wazuh không đổi `ip` thành `srcip`, mà rule đếm (<same_source_ip/>) cần srcip
         rec = {"timestamp": store.now_iso(), "event_type": "console_auth", "action": action, "outcome": outcome,
-               "user": user, "ip": ip, **{k: v for k, v in extra.items() if v is not None}}
+               "user": user, "ip": ip, "srcip": ip, **{k: v for k, v in extra.items() if v is not None}}
         log.info("console %s %s: user=%s ip=%s %s", action, outcome, user, ip, extra or "")
         try:
             with self._lock:

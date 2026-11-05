@@ -19,8 +19,8 @@ install -m 600 -o wazuh -g wazuh /certs/wazuh/wazuh-manager.key "$SSL/server.key
 install -m 644 -o wazuh -g wazuh /certs/wazuh/wazuh-manager.crt "$SSL/server.crt"
 echo "[siem-setup] đã cài chứng chỉ Wazuh API"
 
-# 4. User Wazuh API quyền tối thiểu cho SOAR + vô hiệu hóa 2 user mặc định (wazuh / wazuh-wui)
-/var/ossec/framework/python/bin/python3 /entrypoint-scripts/siem_api_user.py "$S/wazuh_api_password"
+# 4. User Wazuh API quyền tối thiểu cho SOAR (siem-soar) và nạp rule (siem-rules) + vô hiệu hóa 2 user mặc định (wazuh / wazuh-wui)
+/var/ossec/framework/python/bin/python3 /entrypoint-scripts/siem_api_user.py "$S/wazuh_api_password" "$S/wazuh_rules_api_password"
 
 # 5. Bao lâu không có keepalive thì Wazuh đánh dấu agent "disconnected". HLT-001 (soar/health.py) chỉ báo khi agent đã ở
 #    trạng thái này VÀ keepalive cũ hơn AGENT_DOWN_MINUTES, nên tổng thời gian ≈ giá trị lớn hơn trong hai mốc. Mặc định
@@ -76,3 +76,47 @@ install -d -o 10001 -m 0755 /var/log/siem-console
 # file có sẵn để logcollector không báo lỗi 1103 khi khởi động trước lần ghi đầu tiên của manager
 [ -e /var/log/siem-console/console.json ] || install -m 0644 -o 10001 /dev/null /var/log/siem-console/console.json
 echo "[siem-setup] đã chuẩn bị /var/log/siem-console"
+
+# 8. Thư mục rule động (volume mới là root 0755): uid 10001 = user của container `manager` (siem-xdr-server) phải ghi
+#    được, group wazuh để analysisd đọc. Làm mỗi lần khởi động, không làm ở install.sh (volume có tên, không phải thư mục host).
+D=/var/ossec/etc/rules-dynamic
+install -d -o 10001 -g wazuh -m 0755 "$D"
+# 8b. Danh sách IOC từ MISP (TI-001, rule 0845-ti.xml): <list> trong ossec.conf trỏ tới file này; thiếu file thì analysisd không lên.
+#     Tạo file chỉ có dòng giữ chỗ nếu chưa có (API Wazuh từ chối file rỗng; không đè bản SOAR đã đẩy lên). SOAR ghi đè qua API PUT /lists/files/siem-misp-ip. Không đụng
+#     danh sách gốc malicious-ioc/malicious-ip của Wazuh (R50).
+#     R64: thêm siem-misp-domain và siem-misp-hash (giá trị giữ chỗ = misp_cdb.PLACEHOLDERS, server/siem/pipeline/misp_cdb.py).
+for L in 'siem-misp-ip 240.0.0.0:empty' 'siem-misp-domain placeholder.invalid:empty' 'siem-misp-hash 00000000000000000000000000000000:empty'; do
+  read -r N V <<< "$L"
+  if [ ! -e /var/ossec/etc/lists/$N ]; then
+    echo "$V" > /var/ossec/etc/lists/$N
+    chown wazuh:wazuh /var/ossec/etc/lists/$N && chmod 0660 /var/ossec/etc/lists/$N
+  fi
+done
+# 9. File rule hỏng còn trên đĩa thì wazuh-analysisd không lên, kéo theo remoted và apid. Kiểm tra cả ruleset trước khi
+#    start; hỏng thì cách ly file động (AI / ngoại lệ) để manager vẫn khởi động được.
+if ! /var/ossec/bin/wazuh-analysisd -t >/tmp/analysisd-test.log 2>&1; then
+  if [ -n "$(find "$D" -mindepth 1 -maxdepth 1 -name '*.xml')" ]; then
+    Q=/var/ossec/etc/rules-dynamic.quarantine/$(date +%Y%m%d-%H%M%S)
+    mkdir -p "$Q"
+    # chỉ file rule *.xml: sổ cái ngoại lệ exceptions.json (bộ đếm id, lịch sử duyệt) không làm analysisd lỗi, phải ở lại
+    find "$D" -mindepth 1 -maxdepth 1 -name '*.xml' -exec mv -t "$Q" {} +
+    echo "[siem-setup] CẢNH BÁO: ruleset lỗi (wazuh-analysisd -t), đã chuyển file rule động sang $Q:"
+    tail -n 5 /tmp/analysisd-test.log | sed 's/^/[siem-setup]   /'
+  fi
+  # kiểm lại: lỗi có thể nằm ngoài rules-dynamic (vd file hỏng trong wazuh/manager/rules), cách ly không sửa được
+  if /var/ossec/bin/wazuh-analysisd -t >/tmp/analysisd-test.log 2>&1; then
+    echo "[siem-setup] ruleset hợp lệ sau khi cách ly rules-dynamic"
+  else
+    echo "[siem-setup] ruleset VẪN lỗi sau khi cách ly — lỗi nằm ngoài rules-dynamic: $(grep -m1 -iE 'error|critical' /tmp/analysisd-test.log || head -n 1 /tmp/analysisd-test.log)"
+    # cách ly vô ích: chuyển file về chỗ cũ để không mất rule AI / ngoại lệ vì một lỗi không phải của chúng
+    if [ -n "${Q:-}" ] && [ -n "$(ls -A "$Q")" ]; then
+      if find "$Q" -mindepth 1 -maxdepth 1 -exec mv -t "$D" {} +; then
+        rmdir "$Q" && echo "[siem-setup] đã chuyển về $D các file rule động vừa cách ly"
+      else
+        echo "[siem-setup] KHÔNG chuyển về được $D các file rule động, giữ ở $Q"
+      fi
+    fi
+  fi
+else
+  echo "[siem-setup] ruleset hợp lệ (wazuh-analysisd -t)"
+fi

@@ -74,7 +74,7 @@ vẫn là phần tự xây của SIEM/XDR. Không dùng Wazuh indexer, dashboard
 |---|---|
 | `wazuh/manager/ossec.conf` | Cấu hình manager: ghi mọi event ra `archives.json` (`logall_json`), enroll bắt buộc mật khẩu, tắt module giám sát chính container manager, tắt vulnerability detection (từ 4.8 cần Wazuh indexer) |
 | `wazuh/manager/agent.conf` | Cấu hình chung đẩy xuống mọi agent: Windows đọc Sysmon / PowerShell / Defender, FIM thư mục Startup và khóa Run; Linux đọc log Apache, FIM `/var/www`, `/etc/ssh`, cron |
-| `wazuh/manager/local_rules.xml` | Rule Wazuh riêng: file mới / bị sửa trong thư mục web lên level 10 (có thể là webshell, T1505.003) |
+| `wazuh/manager/rules/0100-platform.xml` | Rule Wazuh riêng: file mới / bị sửa trong thư mục web lên level 10 (có thể là webshell, T1505.003) |
 | `wazuh/manager/entrypoint/` | Chạy mỗi lần manager khởi động: mật khẩu enroll lấy từ Docker secret, chứng chỉ Wazuh API do CA nội bộ ký, user API `siem-soar` quyền tối thiểu, khóa 2 user mặc định `wazuh` / `wazuh-wui`, tắt filebeat |
 | `vector/wazuh.yaml` | Đưa `archives.json` (mọi event) và `alerts.json` (cảnh báo ruleset Wazuh) vào Kafka `siem.raw` |
 | `wazuh/agent/linux/siem-xdr`, `wazuh/agent/windows/siem-xdr.cmd` + `.ps1` | Script phản ứng trên agent |
@@ -359,12 +359,14 @@ Trước khi bật lại cần: giai đoạn học trên dữ liệu thật, tá
 
 **Cảnh báo từ ruleset Wazuh** (`server/siem/detection/wazuh.py`): rule của SIEM/XDR chạy trên MỌI event lấy từ
 `archives.json`. Ruleset Wazuh (hơn 3.000 rule) phần lớn trùng việc với rule tự viết (web, SSH, đăng nhập Windows...), nên
-không chuyển hết sang để tránh mỗi sự cố thành 2 alert. Chỉ lấy cảnh báo trong `alerts.json` thuộc các nhóm mà SIEM/XDR không
-có rule tương đương (`WAZUH_ALERT_GROUPS`, mặc định `syscheck`, `rootcheck`, `vulnerability-detector`, `virustotal`, `yara`) từ level 7,
-cộng mọi cảnh báo level ≥ 12. Alert có `rule.id = WZH-<id rule Wazuh>`, `alert.source = wazuh`. Level ánh xạ sang severity:
+không chuyển hết thành alert thật để tránh mỗi sự cố thành 2 alert. Cầu nối chuyển mọi cảnh báo level ≥ 7 trong `alerts.json` (mọi nhóm, trừ `sca`) để đo,
+nhưng rule gốc ngoài các nhóm `syscheck`, `rootcheck`, `vulnerability-detector`, `virustotal`, `yara` (`WAZUH_ALERT_ACTIVE_GROUPS`)
+và dưới level 12 chỉ là alert BÓNG (SOAR bỏ qua) khi `WAZUH_STOCK_SHADOW=true` (từ R65 mặc định tắt: rule gốc đủ level là alert thật); rule riêng (id ≥ 100000) và mọi cảnh báo level ≥ 12 là alert thật. Alert có `rule.id = WZH-<id rule Wazuh>`, `alert.source = wazuh`. Level ánh xạ sang severity:
 7–9 medium, 10–11 high, ≥ 12 critical. Kết quả SCA (CIS) KHÔNG chuyển thành alert: máy demo có 83 mục không đạt ngay khi khởi động,
 và đó là đánh giá cấu hình, không phải sự cố. Xem SCA trong event `event.module: sca`.
-Rule Wazuh riêng đặt ở `wazuh/manager/local_rules.xml` (ID từ 100000).
+Rule Wazuh riêng đặt ở `wazuh/manager/rules/0100-platform.xml` (ID từ 100000).
+
+**Bộ rule Wazuh XML thống nhất (đã chuyển, R65, 05/11/2026).** Nhánh `feature/wazuh-unified-ruleset` chuyển các rule YAML sang rule XML của Wazuh (10 file ở `wazuh/manager/rules/`, 556 ca test log gốc chạy qua Wazuh thật trong CI). Theo quyết định của chủ dự án (R65), engine YAML đã tắt (`RULE_ENGINE_ENABLED=false`), rule XML bỏ chế độ bóng (bỏ qua tiêu chí 7 ngày) và rule gốc Wazuh level 7 đến 11 cũng là alert thật (`WAZUH_STOCK_SHADOW=false`); rủi ro và cách quay lui ở RULES.md 9.1. Đoạn "Cảnh báo từ ruleset Wazuh" ngay trên mô tả hành vi trước R65; mục 3 sẽ viết lại ở Task 24. Xem [RULES.md mục 9](RULES.md#9-bộ-rule-wazuh-xml-thống-nhất-đã-chuyển-sang-wazuh-r65).
 
 **Độ phủ của ruleset gốc Wazuh so với rule tự viết** (đo 6/10/2026, `tools/wazuh_coverage.py`, chi tiết ở
 `datasets/report_wazuh.md`). Cùng dataset với báo cáo độ phủ trong `AI-README.md` (mục 9.1), đưa vào analysisd của một wazuh-manager **tạm**
@@ -390,7 +392,7 @@ auditd (key `audit-wazuh-c`). Không dùng `wazuh-logtest`: bản 4.14 không ch
   không có rule nào cho định dạng này). Đây là chỗ thiếu lớn nhất của cả hai bộ rule.
 - **Lỗi trong ruleset gốc phát hiện được khi đo:** 92041 (level 10, "giá trị registry dạng Base64") có regex mà mọi nhóm sau
   `/d` đều tùy chọn, nên khớp mọi `reg add ... /d`. 92021 ("PowerShell xóa file") thiếu `\b` đầu nhánh `ri|rd|rm...`, nên khớp
-  cả `Invoke-WebRequest -Uri`.
+  cả `Invoke-WebRequest -Uri`. Cả hai đã sửa bằng overwrite ở 0999-tuning.xml (Task 12).
 - **Rule khớp theo cấu trúc, không tính là phát hiện:** 80792 (mọi lệnh auditd), 92032 (mọi tiến trình con của `cmd.exe /c`),
   92036 (`net.exe` con của `cmd /c`), 92041 (lỗi regex ở trên).
 - **Giới hạn:** event Windows dựng lại không có hash, Description / Company, cũng không có event registry / file / mạng /
@@ -414,6 +416,7 @@ lệnh mới. Trước 11/10/2026 lần chặn sau bị bỏ qua: AUTH-001 chặ
 Lệnh gỡ chặn chỉ đánh dấu đã gỡ các lệnh chặn tạo **trước** nó; lệnh chặn mới hơn (IP tấn công lại ngay khi vừa hết hạn) vẫn được
 gỡ đúng hạn của nó, không thành chặn vĩnh viễn.
 Đặt `SOAR_AUTO_RESPONSE=false` nếu chỉ muốn thông báo và tạo case.
+Với alert từ rule Wazuh XML (nhánh `feature/wazuh-unified-ruleset`), hành động phá hủy (`block_ip`, `kill`, `isolate`) chỉ theo id rule tường minh đã duyệt, không theo nhóm; playbook `block_ip` theo rule Wazuh bỏ qua alert từ nguồn syslog; case playbook chọn theo mã rule, rồi kỹ thuật, nhóm, tag, PB-00. Chi tiết: [PLAYBOOKS.md](PLAYBOOKS.md) mục 6.
 **Thông báo và case**: mỗi alert chỉ được thông báo và gom case **một lần**, kể cả khi khớp nhiều playbook (vd LNX-002 khớp
 playbook riêng và "Cảnh báo chung mức critical"). Mỗi cặp rule + thực thể (IP nguồn, tài khoản hoặc máy) tối đa 1 thông báo
 trong `NOTIFY_COOLDOWN_SECONDS` giây (mặc định 300, `0` = tắt); alert cùng cặp trong khoảng đó được gộp, số lượng ghi vào

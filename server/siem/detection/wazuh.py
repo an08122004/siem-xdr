@@ -5,8 +5,10 @@ siem-xdr tự phát hiện bằng rule YAML của mình (server/rules) trên M�
 hết sang, tránh mỗi sự cố thành 2 alert. Chỉ lấy:
   - các nhóm rule mà siem-xdr không có rule tương đương (mặc định: FIM `syscheck`, `rootcheck`...),
     từ level WAZUH_ALERT_MIN_LEVEL trở lên. SCA (đánh giá CIS) không nằm trong mặc định: đó là tư thế cấu hình;
-
   - mọi cảnh báo có level >= WAZUH_ALERT_ANY_LEVEL (Wazuh coi là rất nghiêm trọng), bất kể nhóm.
+Cầu nối chuyển MỌI rule từ MIN_LEVEL để đo; rule gốc ngoài các nhóm trên và dưới ANY_LEVEL là alert BÓNG tới cổng T18 (xem
+is_shadow_stock). Trùng YAML <-> rule gốc như NET-001/002 <-> 87702, AUTH-001 <-> 5758/2502, NET-004 <-> 1003 nên không ra
+2 case; alert bóng không bị chống trùng để T13 đếm đủ.
 Level Wazuh (0-15) -> severity: <7 low, 7-9 medium, 10-11 high, >=12 critical.
 Event FIM đã bị rule riêng cụ thể hơn (vd FIM-001) bắt thì không chuyển cảnh báo chung của Wazuh nữa: covered_by().
 """
@@ -19,7 +21,7 @@ from ..pipeline.normalize import Doc, get
 from . import alerts as alert_builder
 from .rules import Rule, RuleEngine
 
-LOCAL_RULE_MIN_ID = 100000          # rule Wazuh tự viết (wazuh/manager/local_rules.xml): luôn chuyển, không coi là chung
+LOCAL_RULE_MIN_ID = 100000          # rule Wazuh tự viết (wazuh/manager/rules/0100-platform.xml): luôn chuyển, không coi là chung
 
 
 def severity_for(level: int) -> str:
@@ -33,24 +35,84 @@ def severity_for(level: int) -> str:
 
 
 def should_bridge(rule: dict, groups: set[str] | None = None, min_level: int | None = None,
-                  any_level: int | None = None) -> bool:
+                  any_level: int | None = None, exclude_groups: set[str] | None = None) -> bool:
     groups = settings.WAZUH_ALERT_GROUPS if groups is None else groups
+    exclude = settings.WAZUH_ALERT_EXCLUDE_GROUPS if exclude_groups is None else exclude_groups
     min_level = settings.WAZUH_ALERT_MIN_LEVEL if min_level is None else min_level
     any_level = settings.WAZUH_ALERT_ANY_LEVEL if any_level is None else any_level
     try:
         level = int(rule.get("level") or 0)
     except (TypeError, ValueError):
         return False
+    if _is_local(rule):
+        return True
+    # CỐ Ý loại sca ở mọi level (R22): SCA là tư thế cấu hình, không phải phát hiện; đừng "sửa" cho level cao đi qua
+    if exclude & {str(g) for g in rule.get("groups") or []}:
+        return False
     if level >= any_level:
         return True
-    return level >= min_level and bool(groups & {str(g) for g in rule.get("groups") or []})
+    # groups rỗng = mọi nhóm (ruleset Wazuh là nguồn phát hiện duy nhất)
+    return level >= min_level and (not groups or bool(groups & {str(g) for g in rule.get("groups") or []}))
+
+
+def _is_local(rule: dict) -> bool:
+    try:
+        return int(rule.get("id") or 0) >= LOCAL_RULE_MIN_ID
+    except (TypeError, ValueError):
+        return False
+
+
+class Suppressor:
+    """Chống trùng: cùng khóa trong `window` giây chỉ cho qua lần đầu. Khóa quá hạn bị xóa mỗi lần gọi nên bộ nhớ
+    chỉ giữ các khóa trong cửa sổ. `now` do người gọi đưa vào (analyzer dùng time.monotonic)."""
+
+    def __init__(self, window: float | None = None) -> None:
+        self.window = settings.WAZUH_ALERT_SUPPRESS if window is None else window
+        self._seen: dict[tuple, float] = {}
+
+    def seen(self, key: tuple, now: float) -> bool:
+        self._seen = {k: t for k, t in self._seen.items() if now - t < self.window}
+        if key in self._seen:
+            return True
+        self._seen[key] = now
+        return False
+
+
+def suppress_key(doc: Doc) -> tuple:
+    # agent 000 dùng chung cho mọi thiết bị syslog: thiếu source.ip thì agent.id (syslog-<ip>) vẫn tách được nguồn
+    agent = get(doc, "agent.id")
+    # file.path: syscheck 550/554 trên các file KHÁC nhau của một agent là các thay đổi riêng (như main: mỗi thay đổi một alert)
+    # process.pid: hai tiến trình độc hại khác nhau trên cùng agent là hai alert (mỗi cái một lệnh kill), không được gộp
+    return (f"WZH-{get(doc, 'wazuh.rule.id')}", get(doc, "source.ip") or agent, agent, get(doc, "file.path"),
+            get(doc, "process.pid"))
+
+
+def is_shadow_stock(rule: dict, active_groups: set[str] | None = None, any_level: int | None = None) -> bool:
+    """Rule gốc của Wazuh ngoài danh sách nhóm cũ và dưới level any: chạy bóng (chỉ đo, SOAR bỏ qua).
+    Từ R65 mặc định tắt (WAZUH_STOCK_SHADOW=false): rule gốc đủ level là alert thật."""
+    if not settings.WAZUH_STOCK_SHADOW:
+        return False
+    active = settings.WAZUH_ALERT_ACTIVE_GROUPS if active_groups is None else active_groups
+    any_level = settings.WAZUH_ALERT_ANY_LEVEL if any_level is None else any_level
+    if _is_local(rule):
+        return False
+    try:
+        if int(rule.get("level") or 0) >= any_level:
+            return False
+    except (TypeError, ValueError):
+        return False
+    return not (active & {str(g) for g in rule.get("groups") or []})
 
 
 def to_alert(doc: Doc) -> Doc | None:
     rule = get(doc, "wazuh.rule")
     if not isinstance(rule, dict) or not rule.get("id") or not should_bridge(rule):
         return None
-    return alert_builder.from_wazuh(doc, severity_for(int(rule.get("level") or 0)))
+    alert = alert_builder.from_wazuh(doc, severity_for(int(rule.get("level") or 0)))
+    if is_shadow_stock(rule):
+        alert["alert"]["shadow"] = True
+        alert["rule"]["mode"] = "shadow"
+    return alert
 
 
 def covered_by(doc: Doc, rules: Iterable[Rule]) -> str | None:
@@ -61,7 +123,7 @@ def covered_by(doc: Doc, rules: Iterable[Rule]) -> str | None:
     của ruleset gốc (550, 553...), nên khi nó đã bắt event thì không chuyển cảnh báo chung nữa: một thay đổi file không
     thành 2 alert. Không áp cho rule Wazuh tự viết (id >= 100000, vd 100100 webshell) và không tính rule chạy bóng: SOAR
     bỏ qua alert bóng, nếu bỏ luôn cảnh báo Wazuh thì thay đổi đó không còn alert nào được xử lý."""
-    if get(doc, "event.module") != "fim":
+    if not settings.RULE_ENGINE_ENABLED or get(doc, "event.module") != "fim":
         return None
     try:
         if int(get(doc, "wazuh.rule.id") or 0) >= LOCAL_RULE_MIN_ID:

@@ -1,0 +1,231 @@
+<!--
+  TI-001 (kết nối với IOC trong Threat Intelligence), bật từ 05/11/2026 (R65). Dải ID 107000-107999.
+  KHÔNG ĐỔI TÊN FILE: tên phải xếp SAU 0541-network.xml (chứa 103000, 103003, 103004), 0475-suricata_rules.xml (86601), 0540-pfsense_rules.xml (87701), 0245-web_rules.xml (31101, 31108), 0095-sshd_rules.xml, 0580-win-security_rules.xml (60106, 60122) và 0840-win_event_channel.xml (92657); Wazuh nạp theo tên file và bỏ rule có
+  if_sid chưa tồn tại. Vì vậy file này không mang số 0107 như bảng kế hoạch (cùng lý do với 0541-network.xml); ID_RANGES trong server/siem/wazuh_rules.py dùng tên 0845-ti.xml.
+
+  Rule cũ dựa vào threat.matched do pipeline analyzer gắn (IP / domain / hash từ file config/intel và feed MISP). Ở Wazuh dùng danh sách CDB (IP từ đầu; domain + hash từ R64, 107011-107016 cuối file):
+  SOAR mỗi chu kỳ đồng bộ MISP (MISP_INTERVAL_MINUTES) đổi IOC loại ip còn hạn thành danh sách `etc/lists/siem-misp-ip` (server/siem/pipeline/misp_cdb.py, tools/misp_to_cdb.py),
+  đẩy lên bằng Wazuh API rồi nạp lại analysisd. CIDR /24-/31 được triển khai thành từng địa chỉ: Wazuh 4.14.8 không khớp khóa CIDR trong CDB (đã thử, cả address_match_key).
+  Danh sách khai báo trong ossec.conf; entrypoint tạo file giữ chỗ (một dòng 240.0.0.0:empty, API Wazuh từ chối file rỗng) nên analysisd chạy được cả khi chưa có IOC.
+  KHÔNG đụng danh sách gốc etc/lists/malicious-ioc/malicious-ip của Wazuh (R50): 99915 / 99916 và NET-004 (103004) dùng nó.
+  R64: `siem-misp-domain` và `siem-misp-hash` (cùng nguồn, cùng cách đẩy, cũng tách khỏi danh sách gốc malicious-domains / malware-hashes); rule 107011-107016 ở cuối file.
+  GIỚI HẠN domain / hash (RULES.md 9.9): CDB khớp chính xác và phân biệt hoa thường nên subdomain của domain IOC KHÔNG khớp (rule YAML cũ có); Sysmon sự kiện 1 (win.eventdata.hashes là một chuỗi
+  "SHA1=...,MD5=...,SHA256=...") và hash trong tiến trình CHƯA phủ (chỉ hash file của FIM); FIM-001 / WEB-010 (level 10, nạp trước) thắng TI-001 hash cùng cha khi cùng khớp đường dẫn (ngang level, nạp trước thắng).
+
+  Phạm vi nguồn (rule không điều kiện sẽ chặn cả họ rule gốc, nên chọn các cha có địa chỉ IP trong sự kiện):
+    - firewall pf / filterlog (OPNsense qua agent hoặc syslog 514): con của 87701 (block) và 103000 (pass, bộ đếm của 0541-network.xml), và của 103003 (NET-003);
+      rule cuối của event đổi sang TI-001 nên event đó KHÔNG vào lịch sử đếm của NET-001 / NET-005 / 87702: chấp nhận được vì TI-001 đã báo từng event của nguồn IOC (giống mục 5 đầu 0541-network.xml);
+    - Suricata (eve.json): con của 86601 và của 103004.
+  Cũng phủ sshd, web access log, đăng nhập Windows (cuối file, R53).
+  R63 (nhất quán với R57): CẢ BA con TI-001 theo dịch vụ (107008 sshd, 107009 web, 107010 Windows) loại IP có trong danh sách gốc malicious-ip bằng `not_match_key`, để rule IOC gốc
+  (99903 / 99904, 99905 / 99906, 99919 / 99920) giữ ngữ cảnh. Firewall (107001-107003) không loại vì không có rule IOC gốc cùng cha; Suricata loại ở 107004 / 107005.
+  Riêng Windows: 99919 là con trực tiếp của 60105 (level 9) nên thắng 60122 (level 5) cùng toàn bộ cây con của 60122, nên 107010 (con của 60122) không bao giờ được xét với IP nằm ở cả hai danh sách, kể cả khi level 10 > 9. Chưa phủ: DNS, proxy, VPN... (cần cha riêng cho từng nguồn).
+
+  Thứ tự anh em cùng cha (thử trên 4.14.8): rule LEVEL CAO hơn thắng, bằng level thì rule nạp trước thắng; rule gốc (ruleset/rules) nạp trước rule của repo. Vì vậy:
+    - TI-001 firewall level 10 ngang NET-003 (103003, nạp trước) nên NET-003 thắng khi trùng; 107003 là CON của 103003 để vẫn ra TI-001 (mô tả nêu IOC).
+    - Suricata: 99915 / 99916 (level 9, danh sách gốc) thua mọi rule level 10, nên 107004 / 107005 loại IP nằm trong danh sách gốc để rule IOC gốc giữ ngữ cảnh, và 103004 (NET-004, level 10, đã loại IP danh sách gốc)
+      thắng 107004 / 107005 ở severity <= 2, vì thế severity <= 2 xử lý bằng 107006 / 107007 là CON của 103004, còn 107004 / 107005 chỉ nhận severity khác 0-2.
+    - GIỚI HẠN analysisd 4.14.8: rule có từ 3 thẻ <list> trở lên bị xét sai (thẻ đầu bị bỏ qua / kết quả lẫn), nên mỗi rule dưới đây chỉ có tối đa 2 thẻ <list>. Hệ quả: nguồn nằm trong danh sách MISP
+      còn đích nằm trong danh sách gốc (hoặc ngược lại) thì TI-001 (level 10) thắng 99915 / 99916 (level 9); chỉ IP có ở CẢ HAI danh sách ở CÙNG trường mới nhường rule gốc.
+  Trường dùng: srcip / dstip (firewall, decoder pf), src_ip / dest_ip (Suricata, trường json). Dùng match_key / not_match_key (khớp chuỗi chính xác, như 99915 và 103004).
+  R53 (phủ IP trên mọi nguồn có địa chỉ): thêm con level 10 cho sshd (107008), web access log (107009), đăng nhập Windows (107010). Rule cũ gắn threat.matched cho MỌI event;
+  nguồn khác (DNS, proxy, VPN...) chưa phủ. Hệ quả giống R52 cho đếm của dự án (AUTH / WEB / WIN): event của IP trong danh sách IOC có rule cuối là TI-001 nên KHÔNG vào bộ đếm
+  của rule frequency (5763, 5720, 31151, 60204, rule dự án...); IP đó vẫn báo TI-001 từng event (level 10 như các rule đếm). Rule gốc level > 10 cùng cha (31115, 31168...) vẫn thắng TI-001.
+  Danh sách nguồn IOC: SOAR gộp IOC MISP + file config/intel/*.txt (loại ip). Domain và hash: R64, xem trên.
+-->
+<group name="local,siem-xdr,">
+  <!-- TI-001 firewall: IP NGUỒN nằm trong danh sách IOC (nguồn ngoài đang chạm vào mạng) -->
+  <rule id="107001" level="10">
+    <if_sid>87701, 103000</if_sid>
+    <list field="srcip" lookup="match_key">etc/lists/siem-misp-ip</list>
+    <description>TI-001 IP nguồn $(srcip) nằm trong danh sách IOC (MISP) - firewall $(action)</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+    <group>siem,threat_intel,legacy_TI-001,</group>
+  </rule>
+
+  <!-- TI-001 firewall: IP ĐÍCH nằm trong danh sách IOC (máy nội bộ nối ra máy chủ độc hại / C2) -->
+  <rule id="107002" level="10">
+    <if_sid>87701, 103000</if_sid>
+    <list field="dstip" lookup="match_key">etc/lists/siem-misp-ip</list>
+    <description>TI-001 IP đích $(dstip) nằm trong danh sách IOC (MISP) - firewall $(action)</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+    <group>siem,threat_intel,legacy_TI-001,</group>
+  </rule>
+
+  <!-- TI-001 firewall: nguồn IOC vào cổng quản trị (NET-003 đã báo; con của nó để mô tả nêu IOC) -->
+  <rule id="107003" level="10">
+    <if_sid>103003</if_sid>
+    <list field="srcip" lookup="match_key">etc/lists/siem-misp-ip</list>
+    <description>TI-001 IP nguồn $(srcip) nằm trong danh sách IOC (MISP) vào cổng quản trị $(dstport)</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+    <group>siem,threat_intel,legacy_TI-001,</group>
+  </rule>
+
+  <!-- TI-001 Suricata, severity khác 0-2 (NET-004 không nhận): IP nguồn / đích trong danh sách IOC MISP và không nằm trong danh sách gốc (khi đó 99915 / 99916 giữ ngữ cảnh) -->
+  <rule id="107004" level="10">
+    <if_sid>86601</if_sid>
+    <field name="alert.severity" type="pcre2" negate="yes">^[0-2]$</field>
+    <list field="src_ip" lookup="match_key">etc/lists/siem-misp-ip</list>
+    <list field="src_ip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
+    <description>TI-001 Cảnh báo Suricata từ IP nguồn $(src_ip) nằm trong danh sách IOC (MISP): $(alert.signature)</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+    <group>siem,threat_intel,legacy_TI-001,</group>
+  </rule>
+
+  <rule id="107005" level="10">
+    <if_sid>86601</if_sid>
+    <field name="alert.severity" type="pcre2" negate="yes">^[0-2]$</field>
+    <list field="dest_ip" lookup="match_key">etc/lists/siem-misp-ip</list>
+    <list field="dest_ip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
+    <description>TI-001 Cảnh báo Suricata tới IP đích $(dest_ip) nằm trong danh sách IOC (MISP): $(alert.signature)</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+    <group>siem,threat_intel,legacy_TI-001,</group>
+  </rule>
+
+  <!-- TI-001 Suricata, severity 0-2: con của NET-004 (103004 đã loại IP danh sách gốc), nên không cần loại lại -->
+  <rule id="107006" level="10">
+    <if_sid>103004</if_sid>
+    <list field="src_ip" lookup="match_key">etc/lists/siem-misp-ip</list>
+    <description>TI-001 Cảnh báo Suricata mức cao từ IP nguồn $(src_ip) nằm trong danh sách IOC (MISP): $(alert.signature)</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+    <group>siem,threat_intel,legacy_TI-001,</group>
+  </rule>
+
+  <rule id="107007" level="10">
+    <if_sid>103004</if_sid>
+    <list field="dest_ip" lookup="match_key">etc/lists/siem-misp-ip</list>
+    <description>TI-001 Cảnh báo Suricata mức cao tới IP đích $(dest_ip) nằm trong danh sách IOC (MISP): $(alert.signature)</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+    <group>siem,threat_intel,legacy_TI-001,</group>
+  </rule>
+
+  <!-- TI-001 sshd: IP nguồn của đăng nhập thành công (5715), thất bại (5716, 5760) hay user không tồn tại (5710) nằm trong danh sách IOC.
+       Level 10 > 3/5 của các rule này; 5763 / 5720 / 5712 (brute force, level 10, if_matched_sid) đếm theo rule cuối của event nên KHÔNG đếm event của IP MISP:
+       IP đó ra TI-001 từng event (cùng level 10), xem ghi chú R53 ở đầu file.
+       R63: IP có ở CẢ danh sách gốc malicious-ip thì TI-001 nhường 99903 (đăng nhập thành công, level 14) / 99904 (thất bại, level 9, thua level 10 của TI-001 nếu không loại). -->
+  <rule id="107008" level="10">
+    <if_sid>5715, 5716, 5760, 5710</if_sid>
+    <list field="srcip" lookup="match_key">etc/lists/siem-misp-ip</list>
+    <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
+    <description>TI-001 sshd: IP nguồn $(srcip) nằm trong danh sách IOC (MISP)</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+    <group>siem,threat_intel,legacy_TI-001,</group>
+  </rule>
+
+  <!-- TI-001 web access log: con của 31101 (lỗi 4xx) và 31108 (request 2xx/3xx đơn giản, level 0). Thử: con trực tiếp của 31100 KHÔNG bao giờ được xét
+       (31101 / 31108 khớp trước), nên phải treo vào hai lá này. Các rule tấn công khác con của 31100 (31103 SQLi, 31105 XSS, 31115 URL quá dài level 13, 31168 / 31169 level 15...)
+       KHÔNG bị TI-001 thay thế. IP có trong CẢ danh sách gốc malicious-ip: TI-001 nhường (cây gốc 31103 -> 99905 -> 99906, level 14, alert thật, R57). 31151... (if_matched_sid 31101, level 7 sau T12, 30 lần/60 s) không đếm event của IP MISP. Chỉ nhận log của agent (location `(agent) any->path`):
+       decoder web chạy theo nội dung nên thiết bị syslog (agent 000) giả được dòng access log. -->
+  <rule id="107009" level="10">
+    <if_sid>31101, 31108</if_sid>
+    <location type="pcre2">^\(</location>
+    <list field="srcip" lookup="match_key">etc/lists/siem-misp-ip</list>
+    <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
+    <description>TI-001 web: IP nguồn $(srcip) nằm trong danh sách IOC (MISP)</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+    <group>siem,threat_intel,legacy_TI-001,</group>
+  </rule>
+
+  <!-- TI-001 Windows: đăng nhập thất bại (60122) / thành công (60106; đăng nhập từ xa NTLM có workstationName là 92657, level 6, rule gốc khớp trước 60106 nên TI-001 treo cả vào đó), IP nguồn ở win.eventdata.ipAddress.
+       Rule Windows gốc sâu hơn (92650-92656...) chưa được kiểm: chỉ 4625 / 4624 thường và 92657 có ca test. 60204 (nhiều lần thất bại, level 10, if_matched_group)
+       không đếm event của IP MISP. -->
+  <rule id="107010" level="10">
+    <if_sid>60106, 60122, 92657</if_sid>
+    <list field="win.eventdata.ipAddress" lookup="match_key">etc/lists/siem-misp-ip</list>
+    <list field="win.eventdata.ipAddress" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
+    <description>TI-001 Windows: IP nguồn $(win.eventdata.ipAddress) của đăng nhập nằm trong danh sách IOC (MISP)</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+    <group>siem,threat_intel,legacy_TI-001,</group>
+  </rule>
+
+  <!-- R64: TI-001 domain và hash. Danh sách siem-misp-domain / siem-misp-hash do SOAR đẩy (MISP + config/intel/bad_domains.txt, bad_hashes.txt), TÁCH khỏi danh sách gốc.
+       Khóa CDB khớp CHÍNH XÁC và phân biệt hoa thường: khác rule YAML cũ, subdomain của domain IOC KHÔNG khớp (IOC phải liệt kê đúng tên được hỏi) - xem RULES.md 9.9. -->
+  <!-- Domain, Suricata DNS (dns.rrname). Loại domain có trong danh sách gốc malicious-domains: khi đó 99918 (level 9, nạp trước) giữ ngữ cảnh, nếu không level 10 của TI-001 thắng nó -->
+  <rule id="107011" level="10">
+    <if_sid>86603</if_sid>
+    <location type="pcre2">^\(</location>
+    <list field="dns.rrname" lookup="match_key">etc/lists/siem-misp-domain</list>
+    <list field="dns.rrname" lookup="not_match_key">etc/lists/malicious-ioc/malicious-domains</list>
+    <description>TI-001 Domain $(dns.rrname) nằm trong danh sách IOC - truy vấn DNS (Suricata)</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+    <group>siem,threat_intel,legacy_TI-001,</group>
+  </rule>
+
+  <!-- Domain, Suricata HTTP (http.hostname); cùng cách loại trừ với 99917 -->
+  <rule id="107012" level="10">
+    <if_sid>86602</if_sid>
+    <location type="pcre2">^\(</location>
+    <list field="http.hostname" lookup="match_key">etc/lists/siem-misp-domain</list>
+    <list field="http.hostname" lookup="not_match_key">etc/lists/malicious-ioc/malicious-domains</list>
+    <description>TI-001 Domain $(http.hostname) nằm trong danh sách IOC - truy cập HTTP (Suricata)</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+    <group>siem,threat_intel,legacy_TI-001,</group>
+  </rule>
+
+  <!-- Domain, Sysmon sự kiện 22 (truy vấn DNS của tiến trình Windows). Không có rule gốc cùng cha nên không cần loại trừ -->
+  <rule id="107013" level="10">
+    <if_sid>61650</if_sid>
+    <list field="win.eventdata.queryName" lookup="match_key">etc/lists/siem-misp-domain</list>
+    <description>TI-001 Domain $(win.eventdata.queryName) nằm trong danh sách IOC - Sysmon DNS (tiến trình $(win.eventdata.image))</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+    <group>siem,threat_intel,legacy_TI-001,</group>
+  </rule>
+
+  <!-- Hash file, FIM (550 sửa / 554 mới) theo sha256 / sha1 / md5. 99901 (level 14, danh sách gốc malware-hashes) luôn thắng nhờ level; 107014 vẫn loại trừ cho rõ ý -->
+  <rule id="107014" level="10">
+    <if_sid>550, 554</if_sid>
+    <list field="sha256" lookup="match_key">etc/lists/siem-misp-hash</list>
+    <list field="sha256" lookup="not_match_key">etc/lists/malicious-ioc/malware-hashes</list>
+    <description>TI-001 File $(file) có sha256 nằm trong danh sách IOC</description>
+    <mitre>
+      <id>T1204.002</id>
+    </mitre>
+    <group>siem,threat_intel,legacy_TI-001,</group>
+  </rule>
+
+  <rule id="107015" level="10">
+    <if_sid>550, 554</if_sid>
+    <list field="sha1" lookup="match_key">etc/lists/siem-misp-hash</list>
+    <description>TI-001 File $(file) có sha1 nằm trong danh sách IOC</description>
+    <mitre>
+      <id>T1204.002</id>
+    </mitre>
+    <group>siem,threat_intel,legacy_TI-001,</group>
+  </rule>
+
+  <rule id="107016" level="10">
+    <if_sid>550, 554</if_sid>
+    <list field="md5" lookup="match_key">etc/lists/siem-misp-hash</list>
+    <description>TI-001 File $(file) có md5 nằm trong danh sách IOC</description>
+    <mitre>
+      <id>T1204.002</id>
+    </mitre>
+    <group>siem,threat_intel,legacy_TI-001,</group>
+  </rule>
+</group>

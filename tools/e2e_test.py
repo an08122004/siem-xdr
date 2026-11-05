@@ -101,8 +101,11 @@ def sh(*cmd):
 
 
 def alert(c, rule_prefix, pred=lambda a: True):
+    """R65: engine YAML đã tắt, phát hiện là rule Wazuh XML (rule.id WZH-<id>). Mã YAML cũ (WEB-001, LNX-002...) nay là
+    rule.legacy_id / legacy_ids của rule XML tương ứng; truyền WZH-... để khớp theo id."""
     return next((a for a in c.get("/api/v1/alerts?size=200") if a["@timestamp"] >= START
-                 and a["rule"]["id"].startswith(rule_prefix) and pred(a)), None)
+                 and (a["rule"]["id"].startswith(rule_prefix) or rule_prefix in (a["rule"].get("legacy_ids") or []))
+                 and pred(a)), None)
 
 
 def action(c, typ, target=None, status="success"):
@@ -175,7 +178,7 @@ check("sqli", "truy cập bình thường", web("/")[0] == 200)
 t0 = time.time()
 web("/products.html?id=1%20union%20select%20username,password%20from%20users")
 a = wait(lambda: alert(admin, "WEB-001"))
-check("sqli", "alert WEB-001", bool(a), f"{a['rule']['name']}, nguồn {a.get('source', {}).get('ip')}, sau {time.time() - t0:.0f}s" if a else "")
+check("sqli", "alert WEB-001 (rule XML WZH-104xxx, legacy_id WEB-001)", bool(a), f"{a['rule']['name']}, nguồn {a.get('source', {}).get('ip')}, sau {time.time() - t0:.0f}s" if a else "")
 b = wait(lambda: action(admin, "block_ip"))
 check("sqli", "SOAR chặn IP qua Wazuh, agent báo success", bool(b), f"{b['target']}: {b['output']}, sau {time.time() - t0:.0f}s" if b else "")
 check("sqli", "máy host không vào được web nữa", web("/", timeout=4)[0] is None)
@@ -280,7 +283,7 @@ check("grafana", "Sign out trong Grafana → đăng xuất luôn phiên console"
 st, orgs = admin.grafana("/api/user/orgs")
 check("grafana", "quản trị console (e2e-admin) → Admin trong Grafana", st == 200 and orgs[0]["role"] == "Admin")
 st, d = admin.grafana("/api/dashboards/uid/siem-overview")
-check("grafana", "dashboard Tổng quan SOC tải được", st == 200 and len(d["dashboard"]["panels"]) == 36,
+check("grafana", "dashboard Tổng quan SOC tải được", st == 200 and len(d["dashboard"]["panels"]) == 40,
       f"{len(d['dashboard']['panels'])} panel" if st == 200 else str(st))
 q = {"refId": "A", "datasource": {"type": "elasticsearch", "uid": "siem-events"},
      "query": "event.module:console AND event.category:authentication", "metrics": [{"id": "1", "type": "count"}],
@@ -293,7 +296,7 @@ check("grafana", "mục Phiên đăng nhập thấy lượt đăng nhập consol
 st, d = admin.grafana("/api/dashboards/uid/siem-investigate")
 check("grafana", "dashboard Điều tra thực thể (biến q) tải được", st == 200 and d["dashboard"]["templating"]["list"][0]["name"] == "q")
 st, d = admin.grafana("/api/dashboards/uid/siem-rules")
-check("grafana", "dashboard Thư viện rule tải được", st == 200 and len(d["dashboard"]["panels"]) == 15)
+check("grafana", "dashboard Thư viện rule tải được", st == 200 and len(d["dashboard"]["panels"]) == 19)
 
 
 def catalog_count(query):
@@ -307,9 +310,16 @@ def catalog_count(query):
 
 n_files = sum(1 for f in Path("server/rules").glob("**/*.y*ml") if not {"exceptions", "cases"} & set(f.parts)
               for line in f.read_text(encoding="utf-8").splitlines() if line.startswith("- id:"))
-n_rules = catalog_count("origin:rule")
+n_rules = catalog_count("origin:rule AND source:(builtin OR ai)")
 check("grafana", "Thư viện rule liệt kê đủ rule trong server/rules (Grafana đọc qua siem-rules)", n_rules == n_files,
       f"{n_rules}/{n_files} rule")
+n_wzh = catalog_count("origin:wazuh_rule")
+wzh_total = manager_py("""
+from siem.wazuh_rules import WazuhApi
+print(WazuhApi.from_settings().rules(0, 1)['data']['total_affected_items'])
+""").stdout.strip()
+check("grafana", "Thư viện rule liệt kê đủ rule của Wazuh (tổng theo Wazuh API)", wzh_total.isdigit() and n_wzh == int(wzh_total),
+      f"{n_wzh}/{wzh_total} rule Wazuh")
 n_prop, n_cmp = catalog_count("origin:ai_proposal"), catalog_count("origin:comparison")
 check("grafana", "đề xuất AI có trong thư viện, kèm cặp so sánh với rule hiện có", n_prop == 0 or n_cmp > 0,
       f"{n_prop} đề xuất, {n_cmp} cặp so sánh")

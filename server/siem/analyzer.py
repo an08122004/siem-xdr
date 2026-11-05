@@ -29,7 +29,7 @@ FLUSH_SIZE = 500
 class Analyzer:
     def __init__(self) -> None:
         self.enricher = default_enricher()
-        self.engine = RuleEngine(load_rules(settings.RULES_DIR))
+        self.engine = RuleEngine(load_rules(settings.RULES_DIR) if settings.RULE_ENGINE_ENABLED else [])   # R65: tắt = không nạp YAML
         self.rules_fp = rules_fingerprint(settings.RULES_DIR)
         self.last_rules_check = time.time()
         self.detector = ml.AnomalyDetector(
@@ -43,6 +43,7 @@ class Analyzer:
         self.buffer: list[dict] = []
         self.last_flush = time.time()
         self.stats = {"events": 0, "alerts": 0}
+        self.suppressor = wazuh_bridge.Suppressor()
         self.stream: bus.Stream | None = None
 
     def handle(self, raw: dict) -> None:
@@ -53,7 +54,7 @@ class Analyzer:
             if (alert := wazuh_bridge.to_alert(doc)):
                 if (own := wazuh_bridge.covered_by(doc, self.engine.rules)):
                     log.debug("bỏ cảnh báo Wazuh %s: event FIM đã thành alert %s", get(doc, "wazuh.rule.id"), own)
-                else:
+                elif get(alert, "alert.shadow") or not self.suppressor.seen(wazuh_bridge.suppress_key(doc), time.monotonic()):
                     self.emit(alert)
             return
         self.buffer.append({"_index": store.events_index(doc.get("@timestamp")), "_id": doc["event"]["id"], "_source": doc})
@@ -76,6 +77,8 @@ class Analyzer:
     def reload_rules_if_changed(self) -> None:
         """Nạp lại rule khi file trong rules/ đổi (vd analyst duyệt đề xuất AI).
         Giữ nguyên trạng thái cửa sổ đếm của các rule không đổi; rule lỗi -> giữ bộ cũ."""
+        if not settings.RULE_ENGINE_ENABLED:
+            return
         fp = rules_fingerprint(settings.RULES_DIR)
         if fp == self.rules_fp:
             return

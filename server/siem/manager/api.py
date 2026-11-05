@@ -66,7 +66,7 @@ async def catalog_loop() -> None:
     """Đồng bộ danh mục rule (Grafana "Thư viện rule") định kỳ; lỗi chỉ ghi log, lần sau thử lại."""
     while True:
         try:
-            await asyncio.to_thread(rules_catalog.sync, es(), settings.RULES_DIR)
+            await asyncio.to_thread(rules_catalog.sync, es(), settings.RULES_DIR, api=WazuhApi.from_settings())
         except Exception as e:  # noqa: BLE001
             log.warning("đồng bộ danh mục rule lỗi: %s", e)
         await asyncio.sleep(settings.RULES_CATALOG_SECONDS)
@@ -92,7 +92,7 @@ async def kpi_loop() -> None:
 def refresh_catalog() -> None:
     """Sau khi duyệt / từ chối / gỡ đề xuất: cập nhật danh mục ngay, không chờ chu kỳ."""
     try:
-        rules_catalog.sync(es(), settings.RULES_DIR)
+        rules_catalog.sync(es(), settings.RULES_DIR, api=WazuhApi.from_settings())
     except Exception as e:  # noqa: BLE001 - danh mục chỉ để tra cứu, không được làm hỏng thao tác duyệt
         log.warning("cập nhật danh mục rule lỗi: %s", e)
 
@@ -126,7 +126,9 @@ ACTIVITY = [(re.compile(p), op) for p, op in (
     (r"^/api/v1/cases/[^/]+/incident$", "case_incident"), (r"^/api/v1/rules/[^/]+/promote$", "rule_promoted"),
     (r"^/api/v1/hunts$", "hunt_created"), (r"^/api/v1/hunts/[^/]+$", "hunt_updated"),
     (r"^/api/v1/handover$", "handover_saved"), (r"^/api/v1/ai/assist$", "ai_assist"),
-    (r"^/api/v1/ai/assist/[^/]+/feedback$", "ai_assist_feedback"))]
+    (r"^/api/v1/ai/assist/[^/]+/feedback$", "ai_assist_feedback"),
+    (r"^/api/v1/exceptions$", "exception_added"), (r"^/api/v1/exceptions/\d+/approve$", "exception_approved"),
+    (r"^/api/v1/exceptions/\d+$", "exception_removed"))]
 
 
 def activity_detail(body: bytes) -> str | None:
@@ -768,6 +770,7 @@ def go(kind: str, doc_id: str) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 
 from ..ai import deploy as ai_deploy  # noqa: E402
+from .. import wazuh_exceptions, wazuh_rules  # noqa: E402
 
 
 class AIDecision(BaseModel):
@@ -847,6 +850,63 @@ def ai_rollback(pid: str, body: AIDecision, s: Session = Depends(rules_perm)) ->
     if len(body.reason.strip()) < 3:
         raise HTTPException(400, "gỡ phải ghi lý do")
     return _ai(ai_deploy.rollback, es(), pid, s.username, body.reason.strip(), settings.RULES_DIR, now=store.now_iso())
+
+
+class WazuhCondition(BaseModel):
+    field: str = Field(max_length=64)
+    value: str = Field(max_length=500)
+    decoder: str | None = Field(None, max_length=64)
+
+
+class WazuhException(BaseModel):
+    rule: str = Field(max_length=32)                      # vd WZH-31103
+    conditions: list[WazuhCondition] = Field(max_length=10)
+    reason: str = Field(max_length=500)
+
+
+def _exc(fn, *args):
+    try:
+        return fn(*args)
+    except wazuh_rules.WazuhUnavailable as e:             # không xác nhận được với Wazuh: từ chối (fail closed)
+        raise HTTPException(503, str(e))
+    except wazuh_exceptions.NotFound:
+        raise HTTPException(404, "không có ngoại lệ này")
+    except wazuh_exceptions.Duplicate as e:
+        raise HTTPException(409, str(e))
+    except wazuh_rules.WazuhRuleError as e:               # Wazuh không nạp được: file cũ đã được giữ nguyên (là ValueError: bắt trước)
+        raise HTTPException(409, str(e))
+    except (ValueError, KeyError) as e:                   # đầu vào sai: điều kiện rỗng, trường lạ, IP sai...
+        raise HTTPException(400, f"ngoại lệ không hợp lệ: {e}")
+
+
+@app.get("/api/v1/exceptions", dependencies=[Depends(current_user)])
+def exceptions_list() -> list[dict[str, Any]]:
+    return wazuh_exceptions.items()
+
+
+@app.post("/api/v1/exceptions")
+def exceptions_add(body: WazuhException, s: Session = Depends(rules_perm)) -> dict[str, Any]:
+    """Ngoại lệ cho rule Wazuh = rule level 0 trong rules-dynamic/exceptions.xml. Phải có điều kiện (400 nếu không) và
+    rule cha phải đang có trong Wazuh. Tạo ra ở trạng thái pending: cần người KHÁC duyệt (giống ngoại lệ AI)."""
+    if len(body.reason.strip()) < 3:
+        raise HTTPException(400, "ngoại lệ phải ghi lý do")
+    item = _exc(wazuh_exceptions.add, body.rule, [c.model_dump() for c in body.conditions], body.reason.strip(),
+                s.username, wazuh_rules.WazuhApi.from_settings())
+    n = wazuh_exceptions.used()
+    return item | ({"warning": f"đã dùng {n}/1000 id ngoại lệ; id đã dùng không được giải phóng"} if n >= 900 else {})
+
+
+@app.post("/api/v1/exceptions/{eid}/approve")
+def exceptions_approve(eid: int, s: Session = Depends(rules_perm)) -> dict[str, Any]:
+    return _exc(wazuh_exceptions.approve, eid, s.username, wazuh_rules.WazuhApi.from_settings())
+
+
+@app.delete("/api/v1/exceptions/{eid}")
+def exceptions_remove(eid: int, reason: str = Query("", max_length=500), s: Session = Depends(rules_perm)) -> dict[str, Any]:
+    """Gỡ = bật lại phát hiện (hướng an toàn) nên 1 người đủ; mục được giữ trong sổ cái làm lịch sử."""
+    if len(reason.strip()) < 3:
+        raise HTTPException(400, "gỡ phải ghi lý do")
+    return _exc(wazuh_exceptions.remove, eid, s.username, reason.strip(), wazuh_rules.WazuhApi.from_settings())
 
 
 @app.post("/api/v1/ai/run")

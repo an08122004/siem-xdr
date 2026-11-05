@@ -219,7 +219,10 @@ services:
       # đăng nhập console bằng tài khoản riêng (manager/auth.py); secret này chỉ dùng tạo tài khoản admin đầu tiên
       CONSOLE_ADMIN_PASSWORD_FILE: /run/secrets/console_admin_password
       DATASETS_DIR: /datasets   # bộ mẫu vàng để kiểm tra lại đề xuất AI ngay trước khi triển khai
-    secrets: [manager_es_password, console_admin_password]
+      WAZUH_API_URL: https://wazuh-manager:55000
+      WAZUH_RULES_API_USER: siem-rules               # quyền tối thiểu: nạp lại ruleset, đọc rule, logtest
+      WAZUH_RULES_API_PASSWORD_FILE: /run/secrets/wazuh_rules_api_password
+    secrets: [manager_es_password, console_admin_password, wazuh_rules_api_password]
     volumes:
       - *ca-mount
       - {type: volume, source: certs, target: /certs/manager, read_only: true, volume: {subpath: manager}}
@@ -229,13 +232,14 @@ services:
       - ./server/rules/exceptions:/app/rules/exceptions
       - ./server/config:/app/config:ro                # priority.yml (ưu tiên / SLA), threat_profile.yml (độ phủ ATT&CK)
       - ./datasets/processed:/datasets:ro
+      - wazuh_dynamic_rules:/app/wazuh-rules          # ai.xml, exceptions.xml của Wazuh (siem/wazuh_rules.py)
       - console_audit:/app/audit                       # nhật ký console (1 dòng JSON/sự kiện), wazuh-manager đọc bằng <localfile>
 
   # Wazuh manager 4.14.8: trạm thu của Wazuh agent (Windows/Linux). Chỉ dùng manager (không indexer/dashboard/filebeat):
   # event + cảnh báo đi tiếp qua wazuh-forwarder vào Kafka. Cấu hình: wazuh/manager/ (xem README mục 1).
   #   1514/tcp  agent gửi event (mã hóa AES)       1515/tcp  enroll agent (TLS + mật khẩu secrets/enrollment_key)
   #   514/udp+tcp  syslog của firewall/Suricata/router, CHỈ từ SYSLOG_ALLOWED_IPS (thay container Vector `syslog` cũ)
-  #   55000     Wazuh API: KHÔNG publish, chỉ SOAR gọi trong mạng docker (user siem-soar, quyền tối thiểu)
+  #   55000     Wazuh API: KHÔNG publish, chỉ gọi trong mạng docker: SOAR (user siem-soar, quyền tối thiểu) và manager nạp rule (user siem-rules)
   # Agent không được mới hơn manager: dùng bộ cài agent 4.14.8 trở xuống.
   wazuh-manager:
     image: wazuh/wazuh-manager:4.14.8
@@ -252,10 +256,14 @@ services:
       WAZUH_AGENTS_DISCONNECTION_TIME: ${WAZUH_AGENTS_DISCONNECTION_TIME:-10m}
       # IP/CIDR được gửi syslog tới 514 (entrypoint/10-siem-setup.sh ghi vào allowed-ips)
       SYSLOG_ALLOWED_IPS: ${SYSLOG_ALLOWED_IPS:-10.10.40.254}
-    secrets: [enrollment_key, wazuh_api_password]
+    secrets: [enrollment_key, wazuh_api_password, wazuh_rules_api_password]
     volumes:
       - wazuh_api_configuration:/var/ossec/api/configuration
       - wazuh_etc:/var/ossec/etc
+      # rule + decoder của repo (chỉ đọc), rule động do console ghi (entrypoint/10-siem-setup.sh chown cho uid 10001)
+      - ./wazuh/manager/rules:/var/ossec/etc/rules:ro
+      - ./wazuh/manager/decoders:/var/ossec/etc/decoders:ro
+      - wazuh_dynamic_rules:/var/ossec/etc/rules-dynamic
       - wazuh_logs:/var/ossec/logs
       - wazuh_queue:/var/ossec/queue
       - wazuh_var_multigroups:/var/ossec/var/multigroups
@@ -266,7 +274,6 @@ services:
       # /wazuh-config-mount: image chép đè vào /var/ossec mỗi lần khởi động
       - ./wazuh/manager/ossec.conf:/wazuh-config-mount/etc/ossec.conf:ro
       - ./wazuh/manager/agent.conf:/wazuh-config-mount/etc/shared/default/agent.conf:ro
-      - ./wazuh/manager/local_rules.xml:/wazuh-config-mount/etc/rules/local_rules.xml:ro
       - ./wazuh/manager/api.yaml:/wazuh-config-mount/api/configuration/api.yaml:ro
       - console_audit:/var/log/siem-console                   # nhật ký console do manager ghi (ossec.conf <localfile>)
       - ./wazuh/manager/entrypoint:/entrypoint-scripts:ro     # mật khẩu enroll, user API, tắt filebeat
@@ -325,6 +332,7 @@ services:
       WAZUH_API_USER: siem-soar
       WAZUH_API_PASSWORD_FILE: /run/secrets/wazuh_api_password
       MISP_API_KEY_FILE: /run/secrets/misp_api_key   # dò ngược log cũ cả với IOC mới từ MISP (soar/retrohunt.py)
+      # user siem-soar cũng đẩy IOC IP / domain / hash (MISP + config/intel) sang danh sách siem-misp-ip / -domain / -hash của Wazuh (pipeline/misp_cdb.py, TI-001)
     secrets: [soar_es_password, wazuh_api_password, misp_api_key]
     volumes:
       - ./server/config:/app/config:ro
@@ -394,6 +402,7 @@ secrets:
   console_admin_password: {file: ./secrets/console_admin_password}
   ai_es_password:         {file: ./secrets/ai_es_password}
   wazuh_api_password:     {file: ./secrets/wazuh_api_password}
+  wazuh_rules_api_password: {file: ./secrets/wazuh_rules_api_password}
   misp_api_key:           {file: ./secrets/misp_api_key}           # tùy chọn: để trống nếu không dùng MISP
 
 networks:
@@ -413,6 +422,7 @@ volumes:
   vectorwazuh:
   wazuh_api_configuration:
   wazuh_etc:
+  wazuh_dynamic_rules:
   wazuh_logs:
   wazuh_queue:
   wazuh_var_multigroups:

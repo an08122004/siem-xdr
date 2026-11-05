@@ -536,3 +536,17 @@ def test_approved_ai_rule_runs_in_shadow_then_promoted(tmp_path, monkeypatch):
         deploy.promote(es, "AI-077", "de", rd, now="t")
     with pytest.raises(deploy.DeployError, match="rule AI"):
         deploy.promote(es, "WEB-001", "de", rd, now="t")
+
+
+@pytest.mark.parametrize("kind", ["new_rule", "exception"])
+def test_approve_and_promote_refused_when_yaml_engine_off(tmp_path, monkeypatch, kind):
+    """R65: engine YAML tắt -> duyệt / bật chính thức đề xuất AI (ghi YAML vào rules/ai hoặc rules/exceptions) trả 409, không ghi gì."""
+    from siem import settings
+    monkeypatch.setattr(settings, "RULE_ENGINE_ENABLED", False)
+    es = PropES({"id": "0123456789ab", "kind": kind, "target_rule_id": "AI-077", "proposal": {"id": "AI-077"},
+                 "status": "pending", "required_approvals": 1, "approvals": [], "llm": {"model": "fake"}, "updated_at": ""})
+    with pytest.raises(deploy.DeployError, match="engine YAML đã tắt") as e:
+        deploy.approve(es, "0123456789ab", "de", tmp_path, now="t")
+    assert e.value.code == 409 and es.doc["approvals"] == [] and not list(tmp_path.rglob("*.yml"))
+    with pytest.raises(deploy.DeployError, match="engine YAML đã tắt"):
+        deploy.promote(es, "AI-077", "de", tmp_path, now="t")

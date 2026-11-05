@@ -175,7 +175,8 @@ def _common(*, tactic: Any, techniques: Any, tags: Iterable[str], fields: Iterab
 
 
 # ------------------------------------------------------------------ dựng bản ghi
-MODE_LABEL = {"active": "chính thức", "shadow": "chạy bóng"}
+MODE_LABEL = {"active": "chính thức", "shadow": "chạy bóng", "nobridge": "không tạo alert",
+              "off": "đã tắt (engine YAML)"}
 
 
 def _text(v: Any) -> str:
@@ -206,7 +207,7 @@ def rule_docs(rules_dir: Path, alert_stats: dict[str, dict[str, Any]], report=No
             st = alert_stats.get(str(d["id"]), {})
             sev = str(d.get("severity", "medium")).lower()
             info = report.rules.get(str(d["id"])) if report else None
-            mode = str(d.get("mode", "active")).lower()
+            mode = str(d.get("mode", "active")).lower() if settings.RULE_ENGINE_ENABLED else "off"   # R65: engine YAML tắt
             closed30, fp30 = st.get("closed30", 0), st.get("fp30", 0)
             docs.append({
                 "_id": f"rule:{d['id']}", "origin": "rule", "origin_label": "Rule AI (đã duyệt)" if ai else "Rule sẵn có",
@@ -263,11 +264,41 @@ def detector_docs(alert_stats: dict[str, dict[str, Any]], now: str) -> list[dict
     return out
 
 
-def coverage_docs(report, now: str) -> list[dict[str, Any]]:
+def attack_coverage(docs: list[dict[str, Any]], profile: dict[str, Any]) -> list[dict[str, Any]]:
+    """Độ phủ kỹ thuật ưu tiên từ bản ghi thư viện (R49): kỹ thuật được phủ khi có ÍT NHẤT MỘT rule thật sự bật, từ rule
+    YAML / AI (chính thức, đã kiểm thử nếu có số liệu) HOẶC rule Wazuh (không chạy bóng, không tắt). `sources` cho biết
+    nguồn nào phủ: yaml / wazuh / both. Kỹ thuật con (T1110.001) tính cho kỹ thuật gốc (T1110). Danh sách mã rule cắt 10."""
+    from .detection.lint import covers
+    out = []
+    for t in profile.get("techniques") or []:
+        tid = str(t["id"])
+        on: dict[str, list[str]] = {"yaml": [], "wazuh": []}
+        shadow: list[str] = []
+        for d in docs:
+            if d.get("origin") not in ("rule", "wazuh_rule") or not covers(tid, (d.get("mitre") or {}).get("technique") or []):
+                continue
+            rid, mode = d["rule"]["id"], d.get("mode")
+            if d.get("origin") == "wazuh_rule" and d.get("bridged") is not True and mode != "off":
+                continue                                    # bật nhưng không ra alert (cầu nối loại): không tính phủ
+            if d.get("shadow") is True or mode == "shadow":
+                shadow.append(rid)
+            elif mode == "off" or str(d.get("status", "enabled")).lower() != "enabled":
+                continue
+            elif d.get("origin") == "wazuh_rule" or (d.get("tests") or {}).get("tested", True):
+                on["wazuh" if d.get("source") == "wazuh" else "yaml"].append(rid)
+        have = [k for k in ("yaml", "wazuh") if on[k]]
+        ids = on["yaml"] + on["wazuh"]
+        out.append({"id": tid, "name": t.get("name", ""), "why": t.get("why", ""), "covered": bool(ids), "rules": ids[:10],
+                    "rules_n": len(ids), "shadow": shadow[:10], "sources": "both" if len(have) == 2 else "".join(have)})
+    return out
+
+
+def coverage_docs(coverage: list[dict[str, Any]], now: str) -> list[dict[str, Any]]:
     return [{"_id": f"coverage:{c['id']}", "origin": "coverage", "origin_label": "Độ phủ ATT&CK ưu tiên", "updated_at": now,
              "technique": c["id"], "name": c["name"], "why": c.get("why", ""), "covered": c["covered"],
-             "covered_text": "có" if c["covered"] else "CHƯA CÓ", "rules_text": ", ".join(c["rules"]) or "—",
-             "shadow_text": ", ".join(c["shadow"]) or ""} for c in (report.coverage if report else [])]
+             "covered_text": "có" if c["covered"] else "CHƯA CÓ",
+             "rules_text": ", ".join(c["rules"]) + (f" (+{c['rules_n'] - len(c['rules'])})" if c["rules_n"] > len(c["rules"]) else "")
+             or "—", "shadow_text": ", ".join(c["shadow"]) or "", "sources": c["sources"] or "none"} for c in coverage]
 
 
 def exception_docs(rules_dir: Path, rules: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
@@ -429,12 +460,57 @@ def comparison_docs(proposals: list[dict[str, Any]], rules: list[dict[str, Any]]
     return docs
 
 
+# ------------------------------------------------------------------ rule của Wazuh (GET /rules)
+WAZUH_PAGE = 500
+
+
+def wazuh_rule_docs(api, alert_stats: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Mỗi rule trong Wazuh (rule gốc ~4,5 nghìn + rule dự án, kể cả rules-dynamic/) thành một bản ghi cùng dạng rule YAML.
+    `shadow` khớp đúng cách cầu nối cấp alert (detection/wazuh.py): nhóm `shadow` hoặc rule gốc is_shadow_stock, để thư viện
+    không bao giờ ghi "chính thức" cho rule chỉ ra alert chạy bóng. Lỗi API thì raise (người gọi giữ danh mục cũ)."""
+    from .detection.wazuh import _is_local, is_shadow_stock, severity_for, should_bridge
+    docs, offset = [], 0
+    while True:
+        data = (api.rules(offset, WAZUH_PAGE) or {}).get("data") or {}
+        items = data.get("affected_items") or []
+        for r in items:
+            level, groups = int(r.get("level") or 0), [str(g) for g in r.get("groups") or []]
+            mitre = r.get("mitre") or {}
+            ids = [str(i) for i in mitre.get("id") or []]
+            sev, rid = severity_for(level), f"WZH-{r['id']}"
+            legacy = [g for g in groups if g.startswith("legacy_")]
+            shadow = "shadow" in groups or is_shadow_stock({"id": r["id"], "level": level, "groups": groups})
+            off = str(r.get("status", "enabled")).lower() != "enabled"
+            # rule không qua cầu nối (stock level thấp, sca) hoặc rule dự án level < 3 (log_alert_level) không bao giờ ra alert
+            rule = {"id": r["id"], "level": level, "groups": groups}
+            bridged = should_bridge(rule) and (level >= 3 or not _is_local(rule))
+            mode = "off" if off else "shadow" if shadow else "active" if bridged else "nobridge"
+            st = alert_stats.get(rid, {})
+            docs.append({
+                "_id": f"rule:{rid}", "origin": "wazuh_rule", "origin_label": "Rule Wazuh", "source": "wazuh",
+                "rule": {"id": rid, "name": r.get("description", "")}, "description": r.get("description", ""),
+                "severity": sev, "severity_score": SEVERITY_SCORE.get(sev, 0), "type": "wazuh", "level": level,
+                **_common(tactic=(mitre.get("tactic") or [None])[0], techniques=ids, tags=["wazuh", *groups], fields=[]),
+                "groups": groups, **({"legacy_id": legacy[0][7:]} if legacy else {}),     # như alert: không có thì bỏ khóa
+                "condition_text": "", "patterns": [], "yaml": "",
+                "file": f"{r.get('relative_dirname', '')}/{r.get('filename', '')}".strip("/"),
+                "status": r.get("status", "enabled"), "shadow": shadow, "bridged": bridged,
+                "alerts": {"h24": st.get("h24", 0), "d7": st.get("d7", 0), "d90": st.get("d90", 0), "last": st.get("last"),
+                           "closed30": st.get("closed30", 0), "fp30": st.get("fp30", 0), "fp_rate30": None},
+                "mode": mode, "mode_label": "đã tắt" if off else MODE_LABEL[mode],
+            })
+        offset += len(items)
+        if not items or offset >= int(data.get("total_affected_items") or 0):
+            return docs
+
+
 # ------------------------------------------------------------------ đọc nguồn + ghi Elasticsearch
 def alert_stats(es) -> dict[str, dict[str, Any]]:
     """Số alert 24 giờ / 7 ngày và lần gần nhất của từng rule (để biết rule nào hay kêu, rule nào im lặng)."""
     try:
+        # 10 000: rule Wazuh (WZH-*) cũng kêu, 2000 làm rớt rule; vẫn dưới search.max_buckets (65 536)
         d30 = {"range": {"@timestamp": {"gte": "now-30d"}}}
-        res = es.search(index=settings.IDX_ALERTS, size=0, aggs={"r": {"terms": {"field": "rule.id", "size": 2000}, "aggs": {
+        res = es.search(index=settings.IDX_ALERTS, size=0, aggs={"r": {"terms": {"field": "rule.id", "size": 10000}, "aggs": {
             "d90": {"filter": {"range": {"@timestamp": {"gte": "now-90d"}}}},
             "d7": {"filter": {"range": {"@timestamp": {"gte": "now-7d"}}}},
             "h24": {"filter": {"range": {"@timestamp": {"gte": "now-24h"}}}},
@@ -480,13 +556,14 @@ def load_proposals(es) -> list[dict[str, Any]]:
 
 
 def build(rules_dir: Path, proposals: list[dict[str, Any]], stats: dict[str, dict[str, Any]],
-          report=None) -> list[dict[str, Any]]:
+          report=None, wazuh: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     rules = rule_docs(rules_dir, stats, report)
     by_id = {r["rule"]["id"]: r for r in rules}
     props = proposal_docs(proposals, by_id)
     now = max((r["updated_at"] for r in rules), default=_iso(0))
+    cov = attack_coverage(rules + list(wazuh or []), report.profile) if report else []
     docs = rules + exception_docs(rules_dir, by_id) + props + comparison_docs(props, rules) + \
-        detector_docs(stats, now) + coverage_docs(report, now)
+        detector_docs(stats, now) + coverage_docs(cov, now) + [{**w, "updated_at": now} for w in wazuh or []]
     for d in docs:
         d["@timestamp"] = d["updated_at"]
         # bản chuỗi của các trường danh sách để bảng Grafana hiển thị gọn (danh sách vẫn giữ để lọc)
@@ -499,28 +576,50 @@ def build(rules_dir: Path, proposals: list[dict[str, Any]], stats: dict[str, dic
 
 _lock = threading.Lock()
 _last_sig: str | None = None
+_doc_sigs: dict[str, str] = {}      # chữ ký từng bản ghi đã ghi: chỉ gửi bản ghi đổi (~4,5 nghìn rule Wazuh, mỗi chu kỳ ít đổi)
 
 
-def sync(es, rules_dir: Path = settings.RULES_DIR, force: bool = False) -> int:
+def sync(es, rules_dir: Path = settings.RULES_DIR, force: bool = False, api=None) -> int:
     """Ghi danh mục vào siem-rules, xóa bản ghi không còn (rule bị xóa / gỡ). Không đổi gì thì không ghi.
+    Có `api` (Wazuh) thì thêm rule Wazuh; API lỗi thì ghi log và GIỮ bản ghi Wazuh cũ (không xóa nhầm cả chỉ mục).
     Trả về số bản ghi đã ghi (0 nếu bỏ qua)."""
     global _last_sig
     with _lock:
-        docs = build(rules_dir, load_proposals(es), alert_stats(es), lint_report(rules_dir, settings.CONFIG_DIR))
+        stats, wazuh, keep_wazuh = alert_stats(es), None, True      # mặc định giữ rule Wazuh
+        if api is not None:
+            try:
+                wazuh, keep_wazuh = wazuh_rule_docs(api, stats), False
+            except Exception as e:  # noqa: BLE001
+                log.warning("không đọc được rule từ Wazuh API, giữ danh mục Wazuh cũ: %s", e)
+        docs = build(rules_dir, load_proposals(es), stats, lint_report(rules_dir, settings.CONFIG_DIR), wazuh)
         sig = hashlib.sha1(json.dumps(docs, sort_keys=True, default=str).encode()).hexdigest()
         if sig == _last_sig and not force:
             return 0
         ops: list[dict[str, Any]] = []
+        sent: list[str] = []
+        sigs = {d["_id"]: hashlib.sha1(json.dumps(d, sort_keys=True, default=str).encode()).hexdigest() for d in docs}
         for d in docs:
+            if not force and _doc_sigs.get(d["_id"]) == sigs[d["_id"]]:
+                continue
+            sent.append(d["_id"])
             ops += [{"index": {"_index": settings.IDX_RULES, "_id": d["_id"]}}, {k: v for k, v in d.items() if k != "_id"}]
         if ops:
             res = es.bulk(operations=ops, refresh="wait_for")
-            if res.get("errors"):
-                bad = [i for i in res["items"] if i["index"].get("error")]
-                log.warning("danh mục rule: %d bản ghi lỗi, ví dụ %s", len(bad), bad[:1])
+            failed = {sent[n] for n, i in enumerate(res.get("items") or []) if i["index"].get("error")} if res.get("errors") else set()
+            if failed:
+                log.warning("danh mục rule: %d bản ghi lỗi, ví dụ %s", len(failed), sorted(failed)[:1])
+            for k in failed:
+                sigs.pop(k)          # bản ghi lỗi: không ghi chữ ký để chu kỳ sau gửi lại
+        else:
+            failed = set()
         # không refresh=True: cần quyền maintenance mà manager không có (lỗi 403 như SOAR đã gặp)
-        es.delete_by_query(index=settings.IDX_RULES, conflicts="proceed",
-                           query={"bool": {"must_not": [{"ids": {"values": [d["_id"] for d in docs]}}]}})
-        _last_sig = sig
+        for k in [k for k in _doc_sigs if k not in sigs and not (keep_wazuh and k.startswith("rule:WZH-"))] + list(failed):
+            _doc_sigs.pop(k, None)      # bản ghi đã gỡ / ghi lỗi: lần sau gửi lại dù nội dung y hệt
+        _doc_sigs.update(sigs)
+        must_not = [{"ids": {"values": [d["_id"] for d in docs]}}]
+        if keep_wazuh:      # chỉ xóa bản ghi Wazuh khi lần lấy Wazuh API trong chính lần này thành công
+            must_not.append({"term": {"origin": "wazuh_rule"}})
+        es.delete_by_query(index=settings.IDX_RULES, conflicts="proceed", query={"bool": {"must_not": must_not}})
+        _last_sig = None if failed or (api is not None and keep_wazuh) else sig        # lần sau thử lại Wazuh
         log.info("đã đồng bộ danh mục rule: %d bản ghi", len(docs))
         return len(docs)

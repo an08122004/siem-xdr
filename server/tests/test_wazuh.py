@@ -215,12 +215,117 @@ def test_garbage_wazuh_event_does_not_crash():
 
 # ------------------------------------------------------------------ cầu nối cảnh báo Wazuh
 def test_bridge_selects_groups_and_levels():
-    assert bridge.should_bridge({"level": 7, "groups": ["ossec", "syscheck"]})
-    assert not bridge.should_bridge({"level": 5, "groups": ["syscheck"]})             # dưới ngưỡng
-    assert not bridge.should_bridge({"level": 7, "groups": ["sca"]})                  # SCA = tư thế, không phải sự cố
-    assert not bridge.should_bridge({"level": 10, "groups": ["sshd", "authentication_failures"]})  # rule riêng đã có
-    assert bridge.should_bridge({"level": 12, "groups": ["web"]})                     # rất nghiêm trọng: lấy hết
+    g = {"syscheck", "rootcheck"}                                                     # giới hạn nhóm bằng cấu hình
+    assert bridge.should_bridge({"level": 7, "groups": ["ossec", "syscheck"]}, groups=g)
+    assert not bridge.should_bridge({"level": 5, "groups": ["syscheck"]}, groups=g)   # dưới ngưỡng
+    assert not bridge.should_bridge({"level": 7, "groups": ["sca"]}, groups=g)
+    assert not bridge.should_bridge({"level": 10, "groups": ["sshd"]}, groups=g)
+    assert bridge.should_bridge({"level": 12, "groups": ["web"]}, groups=g)           # rất nghiêm trọng: lấy hết
     assert [bridge.severity_for(x) for x in (3, 7, 10, 12)] == ["low", "medium", "high", "critical"]
+
+
+def test_any_group_level7_bridged_by_default():
+    assert bridge.should_bridge({"id": "60122", "level": 10, "groups": ["windows", "authentication_failures"]})
+    assert bridge.should_bridge({"id": "5710", "level": 7, "groups": ["sshd"]})
+
+
+def test_sca_not_bridged_by_default():
+    sca = {"id": "19007", "level": 7, "groups": ["sca"]}
+    assert not bridge.should_bridge(sca) and not bridge.should_bridge({**sca, "level": 12})
+    assert bridge.should_bridge(sca, exclude_groups=set())
+    assert bridge.should_bridge({"id": "100500", "level": 7, "groups": ["sca"]})      # rule tự viết luôn chuyển
+
+
+def test_level6_not_bridged():
+    assert not bridge.should_bridge({"id": "31101", "level": 5, "groups": ["web"]})
+    assert bridge.should_bridge({"id": "100200", "level": 3, "groups": ["web"]})     # rule tự viết: luôn chuyển
+
+
+def test_shadow_group_marks_alert_shadow(enricher):
+    raw = wz("wazuh_alert", location="syscheck", rule={
+        "id": "104001", "level": 10, "description": "x", "groups": ["siem", "web", "shadow", "legacy_WEB-001"]})
+    a = bridge.to_alert(enricher.enrich(normalize(raw)))
+    assert a["alert"]["shadow"] is True and a["rule"]["mode"] == "shadow" and a["rule"]["legacy_id"] == "WEB-001"
+    assert a["rule"]["legacy_ids"] == ["WEB-001"]
+    assert a["rule"]["id"] == "WZH-104001" and a["rule"]["groups"] == ["siem", "web", "shadow", "legacy_WEB-001"]
+
+
+def _alert(enricher, rid, level, groups, **kw):
+    raw = wz("wazuh_alert", rule={"id": rid, "level": level, "description": "x", "groups": groups}, **kw)
+    return bridge.to_alert(enricher.enrich(normalize(raw)))
+
+
+def test_non_shadow_wazuh_alert_is_active(enricher):
+    a = _alert(enricher, "101002", 8, ["siem", "sshd"])                      # rule riêng không có nhóm shadow
+    assert not get(a, "alert.shadow") and "legacy_id" not in a["rule"] and "legacy_ids" not in a["rule"] and a["rule"]["groups"] == ["siem", "sshd"]
+
+
+def test_stock_rule_level_7_to_11_is_real_alert_after_cutover(enricher):
+    """R65: rule gốc level 7-11 ngoài nhóm cũ là alert thật (WAZUH_STOCK_SHADOW mặc định false)."""
+    for a in (_alert(enricher, "87702", 10, ["pfsense", "firewall_block"]), _alert(enricher, "5710", 8, ["sshd"])):
+        assert not get(a, "alert.shadow") and a["rule"].get("mode") != "shadow"
+    assert not bridge.is_shadow_stock({"id": "5710", "level": 8, "groups": ["sshd"]})
+
+
+def test_stock_rule_outside_old_groups_is_shadow_when_setting_on(enricher, monkeypatch):
+    """A2 (R38), khôi phục được bằng WAZUH_STOCK_SHADOW=true: chỉ chạy bóng, trừ level >= WAZUH_ALERT_ANY_LEVEL."""
+    monkeypatch.setattr(settings, "WAZUH_STOCK_SHADOW", True)
+    for a in (_alert(enricher, "87702", 10, ["pfsense", "firewall_block"]), _alert(enricher, "5710", 8, ["sshd"])):
+        assert a["alert"]["shadow"] is True and a["rule"]["mode"] == "shadow"
+    assert not get(_alert(enricher, "550", 7, ["ossec", "syscheck"]), "alert.shadow")        # nhóm cũ: giữ nguyên hành vi
+    assert not get(_alert(enricher, "1003", 13, ["syslog"]), "alert.shadow")                 # level >= 12: thật
+    assert _alert(enricher, "101001", 10, ["siem", "shadow"])["alert"]["shadow"] is True     # rule riêng có nhóm shadow
+
+
+def test_suppress_key_uses_source_or_agent_and_ignores_dead_srcip(enricher):
+    d = enricher.enrich(normalize(wz("wazuh_alert", data={"srcip": "9.9.9.9"},
+                                     rule={"id": "5710", "level": 8, "groups": ["sshd"]})))
+    assert bridge.suppress_key(d) == ("WZH-5710", get(d, "agent.id"), get(d, "agent.id"), None, None)   # không còn data.srcip
+
+
+def test_suppress_key_keeps_distinct_processes_on_one_agent(enricher):
+    """Hai tiến trình độc hại khác nhau trên cùng agent trong cửa sổ dập trùng: alert thứ hai (lệnh kill thứ hai) không bị bỏ."""
+    a, b = (enricher.enrich(normalize(wz("wazuh_alert", rule={"id": "102001", "level": 10, "groups": ["siem"]})))
+            for _ in range(2))
+    a.setdefault("process", {})["pid"], b.setdefault("process", {})["pid"] = 4242, 4343
+    assert bridge.suppress_key(a) != bridge.suppress_key(b)
+    s = bridge.Suppressor(60)
+    assert not s.seen(bridge.suppress_key(a), 0.0) and not s.seen(bridge.suppress_key(b), 1.0)
+    assert s.seen(bridge.suppress_key(a), 2.0)              # cùng tiến trình lặp lại trong cửa sổ: vẫn dập trùng
+
+
+
+def test_fim_alerts_on_different_files_are_not_collapsed(enricher, engine):
+    from siem.analyzer import Analyzer
+    an = Analyzer.__new__(Analyzer)
+    an.enricher, an.engine, an.detector, an.buffer, an.stats = enricher, engine, None, [], {"events": 0, "alerts": 0}
+    emitted = []
+    an.emit = emitted.append
+    an.suppressor = bridge.Suppressor(60)
+    for path in ("/etc/hostname", "/etc/motd", "/etc/hostname"):     # 2 file khác nhau + lặp lại file đầu trong 60 s
+        an.handle(wz("wazuh_alert", location="syscheck", syscheck={"path": path, "event": "modified"},
+                     rule={"id": "550", "level": 7, "description": "x", "groups": ["syscheck"]}))
+    assert [a["file"]["path"] for a in emitted] == ["/etc/hostname", "/etc/motd"]
+
+def test_analyzer_does_not_suppress_shadow_alerts(enricher, engine, monkeypatch):
+    monkeypatch.setattr(settings, "WAZUH_STOCK_SHADOW", True)
+    from siem.analyzer import Analyzer
+    an = Analyzer.__new__(Analyzer)
+    an.enricher, an.engine, an.detector, an.buffer, an.stats = enricher, engine, None, [], {"events": 0, "alerts": 0}
+    emitted = []
+    an.emit = emitted.append
+    an.suppressor = bridge.Suppressor(60)
+    for _ in range(2):      # T13 cần đếm đủ số alert bóng: lần thứ 2 cùng nguồn vẫn ra
+        an.handle(wz("wazuh_alert", rule={"id": "5710", "level": 8, "description": "x", "groups": ["sshd"]}))
+    assert len(emitted) == 2
+
+
+def test_same_rule_same_source_suppressed_60s():
+    s = bridge.Suppressor(60)
+    assert not s.seen(("WZH-104001", "203.0.113.5"), 0) and s.seen(("WZH-104001", "203.0.113.5"), 30)
+    assert not s.seen(("WZH-104001", "198.51.100.7"), 30) and not s.seen(("WZH-104001", "203.0.113.5"), 61)
+    s.seen(("x", "y"), 1000)
+    assert len(s._seen) == 1                       # khóa quá hạn bị xóa, bộ nhớ không phình
 
 
 def test_bridge_alert_document(enricher):
@@ -242,6 +347,7 @@ def test_analyzer_does_not_store_wazuh_alert_twice(enricher, engine):
     an.enricher, an.engine, an.detector, an.buffer, an.stats = enricher, engine, None, [], {"events": 0, "alerts": 0}
     emitted = []
     an.emit = emitted.append
+    an.suppressor = bridge.Suppressor(60)
     # file không thuộc FIM-001 (rule đó chạy chính thức thì cảnh báo 550 của /etc/passwd không chuyển nữa: test_fim_rules.py)
     an.handle(wz("wazuh_alert", location="syscheck", syscheck={"path": "/etc/hostname", "event": "modified"},
                  rule={"id": "550", "level": 7, "description": "Integrity checksum changed.", "groups": ["syscheck"]}))
@@ -558,14 +664,14 @@ def test_longer_block_extends_shorter_one(soar_env):
     block = lambda res: next(r for r in res if r["action"] == "block_ip")   # noqa: E731
     left = lambda: datetime.fromisoformat(docs[0]["expires_at"]) - datetime.now(timezone.utc)   # noqa: E731
 
-    assert block(soar.handle(_auth_alert("AUTH-001", "high", 3)))["status"] == "queued"
+    assert block(soar.handle(_auth_alert("WZH-101001", "high", 3)))["status"] == "queued"
     docs[0]["status"] = "success"
-    r = block(soar.handle(_auth_alert("AUTH-002", "critical", 4)))
+    r = block(soar.handle(_auth_alert("WZH-101002", "critical", 4)))
     assert r["status"] == "extended" and "gia hạn" in r["detail"] and len(docs) == 1   # không gửi lệnh chặn mới
     assert left() > timedelta(hours=23)
     ext, = [c for c in es.calls if c[1] == settings.IDX_ACTIONS]
     assert ext[3] == {"expires_at": docs[0]["expires_at"]} and ext[4]["refresh"] == "wait_for"   # giữ updated_at
-    r = block(soar.handle(_auth_alert("AUTH-001", "high", 3)))                       # chặn ngắn hơn: giữ hạn 24 giờ
+    r = block(soar.handle(_auth_alert("WZH-101001", "high", 3)))                       # chặn ngắn hơn: giữ hạn 24 giờ
     assert r["status"] == "skipped" and left() > timedelta(hours=23)
     alert_status = [c[3]["alert"]["status"] for c in es.calls if c[1] == settings.IDX_ALERTS]
     assert alert_status == ["in_progress", "in_progress", "open"]                    # gia hạn cũng là đã phản ứng
@@ -623,16 +729,16 @@ def test_case_merge_adds_alert_atomically_on_es(monkeypatch):
 
 
 def test_notify_and_case_run_once_per_alert(soar_env):
-    """LNX-002 (critical) khớp playbook "Diệt tiến trình" VÀ "Cảnh báo chung mức critical": trước đây thông báo 2 lần."""
+    """WZH-102002 (LNX-002, critical) khớp playbook "Diệt tiến trình" VÀ các playbook chung: trước đây thông báo 2 lần."""
     from siem.soar.engine import Soar, load_playbooks
     docs, es = soar_env
     soar = Soar(es, load_playbooks(ROOT / "config" / "playbooks.yml"), whitelist=[])
     soar.create_case = lambda alert: {"status": "created"}
-    res = soar.handle({"alert": {"id": "a1", "source": "rule"}, "rule": {"id": "LNX-002", "name": "x"},
+    res = soar.handle({"alert": {"id": "a1", "source": "rule"}, "rule": {"id": "WZH-102002", "name": "x"},
                        "severity": "critical", "severity_score": 4, "agent": {"id": "001"},
                        "process": {"pid": 4242, "name": "sh"}, "message": "x"})
     notify = [r for r in res if r["action"] == "notify"]
-    assert [r["status"] for r in notify] == ["logged", "skipped"] and "playbook trước" in notify[1]["detail"]
+    assert [r["status"] for r in notify] == ["logged", "skipped", "skipped"] and all("playbook trước" in r["detail"] for r in notify[1:])
     assert sum(r["action"] == "create_case" and r["status"] == "created" for r in res) == 1
 
 
@@ -663,3 +769,45 @@ def test_ar_arguments_validation():
                 {"type": "kill_process", "params": {"name": "xmrig", "expect": "xmrig"}}):   # expect chỉ đi với PID
         with pytest.raises(ValueError):
             soar_wazuh.ar_arguments({"id": "x", **bad})
+
+
+def test_several_legacy_groups_keep_first_and_all(enricher):
+    a = _alert(enricher, "104002", 10, ["siem", "legacy_NET-004", "legacy_NET-005"])
+    assert a["rule"]["legacy_id"] == "NET-004" and a["rule"]["legacy_ids"] == ["NET-004", "NET-005"]
+
+
+def test_engine_disabled_no_yaml_alerts(enricher, monkeypatch):
+    """R65: RULE_ENGINE_ENABLED=false -> Analyzer không nạp rule YAML; event khớp rule YAML (SQLi) không ra alert YAML,
+    nhưng event vẫn được lưu và nạp lại rule không làm gì."""
+    from siem import analyzer as mod
+    monkeypatch.setattr(settings, "RULE_ENGINE_ENABLED", False)
+    monkeypatch.setattr(mod, "default_enricher", lambda: enricher)
+    monkeypatch.setattr(mod.store, "connect", lambda: None)
+    monkeypatch.setattr(mod.bus, "wait_for_kafka", lambda: None)
+    monkeypatch.setattr(mod.bus, "producer", lambda: None)
+    an = mod.Analyzer()
+    assert an.engine.rules == []
+    emitted = []
+    an.emit = emitted.append
+    sqli = wz(full_log="x", location="/var/log/apache2/access.log")
+    sqli["data"]["full_log"] = '203.0.113.9 - - [28/Sep/2026:15:31:34 +0000] "GET /index.php?id=1%27%20union%20select%201,2-- HTTP/1.1" 200 512 "-" "sqlmap/1.7"'
+    ctrl = RuleEngine(load_rules(ROOT / "rules")).process(enricher.enrich(normalize(sqli)))
+    assert any(d.rule.id == "WEB-001" for d in ctrl)                       # đối chứng: engine bật thì event này ra WEB-001
+    an.handle(sqli)
+    assert len(an.buffer) == 1 and emitted == []
+    an.reload_rules_if_changed()
+    assert an.engine.rules == []
+
+
+def test_engine_disabled_bridge_still_emits_wzh_and_stock_fim(enricher, engine, monkeypatch):
+    from siem.analyzer import Analyzer
+    monkeypatch.setattr(settings, "RULE_ENGINE_ENABLED", False)
+    an = Analyzer.__new__(Analyzer)
+    an.enricher, an.engine, an.detector, an.buffer, an.stats = enricher, RuleEngine([]), None, [], {"events": 0, "alerts": 0}
+    emitted = []
+    an.emit = emitted.append
+    an.suppressor = bridge.Suppressor(60)
+    an.handle(wz("wazuh_alert", rule={"id": "104001", "level": 10, "description": "WEB-001 x", "groups": ["siem", "web", "legacy_WEB-001"]}))
+    an.handle(wz("wazuh_alert", location="syscheck", syscheck={"path": "/etc/passwd", "event": "modified"},
+                 rule={"id": "550", "level": 7, "description": "Integrity checksum changed.", "groups": ["syscheck"]}))
+    assert [a["rule"]["id"] for a in emitted] == ["WZH-104001", "WZH-550"]      # 550 không bị bỏ vì "đã có FIM-001"

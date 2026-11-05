@@ -78,10 +78,12 @@ host nối vào vùng SOC với địa chỉ `10.10.40.1` và chính là SIEM. M
 8. **Port forward web:** *Firewall → NAT → Port Forward*: cổng `INET_GIA`, TCP, đích là địa chỉ của INET_GIA cổng 80, chuyển
    tới `10.10.20.20:80`, chọn tự tạo luật đi kèm.
 9. **Syslog về SIEM:** *System → Settings → Logging → Remote*: thêm đích UDP, `10.10.40.1`, cổng `514`, mọi ứng dụng và mọi
-   mức.
+   mức. **Định dạng BẮT BUỘC RFC 3164 (BSD, `Nov  2 10:00:03 host filterlog[1234]: ...`): KHÔNG bật RFC 5424** (hộp *RFC 5424* trong
+   mục Remote). Wazuh remoted không tách được RFC 5424 nên decoder `pf`/`sshd` không chạy (spike S6; ca CI `0101-auth.yml` / `0100-platform.yml` ghim hành vi này).
 10. **Suricata:** *Services → Intrusion Detection*:
     - *Administration*: bật *Enabled*, **không** bật IPS mode (chỉ phát hiện, để SOAR là bên phản ứng), Interfaces
-      `INET_GIA` (thêm `DMZ` nếu đủ RAM), bật *Enable eve syslog output*.
+      `INET_GIA` (thêm `DMZ` nếu đủ RAM), bật *Enable eve syslog output* (chỉ nuôi parser Suricata của analyzer YAML: theo spike S6, Suricata qua syslog không có decoder Wazuh ở cả RFC 3164 lẫn 5424;
+      rule Suricata của Wazuh và NET-004 bản XML cần agent `os-wazuh-agent` đọc `/var/log/suricata/eve.json`, `log_format json`).
     - *Download*: chọn bộ luật ET Open → *Download & Update Rules*.
 11. **Kiểm tra:** mọi gói bị luật mặc định chặn đều được ghi log, ví dụ ping từ Web-01 sang `10.10.30.30`. Trong 1 phút,
     Grafana *Điều tra* có event `event.module:pfsense`.

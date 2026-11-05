@@ -71,3 +71,125 @@ def test_kpi_grade_directions():
     assert kpi.grade("sla_pct", 96) == "gd4" and kpi.grade("sla_pct", 90) == "gd2" and kpi.grade("sla_pct", 80) == "below"
     assert kpi.grade("mtta_p1_s", 20 * 60) == "gd2" and kpi.grade("mtta_p1_s", 40 * 60) == "below"
     assert kpi.grade("fp_rate_pct", None) is None and kpi.grade("không-có", 1) is None
+
+
+def _doc(rid, tech, origin="rule", source="builtin", **kw):
+    return {"origin": origin, "source": source, "rule": {"id": rid}, "mitre": {"technique": [tech]}, **kw}
+
+
+def test_attack_coverage_from_library_docs():
+    """R49: phủ khi có ít nhất một rule thật sự bật, từ YAML hoặc Wazuh; rule bóng / tắt không tính; nhãn nguồn đúng."""
+    from siem.rules_catalog import attack_coverage
+    prof = {"techniques": [{"id": t} for t in ("T1190", "T1486", "T1110", "T1059", "T1003", "T1078")]}
+    docs = [
+        _doc("WEB-001", "T1190", mode="active"),                                          # chỉ YAML
+        _doc("WZH-100", "T1486", origin="wazuh_rule", source="wazuh", mode="shadow", shadow=True, bridged=True),   # bóng
+        _doc("WZH-101", "T1110", origin="wazuh_rule", source="wazuh", mode="active", shadow=False, status="enabled", bridged=True),
+        _doc("AUTH-001", "T1110.001", mode="active", tests={"tested": True}),            # kỹ thuật con tính cho gốc; cả hai nguồn
+        _doc("WZH-102", "T1059", origin="wazuh_rule", source="wazuh", mode="off", status="disabled", bridged=True),   # tắt
+        _doc("WZH-5712", "T1003", origin="wazuh_rule", source="wazuh", mode="shadow", shadow=True, bridged=True),     # rule gốc bóng
+        _doc("X-001", "T1078", mode="active", tests={"tested": False}),                  # YAML chưa qua kiểm thử
+    ]
+    cov = {c["id"]: c for c in attack_coverage(docs, prof)}
+    assert {t for t, c in cov.items() if c["covered"]} == {"T1190", "T1110"}
+    assert cov["T1190"]["sources"] == "yaml" and cov["T1110"]["sources"] == "both"
+    assert cov["T1486"]["sources"] == "" and cov["T1486"]["shadow"] == ["WZH-100"]
+    only_wazuh = attack_coverage([docs[2]], prof)
+    assert next(c for c in only_wazuh if c["id"] == "T1110")["sources"] == "wazuh"
+
+
+def test_kpi_coverage_reads_rule_library(monkeypatch):
+    es = KES()
+    orig = es.search
+
+    def search(index, **kw):
+        if index == settings.IDX_RULES:
+            return {"hits": {"total": {"value": 1}, "hits": [{"_source": _doc("WZH-101", "T1190", origin="wazuh_rule", source="wazuh", mode="active", bridged=True)}]}}
+        return orig(index, **kw)
+    es.search = search
+    d = kpi.compute(es, ROOT / "rules", ROOT / "config", days=30, now=NOW)
+    assert d["attack_coverage_source"] == "siem-rules" and d["attack_coverage_pct"] == 8.3 and [c["id"] for c in d["attack_coverage"] if c["covered"]] == ["T1190"]
+    assert d["attack_coverage"][0]["sources"] == "wazuh"
+
+
+def test_kpi_coverage_fallback_is_reported():
+    """ES lỗi, hoặc siem-rules chưa có rule Wazuh nào: lùi về lint YAML và nói rõ trong bản ghi KPI."""
+    for fake in (lambda: (_ for _ in ()).throw(ConnectionError("ES")), lambda: {"hits": {"total": {"value": 0}, "hits": []}}):
+        es = KES()
+        orig = es.search
+
+        def search(index, _f=fake, _o=orig, **kw):
+            return _f() if index == settings.IDX_RULES else _o(index, **kw)
+        es.search = search
+        d = kpi.compute(es, ROOT / "rules", ROOT / "config", days=30, now=NOW)
+        assert d["attack_coverage_source"] == "lint-yaml" and d["attack_coverage_pct"] == 83.3
+
+
+def test_attack_coverage_requires_bridged_for_wazuh():
+    from siem.rules_catalog import attack_coverage
+    w = _doc("WZH-1", "T1190", origin="wazuh_rule", source="wazuh", mode="active", shadow=False, status="enabled")
+    assert not attack_coverage([w], {"techniques": [{"id": "T1190"}]})[0]["covered"]
+    assert attack_coverage([{**w, "bridged": True}], {"techniques": [{"id": "T1190"}]})[0]["covered"]
+
+
+class DetectionKES(KES):
+    """ES giả giữ alert thật của audit 05/11: 23 critical rule (~3,6 s), 12 critical rba (~14 751 s), 1 health, 1 retrohunt."""
+    DOCS = ([{"source": "rule", "ttd": 3.6, "sev": "critical"}] * 23 + [{"source": "rba", "ttd": 14751.0, "sev": "critical"}] * 12
+            + [{"source": "health", "ttd": 0.0, "sev": "critical"}, {"source": "retrohunt", "ttd": 9e6, "sev": "high"},
+               {"source": "wazuh", "ttd": 4.0, "sev": "high"}])
+
+    def search(self, index, size=0, query=None, aggs=None, **kw):
+        if index != settings.IDX_ALERTS:
+            return super().search(index, size, query, aggs, **kw)
+        allowed = next(f["terms"]["alert.source"] for f in query["bool"]["filter"] if "terms" in f)
+        docs = [d for d in self.DOCS if d["source"] in allowed]
+        avg = lambda xs: {"value": sum(xs) / len(xs) if xs else None}  # noqa: E731
+        crit = [d["ttd"] for d in docs if d["sev"] == "critical"]
+        r = super().search(index, size, query, aggs, **kw)
+        r["hits"]["total"]["value"] = len(docs)
+        r["aggregations"]["ttd_crit"] = {"doc_count": len(crit), "v": avg(crit)}
+        r["aggregations"]["ttd"] = avg([d["ttd"] for d in docs])
+        return r
+
+
+def test_kpi_mttd_only_detection_alerts():
+    d = kpi.compute(DetectionKES(), ROOT / "rules", ROOT / "config", days=30, now=NOW)
+    assert d["mttd_critical_s"] == 3.6 and d["alerts"]["total"] == 24      # không phải ~5 300 giây khi gộp rba / health
+    assert d["grade"]["mttd_critical_s"] == "gd4"
+
+
+def test_kpi_alert_query_is_detection_only():
+    es = KES()
+    kpi.compute(es, ROOT / "rules", ROOT / "config", days=30, now=NOW)
+    q, _ = es.queries[settings.IDX_ALERTS]
+    assert {"terms": {"alert.source": ["rule", "wazuh", "ml"]}} in q["bool"]["filter"]      # R62: loại rba, health, retrohunt
+    assert q["bool"]["must_not"] == [{"term": {"alert.shadow": True}}]
+
+
+def test_dashboard_json_matches_generator(tmp_path):
+    """JSON trong grafana/dashboards phải đúng bằng đầu ra của tools/gen_dashboard.py (không sửa tay, không để lệch)."""
+    import os
+    import subprocess
+    import sys
+    repo = ROOT.parent
+    subprocess.run([sys.executable, str(repo / "tools" / "gen_dashboard.py")], check=True, capture_output=True,
+                   env={**os.environ, "GEN_DASHBOARD_OUT": str(tmp_path), "PYTHONIOENCODING": "utf-8"})
+    for f in tmp_path.glob("*.json"):
+        assert f.read_bytes() == (repo / "grafana" / "dashboards" / f.name).read_bytes(), f"{f.name} lệch generator: chạy lại tools/gen_dashboard.py"
+    assert len(list(tmp_path.glob("*.json"))) == 4
+
+
+def test_kpi_coverage_only_from_wazuh_when_yaml_engine_off(monkeypatch):
+    """R65: engine YAML tắt -> rule YAML trong thư viện mang mode off, không tính phủ; lint YAML không còn là nguồn dự phòng."""
+    from siem.rules_catalog import attack_coverage
+    monkeypatch.setattr(settings, "RULE_ENGINE_ENABLED", False)
+    prof = {"techniques": [{"id": "T1190"}, {"id": "T1110"}]}
+    docs = [_doc("WEB-001", "T1190", mode="off", tests={"tested": True}),
+            _doc("WZH-101", "T1110", origin="wazuh_rule", source="wazuh", mode="active", shadow=False, status="enabled", bridged=True)]
+    cov = {c["id"]: c for c in attack_coverage(docs, prof)}
+    assert not cov["T1190"]["covered"] and cov["T1110"]["sources"] == "wazuh"
+    es = KES()
+    orig = es.search
+    es.search = lambda index, **kw: ({"hits": {"total": {"value": 0}, "hits": []}} if index == settings.IDX_RULES else orig(index, **kw))
+    d = kpi.compute(es, ROOT / "rules", ROOT / "config", days=30, now=NOW)
+    assert d["attack_coverage_source"] == "siem-rules" and d["attack_coverage_pct"] == 0.0

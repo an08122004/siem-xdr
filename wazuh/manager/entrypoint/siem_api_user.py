@@ -1,9 +1,12 @@
-"""Tạo / cập nhật user Wazuh API `siem-soar` với quyền TỐI THIỂU cho SOAR của SIEM/XDR (idempotent).
+"""Tạo / cập nhật 2 user Wazuh API với quyền TỐI THIỂU cho SIEM/XDR (idempotent).
 
-    python3 siem_api_user.py /run/secrets/wazuh_api_password
+    python3 siem_api_user.py /run/secrets/wazuh_api_password /run/secrets/wazuh_rules_api_password
 
-Quyền: chạy active response trên agent (`active-response:command`) và đọc danh sách agent (`agent:read`).
-Không có quyền đọc/sửa rule, decoder, cấu hình, user... Script tạo user mặc định của image (create_user.py) cấp
+`siem-soar` (SOAR): chạy active response trên agent (`active-response:command`), đọc danh sách agent (`agent:read`), ghi đè đúng danh sách
+`siem-misp-ip` / `siem-misp-domain` / `siem-misp-hash` (`lists:update` + `lists:delete` chỉ trên ba file đó) và nạp lại ruleset (`manager:read` + `manager:restart`) cho TI-001.
+`siem-rules` (console, nạp rule): `manager:read` + `manager:restart` (để PUT /manager/analysisd/reload; quyền này cũng
+mở restart manager, Wazuh không có quyền hẹp hơn), `rules:read`, `logtest:run`. Không sửa được cấu hình hay user.
+Không user nào có quyền sửa rule, decoder, cấu hình, user... Script tạo user mặc định của image (create_user.py) cấp
 role administrator nên không dùng. Hai user mặc định `wazuh` / `wazuh-wui` (mật khẩu mặc định công khai) bị đổi
 sang mật khẩu ngẫu nhiên không ai biết = vô hiệu hóa.
 Chạy bằng python của Wazuh, TRƯỚC khi API khởi động -> dùng thẳng lớp ORM của RBAC (các hàm trong wazuh.security
@@ -14,16 +17,40 @@ import secrets
 import string
 import sys
 
+# Một file mật khẩu cho mỗi user trong ACCOUNTS, theo thứ tự: thiếu thì dừng ngay (không âm thầm bỏ qua user)
+if len(sys.argv) != 3:
+    sys.exit("usage: siem_api_user.py <siem-soar password file> <siem-rules password file>")
+
 sys.path.append("/var/ossec/framework")
 
 from wazuh.rbac.orm import (AuthenticationManager, PoliciesManager, RolesManager,  # noqa: E402
                             RolesPoliciesManager, UserRolesManager, check_database_integrity)
 
-USER, ROLE = "siem-soar", "siem_soar"
-POLICIES = {
-    "siem_soar_active_response": {"actions": ["active-response:command"], "resources": ["agent:id:*"],
-                                  "effect": "allow"},
-    "siem_soar_agents_read": {"actions": ["agent:read"], "resources": ["agent:id:*"], "effect": "allow"},
+# user -> (role, {policy: nội dung})
+ACCOUNTS = {
+    "siem-soar": ("siem_soar", {
+        "siem_soar_active_response": {"actions": ["active-response:command"], "resources": ["agent:id:*"],
+                                      "effect": "allow"},
+        "siem_soar_agents_read": {"actions": ["agent:read"], "resources": ["agent:id:*"], "effect": "allow"},
+        # Đẩy IOC IP / domain / hash lên danh sách siem-misp-ip / -domain / -hash (TI-001): PUT /lists/files?overwrite=true. Wazuh ghi đè = xóa file cũ rồi ghi file mới, nên cần
+        # `lists:update` (resource `*:*:*`, không hẹp hơn được; trùng policy mặc định lists_all_resourceless nên setup() dùng lại) và
+        # `lists:delete` CHỈ trên các list:file:siem-misp-* (ip; domain + hash ở policy sau, R64): không ghi đè được danh sách gốc malicious-ioc/* (R50). Tạo file MỚI tên khác thì được,
+        # vô hại vì không có <list> trỏ tới.
+        "siem_soar_lists_update": {"actions": ["lists:update"], "resources": ["*:*:*"], "effect": "allow"},
+        "siem_soar_misp_list": {"actions": ["lists:delete"], "resources": ["list:file:siem-misp-ip"], "effect": "allow"},
+        # R64: hai danh sách domain / hash. Policy RIÊNG (tên mới) vì setup() không sửa nội dung policy đã có trong DB: sửa policy cũ thì bản nâng cấp giữ quyền cũ.
+        "siem_soar_misp_list_dh": {"actions": ["lists:delete"], "resources": ["list:file:siem-misp-domain", "list:file:siem-misp-hash"],
+                                   "effect": "allow"},
+        # Nạp lại ruleset sau khi đẩy (PUT /manager/analysisd/reload). GIÁ: Wazuh không có quyền reload riêng, `manager:restart` cũng mở
+        # PUT /manager/restart -> token siem-soar có thể khởi động lại manager (cùng đánh đổi với siem-rules).
+        "siem_soar_manager": {"actions": ["manager:read", "manager:restart"], "resources": ["*:*:*"], "effect": "allow"},
+    }),
+    "siem-rules": ("siem_rules", {
+        "siem_rules_manager": {"actions": ["manager:read", "manager:restart"], "resources": ["*:*:*"],
+                               "effect": "allow"},
+        "siem_rules_read": {"actions": ["rules:read"], "resources": ["rule:file:*"], "effect": "allow"},
+        "siem_rules_logtest": {"actions": ["logtest:run"], "resources": ["*:*:*"], "effect": "allow"},
+    }),
 }
 DEFAULT_USERS = ("wazuh", "wazuh-wui")
 
@@ -35,13 +62,10 @@ def random_password() -> str:
     return "".join(chars)
 
 
-def main() -> None:
-    password = open(sys.argv[1], encoding="utf-8").read().strip()
-    check_database_integrity()
-
+def setup(user: str, role: str, policies: dict, password: str) -> None:
     with PoliciesManager() as pm:
         policy_ids = []
-        for name, body in POLICIES.items():
+        for name, body in policies.items():
             if not isinstance(pm.get_policy(name), dict):
                 pm.add_policy(name=name, policy=body)
             found = pm.get_policy(name)
@@ -55,34 +79,46 @@ def main() -> None:
             policy_ids.append(same[0])
 
     with RolesManager() as rm:
-        if not isinstance(rm.get_role(ROLE), dict):
-            rm.add_role(name=ROLE)
-        role_id = rm.get_role(ROLE)["id"]
+        if not isinstance(rm.get_role(role), dict):
+            rm.add_role(name=role)
+        role_id = rm.get_role(role)["id"]
 
     with RolesPoliciesManager() as rpm:
         for pid in policy_ids:
             if rpm.exist_role_policy(role_id, pid) is not True:
                 rpm.add_policy_to_role(role_id=role_id, policy_id=pid)
+        # role của repo chỉ giữ đúng các policy khai báo: quyền đã bỏ khỏi ACCOUNTS (vd quyền danh sách của siem-rules) bị gỡ khi nâng cấp
+        for old in rpm.get_all_policies_from_role(role_id):
+            old_id = old if isinstance(old, int) else getattr(old, "id", old)
+            if old_id not in policy_ids:
+                rpm.remove_policy_in_role(role_id=role_id, policy_id=old_id)
 
     with AuthenticationManager() as auth:
-        user = auth.get_user(USER)
-        if not user:
-            if auth.add_user(USER, password) is not True:
-                sys.exit(f"[siem-setup] không tạo được user API {USER}")
-            user = auth.get_user(USER)
+        found = auth.get_user(user)
+        if not found:
+            if auth.add_user(user, password) is not True:
+                sys.exit(f"[siem-setup] không tạo được user API {user}")
+            found = auth.get_user(user)
         else:
-            auth.update_user(user["id"], password)
-        user_id = user["id"]
-        for name in DEFAULT_USERS:
-            if (default := auth.get_user(name)):
-                auth.update_user(default["id"], random_password())
+            auth.update_user(found["id"], password)
+        user_id = found["id"]
 
     with UserRolesManager() as urm:
         if urm.exist_user_role(user_id, role_id) is not True:
             urm.add_role_to_user(user_id=user_id, role_id=role_id)
+    print(f"[siem-setup] user API {user} (role {role}: {', '.join(policies)})")
 
-    print(f"[siem-setup] user API {USER} (role {ROLE}: active response + đọc agent); "
-          f"đã vô hiệu hóa {', '.join(DEFAULT_USERS)}")
+
+def main() -> None:
+    assert len(sys.argv) == len(ACCOUNTS) + 1, "ACCOUNTS và số file mật khẩu lệch nhau"
+    check_database_integrity()
+    for (user, (role, policies)), pw_file in zip(ACCOUNTS.items(), sys.argv[1:]):
+        setup(user, role, policies, open(pw_file, encoding="utf-8").read().strip())
+    with AuthenticationManager() as auth:
+        for name in DEFAULT_USERS:
+            if (default := auth.get_user(name)):
+                auth.update_user(default["id"], random_password())
+    print(f"[siem-setup] đã vô hiệu hóa {', '.join(DEFAULT_USERS)}")
 
 
 if __name__ == "__main__":

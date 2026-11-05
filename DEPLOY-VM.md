@@ -458,6 +458,7 @@ Làm sau khi `siem-server` chạy (mục 2). `assets.yml` đã khai IP các cổ
 1. **Syslog**: *Status → System Logs → Settings → Remote Logging Options*: bật *Send log messages to remote syslog server*,
    *Source Address* `SOC` (để gói syslog đi ra từ 10.10.40.254), *Remote log servers* `10.10.40.10:514`, *Remote Syslog
    Contents* `Everything` (cần cả log Suricata ở bước 3). pfSense mặc định gửi UDP (mất log khi wazuh-manager chết hoặc khởi động lại; dùng TCP nếu phiên bản hỗ trợ); wazuh-manager nghe cả UDP và TCP 514 nhưng chỉ nhận từ các IP trong `SYSLOG_ALLOWED_IPS` (`.env`, mặc định `10.10.40.254`): đặt đúng địa chỉ nguồn của firewall rồi `docker compose up -d wazuh-manager`.
+   **Định dạng syslog BẮT BUỘC RFC 3164 (BSD): không bật RFC 5424** (OPNsense: bỏ tích *RFC 5424* ở đích remote; pfSense: *Log Message Format* = BSD). Spike S6: remoted giữ nguyên dòng RFC 5424 (`1 2026-11-02T10:00:04+07:00 host sshd 1235 - - ...`) không tách được tên chương trình, nên decoder `pf` (filterlog) và `sshd` không chạy, mọi dòng rơi xuống rule 1002 hoặc không rule nào.
    OPNsense: *System → Settings → Logging → Remote*, thêm đích `10.10.40.10:514` (ưu tiên TCP nếu có, UDP thì mất log lúc manager dừng). Hoặc cài plugin `os-wazuh-agent` trên OPNsense để thu log bằng agent (không cần syslog).
 2. Kiểm tra: từ attacker `nmap -Pn -p 1-200 203.0.113.1`, trong 1 phút có event `event.module: pfsense` (tên dùng chung cho
    filterlog của pfSense và OPNsense) với `observer.ip` 10.10.40.254 trên Grafana *Điều tra*, và alert **NET-001** (một IP
@@ -465,7 +466,8 @@ Làm sau khi `siem-server` chạy (mục 2). `assets.yml` đã khai IP các cổ
 3. **Suricata** (pfSense: *System → Package Manager* cài gói `suricata`; OPNsense có sẵn ở *Services → Intrusion Detection*):
    - Tải bộ luật *ETOpen Emerging Threats* (pfSense: *Services → Suricata → Global Settings*; OPNsense: tab *Download*).
    - Bật Suricata trên cổng `INET_GIA` (và `DMZ` nếu đủ RAM), chế độ chỉ phát hiện (không chặn) để SOAR là bên phản ứng.
-   - Gửi alert dạng EVE qua syslog: pfSense *Interface Settings → EVE Output Settings*: bật *EVE JSON Log*, *EVE Output
+   - **Rule Suricata của Wazuh (86601...) và NET-004 bản XML cần agent Wazuh trên OPNsense đọc `/var/log/suricata/eve.json`** (`<localfile>` `log_format json`, plugin `os-wazuh-agent`). Spike S6: Suricata qua syslog 514 KHÔNG có decoder Wazuh (cả RFC 3164 lẫn 5424), nên đường syslog dưới đây chỉ nuôi parser Suricata của analyzer YAML.
+   - Gửi alert dạng EVE qua syslog (đường phụ cho analyzer YAML): pfSense *Interface Settings → EVE Output Settings*: bật *EVE JSON Log*, *EVE Output
      Type* `SYSLOG`, tắt ghi payload (dòng syslog quá dài bị cắt thì analyzer không đọc được JSON); OPNsense *Settings →
      Enable eve syslog output*.
    - Analyzer chỉ đọc JSON EVE từ dòng syslog có tên chương trình `suricata` (mặc định của cả hai).
@@ -524,6 +526,45 @@ Kết quả đúng: không có alert LNX-002 và không có lệnh *Kill tiến 
   *Apps*. Xóa agent khỏi manager bằng `manage_agents -r <id>`.
 - Xóa sạch backend (mất toàn bộ event, alert, case, tài khoản): `docker compose down -v`, rồi chạy lại `sudo ./install.sh` (bí mật cũ được giữ).
 - Nhanh nhất: quay về snapshot "sạch" của mục 1.5.
+
+## 9. Nâng cấp hệ thống đang chạy lên bộ rule Wazuh XML (chạy bóng)
+
+Áp dụng khi máy đang chạy `main` cũ (engine YAML) và muốn chạy mã của nhánh `feature/wazuh-unified-ruleset` (RULES.md mục 9).
+Lần triển khai này **chưa** là cổng chuyển (Task 18): engine YAML vẫn chạy thật, rule XML của dự án chạy bóng.
+
+**Thay đổi so với `main`:** bí mật mới `secrets/wazuh_rules_api_password` (user API `siem-rules` của console); volume mới
+`wazuh_dynamic_rules` (rule động `ai.xml`, `exceptions.xml` và sổ `exceptions.json`); wazuh-manager mount thư mục
+`wazuh/manager/rules` và `wazuh/manager/decoders` (bỏ mount `local_rules.xml`); `ossec.conf` thêm `<list>` cho
+`etc/lists/siem-misp-ip`; image server phải build lại; 4 dashboard Grafana được sinh lại.
+
+**Hành vi thật thay đổi ngay khi triển khai** (không chờ cổng chuyển):
+- 9 rule gốc bị chỉnh trong `0999-tuning.xml` (RULES.md 9.8): 61627 / 61640 hẹp lại (bớt báo nhầm thật), 92041 / 92021 sửa regex.
+- 104095 (tấn công web từ IP độc hại trả 200, level 14) là alert thật; SOAR chặn IP nguồn trên agent đã thấy (scope `origin`).
+- Rule gốc 5712 / 5720 / 5763 / 31152 có playbook chặn IP nhưng hiện là alert **bóng** (ngoài nhóm hoạt động, level < 12), nên
+  SOAR chưa chặn gì cho tới cổng chuyển.
+- Dashboard: số alert không còn gồm alert bóng, alert sức khỏe nền tảng, RBA; KPI chỉ tính alert phát hiện (SOC-OPERATIONS mục 7).
+
+**Các bước:**
+1. Sao lưu: volume `wazuh_etc`, `wazuh_api_configuration`, `wazuh_logs`, dữ liệu Elasticsearch, và `server/rules/ai`; ghi lại
+   commit đang chạy và id image `siem-xdr-server` (để quay lại).
+2. Lấy mã của nhánh (`git fetch && git checkout feature/wazuh-unified-ruleset`).
+3. `sudo ./install.sh --update` (chạy `tools/init_secrets.py`: chỉ tạo bí mật còn thiếu, giữ bí mật cũ; build lại image; khởi
+   động lại). Làm tay thì: `python3 tools/init_secrets.py`, rồi `docker compose up -d --build`. Thiếu bí mật mới thì Compose
+   báo lỗi file secret và không tạo container.
+4. Kiểm wazuh-manager: log có `[siem-setup] ruleset hợp lệ` (bước 9 của `wazuh/manager/entrypoint/10-siem-setup.sh`);
+   `wazuh-control status` có analysisd, remoted, apid; `GET /rules?rule_ids=104095` (user `siem-rules`) trả về rule.
+5. Kiểm quyền API: token `siem-soar` đẩy được `PUT /lists/files/siem-misp-ip` (và `siem-misp-domain`, `siem-misp-hash` từ R64; nâng cấp cần khởi động lại manager để entrypoint thêm policy mới) nhưng bị từ chối với danh sách gốc
+   (`malicious-ioc/malicious-ip`, `audit-keys`); token `siem-rules` nạp lại được ruleset nhưng không ghi được danh sách.
+6. Kiểm console và SOAR: thư viện rule có khoảng 4,5 nghìn bản ghi `origin: wazuh_rule`; thêm một ngoại lệ, duyệt bằng người
+   thứ hai, thấy rule 110000 trong `rules-dynamic/exceptions.xml`, gỡ ngoại lệ; log `analyzer`, `soar` sạch.
+7. Chạy `python tools/e2e_test.py` (mong 44/44); sau 24 giờ chạy `python tools/parity_report.py` (từ thư mục chính) để có
+   `build/parity.md`.
+8. `SOAR_WHITELIST` (`.env`): trước khi bật chặn IP theo rule gốc ở cổng chuyển, thêm IP proxy, mail relay, NAT nội bộ của
+   lab (mặc định chỉ `127.0.0.0/8`).
+
+**Quay lại `main`:** checkout commit cũ, `docker compose up -d --build`. User `siem-rules` và danh sách `siem-misp-ip` còn lại
+trong volume Wazuh nhưng không dùng; ngoại lệ Wazuh đã duyệt nằm trong volume `wazuh_dynamic_rules` (không xóa volume này nếu
+còn muốn giữ chúng).
 
 ## Phụ lục A. Cài máy chủ bằng tay
 

@@ -7,9 +7,11 @@
 Bảng alert / case có liên kết "Mở trên SOC console" (/go/alert/<id>, /go/case/<id>, xem manager/api.py).
 """
 import json
+import os
 from pathlib import Path
 
-DIR = Path(__file__).resolve().parent.parent / "grafana" / "dashboards"
+# GEN_DASHBOARD_OUT: thư mục ghi thay thế (test so JSON đã commit với đầu ra của generator)
+DIR = Path(os.environ.get("GEN_DASHBOARD_OUT") or Path(__file__).resolve().parent.parent / "grafana" / "dashboards")
 
 EV = {"type": "elasticsearch", "uid": "siem-events"}
 AL = {"type": "elasticsearch", "uid": "siem-alerts"}
@@ -85,7 +87,7 @@ def timeseries(title, ds, query, split, x, y, w=12, h=8, colors=None, labels=Non
                         "tooltip": {"mode": "multi", "sort": "desc"}}}
 
 
-def bars(title, ds, query, field, x, y, w=6, h=8, size=10, metric=None, sort_term=False):
+def bars(title, ds, query, field, x, y, w=6, h=8, size=10, metric=None, sort_term=False, name_field=None):
     """Xếp hạng top N: bảng không tiêu đề cột, tên bên trái, bên phải thanh mảnh một màu kèm số màu chữ thường.
     Không dùng panel bar gauge: Grafana ẩn tên khi chỉ có 1 giá trị (vd 1 IP tấn công trong lab) hoặc khi thanh thấp."""
     agg = terms(field, size)
@@ -93,8 +95,9 @@ def bars(title, ds, query, field, x, y, w=6, h=8, size=10, metric=None, sort_ter
         agg["settings"]["orderBy"] = "1"             # xếp theo metric (vd tổng alert 7 ngày), không theo số document
     if sort_term:
         agg["settings"].update(order="asc", orderBy="_term")   # giá trị có thứ tự (P1..P4): giữ thứ tự, không xếp theo số
+    aggs = [agg] + ([terms(name_field, 1, id_="4")] if name_field else [])    # cột thứ hai: tên đi kèm mã (mỗi mã một tên)
     return {"id": pid(), "type": "table", "title": title, "datasource": ds, "gridPos": {"x": x, "y": y, "w": w, "h": h},
-            "targets": [target(ds, query, [agg], metric)],
+            "targets": [target(ds, query, aggs, metric)],
             "options": {"showHeader": False, "cellHeight": "sm", "footer": {"show": False}},
             "fieldConfig": {"defaults": {"color": {"mode": "fixed", "fixedColor": ACCENT}, "min": 0, "unit": "short",
                                          "decimals": 0, "custom": {"align": "auto", "cellOptions": {"type": "auto"}}},
@@ -207,29 +210,54 @@ HTTP_CLASSES = [("2xx thành công", "http.response.status_code:[200 TO 299]"),
                 ("5xx lỗi máy chủ", "http.response.status_code:[500 TO 599]")]
 http_series = {"colors": dict(zip([k for k, _ in HTTP_CLASSES], (OK, ACCENT, SEV_MARK["medium"], SEV_MARK["critical"])))}
 
+
+
+def real(q=""):
+    """Alert thật: loại alert chạy bóng (alert.shadow, rule đo thử), cùng quy ước với console (shadow=exclude) và KPI.
+    An toàn trước khi mapping có alert.shadow: ES coi `NOT field:true` là đúng với mọi bản ghi."""
+    return f"({q}) AND NOT alert.shadow:true" if q else "NOT alert.shadow:true"
+
+
+def det(q=""):
+    """Alert phát hiện để đếm tổng / top: loại health (sự cố nền tảng, ô riêng ở SOC KPI) và rba (alert cộng dồn rủi ro
+    từ các alert khác — đếm chung là đếm hai lần; ô riêng "Alert RBA"). Alert dò ngược TI-002 (retrohunt) vẫn tính."""
+    return real(f"({q}) AND NOT alert.source:(health OR rba)" if q else "NOT alert.source:(health OR rba)")
+
+
+def kpi_alert(q=""):
+    """Alert PHÁT HIỆN theo R62: rule / wazuh / ml, không bóng. Loại rba (cộng dồn rủi ro), health, retrohunt (TI-002)."""
+    return real(f"({q}) AND alert.source:(rule OR wazuh OR ml)" if q else "alert.source:(rule OR wazuh OR ml)")
+
+
 # Phiên đăng nhập: đăng nhập hệ thống (SSH, PAM, Windows logon 4624/4625 — event.category authentication)
 # và đăng nhập form web (POST tới đường dẫn login — access log không có tên tài khoản, chỉ có IP và mã HTTP)
-AUTH = "event.category:authentication"
+# Event nội bộ của nền tảng (console SOC: đăng nhập/đăng xuất giao diện; siem-xdr: kết quả phản ứng) không phải log hệ thống
+INTERNAL = "event.module:(console OR siem-xdr)"
+AUTH_ANY = "event.category:authentication"
+AUTH = f"{AUTH_ANY} AND NOT {INTERNAL}"          # đăng nhập hệ thống thật (ssh, PAM, Windows)
+CONSOLE_AUTH = f"{AUTH_ANY} AND event.module:console"
 WEB_LOGIN = "event.category:web AND http.request.method:POST AND url.path:*login*"
 PRIVILEGED = "user.name:(root OR Administrator OR admin)"
 
 panels = [
     row("Tổng quan", 0),
-    stat("Tổng event", EV, "", 0, 1),
-    stat("Tổng alert", AL, "", 4, 1),
-    stat("Alert nghiêm trọng", AL, "severity:critical", 8, 1, spark=SEV_MARK["critical"]),
-    stat("Alert mức cao", AL, "severity:high", 12, 1, spark=SEV_MARK["high"]),
-    all_time(stat("Case đang mở", CS, "status:(open OR in_progress OR contained)", 16, 1)),
-    stat("Lệnh phản ứng XDR", AC, "", 20, 1),
-    timeseries("Alert theo mức độ", AL, "", "severity", 0, 5, **sev_series),
+    stat("Tổng event (không tính console/phản ứng)", EV, f"NOT {INTERNAL}", 0, 1, w=3),
+    stat("Tổng alert", AL, det(), 3, 1, w=3),
+    stat("Alert nghiêm trọng", AL, det("severity:critical"), 6, 1, w=3, spark=SEV_MARK["critical"]),
+    stat("Alert mức cao", AL, det("severity:high"), 9, 1, w=3, spark=SEV_MARK["high"]),
+    stat("Alert RBA (cộng dồn rủi ro)", AL, real("alert.source:rba"), 12, 1, w=3),
+    stat("Alert chạy bóng", AL, "alert.shadow:true", 15, 1, w=3),
+    all_time(stat("Case đang mở", CS, "status:(open OR in_progress OR contained)", 18, 1, w=3)),
+    stat("Lệnh phản ứng XDR", AC, "", 21, 1, w=3),
+    timeseries("Alert theo mức độ", AL, det(), "severity", 0, 5, **sev_series),
     # 11 loại event: quá 8 màu phân biệt được -> xếp hạng một màu thay cho cột chồng nhiều màu
     bars("Event theo loại (event.category)", EV, "", "event.category", 12, 5, w=12, size=12),
     row("Phát hiện (Detection)", 13),
-    bars("Top rule kích hoạt", AL, "", "rule.name", 0, 14, w=8, size=15),
-    bars("MITRE ATT&CK tactic", AL, "", "rule.mitre.tactic", 8, 14),
-    bars("Top IP tấn công (từ alert)", AL, "", "source.ip", 14, 14, w=5),
-    bars("Host bị nhắm tới", AL, "", "host.name", 19, 14, w=5),
-    table("Alert mới nhất — bấm tên rule để mở trên console", AL, "",
+    bars("Top rule kích hoạt", AL, det(), "rule.name", 0, 14, w=8, size=15),
+    bars("MITRE ATT&CK tactic", AL, det(), "rule.mitre.tactic", 8, 14),
+    bars("Top IP tấn công (từ alert)", AL, det(), "source.ip", 14, 14, w=5),
+    bars("Host bị nhắm tới", AL, det(), "host.name", 19, 14, w=5),
+    table("Alert mới nhất — bấm tên rule để mở trên console", AL, real(),
           ["@timestamp", "severity", "rule.id", "rule.name", "source.ip", "user.name", "host.name", "agent.id",
            "risk_score", "alert.status", "message", "alert.id"], 0, 22,
           overrides=[label_cells("alert.status", ALERT_CELLS), inspect("message"), width("@timestamp", 190),
@@ -237,16 +265,20 @@ panels = [
                      width("alert.status", 105), *console_link("alert", "alert.id", "rule.id", "rule.name")]),
     row("Telemetry", 32),
     timeseries("HTTP status code (Apache)", EV, "event.module:apache", HTTP_CLASSES, 0, 33, w=8, **http_series),
-    bars("IP xác thực thất bại nhiều nhất", EV, "event.category:authentication AND event.outcome:failure", "source.ip",
+    bars("IP xác thực thất bại nhiều nhất", EV, f"{AUTH} AND event.outcome:failure", "source.ip",
          8, 33, w=8),
     bars("Nguồn dữ liệu (event.module)", EV, "", "event.module", 16, 33, w=8),
     bars("Top URL bị truy cập", EV, "event.category:web", "url.path", 0, 41, w=12, size=15),
     bars("Kết nối bị firewall chặn (IP nguồn)", EV, "event.action:deny", "source.ip", 12, 41, w=12),
     row("Phiên đăng nhập", 49),
-    stat("Đăng nhập thành công", EV, f"{AUTH} AND event.outcome:success", 0, 50, w=6),
-    stat("Đăng nhập thất bại", EV, f"{AUTH} AND event.outcome:failure", 6, 50, w=6),
-    stat("Tài khoản đặc quyền đăng nhập được", EV, f"{AUTH} AND event.outcome:success AND {PRIVILEGED}", 12, 50, w=6),
-    stat("Đăng nhập form web bị từ chối", EV, f"{WEB_LOGIN} AND http.response.status_code:(401 OR 403)", 18, 50, w=6),
+    stat("Đăng nhập hệ thống thành công", EV, f"{AUTH} AND event.outcome:success", 0, 50, w=4),
+    stat("Đăng nhập hệ thống thất bại", EV, f"{AUTH} AND event.outcome:failure", 4, 50, w=4),
+    # tên tài khoản đặc quyền của máy (root, Administrator) hoặc admin; không tính tài khoản đăng nhập console SOC
+    stat("Đặc quyền đăng nhập hệ thống được (root/Administrator/admin)", EV,
+         f"{AUTH} AND event.outcome:success AND {PRIVILEGED}", 8, 50, w=4),
+    stat("Đăng nhập form web bị từ chối", EV, f"{WEB_LOGIN} AND http.response.status_code:(401 OR 403)", 12, 50, w=4),
+    stat("Đăng nhập console SOC thành công", EV, f"{CONSOLE_AUTH} AND event.outcome:success", 16, 50, w=4),
+    stat("Đăng nhập console SOC thất bại", EV, f"{CONSOLE_AUTH} AND event.outcome:failure", 20, 50, w=4),
     timeseries("Đăng nhập hệ thống theo kết quả", EV, AUTH, "event.outcome", 0, 54, **outcome_series),
     bars("IP đăng nhập form web nhiều nhất", EV, WEB_LOGIN, "source.ip", 12, 54, w=12),
     bars("Tài khoản đăng nhập thất bại nhiều nhất", EV, f"{AUTH} AND event.outcome:failure", "user.name", 0, 62),
@@ -282,16 +314,16 @@ Q = "(${q:raw})"
 investigate = [
     row("Thực thể: ${q}", 0),
     stat("Event", EV, Q, 0, 1, w=6),
-    stat("Alert", AL, Q, 6, 1, w=6),
-    stat("Alert nghiêm trọng / cao", AL, f"{Q} AND severity:(critical OR high)", 12, 1, w=6, spark=SEV_MARK["critical"]),
-    stat("Đăng nhập thất bại", EV, f"{Q} AND {AUTH} AND event.outcome:failure", 18, 1, w=6),
+    stat("Alert", AL, real(Q), 6, 1, w=6),
+    stat("Alert nghiêm trọng / cao", AL, real(f"{Q} AND severity:(critical OR high)"), 12, 1, w=6, spark=SEV_MARK["critical"]),
+    stat("Đăng nhập thất bại (cả console)", EV, f"{Q} AND {AUTH_ANY} AND event.outcome:failure", 18, 1, w=6),
     bars("Event theo loại", EV, Q, "event.category", 0, 5, w=12, size=12),
-    timeseries("Alert theo mức độ", AL, Q, "severity", 12, 5, **sev_series),
+    timeseries("Alert theo mức độ", AL, real(Q), "severity", 12, 5, **sev_series),
     bars("Hành động (event.action)", EV, Q, "event.action", 0, 13, w=6),
     bars("URL bị truy cập", EV, f"{Q} AND event.category:web", "url.path", 6, 13, w=6),
     bars("Tiến trình", EV, f"{Q} AND event.category:process", "process.name", 12, 13, w=6),
     bars("IP liên quan", EV, Q, "source.ip", 18, 13, w=6),
-    table("Alert của thực thể — bấm tên rule để mở trên console", AL, Q,
+    table("Alert của thực thể — bấm tên rule để mở trên console", AL, real(Q),
           ["@timestamp", "severity", "rule.id", "rule.name", "source.ip", "user.name", "host.name", "alert.status",
            "alert.id"], 0, 21, h=9,
           overrides=[label_cells("alert.status", ALERT_CELLS), *console_link("alert", "alert.id", "rule.id", "rule.name")]),
@@ -311,7 +343,7 @@ CATALOG = "origin:${origin:raw} AND mitre.tactic:$tactic AND tags:$tag AND field
 PICKED = "proposal.pick:${proposal:lucene}"
 
 
-def terms_var(name, label, field, query="origin:(rule OR ai_proposal OR exception)", all_=True, size=300):
+def terms_var(name, label, field, query="origin:(rule OR wazuh_rule OR ai_proposal OR exception)", all_=True, size=300):
     return {"type": "query", "name": name, "label": label, "datasource": RU, "refresh": 1, "sort": 1,
             "query": json.dumps({"find": "terms", "field": field, "query": query, "size": size}, ensure_ascii=False),
             "includeAll": all_, "multi": all_, "allValue": "*" if all_ else None,
@@ -320,8 +352,8 @@ def terms_var(name, label, field, query="origin:(rule OR ai_proposal OR exceptio
 
 rules_vars = [
     {"type": "custom", "name": "origin", "label": "Hiển thị",
-     "query": "Tất cả : (rule OR ai_proposal OR exception),Rule đang chạy : rule,Đề xuất AI : ai_proposal,Ngoại lệ : exception",
-     "current": {"text": "Tất cả", "value": "(rule OR ai_proposal OR exception)"}},
+     "query": "Tất cả : (rule OR wazuh_rule OR ai_proposal OR exception),Rule YAML của dự án : rule,Rule Wazuh : wazuh_rule,Đề xuất AI : ai_proposal,Ngoại lệ : exception",
+     "current": {"text": "Tất cả", "value": "(rule OR wazuh_rule OR ai_proposal OR exception)"}},
     terms_var("tactic", "MITRE tactic", "mitre.tactic"),
     terms_var("tag", "Tag", "tags"),
     terms_var("field", "Trường log", "fields"),
@@ -333,21 +365,30 @@ CATALOG_COLS = ["origin_label", "rule.id", "rule.name", "severity", "type", "mod
                 "tags_text", "fields_text", "condition_text", "alerts.h24", "alerts.d7", "alerts.fp_rate30", "alerts.last",
                 "playbook", "proposal.status_label", "proposal.test", "proposal.fp", "proposal.alerts_per_day", "file",
                 "proposal.id"]
+# "Đang chạy" = rule YAML hoặc rule Wazuh có mode:active (tạo alert thật). Khi tắt engine YAML (Task 18) origin:rule về ~0 mà
+# rule Wazuh mới là thứ chạy, nên mọi ô "đang chạy" đếm cả hai origin.
+LIB = "origin:(rule OR wazuh_rule)"
+RUN = f"{LIB} AND mode:active"
 rules_lib = [
-    row("Tổng quan thư viện", 0),
-    stat("Rule đang chạy", RU, "origin:rule", 0, 1),
-    stat("Rule do AI viết (đã duyệt)", RU, "origin:rule AND source:ai", 4, 1),
-    stat("Ngoại lệ đang áp dụng", RU, "origin:exception", 8, 1),
-    stat("Đề xuất AI chờ duyệt", RU, "origin:ai_proposal AND proposal.status:pending", 12, 1),
-    stat("Đề xuất không đạt kiểm định", RU, "origin:ai_proposal AND proposal.passed:false", 16, 1),
-    stat("Rule im lặng 7 ngày", RU, "origin:rule AND alerts.d7:0", 20, 1),
-    bars("Rule theo MITRE tactic", RU, "origin:rule", "mitre.tactic", 0, 5, w=8),
-    bars("Đề xuất AI theo trạng thái", RU, "origin:ai_proposal", "proposal.status_label", 8, 5, w=8),
-    bars("Rule kêu nhiều nhất (7 ngày)", RU, "origin:rule AND alerts.d7:>0", "rule.name", 16, 5, w=8,
-         metric={"id": "1", "type": "sum", "field": "alerts.d7"}),
-    row("Danh sách rule, ngoại lệ, đề xuất AI — lọc bằng các ô phía trên", 13),
+    row("Tổng quan thư viện (rule YAML + rule Wazuh)", 0),
+    stat("Rule đang chạy (YAML + Wazuh, tạo alert thật)", RU, RUN, 0, 1, w=4),
+    stat("Rule chạy bóng (đo thử, không ra alert thật)", RU, f"{LIB} AND mode:shadow", 4, 1, w=4),
+    stat("Rule Wazuh không cầu nối (không ra alert)", RU, f"{LIB} AND mode:nobridge", 8, 1, w=4),
+    stat("Rule đã tắt", RU, f"{LIB} AND mode:off", 12, 1, w=4),
+    stat("Rule Wazuh (tổng, mọi chế độ)", RU, "origin:wazuh_rule", 16, 1, w=4),
+    stat("Rule im lặng 7 ngày (đang chạy)", RU, f"{RUN} AND alerts.d7:0", 20, 1, w=4),
+    stat("Rule do AI viết (đã duyệt)", RU, "origin:rule AND source:ai", 0, 5, w=6),
+    stat("Ngoại lệ đang áp dụng", RU, "origin:exception", 6, 5, w=6),
+    stat("Đề xuất AI chờ duyệt", RU, "origin:ai_proposal AND proposal.status:pending", 12, 5, w=6),
+    # cùng định nghĩa với dòng "không đạt kiểm định" của biểu đồ trạng thái bên dưới (status invalid)
+    stat("Đề xuất không đạt kiểm định", RU, "origin:ai_proposal AND proposal.status:invalid", 18, 5, w=6),
+    bars("Rule đang chạy theo MITRE tactic", RU, RUN, "mitre.tactic", 0, 9, w=8),
+    bars("Đề xuất AI theo trạng thái", RU, "origin:ai_proposal", "proposal.status_label", 8, 9, w=8),
+    bars("Rule kêu nhiều nhất (7 ngày): mã rule và tên", RU, f"{LIB} AND alerts.d7:>0", "rule.id", 16, 9, w=8,
+         metric={"id": "1", "type": "sum", "field": "alerts.d7"}, name_field="rule.name"),
+    row("Danh sách rule, ngoại lệ, đề xuất AI — lọc bằng các ô phía trên", 17),
     table("Rule và đề xuất AI — bấm mã rule xem cảnh báo của rule, bấm trạng thái đề xuất để mở trên console",
-          RU, CATALOG, CATALOG_COLS, 0, 14, h=16, size=500, sort=("rule.id", False),
+          RU, CATALOG, CATALOG_COLS, 0, 18, h=16, size=500, sort=("rule.id", False),
           rename={"origin_label": "Nguồn", "rule.id": "Mã", "rule.name": "Tên", "severity": "Mức độ", "type": "Loại",
                   "mitre.tactic": "Tactic", "technique_text": "Kỹ thuật", "tags_text": "Tag", "fields_text": "Trường log",
                   "condition_text": "Điều kiện", "alerts.h24": "Alert 24h", "alerts.d7": "Alert 7 ngày",
@@ -359,11 +400,11 @@ rules_lib = [
                      inspect("fields_text", 200), hide("proposal.id"),
                      link_to("rule.id", "Xem cảnh báo của rule trên console", '/go/rule/${__data.fields["rule.id"]}'),
                      link_to("proposal.status_label", "Mở đề xuất trên console", '/go/proposal/${__data.fields["proposal.id"]}')]),
-    row("So sánh đề xuất AI với rule hiện có — chọn đề xuất ở ô “Đề xuất cần so sánh”", 30),
+    row("So sánh đề xuất AI với rule hiện có — chọn đề xuất ở ô “Đề xuất cần so sánh”", 34),
     table("Đề xuất đã chọn", RU, f"origin:ai_proposal AND {PICKED}",
           ["proposal.kind_label", "rule.id", "rule.name", "proposal.status_label", "proposal.test", "proposal.fp",
            "proposal.alerts_per_day", "proposal.approvals", "mitre.tactic", "tags_text", "condition_text", "yaml", "proposal.id"],
-          0, 31, h=6, cell_height="lg",
+          0, 35, h=6, cell_height="lg",
           rename={"proposal.kind_label": "Loại", "rule.id": "Mã", "rule.name": "Đề xuất", "proposal.status_label": "Trạng thái",
                   "proposal.test": "Bắt mẫu kiểm tra", "proposal.fp": "Báo nhầm", "proposal.alerts_per_day": "Alert/ngày",
                   "proposal.approvals": "Lượt duyệt", "mitre.tactic": "Tactic", "tags_text": "Tag",
@@ -372,7 +413,7 @@ rules_lib = [
                      link_to("proposal.status_label", "Mở đề xuất trên console", '/go/proposal/${__data.fields["proposal.id"]}')]),
     table("Rule hiện có liên quan — điều kiện hai bên đặt cạnh nhau, xếp theo mức liên quan", RU, f"origin:comparison AND {PICKED}",
           ["score", "rule.id", "rule.name", "reasons_text", "condition_text", "proposal.condition_text", "alerts.d7"],
-          0, 37, h=14, sort=("score", True), cell_height="lg",
+          0, 41, h=14, sort=("score", True), cell_height="lg",
           rename={"score": "Mức liên quan", "rule.id": "Mã", "rule.name": "Rule hiện có", "severity": "Mức độ",
                   "reasons_text": "Vì sao liên quan", "condition_text": "Điều kiện rule hiện có",
                   "proposal.condition_text": "Điều kiện AI đề xuất", "alerts.d7": "Alert 7 ngày"},
@@ -439,13 +480,13 @@ SOURCE_CELLS = {"ok": ("Bình thường", ST_DONE), "deviation": ("Lệch nhịp
 CLOSED = "alert.status:(closed OR false_positive)"
 kpi_panels = [
     row("Chỉ số chính (30 ngày gần nhất) — xanh: đạt đích giai đoạn 4, vàng: đạt giai đoạn 2, đỏ: chưa đạt", 0),
-    kpi_stat("MTTD alert critical", "mttd_critical_s", "s", 0, 1, desc="Từ event đầu tiên của chuỗi tấn công tới lúc sinh alert."),
+    kpi_stat("MTTD alert critical", "mttd_critical_s", "s", 0, 1, desc="Từ event đầu tiên của chuỗi tấn công tới lúc sinh alert. Chỉ alert phát hiện (rule/wazuh/ml, không bóng); không tính RBA, health, dò ngược TI-002 (R62)."),
     kpi_stat("MTTA case P1", "mtta_p1_s", "s", 4, 1, desc="Từ lúc mở case tới khi có người nhận xử lý."),
     kpi_stat("MTTC case P1", "mttc_p1_s", "s", 8, 1, desc="Từ lúc mở case tới khi khoanh vùng xong (Đã ngăn chặn)."),
     kpi_stat("Tuân thủ SLA", "sla_pct", "percent", 12, 1, desc="% case xác nhận / khoanh vùng trong hạn của mức ưu tiên."),
-    kpi_stat("Tỉ lệ báo nhầm", "fp_rate_pct", "percent", 16, 1, desc="Alert kết luận báo nhầm / alert đã đóng."),
-    kpi_stat("Alert / analyst / ca", "alerts_per_analyst_shift", "short", 20, 1, desc="Tải công việc."),
-    kpi_stat("Làm giàu tự động", "enrichment_pct", "percent", 0, 5, w=6, desc="% alert có ngữ cảnh tài sản."),
+    kpi_stat("Tỉ lệ báo nhầm", "fp_rate_pct", "percent", 16, 1, desc="Alert kết luận báo nhầm / alert đã đóng; chỉ alert phát hiện (R62)."),
+    kpi_stat("Alert / analyst / ca", "alerts_per_analyst_shift", "short", 20, 1, desc="Tải công việc: alert phát hiện (R62) mỗi analyst mỗi ca."),
+    kpi_stat("Làm giàu tự động", "enrichment_pct", "percent", 0, 5, w=6, desc="% alert phát hiện (R62) có ngữ cảnh tài sản."),
     kpi_stat("Độ phủ ATT&CK ưu tiên", "attack_coverage_pct", "percent", 6, 5, w=6,
              desc="% kỹ thuật trong threat_profile.yml có rule chạy chính thức đã kiểm thử."),
     kpi_stat("Sức khỏe nguồn log", "source_health_pct", "percent", 12, 5, w=6, desc="% nguồn đã onboard không im lặng."),
@@ -456,10 +497,10 @@ kpi_panels = [
     kpi_trend("Tỉ lệ (%)", [("sla_pct", "Tuân thủ SLA"), ("fp_rate_pct", "Báo nhầm"), ("enrichment_pct", "Làm giàu"),
                             ("attack_coverage_pct", "Độ phủ ATT&CK"), ("source_health_pct", "Nguồn log khỏe")],
               "percent", 12, 10),
-    row("Chất lượng cảnh báo (theo khoảng thời gian của dashboard)", 18),
-    bars("Kết luận khi đóng alert", AL, CLOSED, "alert.verdict", 0, 19, w=6),
-    bars("Rule báo nhầm nhiều nhất", AL, "alert.status:false_positive", "rule.id", 6, 19, w=6),
-    bars("Alert theo mức ưu tiên", AL, "NOT alert.shadow:true", "priority", 12, 19, w=6, sort_term=True),
+    row("Chất lượng cảnh báo phát hiện (rule/wazuh/ml, không bóng; theo khoảng thời gian của dashboard)", 18),
+    bars("Kết luận khi đóng alert", AL, kpi_alert(CLOSED), "alert.verdict", 0, 19, w=6),
+    bars("Rule báo nhầm nhiều nhất", AL, kpi_alert("alert.status:false_positive"), "rule.id", 6, 19, w=6),
+    bars("Alert theo mức ưu tiên", AL, kpi_alert(), "priority", 12, 19, w=6, sort_term=True),
     avg_by("MTTA theo mức ưu tiên (case)", CS, "_exists_:metrics.tta_seconds", "metrics.tta_seconds", "priority", "s",
            18, 19, w=6),
     all_time(table("Case quá hạn xác nhận (chưa ai nhận) — bấm tiêu đề để mở trên console", CS,

@@ -57,6 +57,8 @@ GRAFANA_URL = os.getenv("GRAFANA_URL", "http://grafana-internal:3000")
 WAZUH_API_URL = os.getenv("WAZUH_API_URL", "https://wazuh-manager:55000")
 WAZUH_API_USER = os.getenv("WAZUH_API_USER", "siem-soar")
 WAZUH_API_PASSWORD = _secret("WAZUH_API_PASSWORD")
+WAZUH_RULES_API_USER = os.getenv("WAZUH_RULES_API_USER", "siem-rules")   # nạp lại / thử rule (wazuh_rules.py)
+WAZUH_RULES_API_PASSWORD = _secret("WAZUH_RULES_API_PASSWORD")
 WAZUH_API_CA = os.getenv("WAZUH_API_CA", os.getenv("ES_CA_CERT", ""))   # cùng CA nội bộ với Elasticsearch
 WAZUH_AR_SCRIPT = os.getenv("WAZUH_AR_SCRIPT", "siem-xdr")              # script phản ứng cài sẵn trên agent
 # Cảnh báo của ruleset Wazuh chuyển thành alert (xem detection/wazuh.py)
@@ -64,8 +66,18 @@ WAZUH_ALERT_MIN_LEVEL = int(os.getenv("WAZUH_ALERT_MIN_LEVEL", "7"))
 WAZUH_ALERT_ANY_LEVEL = int(os.getenv("WAZUH_ALERT_ANY_LEVEL", "12"))
 # sca KHÔNG có mặc định: mỗi mục CIS không đạt là 1 cảnh báo level 7 (máy demo: 83 cái lúc khởi động) — đó là
 # tư thế cấu hình, xem trong event (event.module: sca), không phải sự cố cần mở case
-WAZUH_ALERT_GROUPS = {g.strip() for g in os.getenv(
-    "WAZUH_ALERT_GROUPS", "syscheck,rootcheck,vulnerability-detector,virustotal,yara").split(",") if g.strip()}
+WAZUH_ALERT_GROUPS = {g.strip() for g in os.getenv("WAZUH_ALERT_GROUPS", "").split(",") if g.strip()}   # rỗng = mọi nhóm
+# R22: không chuyển nhóm sca mặc định: mỗi mục CIS không đạt là 1 cảnh báo level 7 (máy demo: 83 cái lúc khởi động), làm ngập alert/case
+WAZUH_ALERT_EXCLUDE_GROUPS = {g.strip() for g in os.getenv("WAZUH_ALERT_EXCLUDE_GROUPS", "sca").split(",") if g.strip()}
+# Rule gốc (id < 100000) thuộc nhóm này giữ hành vi cũ (alert thật). Rule gốc ngoài danh sách chỉ CHẠY BÓNG tới cổng T18
+# (trừ level >= WAZUH_ALERT_ANY_LEVEL): cầu nối vẫn chuyển để đo, SOAR bỏ qua.
+WAZUH_ALERT_ACTIVE_GROUPS = {g.strip() for g in os.getenv(
+    "WAZUH_ALERT_ACTIVE_GROUPS", "syscheck,rootcheck,vulnerability-detector,virustotal,yara").split(",") if g.strip()}
+# R65 (cổng T18, 05/11/2026): engine YAML tắt, phát hiện chạy hoàn toàn trong wazuh-analysisd. =true để bật lại engine YAML.
+RULE_ENGINE_ENABLED = os.getenv("RULE_ENGINE_ENABLED", "false").lower() in ("1", "true", "yes")
+# R65: rule gốc Wazuh level 7-11 ngoài nhóm cũ là alert thật. =true để khôi phục chế độ bóng (R38).
+WAZUH_STOCK_SHADOW = os.getenv("WAZUH_STOCK_SHADOW", "false").lower() in ("1", "true", "yes")
+WAZUH_ALERT_SUPPRESS = int(os.getenv("WAZUH_ALERT_SUPPRESS", "60"))     # giây: cùng rule + cùng nguồn chỉ 1 alert
 
 # Thư mục cấu hình (rules, playbooks, intel, assets)
 CONFIG_DIR = Path(os.getenv("CONFIG_DIR", BASE_DIR / "config"))
