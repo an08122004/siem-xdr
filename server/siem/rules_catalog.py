@@ -469,14 +469,16 @@ def wazuh_rule_docs(api, alert_stats: dict[str, dict[str, Any]]) -> list[dict[st
     `shadow` khớp đúng cách cầu nối cấp alert (detection/wazuh.py): nhóm `shadow` hoặc rule gốc is_shadow_stock, để thư viện
     không bao giờ ghi "chính thức" cho rule chỉ ra alert chạy bóng. Lỗi API thì raise (người gọi giữ danh mục cũ)."""
     from .detection.wazuh import _is_local, is_shadow_stock, severity_for, should_bridge
-    docs, offset = [], 0
+    docs, offset, seen = [], 0, {}
     while True:
         data = (api.rules(offset, WAZUH_PAGE) or {}).get("data") or {}
         items = data.get("affected_items") or []
         for r in items:
             level, groups = int(r.get("level") or 0), [str(g) for g in r.get("groups") or []]
-            mitre = r.get("mitre") or {}
-            ids = [str(i) for i in mitre.get("id") or []]
+            # Wazuh 4.14 trả `mitre` là list mã kỹ thuật (['T1110']), không có tactic; dạng dict {id, tactic} vẫn đọc được
+            m = r.get("mitre") or []
+            ids = [str(i) for i in ((m.get("id") or []) if isinstance(m, dict) else m)]
+            tactic = (m.get("tactic") or [None])[0] if isinstance(m, dict) else None
             sev, rid = severity_for(level), f"WZH-{r['id']}"
             legacy = [g for g in groups if g.startswith("legacy_")]
             shadow = "shadow" in groups or is_shadow_stock({"id": r["id"], "level": level, "groups": groups})
@@ -486,11 +488,11 @@ def wazuh_rule_docs(api, alert_stats: dict[str, dict[str, Any]]) -> list[dict[st
             bridged = should_bridge(rule) and (level >= 3 or not _is_local(rule))
             mode = "off" if off else "shadow" if shadow else "active" if bridged else "nobridge"
             st = alert_stats.get(rid, {})
-            docs.append({
+            doc = {
                 "_id": f"rule:{rid}", "origin": "wazuh_rule", "origin_label": "Rule Wazuh", "source": "wazuh",
                 "rule": {"id": rid, "name": r.get("description", "")}, "description": r.get("description", ""),
                 "severity": sev, "severity_score": SEVERITY_SCORE.get(sev, 0), "type": "wazuh", "level": level,
-                **_common(tactic=(mitre.get("tactic") or [None])[0], techniques=ids, tags=["wazuh", *groups], fields=[]),
+                **_common(tactic=tactic, techniques=ids, tags=["wazuh", *groups], fields=[]),
                 "groups": groups, **({"legacy_id": legacy[0][7:]} if legacy else {}),     # như alert: không có thì bỏ khóa
                 "condition_text": "", "patterns": [], "yaml": "",
                 "file": f"{r.get('relative_dirname', '')}/{r.get('filename', '')}".strip("/"),
@@ -498,7 +500,14 @@ def wazuh_rule_docs(api, alert_stats: dict[str, dict[str, Any]]) -> list[dict[st
                 "alerts": {"h24": st.get("h24", 0), "d7": st.get("d7", 0), "d90": st.get("d90", 0), "last": st.get("last"),
                            "closed30": st.get("closed30", 0), "fp30": st.get("fp30", 0), "fp_rate30": None},
                 "mode": mode, "mode_label": "đã tắt" if off else MODE_LABEL[mode],
-            })
+            }
+            # rule gốc bị đè (overwrite trong etc/rules/0999-tuning.xml) có 2 bản trong API: giữ bản đè (bản đang chạy)
+            if r["id"] in seen:
+                if not str(r.get("relative_dirname", "")).startswith("ruleset"):
+                    docs[seen[r["id"]]] = doc
+                continue
+            seen[r["id"]] = len(docs)
+            docs.append(doc)
         offset += len(items)
         if not items or offset >= int(data.get("total_affected_items") or 0):
             return docs
