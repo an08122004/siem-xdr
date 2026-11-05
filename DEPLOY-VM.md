@@ -553,7 +553,7 @@ Lần triển khai này **chưa** là cổng chuyển (Task 18): engine YAML v�
    báo lỗi file secret và không tạo container.
 4. Kiểm wazuh-manager: log có `[siem-setup] ruleset hợp lệ` (bước 9 của `wazuh/manager/entrypoint/10-siem-setup.sh`);
    `wazuh-control status` có analysisd, remoted, apid; `GET /rules?rule_ids=104095` (user `siem-rules`) trả về rule.
-5. Kiểm quyền API: token `siem-soar` đẩy được `PUT /lists/files/siem-misp-ip` nhưng bị từ chối với danh sách gốc
+5. Kiểm quyền API: token `siem-soar` đẩy được `PUT /lists/files/siem-misp-ip` (và `siem-misp-domain`, `siem-misp-hash` từ R64; nâng cấp cần khởi động lại manager để entrypoint thêm policy mới) nhưng bị từ chối với danh sách gốc
    (`malicious-ioc/malicious-ip`, `audit-keys`); token `siem-rules` nạp lại được ruleset nhưng không ghi được danh sách.
 6. Kiểm console và SOAR: thư viện rule có khoảng 4,5 nghìn bản ghi `origin: wazuh_rule`; thêm một ngoại lệ, duyệt bằng người
    thứ hai, thấy rule 110000 trong `rules-dynamic/exceptions.xml`, gỡ ngoại lệ; log `analyzer`, `soar` sạch.

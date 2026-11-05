@@ -382,7 +382,7 @@ Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info 
 - (c) E2E 44/44 với SOAR theo playbook mới
 
 **Đạt:**
-- [ ] TI-001 domain/hash IOC chỉ có ở analyzer — người dùng quyết trước khi tắt rule YAML (Wazuh mới phủ IP: firewall, Suricata, sshd, web, Windows; tên file TI là `0845-ti.xml`)
+- [x] TI-001 domain/hash IOC: XONG bằng XML (R64, 05/11): danh sách `siem-misp-domain` / `siem-misp-hash`, rule 107011-107016 (Suricata DNS / HTTP, Sysmon 22, FIM sha256 / sha1 / md5). CÒN giới hạn: subdomain không khớp (CDB chính xác, rule YAML cũ khớp), hash trong Sysmon 1 (`win.eventdata.hashes` một chuỗi) và trong tiến trình chưa phủ, domain khác chữ hoa không khớp, DNS qua proxy / VPN chưa phủ; tên file TI là `0845-ti.xml`
 - [ ] 102505 (LNX-005) báo nhầm 2,0/100 trên tập Linux bình thường khi phát lại dồn trong vài giây — đo lại với dữ liệu giãn theo thời gian thật trước khi bật
 - [x] bỏ nhóm `shadow` ở các file 0101–0106 và 0845 (trừ rule có `shadow_since` < 7 ngày, giữ đúng tiêu chí chạy bóng của SOC-OPERATIONS mục 4) — **R65, 05/11: chủ dự án bỏ qua tiêu chí 7 ngày**, bỏ nhóm `shadow` ở mọi file trừ `0845-ti.xml` (controller bỏ sau khi gộp phần TI domain/hash); cũng bỏ ở 63103 / 91837 (`0999-tuning.xml`); rule gốc level 7 đến 11 thành alert thật (`WAZUH_STOCK_SHADOW=false`); lint bỏ yêu cầu bắt buộc chạy bóng
 - [x] `RULE_ENGINE_ENABLED=false` (biến mới trong `settings.py`, analyzer không chạy engine của `detection/rules.py`) + test `test_engine_disabled_no_yaml_alerts`

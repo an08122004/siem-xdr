@@ -3,12 +3,14 @@
   KHÔNG ĐỔI TÊN FILE: tên phải xếp SAU 0541-network.xml (chứa 103000, 103003, 103004), 0475-suricata_rules.xml (86601), 0540-pfsense_rules.xml (87701), 0245-web_rules.xml (31101, 31108), 0095-sshd_rules.xml, 0580-win-security_rules.xml (60106, 60122) và 0840-win_event_channel.xml (92657); Wazuh nạp theo tên file và bỏ rule có
   if_sid chưa tồn tại. Vì vậy file này không mang số 0107 như bảng kế hoạch (cùng lý do với 0541-network.xml); ID_RANGES trong server/siem/wazuh_rules.py dùng tên 0845-ti.xml.
 
-  Rule cũ dựa vào threat.matched do pipeline analyzer gắn (IP / domain / hash từ file config/intel và feed MISP). Ở Wazuh chỉ phần IP làm được bằng danh sách CDB:
+  Rule cũ dựa vào threat.matched do pipeline analyzer gắn (IP / domain / hash từ file config/intel và feed MISP). Ở Wazuh dùng danh sách CDB (IP từ đầu; domain + hash từ R64, 107011-107016 cuối file):
   SOAR mỗi chu kỳ đồng bộ MISP (MISP_INTERVAL_MINUTES) đổi IOC loại ip còn hạn thành danh sách `etc/lists/siem-misp-ip` (server/siem/pipeline/misp_cdb.py, tools/misp_to_cdb.py),
   đẩy lên bằng Wazuh API rồi nạp lại analysisd. CIDR /24-/31 được triển khai thành từng địa chỉ: Wazuh 4.14.8 không khớp khóa CIDR trong CDB (đã thử, cả address_match_key).
   Danh sách khai báo trong ossec.conf; entrypoint tạo file giữ chỗ (một dòng 240.0.0.0:empty, API Wazuh từ chối file rỗng) nên analysisd chạy được cả khi chưa có IOC.
   KHÔNG đụng danh sách gốc etc/lists/malicious-ioc/malicious-ip của Wazuh (R50): 99915 / 99916 và NET-004 (103004) dùng nó.
-  Domain và hash từ MISP CHƯA có rule ở đây (rule gốc 99917 / 99918 dùng danh sách domain gốc; hash cần decoder sysmon / syscheck), xem task-11-report.
+  R64: `siem-misp-domain` và `siem-misp-hash` (cùng nguồn, cùng cách đẩy, cũng tách khỏi danh sách gốc malicious-domains / malware-hashes); rule 107011-107016 ở cuối file.
+  GIỚI HẠN domain / hash (RULES.md 9.9): CDB khớp chính xác và phân biệt hoa thường nên subdomain của domain IOC KHÔNG khớp (rule YAML cũ có); Sysmon sự kiện 1 (win.eventdata.hashes là một chuỗi
+  "SHA1=...,MD5=...,SHA256=...") và hash trong tiến trình CHƯA phủ (chỉ hash file của FIM); FIM-001 / WEB-010 (level 10, nạp trước) thắng TI-001 hash cùng cha khi cùng khớp đường dẫn (ngang level, nạp trước thắng).
 
   Phạm vi nguồn (rule không điều kiện sẽ chặn cả họ rule gốc, nên chọn các cha có địa chỉ IP trong sự kiện):
     - firewall pf / filterlog (OPNsense qua agent hoặc syslog 514): con của 87701 (block) và 103000 (pass, bộ đếm của 0541-network.xml), và của 103003 (NET-003);
@@ -29,7 +31,7 @@
   R53 (phủ IP trên mọi nguồn có địa chỉ): thêm con level 10 cho sshd (107008), web access log (107009), đăng nhập Windows (107010). Rule cũ gắn threat.matched cho MỌI event;
   nguồn khác (DNS, proxy, VPN...) chưa phủ. Hệ quả giống R52 cho đếm của dự án (AUTH / WEB / WIN): event của IP trong danh sách IOC có rule cuối là TI-001 nên KHÔNG vào bộ đếm
   của rule frequency (5763, 5720, 31151, 60204, rule dự án...); IP đó vẫn báo TI-001 từng event (level 10 như các rule đếm). Rule gốc level > 10 cùng cha (31115, 31168...) vẫn thắng TI-001.
-  Danh sách nguồn IOC: SOAR gộp IOC MISP + file config/intel/*.txt (loại ip). Domain và hash CHƯA có ở Wazuh (xem legacy_map TI-001 và Task 18).
+  Danh sách nguồn IOC: SOAR gộp IOC MISP + file config/intel/*.txt (loại ip). Domain và hash: R64, xem trên.
 -->
 <group name="local,siem-xdr,">
   <!-- TI-001 firewall: IP NGUỒN nằm trong danh sách IOC (nguồn ngoài đang chạm vào mạng) -->
@@ -163,6 +165,83 @@
       <id>T1071</id>
     </mitre>
     <info type="text">shadow_since=2026-11-03</info>
+    <group>siem,threat_intel,shadow,legacy_TI-001,</group>
+  </rule>
+
+  <!-- R64: TI-001 domain và hash. Danh sách siem-misp-domain / siem-misp-hash do SOAR đẩy (MISP + config/intel/bad_domains.txt, bad_hashes.txt), TÁCH khỏi danh sách gốc.
+       Khóa CDB khớp CHÍNH XÁC và phân biệt hoa thường: khác rule YAML cũ, subdomain của domain IOC KHÔNG khớp (IOC phải liệt kê đúng tên được hỏi) - xem RULES.md 9.9. -->
+  <!-- Domain, Suricata DNS (dns.rrname). Loại domain có trong danh sách gốc malicious-domains: khi đó 99918 (level 9, nạp trước) giữ ngữ cảnh, nếu không level 10 của TI-001 thắng nó -->
+  <rule id="107011" level="10">
+    <if_sid>86603</if_sid>
+    <location type="pcre2">^\(</location>
+    <list field="dns.rrname" lookup="match_key">etc/lists/siem-misp-domain</list>
+    <list field="dns.rrname" lookup="not_match_key">etc/lists/malicious-ioc/malicious-domains</list>
+    <description>TI-001 Domain $(dns.rrname) nằm trong danh sách IOC - truy vấn DNS (Suricata)</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-05</info>
+    <group>siem,threat_intel,shadow,legacy_TI-001,</group>
+  </rule>
+
+  <!-- Domain, Suricata HTTP (http.hostname); cùng cách loại trừ với 99917 -->
+  <rule id="107012" level="10">
+    <if_sid>86602</if_sid>
+    <location type="pcre2">^\(</location>
+    <list field="http.hostname" lookup="match_key">etc/lists/siem-misp-domain</list>
+    <list field="http.hostname" lookup="not_match_key">etc/lists/malicious-ioc/malicious-domains</list>
+    <description>TI-001 Domain $(http.hostname) nằm trong danh sách IOC - truy cập HTTP (Suricata)</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-05</info>
+    <group>siem,threat_intel,shadow,legacy_TI-001,</group>
+  </rule>
+
+  <!-- Domain, Sysmon sự kiện 22 (truy vấn DNS của tiến trình Windows). Không có rule gốc cùng cha nên không cần loại trừ -->
+  <rule id="107013" level="10">
+    <if_sid>61650</if_sid>
+    <list field="win.eventdata.queryName" lookup="match_key">etc/lists/siem-misp-domain</list>
+    <description>TI-001 Domain $(win.eventdata.queryName) nằm trong danh sách IOC - Sysmon DNS (tiến trình $(win.eventdata.image))</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-05</info>
+    <group>siem,threat_intel,shadow,legacy_TI-001,</group>
+  </rule>
+
+  <!-- Hash file, FIM (550 sửa / 554 mới) theo sha256 / sha1 / md5. 99901 (level 14, danh sách gốc malware-hashes) luôn thắng nhờ level; 107014 vẫn loại trừ cho rõ ý -->
+  <rule id="107014" level="10">
+    <if_sid>550, 554</if_sid>
+    <list field="sha256" lookup="match_key">etc/lists/siem-misp-hash</list>
+    <list field="sha256" lookup="not_match_key">etc/lists/malicious-ioc/malware-hashes</list>
+    <description>TI-001 File $(file) có sha256 nằm trong danh sách IOC</description>
+    <mitre>
+      <id>T1204.002</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-05</info>
+    <group>siem,threat_intel,shadow,legacy_TI-001,</group>
+  </rule>
+
+  <rule id="107015" level="10">
+    <if_sid>550, 554</if_sid>
+    <list field="sha1" lookup="match_key">etc/lists/siem-misp-hash</list>
+    <description>TI-001 File $(file) có sha1 nằm trong danh sách IOC</description>
+    <mitre>
+      <id>T1204.002</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-05</info>
+    <group>siem,threat_intel,shadow,legacy_TI-001,</group>
+  </rule>
+
+  <rule id="107016" level="10">
+    <if_sid>550, 554</if_sid>
+    <list field="md5" lookup="match_key">etc/lists/siem-misp-hash</list>
+    <description>TI-001 File $(file) có md5 nằm trong danh sách IOC</description>
+    <mitre>
+      <id>T1204.002</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-05</info>
     <group>siem,threat_intel,shadow,legacy_TI-001,</group>
   </rule>
 </group>

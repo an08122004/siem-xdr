@@ -28,19 +28,22 @@ ROOT = cov.ROOT
 IMAGE = "wazuh/wazuh-manager:4.14.8"
 # đổi tên khi nhiều bản chạy song song trên cùng máy (container tạm bị `docker rm -f` theo tên)
 NAME = os.getenv("WAZUH_NOISE_NAME", "wazuh-noise")
+MISP_LISTS = {"siem-misp-ip": "240.0.0.0:empty\n", "siem-misp-domain": "placeholder.invalid:empty\n",
+              "siem-misp-hash": "0" * 32 + ":empty\n"}      # tên -> dòng giữ chỗ (cùng giá trị 10-siem-setup.sh bước 8b)
 MIN_LEVEL = 7
 GATE = 1.0          # alert / 100 event bình thường
 # thay entrypoint của repo (cần secrets/chứng chỉ): chỉ tắt filebeat + tạo thư mục rule động như entrypoint thật
 SETUP = ("#!/bin/bash\nprintf '#!/bin/sh\\nexec sleep infinity\\n' > /etc/services.d/filebeat/run\n"
          "install -d -o root -g wazuh -m 0755 /var/ossec/etc/rules-dynamic\n"
          "install -d -m 0755 /var/log/siem-console\n"
-         "install -m 0660 -o wazuh -g wazuh /entrypoint-scripts/siem-misp-ip /var/ossec/etc/lists/siem-misp-ip\n")   # ossec.conf có <localfile> console: giữ ossec.log sạch cảnh báo logcollector
+         + "".join(f"install -m 0660 -o wazuh -g wazuh /entrypoint-scripts/{n} /var/ossec/etc/lists/{n}\n" for n in MISP_LISTS))   # ossec.conf có <localfile> console: giữ ossec.log sạch cảnh báo logcollector
 
 
-def start(tmp: Path, misp_list: str = "240.0.0.0:empty\n") -> None:
-    """misp_list: nội dung danh sách siem-misp-ip (ossec.conf khai báo nó; thiếu file thì rule dùng nó bị bỏ). Mặc định = dòng giữ chỗ của entrypoint."""
+def start(tmp: Path, lists: dict[str, str] | None = None) -> None:
+    """lists: {tên: nội dung} của danh sách siem-misp-* (ossec.conf khai báo chúng; thiếu file thì rule dùng nó bị bỏ). Tên thiếu = dòng giữ chỗ của entrypoint."""
     (tmp / "10-setup.sh").write_text(SETUP, encoding="utf-8", newline="\n")
-    (tmp / "siem-misp-ip").write_text(misp_list, encoding="utf-8", newline="\n")
+    for n, placeholder in MISP_LISTS.items():
+        (tmp / n).write_text((lists or {}).get(n, placeholder), encoding="utf-8", newline="\n")
     cov.docker("run", "-d", "--rm", "--name", NAME, "--network", "none",
                "-v", f"{tmp}:/entrypoint-scripts:ro",
                "-v", f"{ROOT / 'wazuh/manager/rules'}:/var/ossec/etc/rules:ro",

@@ -127,7 +127,7 @@ def _message(fmt: str, ev, ident: int) -> str:
             data["old_attributes"] = {**data["attributes"], "size": 5}
         return "8:syscheck:" + json.dumps({"type": "event", "data": data})
     data = {"path": ev["path"], "mode": "scheduled", "type": ev["type"], "timestamp": 1767225600,
-            "attributes": {**_FILE, "inode": ident, **({"hash_sha256": ev["sha256"]} if "sha256" in ev else {})}}
+            "attributes": {**_FILE, "inode": ident, **{f"hash_{h}": ev[h] for h in ("md5", "sha1", "sha256") if h in ev}}}
     if ev["type"] == "modified":
         data["changed_attributes"] = ["size", "mtime"]
         data["old_attributes"] = {**data["attributes"], "size": 5}
@@ -166,7 +166,7 @@ def inject(cases: list[dict]) -> list[set[int]]:
     try:
         with tempfile.TemporaryDirectory() as tmp:
             try:
-                noise.start(Path(tmp), LISTS.get("siem-misp-ip", "240.0.0.0:empty\n"))
+                noise.start(Path(tmp), LISTS)
                 alerts = cov.run_wazuh(items)
             finally:
                 subprocess.run(["docker", "rm", "-f", noise.NAME], env=cov.ENV, capture_output=True)
@@ -189,7 +189,7 @@ def inject(cases: list[dict]) -> list[set[int]]:
 # ---------------------------------------------------------------- chạy cả bộ
 def _load_lists(cases: list[dict], api) -> list[dict]:
     """Phần tử `list_file: {name, content}` (không phải ca) = đẩy danh sách CDB lên manager thử rồi nạp lại ruleset, trước khi chạy các ca.
-    Cần cho rule dùng danh sách do SOAR cập nhật lúc chạy thật (vd siem-misp-ip của TI-001). Trả về các ca còn lại."""
+    Cần cho rule dùng danh sách do SOAR cập nhật lúc chạy thật (vd siem-misp-ip / -domain / -hash của TI-001). Trả về các ca còn lại."""
     setup = [c["list_file"] for c in cases if "list_file" in c]
     for lf in setup:
         (LIST_API or api).put_list(lf["name"], lf["content"])

@@ -554,7 +554,7 @@ Wazuh nạp rule theo thứ tự **tên file**, và rule con bị bỏ nếu `if
 | `0271-web.xml` | 104000–104999 | 18 | WEB-001..009 trên access log Apache; 104095 là cổng IOC (9.3). Phải nạp sau 0245 (rule web gốc) |
 | `0965-windows.xml` | 105000–105999 | 16 | WIN-001, 002, 004..013 trên eventchannel (Sysmon, Security, System). Con của chuỗi rule gốc 60000 / 61600 / 92000 |
 | `0106-fim.xml` | 106000–106999 | 3 | FIM-001 (Linux, thư mục Startup Windows, khóa Run của registry), con của 550 / 554 / 750 / 752 |
-| `0845-ti.xml` | 107000–107999 | 10 | TI-001 phần IP: firewall, Suricata, sshd, web, đăng nhập Windows (9.9). Phải nạp sau 0840 và 0541 |
+| `0845-ti.xml` | 107000–107999 | 16 | TI-001: IP (firewall, Suricata, sshd, web, đăng nhập Windows) và domain + hash (R64: Suricata DNS / HTTP, Sysmon 22, FIM) (9.9). Phải nạp sau 0840, 0541 và 0475 |
 | `0999-tuning.xml` | không có dải | 9 | Chỉ `overwrite="yes"` trên rule gốc (id < 100000), xem 9.8. Nạp cuối cùng |
 
 Dải chưa dùng: `0108-sigmahq.xml` (108000–108999) cho SigmaHQ, `rules-dynamic/ai.xml` (109000–109999) cho rule AI,
@@ -615,7 +615,7 @@ Cả 41 mã đều có dòng. Dòng "tuning" nghĩa là chỉnh rule gốc, "rul
 | NET-003 | convert | 103003 | |
 | NET-004 | convert | 103004 | chỉ qua agent OPNsense đọc `eve.json` (9.6) |
 | NET-005 | convert | 103005 | `different_dstip` |
-| TI-001 | convert | 107001..107010 | chỉ phần IP (9.9) |
+| TI-001 | convert | 107001..107016 | IP (107001..107010) + domain / hash (107011..107016, R64), còn giới hạn (9.9) |
 | WEB-001 | approx | 104001, 104011..104014 | rule gốc 31103 / 31106 chỉ phủ một phần nhánh |
 | WEB-002 | approx | 104002, 104021 | |
 | WEB-003 | approx | 104003, 104031 | |
@@ -640,7 +640,7 @@ Cả 41 mã đều có dòng. Dòng "tuning" nghĩa là chỉnh rule gốc, "rul
 | WIN-012 | approx | 105012 | |
 | WIN-013 | convert | 105013, 105113 | 105113 là Security 4698 |
 
-Phần chưa chuyển được và đã ghi để người dùng quyết trước Task 18: TI-001 domain và hash (9.9).
+Phần chưa chuyển được và đã ghi để người dùng quyết trước Task 18: TI-001 domain và hash đã chuyển ở R64, còn giới hạn ghi ở 9.9.
 
 ### 9.5 Viết và kiểm thử một rule XML
 
@@ -754,7 +754,7 @@ Cảnh báo 7605 (`It is not possible to overwrite 'if_group' value in rule '920
 - **102505 (LNX-005, auditd) báo nhầm** 2,0 / 100 event trên tập Linux nền, giữ ở chế độ bóng: chuỗi `id; whoami; uname -a; ...` liền nhau đúng nghĩa "≥ 4 lệnh trinh sát khác nhau trong 60 giây", và tập đo bơm dồn trong vài giây. Cần đo lại với dữ liệu giãn theo thời gian thật. Còn theo dõi 102511 (`/dev/tcp/` trong hex) với script healthcheck.
 - **Syslog và nhật ký console:** số đo độ ồn hiện chưa có hai nguồn này; cần đo lại trên ≥ 24 giờ `archives.json` của agent 000.
 - **auditd:** `curl | sh` và một số tách tham số (`socat exec:`, python tách tham số, `/dev/tcp` tách tham số) không phủ được vì auditd mã hóa hex payload trong `bash -c`.
-- **TI-001** chỉ phủ IP (9.9).
+- **TI-001** phủ IP, domain (Suricata DNS / HTTP, Sysmon 22) và hash file của FIM; không khớp subdomain, không phủ hash tiến trình Sysmon 1 (9.9).
 - Nhóm `sca` không thành alert (cấu hình CIS, không phải phát hiện), mặc định `WAZUH_ALERT_EXCLUDE_GROUPS=sca`.
 - 104095 mang mã `WEB-012` (trước 05/11 ghi nhầm `WEB-010`, trùng với 100100).
 
@@ -791,7 +791,9 @@ Ba hệ quả cần nói rõ:
   (`PUT /lists/files/...`) rồi reload analysisd. Chỉ user API `siem-soar` có quyền ghi danh sách (thử thật: `PUT` vào danh sách gốc bằng token đó bị từ chối); `siem-rules` không còn quyền đó. Hệ quả: `siem-soar` có thêm `manager:restart` (cần cho reload).
 - API Wazuh từ chối file danh sách rỗng, nên entrypoint tạo file giữ chỗ một dòng `240.0.0.0:empty` để analysisd chạy được khi chưa có IOC.
 - Rule TI dùng `match_key` / `not_match_key` (khớp chuỗi chính xác), vì CIDR không khớp (9.7). Phủ: firewall pf (107001, 107002, 107003), Suricata (107004 đến 107007), sshd (107008), web (107009 chỉ nhận location agent), đăng nhập Windows (107010). Cả ba (R63) loại IP có trong danh sách gốc `malicious-ip` bằng `not_match_key`, để rule IOC gốc (99903 / 99904, 99905 / 99906, 99919 / 99920) giữ ngữ cảnh; trước R63 chỉ 107009 làm vậy nên 107008 thay 99904 (level 9 < 10) cho đăng nhập sshd thất bại từ IP ở cả hai danh sách.
-- **Chưa phủ:** domain và hash của MISP / `config/intel` (rule gốc 99917 / 99918 dùng danh sách domain gốc; hash cần decoder sysmon / syscheck), DNS, proxy, VPN. Người dùng quyết định trước khi tắt YAML (checklist Task 18).
+- **Domain và hash (R64, 05/11):** hai danh sách riêng `etc/lists/siem-misp-domain` và `etc/lists/siem-misp-hash` (md5 / sha1 / sha256 chung một danh sách, khóa là chuỗi hex), cùng nguồn và cùng đường đẩy với IP (`pipeline/misp_cdb.py`, một lần reload cho cả ba), cũng tách khỏi danh sách gốc `malicious-domains` / `malware-hashes`. Kiểm chặt: domain đổi chữ thường, IDN sang punycode, bỏ dấu `.` cuối, nhãn `[a-z0-9-]` không đầu / cuối `-`, tối thiểu hai nhãn, TLD không toàn số, tối đa 253 ký tự, loại `*`, khoảng trắng, `:`, xuống dòng; hash là hex 32 / 40 / 64 chữ thường; trần 100000 dòng mỗi danh sách; rỗng thì dòng giữ chỗ (`placeholder.invalid:empty`, `000...0:empty`). Quyền: `siem-soar` có thêm `lists:delete` trên đúng hai file này (policy `siem_soar_misp_list_dh`; policy cũ giữ nguyên vì entrypoint không sửa policy đã có); danh sách gốc `malicious-ioc/*` nằm trong thư mục con mà `PUT /lists/files` không với tới (404), danh sách gốc ở thư mục gốc như `audit-keys` vẫn bị từ chối (thử thật trên 4.14.8).
+  - Rule (level 10, shadow): 107011 Suricata DNS (con 86603, `dns.rrname`), 107012 Suricata HTTP (con 86602, `http.hostname`), cả hai chỉ nhận location agent `^\(` (JSON giả qua syslog 514 không ra TI-001) và loại domain có trong danh sách gốc (`not_match_key`) để 99918 / 99917 (level 9, nạp trước) giữ ngữ cảnh; 107013 Sysmon 22 (con 61650, `win.eventdata.queryName`); 107014 / 107015 / 107016 FIM 550 / 554 theo `sha256` / `sha1` / `md5` (rule gốc 99901 level 14 vẫn thắng nhờ level; 107014 loại luôn danh sách gốc cho rõ ý). Mỗi rule tối đa hai thẻ `<list>`.
+  - **Giới hạn đã chấp nhận:** (1) khóa CDB khớp chính xác và phân biệt hoa thường nên `www.evil.example` KHÔNG khớp khi IOC là `evil.example`, và `EVIL.example` không khớp (rule YAML cũ khớp subdomain; không có cách thuần CDB: cần liệt kê từng tên được hỏi, hoặc một decoder rút domain gốc, nhưng decoder không chạy được trên eventchannel / JSON nên không thử); (2) Sysmon sự kiện 1 `win.eventdata.hashes` là một chuỗi `SHA1=..,MD5=..,SHA256=..` mà CDB không tách được, nên hash tiến trình (`process.hash` của rule YAML) chưa phủ, chỉ có hash file của FIM; (3) FIM-001 (106001-106003) và WEB-010 / 011 (100100 / 100101), level 10 và nạp trước, thắng TI-001 hash khi cùng cha cùng khớp đường dẫn (alert vẫn ra, mất ngữ cảnh IOC); (4) DNS qua proxy / VPN, và domain chỉ có trong log không phải Suricata / Sysmon, chưa phủ.
 - Với IP trong MISP, rule cuối của event là TI-001 nên event đó không vào bộ đếm 5763 / 31151 / 60204: TI-001 báo từng event (level 10 như các rule đếm) thay cho đếm. Rule gốc level > 10 cùng cha (31115, 31168...) vẫn thắng TI-001.
 
 ### 9.10 Những việc còn lại trước khi bật

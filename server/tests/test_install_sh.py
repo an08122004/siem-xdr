@@ -90,6 +90,8 @@ def test_quarantine_restores_files_when_error_is_outside_rules_dynamic(tmp_path,
     r = subprocess.run(["bash", "-c", "set -euo pipefail\n" + step], capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert r.returncode == 0, r.stdout + r.stderr
     assert (ossec / "etc" / "lists" / "siem-misp-ip").read_text() == "240.0.0.0:empty\n"   # bước 8b
+    assert (ossec / "etc" / "lists" / "siem-misp-domain").read_text() == "placeholder.invalid:empty\n"
+    assert (ossec / "etc" / "lists" / "siem-misp-hash").read_text() == "0" * 32 + ":empty\n"
     q = list((ossec / "etc" / "rules-dynamic.quarantine").glob("*/*"))
     if always_fails:
         assert sorted(p.name for p in d.iterdir()) == ["ai.xml", "bad.xml", "exceptions.json"] and not q and "đã chuyển về" in r.stdout
