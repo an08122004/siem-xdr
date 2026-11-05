@@ -5,7 +5,7 @@
 # Suricata qua syslog không có decoder (S6) nên có ca âm ghi lại điều đó.
 # CA ĐẾM (NET-001, NET-005): lịch sử đếm của analysisd còn giữ qua các lần chạy và logtest luôn là agent 000, nên mỗi ca đếm dùng
 # một IP nguồn riêng (rule khai same_source_ip); phải khởi động lại manager thử (wzhdev) giữa hai lần chạy cả bộ.
-# NET-002 (>= 50 chặn / 60 s) không có rule ở đây: chỉ khác 87702 ở ngưỡng, chuyển sang 0190-tuning (Task 12).
+# NET-002 (>= 50 chặn / 60 s) không có rule ở đây: chỉ khác 87702 ở ngưỡng, đã chuyển sang 0999-tuning.xml (Task 12; ca trong 0999-tuning.yml).
 
 - rule: 103000   # NET-000: dòng pass đi vào bộ đếm (rule cuối 103000)
   log_format: syslog
@@ -229,7 +229,7 @@
   - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.24,10.0.0.5,50000,5900,0,S,123456,,64240,,mss'
   - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.25,10.0.0.5,50000,8080,0,S,123456,,64240,,mss'
 
-- rule: 103002   # NET-001 (block): 22 cổng đích khác nhau bị chặn; 87702 báo ở dòng 18, 103002 báo ở dòng 21 (level 11, xem đầu file)
+- rule: 103002   # NET-001 (block): 22 cổng đích khác nhau bị chặn; 103002 báo ở dòng 20 (87702 chỉ báo từ dòng 50 sau Task 12; level 11)
   log_format: syslog
   location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
   events:
@@ -256,7 +256,7 @@
   - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1021,0,S,123456,,64240,,mss'
   - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,203.0.113.10,10.0.0.5,50000,1022,0,S,123456,,64240,,mss'
 
-- none: [103002]   # NET-001 (block): 20 cổng bị chặn: 87702 gốc báo ở dòng 18 và đánh dấu event, 103002 CHƯA báo (giới hạn đã biết)
+- rule: 103002   # NET-001 (block): 20 cổng bị chặn: 87702 (50 chặn/60 s sau Task 12) chưa đánh dấu event nên 103002 báo ngay ở dòng 20
   log_format: syslog
   location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
   events:
@@ -809,7 +809,7 @@
   events:
   - 'Oct 31 10:00:00 pfsense filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.41,10.0.0.5,50000,8000,0,S,123456,,64240,,mss'
 
-- rule: 87702   # gốc: 18 gói chặn/45 s cùng nguồn vẫn ra 87702 (NET-002 xấp xỉ bằng rule này, Task 12 chỉnh ngưỡng)
+- none: [87702]   # 87702 đã chỉnh ở 0999-tuning.xml (50 chặn/60 s): 18 gói chặn/45 s cùng nguồn KHÔNG còn báo (ca dương 50 gói ở 0999-tuning.yml)
   log_format: syslog
   location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
   events:
@@ -909,7 +909,7 @@
     - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8019,0,S,123456,,64240,,mss'
     - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,pass,in,4,0x0,,64,12345,0,none,6,tcp,60,10.0.0.162,10.0.0.5,50000,8020,0,S,123456,,64240,,mss'
 
-- rule: 103002   # NET-001 (block): hai nguồn liên tiếp mỗi nguồn 21 dòng chặn tới 21 cổng khác nhau
+- rule: 103002   # NET-001 (block): hai nguồn liên tiếp mỗi nguồn 21 dòng chặn tới 21 cổng khác nhau (Task 12: mỗi nguồn báo ở dòng thứ 20 của nó, nên dòng cuối là cổng thứ 20 của nguồn thứ hai)
   last: true
   log_format: syslog
   location: (fw01) any->/var/ossec/logs/opnsense_syslog.log
@@ -955,7 +955,6 @@
     - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9018,0,S,123456,,64240,,mss'
     - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9019,0,S,123456,,64240,,mss'
     - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9020,0,S,123456,,64240,,mss'
-    - 'Oct 31 10:00:00 OPNsense.localdomain filterlog[1234]: 5,,,1000000103,em0,match,block,in,4,0x0,,64,12345,0,none,6,tcp,60,198.51.100.102,10.0.0.5,50000,9021,0,S,123456,,64240,,mss'
 
 - rule: 103005   # NET-005: hai máy nội bộ liên tiếp mỗi máy tới 10 IP khác nhau cổng 445
   last: true

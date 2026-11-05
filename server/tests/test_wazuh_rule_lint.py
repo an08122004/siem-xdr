@@ -164,3 +164,13 @@ def test_attack_layer_counts_only_rules_that_are_on():
 def test_ignore_attribute_is_forbidden():
     assert has(run(rule(attrs=' frequency="5" timeframe="60" ignore="60"')), "ràng buộc toàn cục 7")
     assert not has(run(rule(attrs=' frequency="5" timeframe="60"')), "ignore")
+
+
+def test_tuning_level12_new_alerts_are_shadow():
+    """R58: overwrite có hiệu lực ngay; rule gốc bị đè lên level >= 12 mà trước đó KHÔNG phải alert thật phải mang nhóm shadow.
+    61627 / 61640 vốn đã level 12 (chỉ thêm ngoại lệ), nên không đổi trạng thái."""
+    from siem import wazuh_rules
+    rules = wazuh_rules.parse((lint.RULES_DIR / wazuh_rules.TUNING_FILE).read_text(encoding="utf-8"))
+    shadowed = {r["id"] for r in rules if r["level"] >= 12 and "shadow" in r["groups"]}
+    assert shadowed == {63103, 91837}
+    assert {r["id"] for r in rules if r["level"] >= 12 and "shadow" not in r["groups"]} == {61627, 61640}

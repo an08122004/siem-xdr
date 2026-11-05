@@ -2,7 +2,7 @@
 # Vị trí khớp rule của agent là `(demo-web) any-><đường dẫn>` (S7). Wazuh KHÔNG giải mã URL (S5), nên mỗi rule có nhánh payload đều có ca dạng thô VÀ dạng mã hóa
 # (%27, %2527, %u0027, + thay dấu cách, %55NION từng chữ...). Ca đếm (WEB-007, WEB-009) dùng IP nguồn riêng cho từng ca vì rule khai same_source_ip;
 # phải khởi động lại manager thử (wzhdev) giữa hai lần chạy cả bộ vì lịch sử đếm của analysisd còn giữ qua các lần chạy.
-# WEB-006 (>= 30 phản hồi 404 / 60 s) không có rule ở đây: chỉ khác 31151 ở ngưỡng/level, chuyển sang 0190-tuning (Task 12).
+# WEB-006 (>= 30 phản hồi 404 / 60 s) không có rule ở đây: chỉ khác 31151 ở ngưỡng/level, đã chuyển sang 0999-tuning.xml (Task 12; ca trong 0999-tuning.yml).
 
 - rule: 104090   # WEB-009 bộ đếm: một GET /index.html (level 2)
   log_format: apache
@@ -1800,24 +1800,40 @@
   - '198.51.100.117 - - [05/Jan/2026:09:00:08 +0000] "POST /api/orders?x=1 HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
   - '198.51.100.117 - - [05/Jan/2026:09:00:09 +0000] "POST /api/orders?x=1 HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
 
-- rule: 31151   # rule gốc 31151 vẫn báo: 14 phản hồi 404 thường (không payload) từ một IP
+- rule: 31151   # rule gốc 31151 vẫn báo: 30 phản hồi 404 (ngưỡng mới của 0999-tuning.xml) thường (không payload) từ một IP
   log_format: apache
   location: (demo-web) any->/usr/local/apache2/logs/access_log
   events:
   - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing0.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
-  - '198.51.100.118 - - [05/Jan/2026:09:00:01 +0000] "GET /missing1.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
-  - '198.51.100.118 - - [05/Jan/2026:09:00:02 +0000] "GET /missing2.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
-  - '198.51.100.118 - - [05/Jan/2026:09:00:03 +0000] "GET /missing3.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
-  - '198.51.100.118 - - [05/Jan/2026:09:00:04 +0000] "GET /missing4.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
-  - '198.51.100.118 - - [05/Jan/2026:09:00:05 +0000] "GET /missing5.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
-  - '198.51.100.118 - - [05/Jan/2026:09:00:06 +0000] "GET /missing6.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
-  - '198.51.100.118 - - [05/Jan/2026:09:00:07 +0000] "GET /missing7.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
-  - '198.51.100.118 - - [05/Jan/2026:09:00:08 +0000] "GET /missing8.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
-  - '198.51.100.118 - - [05/Jan/2026:09:00:09 +0000] "GET /missing9.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
-  - '198.51.100.118 - - [05/Jan/2026:09:00:10 +0000] "GET /missing10.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
-  - '198.51.100.118 - - [05/Jan/2026:09:00:11 +0000] "GET /missing11.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
-  - '198.51.100.118 - - [05/Jan/2026:09:00:12 +0000] "GET /missing12.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
-  - '198.51.100.118 - - [05/Jan/2026:09:00:13 +0000] "GET /missing13.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing1.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing2.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing3.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing4.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing5.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing6.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing7.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing8.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing9.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing10.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing11.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing12.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing13.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing14.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing15.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing16.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing17.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing18.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing19.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing20.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing21.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing22.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing23.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing24.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing25.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing26.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing27.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing28.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
+  - '198.51.100.118 - - [05/Jan/2026:09:00:00 +0000] "GET /missing29.html HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
 
 - rule: 31101   # rule gốc 31101 vẫn là rule cuối cho 404 thường
   log_format: apache

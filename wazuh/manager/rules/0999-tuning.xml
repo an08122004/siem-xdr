@@ -1,0 +1,160 @@
+<!--
+  Chỉnh RULE GỐC của Wazuh bằng overwrite="yes" (Task 12). Mỗi rule dưới đây chép ĐỦ định nghĩa gốc 4.14.8 (nhóm, mitre, tuân thủ, options, if_sid) và chỉ đổi phần ghi trong chú thích riêng.
+  if_group / if_sid bị Wazuh giữ nguyên khi overwrite (cảnh báo 7605 nếu khai lại), nên rule if_group (92021, 61627, 61640) không khai lại if_group.
+  Chỉ id < 100000 được phép ở file này (lint). Rule con vẫn nối theo id nên không phải sửa.
+
+  TÊN FILE 0999-tuning.xml: analysisd nạp rule theo thứ tự tên file trên cả ruleset/rules lẫn etc/rules; overwrite chỉ có hiệu lực khi rule gốc ĐÃ được nạp. File chứa rule bị đè nạp muộn nhất là
+  0915-win-powershell_rules.xml (91837); 0999-malicious-ioc-rules.xml là file gốc cuối cùng. "0999-tuning" xếp SAU "0999-malicious-ioc-rules" (t > m) nên sau mọi file gốc và mọi file dự án.
+  Tên cũ 0190-tuning xếp trước 0245 (web), 0540 (pfSense), 0575+ (Windows), 0800+ (Sysmon): overwrite sẽ không tìm thấy rule để đè.
+
+  R58: overwrite có hiệu lực NGAY khi triển khai (không có giai đoạn chạy bóng).
+    - Hạ level / làm yên: không cần shadow. Alert thật biến mất được ghi ở từng rule.
+    - Rule có level mới >= 12 (alert thật mới) mang nhóm `shadow` + shadow_since cho tới cổng cut-over (alerts.py áp shadow theo nhóm): 63103, 91837.
+    - Không dùng thuộc tính ignore (ràng buộc 7): bản gốc của 87702 / 31151 có ignore="240" / không có; 87702 bỏ ignore, dập trùng làm ở cầu nối.
+
+  ĐÃ XÉT NHƯNG KHÔNG ĐÈ (lý do):
+    - 61618 (svchost.exe): 1 ca ồn trong tập đo nền là do cách dựng event (scenario-background không có ParentImage nên 61619 "cha là services.exe" không khớp). Svchost thật luôn có cha services.exe.
+    - 60141 (WIN-004, level 5): chỉ là cha chung "thêm thành viên vào bất kỳ nhóm global"; Administrators / Domain Admins / Enterprise Admins / Remote Desktop Users đã có con 60154 / 60159 / 60167 / 60179
+      (level 10-12) và 105004; nâng 60141 lên 10 sẽ báo mọi nhóm thường (vd nhóm phòng ban) mà YAML cũ không báo.
+    - 92043 (netsh add rule, level 10), 92074 (curl -o *.exe/dll, level 12), 92057 (powershell con của powershell -EncodedCommand, level 12): mỗi rule 1 ca ồn trong 671 event Windows nền, nhưng nội dung
+      KHÔNG phân biệt được với tấn công (`netsh advfirewall firewall add rule ... action=allow` của quản trị viên và của atomic T1686 giống hệt về hình dạng). Giữ, vì đè chỉ để bớt 3 ca nền thì mất 4 + 4 + 1 phát hiện thật.
+    - 102505 (LNX-005, 0851-linux-audit.xml, level 7, bóng): 2-4 alert trên 200 lệnh Linux nền là do bơm lại 200 event trong vài giây: baseline-endpoint có chuỗi `id; whoami; uname -a; hostname -I; ip addr; ss -tulpn` liền nhau,
+      đúng nghĩa >= 4 lệnh trinh sát KHÁC NHAU trong 60 s như rule YAML cũ. Không phân biệt được với kẻ xâm nhập chỉ bằng nội dung lệnh, nên giữ (bóng); đo thật cần giãn cách thời gian. 102511 đã thu hẹp (xem 0851).
+    - 5763 / 5712 (R34): mất vì bộ đếm chung 101000 (0101-auth.xml). Không có sửa nhỏ: đếm 8/120 s trên 101000 song song 101001 / 101010 không chạy (rule frequency báo "tiêu" event đã đếm), nên chỉ ghi lại.
+      Phần hở: 4-5 lần sai/phút từ một IP, không thành công sau đó. Rule YAML cũ cũng không bắt nhịp này.
+
+  R52 (AUTH x IOC, ca ghim trong tests/cases/0999-tuning.yml): sshd thất bại / thành công từ IP trong danh sách gốc etc/lists/malicious-ioc/malicious-ip do 99904 (level 9) / 99903 (level 14)
+  của 0999-malicious-ioc-rules.xml giữ, vì chúng nạp SAU 0101-auth.xml và cùng cha 5716 / 5715. Event đó KHÔNG vào bộ đếm 101000, nên AUTH-001 / AUTH-003 không báo cho IP độc hại
+  (alert IOC báo TỪNG event, level >= AUTH-001). Không mất cảnh báo, nhưng một số liệu parity AUTH-001 sẽ thấp hơn YAML cho IP trong danh sách.
+-->
+<group name="sysmon,sysmon_eid1_detections,windows,">
+  <!-- 92041: gốc `add.+\/d\s+(")?(?:[A-Za-z\d+\/]{4})*(?:...)?` có mọi nhóm sau /d tùy chọn nên khớp MỌI `reg add ... /d`. Nay yêu cầu giá trị /d là một chuỗi Base64-like
+       (có đệm: >= 8 ký tự [A-Za-z0-9+/] rồi 1-2 dấu =; không đệm: >= 20 ký tự có ít nhất một chữ số; kết thúc bằng nháy / khoảng trắng / hết dòng). Level 10, nhóm, mitre giữ nguyên.
+       Alert thật mất: mọi `reg add /d` có giá trị thường (REG_DWORD, đường dẫn, URL, chữ ngắn), vd ~220 sự kiện atomic T1112 trong tập đo; chúng là phát hiện chung, không đặc hiệu (GENERIC của wazuh_coverage.py).
+       Giữ: Base64 có hoặc không đệm (atomic T1053.005, T1059.001). -->
+  <rule id="92041" level="10" overwrite="yes">
+    <if_sid>92025</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)\sadd\s.+\s\/d\s+(?:\\?")?(?:[a-z\d+\/]{8,}={1,2}|(?=[a-z+\/]*\d)[a-z\d+\/]{20,})(?:\\?"|\s|$)</field>
+    <options>no_full_log</options>
+    <description>Value added to registry key has Base64-like pattern</description>
+    <mitre>
+      <id>T1027</id>
+      <id>T1112</id>
+    </mitre>
+  </rule>
+
+  <!-- 92021: gốc `(Remove-Item|ri|rm|rmdir|del|erase|rd)\b` thiếu \b đầu từ nên `ri` khớp trong `-Uri`. Thêm \b ở đầu. Level 3 (không vào cầu nối), mọi thứ khác giữ nguyên. -->
+  <rule id="92021" level="3" overwrite="yes">
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)PowerShell\.EXE</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)\b(Remove-Item|ri|rm|rmdir|del|erase|rd)\b</field>
+    <options>no_full_log</options>
+    <description>Powershell was used to delete files or directories</description>
+    <mitre>
+      <id>T1070.004</id>
+    </mitre>
+  </rule>
+</group>
+
+<group name="windows,sysmon,sysmon_process-anomalies,">
+  <!-- 61627: lsass.exe là tiến trình cha (level 12). Ngoại lệ hẹp: efsui.exe do lsass.exe mở khi dùng EFS (`efsui.exe /efs /installdra`), thấy trong log nền ghi thật (scenario-background).
+       Alert thật mất: chỉ efsui.exe con của lsass.exe. -->
+  <rule id="61627" level="12" overwrite="yes">
+    <field name="win.eventdata.parentImage">lsass.exe</field>
+    <field name="win.eventdata.image" type="pcre2" negate="yes">(?i)\\efsui\.exe$</field>
+    <description>Sysmon - Suspicious Process - lsass.exe is a Parent Image</description>
+    <mitre>
+      <id>T1055</id>
+    </mitre>
+    <group>pci_dss_10.6.1,pci_dss_11.4,gdpr_IV_35.7.d,hipaa_164.312.b,nist_800_53_AU.6,nist_800_53_SI.4,tsc_CC7.2,tsc_CC7.3,tsc_CC6.1,tsc_CC6.8,</group>
+  </rule>
+
+  <!-- 61640: explorer.exe (level 12), con hợp lệ là 61641 (cha userinit.exe). Ngoại lệ hẹp: `explorer.exe /factory,{GUID} -Embedding` do svchost.exe (DCOM) mở, thấy trong log nền ghi thật.
+       Alert thật mất: explorer.exe có dòng lệnh /factory,{GUID} -Embedding. -->
+  <rule id="61640" level="12" overwrite="yes">
+    <field name="win.eventdata.image">\\explorer.exe</field>
+    <field name="win.eventdata.commandLine" type="pcre2" negate="yes">(?i)\/factory,\{[0-9a-f-]+\}\s+-Embedding</field>
+    <description>Sysmon - Suspicious Process - explorer.exe</description>
+    <mitre>
+      <id>T1055</id>
+    </mitre>
+    <group>pci_dss_10.6.1,pci_dss_11.4,gdpr_IV_35.7.d,hipaa_164.312.b,nist_800_53_AU.6,nist_800_53_SI.4,tsc_CC7.2,tsc_CC7.3,tsc_CC6.1,tsc_CC6.8,</group>
+  </rule>
+</group>
+
+<group name="windows,windows_logs,">
+  <!-- WIN-002 (1102 xóa nhật ký bảo mật): gốc level 5 (không ra alert thật). YAML cũ: critical -> level 12. Alert thật MỚI nên chạy bóng tới cổng cut-over (R58.1). Thêm legacy_WIN-002 để báo cáo parity đếm. -->
+  <rule id="63103" level="12" overwrite="yes">
+    <if_sid>63108</if_sid>
+    <field name="win.system.eventID">^1102$</field>
+    <description>The audit log was cleared</description>
+    <options>no_full_log</options>
+    <mitre>
+      <id>T1070</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-04</info>
+    <group>log_clearing_auditlog,gpg13_10.1,gdpr_II_5.1.f,gdpr_IV_30.1.g,shadow,legacy_WIN-002,</group>
+  </rule>
+</group>
+
+<group name="windows,windows_security,">
+  <!-- WIN-003 (tạo tài khoản): gốc báo cả 4722 (bật lại tài khoản) và 624 / 626 / 4720. YAML cũ chỉ 4720. Bỏ 4722; level 8 giữ (>= medium 7, ngang YAML).
+       Alert thật mất: 4722 (chỉ còn event rule gốc cha 60103, level 0). -->
+  <rule id="60109" level="8" overwrite="yes">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^624$|^626$|^4720$</field>
+    <description>User account enabled or created</description>
+    <options>no_full_log</options>
+    <group>adduser,account_changed,legacy_WIN-003,</group>
+    <group>pci_dss_8.1.2,pci_dss_10.2.5,gpg13_7.10,gdpr_IV_35.7.d,gdpr_IV_32.2,hipaa_164.312.a.2.I,hipaa_164.312.a.2.II,hipaa_164.312.b,nist_800_53_AC.2,nist_800_53_IA.4,nist_800_53_AU.14,nist_800_53_AC.7,tsc_CC6.8,tsc_CC7.2,tsc_CC7.3,</group>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+  </rule>
+</group>
+
+<group name="windows, powershell,">
+  <!-- WIN-006 nhánh script block 4104: gốc level 4 và regex `(Get-Content.+\-Stream|IEX|Invoke-Expresion)` (IEX khớp chuỗi con như "Complexity"; "Invoke-Expresion" gõ sai nên không khớp Invoke-Expression).
+       YAML cũ: critical -> level 12 với các mẫu iex(new-object net.webclient / downloadstring( / invoke-mimikatz / amsiutils|amsiinitfailed / invoke-shellcode / frombase64string(...)|iex.
+       Level 12 với regex gốc sẽ báo mọi script có "iex" trong từ, nên thay regex bằng mẫu của YAML (bỏ Get-Content -Stream, vốn là level 4 không ra alert).
+       Alert thật MỚI: chạy bóng (R58.1). Mô tả đổi để đúng ý nghĩa mới. -->
+  <rule id="91837" level="12" overwrite="yes">
+    <if_sid>91802</if_sid>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">(?i)iex\s*\(?\s*\(?new-object\s+net\.webclient|downloadstring\(|invoke-mimikatz|amsiutils|amsiinitfailed|invoke-shellcode|frombase64string\(.*\)\s*\|\s*iex</field>
+    <options>no_full_log</options>
+    <description>Powershell script block with download cradle, AMSI bypass or Mimikatz/shellcode pattern</description>
+    <mitre>
+      <id>T1059.001</id>
+    </mitre>
+    <info type="text">shadow_since=2026-11-04</info>
+    <group>shadow,legacy_WIN-006,</group>
+  </rule>
+</group>
+
+<group name="pfsense,">
+  <!-- NET-002 (nhiều gói bị chặn từ một nguồn): gốc 18 chặn / 45 s, level 10, ignore="240". YAML cũ: >= 50 / 60 s, medium -> level 7. Bỏ ignore (ràng buộc 7).
+       Alert thật mất: đợt 18-49 chặn/45 s từ một nguồn. 103002 (NET-001 nhánh block, level 11) cũng đếm trên 87701 nên nay báo ở dòng 20 thay vì 21 (87702 không còn đánh dấu event ở dòng 18). -->
+  <rule id="87702" level="7" frequency="50" timeframe="60" overwrite="yes">
+    <if_matched_sid>87701</if_matched_sid>
+    <same_source_ip />
+    <description>Multiple pfSense firewall blocks events from same source.</description>
+    <mitre>
+      <id>T1110</id>
+    </mitre>
+    <group>multiple_blocks,legacy_NET-002,pci_dss_1.4,pci_dss_10.6.1,gpg13_4.12,hipaa_164.312.a.1,hipaa_164.312.b,nist_800_53_SC.7,nist_800_53_AU.6,tsc_CC6.7,tsc_CC6.8,tsc_CC7.2,tsc_CC7.3,</group>
+  </rule>
+</group>
+
+<group name="web,accesslog,">
+  <!-- WEB-006 (dò thư mục): gốc 14 phản hồi 4xx / 90 s, level 10. YAML cũ: >= 30 phản hồi 404 / 60 s, medium -> level 7. Giữ đếm mọi 4xx của 31101 (rộng hơn YAML: 400/401/403 cũng tính).
+       Alert thật mất: đợt 14-29 phản hồi 4xx/90 s từ một IP. -->
+  <rule id="31151" level="7" frequency="30" timeframe="60" overwrite="yes">
+    <if_matched_sid>31101</if_matched_sid>
+    <same_source_ip />
+    <description>Multiple web server 400 error codes </description>
+    <description>from same source ip.</description>
+    <mitre>
+      <id>T1595.002</id>
+    </mitre>
+    <group>web_scan,recon,legacy_WEB-006,pci_dss_6.5,pci_dss_11.4,gdpr_IV_35.7.d,nist_800_53_SA.11,nist_800_53_SI.4,tsc_CC6.6,tsc_CC7.1,tsc_CC8.1,tsc_CC6.1,tsc_CC6.8,tsc_CC7.2,tsc_CC7.3,</group>
+  </rule>
+</group>
