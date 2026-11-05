@@ -366,6 +366,8 @@ và dưới level 12 chỉ là alert BÓNG (SOAR bỏ qua) tới cổng T18; rul
 và đó là đánh giá cấu hình, không phải sự cố. Xem SCA trong event `event.module: sca`.
 Rule Wazuh riêng đặt ở `wazuh/manager/rules/0100-platform.xml` (ID từ 100000).
 
+**Bộ rule Wazuh XML thống nhất (đang chạy bóng).** Nhánh `feature/wazuh-unified-ruleset` chuyển các rule YAML sang rule XML của Wazuh (10 file ở `wazuh/manager/rules/`, 539 ca test log gốc chạy qua Wazuh thật trong CI). Rule XML ở chế độ bóng cho tới cổng chuyển (Task 18, chưa được duyệt); mục 3 này được viết lại khi đó. Xem [RULES.md mục 9](RULES.md#9-bộ-rule-wazuh-xml-thống-nhất-nhánh-featurewazuh-unified-ruleset-chạy-bóng-tới-cổng-chuyển).
+
 **Độ phủ của ruleset gốc Wazuh so với rule tự viết** (đo 6/10/2026, `tools/wazuh_coverage.py`, chi tiết ở
 `datasets/report_wazuh.md`). Cùng dataset với báo cáo độ phủ trong `AI-README.md` (mục 9.1), đưa vào analysisd của một wazuh-manager **tạm**
 (không nối mạng, không chung volume) đúng định dạng agent gửi: access log Apache, Sysmon EventID 1 dạng XML eventchannel,
@@ -414,6 +416,7 @@ lệnh mới. Trước 11/10/2026 lần chặn sau bị bỏ qua: AUTH-001 chặ
 Lệnh gỡ chặn chỉ đánh dấu đã gỡ các lệnh chặn tạo **trước** nó; lệnh chặn mới hơn (IP tấn công lại ngay khi vừa hết hạn) vẫn được
 gỡ đúng hạn của nó, không thành chặn vĩnh viễn.
 Đặt `SOAR_AUTO_RESPONSE=false` nếu chỉ muốn thông báo và tạo case.
+Với alert từ rule Wazuh XML (nhánh `feature/wazuh-unified-ruleset`), hành động phá hủy (`block_ip`, `kill`, `isolate`) chỉ theo id rule tường minh đã duyệt, không theo nhóm; playbook `block_ip` theo rule Wazuh bỏ qua alert từ nguồn syslog; case playbook chọn theo mã rule, rồi kỹ thuật, nhóm, tag, PB-00. Chi tiết: [PLAYBOOKS.md](PLAYBOOKS.md) mục 6.
 **Thông báo và case**: mỗi alert chỉ được thông báo và gom case **một lần**, kể cả khi khớp nhiều playbook (vd LNX-002 khớp
 playbook riêng và "Cảnh báo chung mức critical"). Mỗi cặp rule + thực thể (IP nguồn, tài khoản hoặc máy) tối đa 1 thông báo
 trong `NOTIFY_COOLDOWN_SECONDS` giây (mặc định 300, `0` = tắt); alert cùng cặp trong khoảng đó được gộp, số lượng ghi vào

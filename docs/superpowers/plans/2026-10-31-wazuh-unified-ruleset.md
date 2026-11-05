@@ -2,6 +2,10 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Trạng thái (05/11/2026):** Task 0 đến 17 đã xong trên nhánh `feature/wazuh-unified-ruleset` (CI xanh: 596 unit test, 539 ca log gốc qua Wazuh thật). Bước còn hoãn có ghi `(hoãn: ...)`. Task 18 chờ người dùng duyệt, Task 19 đến 24 chưa lập kế hoạch chi tiết.
+> Sổ quyết định: [docs/wazuh-ruleset-decisions.md](../../wazuh-ruleset-decisions.md). Mô tả bộ rule: [RULES.md](../../../RULES.md) mục 9.
+> Tên file thực tế khác kế hoạch ban đầu: `0190-tuning.xml` thành `0999-tuning.xml`, `0103-network.xml` thành `0541-network.xml`, `0104-web.xml` thành `0271-web.xml`, `0107-ti.xml` thành `0845-ti.xml`, thêm `0851-linux-audit.xml`.
+
 **Mục tiêu:** mọi phát hiện chạy trong `wazuh-analysisd`. Gồm ruleset gốc Wazuh 4.14.8 (4.515 rule, 168 file) cộng rule riêng dạng XML. Rule riêng chỉ viết khi ruleset gốc chưa bắt được: chuyển từ 41 rule YAML, từ SigmaHQ và từ AI. Analyzer chỉ còn chuẩn hóa, lưu, làm giàu và chuyển cảnh báo Wazuh thành alert.
 
 **Kiến trúc:**
@@ -72,19 +76,19 @@ Các quyết định mình tự chọn được đánh dấu *(Claude)*, ngườ
 
 Làm trên project tạm `wzh-spike` (như cách thử 4.14.8: chép volume, `--no-deps`). Kết quả ghi vào mục *Kết quả P0* cuối file này. Câu nào trả lời "không" thì sửa task liên quan trước khi làm tiếp.
 
-- [ ] **S1 — reload:** gửi 10.000 dòng syslog qua agent demo-web trong lúc gọi `PUT /manager/analysisd/reload` 3 lần.
+- [x] **S1 — reload:** gửi 10.000 dòng syslog qua agent demo-web trong lúc gọi `PUT /manager/analysisd/reload` 3 lần.
   - Đạt: số event trong `archives.json` = số đã gửi, rule mới thêm có hiệu lực sau reload.
   - Thử thêm: reload với một file XML hỏng. Đạt: ruleset cũ vẫn chạy, API trả lỗi.
-- [ ] **S2 — thư mục rule:** bind mount `./wazuh/manager/rules` → `/var/ossec/etc/rules` (ro) và thêm `<rule_dir>etc/rules-dynamic</rule_dir>` trỏ vào volume.
+- [x] **S2 — thư mục rule:** bind mount `./wazuh/manager/rules` → `/var/ossec/etc/rules` (ro) và thêm `<rule_dir>etc/rules-dynamic</rule_dir>` trỏ vào volume.
   - Đạt: analysisd đọc được cả hai (quyền đọc của user `wazuh` trên bind mount từ Windows lẫn Linux).
   - Container `manager` (uid 10001) ghi được vào volume động, `wazuh` đọc được.
-- [ ] **S3 — API logtest:** `PUT /logtest` với `log_format` syslog / json / apache, giữ `token` qua nhiều dòng (rule `frequency`).
+- [x] **S3 — API logtest:** `PUT /logtest` với `log_format` syslog / json / apache, giữ `token` qua nhiều dòng (rule `frequency`).
   - Đạt: rule đếm ngưỡng báo ở đúng dòng thứ N.
   - Windows `eventchannel`: ghi nhận logtest có giải mã được không. Ghi chú 06/10: `wazuh-logtest` 4.14 không chạy DecodeWinevt, nên `tools/wazuh_coverage.py` phải bơm vào hàng đợi analysisd.
-- [ ] **S4 — đếm giá trị khác nhau:** thử `<different_url/>`, `<same_field>`, `<not_same_field>` và các thẻ `different_*` khác (`different_srcip`, `different_dstport`...) với `frequency`.
+- [x] **S4 — đếm giá trị khác nhau:** thử `<different_url/>`, `<same_field>`, `<not_same_field>` và các thẻ `different_*` khác (`different_srcip`, `different_dstport`...) với `frequency`.
   - Câu hỏi: 4.14.8 có rule kiểu "≥ 20 cổng đích khác nhau từ cùng một nguồn" không. Liên quan NET-001, NET-005, AUTH-003, LNX-005.
   - Không có thì 4 rule này dùng xấp xỉ "≥ N event cùng nguồn" kèm ghi chú giới hạn trong RULES.md.
-- [ ] **S5 — giải mã URL:** gửi dòng access log có `%27`, `%2527`, `+`, `%u0027` qua logtest, xem trường `url` ra gì.
+- [x] **S5 — giải mã URL:** gửi dòng access log có `%27`, `%2527`, `+`, `%u0027` qua logtest, xem trường `url` ra gì.
   - Nếu ra nguyên dạng mã hóa (dự kiến): Task 9 viết regex bắt cả dạng mã hóa, và ca test có cả hai dạng.
 
 ---
@@ -124,7 +128,7 @@ Dải id theo file (lint ở Task 4 đọc bảng này từ `wazuh_rules.ID_RANG
   - `wazuh_rules.write_dynamic(name: str, xml_text: str, api, root: Path = DYNAMIC_DIR) -> None` (`DYNAMIC_DIR = Path("/app/wazuh-rules")`): parse → ghi file tạm → `logtest` 1 dòng mẫu để buộc nạp → đổi tên → `api.reload()`; lỗi thì giữ file cũ, raise `WazuhRuleError`
   - `class WazuhApi`: `request()` như `soar/wazuh.py`, cộng `reload()`, `logtest(event, log_format, location, token=None) -> dict`, `rules(offset, limit) -> dict`. Đăng nhập bằng user `siem-rules`.
 
-- [ ] **Step 1: Viết test hỏng**
+- [x] **Step 1: Viết test hỏng**
 
 ```python
 def test_parse_reads_id_level_groups_mitre():
@@ -143,10 +147,10 @@ def test_reload_rejects_invalid_xml(tmp_path):
     assert (tmp_path / "ai.xml").read_text() == GOOD and api.reloads == 0
 ```
 
-- [ ] **Step 2:** `cd server && python -m pytest tests/test_wazuh_rules.py -q` → FAIL (chưa có module)
-- [ ] **Step 3:** viết `server/siem/wazuh_rules.py`. Wazuh file rule không có thẻ gốc duy nhất, nên bọc trong `<root>` rồi parse bằng `xml.etree.ElementTree`. Riêng việc hiểu `level`, `overwrite` thì không cần thư viện ngoài.
-- [ ] **Step 4:** chạy test → PASS. `docker compose up -d --no-deps wazuh-manager` → healthy, `wazuh-control status` đủ tiến trình, rule 100100 vẫn báo (tạo file trong htdocs của demo-web như lần thử 4.14.8).
-- [ ] **Step 5:** commit `wazuh: thư mục rule riêng, volume rule động, user API siem-rules`
+- [x] **Step 2:** `cd server && python -m pytest tests/test_wazuh_rules.py -q` → FAIL (chưa có module)
+- [x] **Step 3:** viết `server/siem/wazuh_rules.py`. Wazuh file rule không có thẻ gốc duy nhất, nên bọc trong `<root>` rồi parse bằng `xml.etree.ElementTree`. Riêng việc hiểu `level`, `overwrite` thì không cần thư viện ngoài.
+- [x] **Step 4:** chạy test → PASS. `docker compose up -d --no-deps wazuh-manager` → healthy, `wazuh-control status` đủ tiến trình, rule 100100 vẫn báo (tạo file trong htdocs của demo-web như lần thử 4.14.8).
+- [x] **Step 5:** commit `wazuh: thư mục rule riêng, volume rule động, user API siem-rules`
 
 ### Task 2: Cầu nối mọi cảnh báo Wazuh, chạy bóng bằng nhóm, chống trùng
 
@@ -162,7 +166,7 @@ def test_reload_rejects_invalid_xml(tmp_path):
   - `class Suppressor: seen(key: tuple, now: float) -> bool`
   - alert có `alert.shadow: bool`, `rule.legacy_id: str | None`
 
-- [ ] **Step 1: Viết test hỏng**
+- [x] **Step 1: Viết test hỏng**
 
 ```python
 def test_any_group_level7_bridged_by_default():
@@ -181,10 +185,11 @@ def test_same_rule_same_source_suppressed_60s():
     assert not s.seen(("WZH-104001", "198.51.100.7"), 30) and not s.seen(("WZH-104001", "203.0.113.5"), 61)
 ```
 
-- [ ] **Step 2:** chạy → FAIL
-- [ ] **Step 3:** sửa code. Khóa chống trùng = `(rule.id, data.srcip or agent.id)`. `Suppressor` xóa khóa quá hạn mỗi lần gọi để không phình bộ nhớ.
-- [ ] **Step 4:** chạy test → PASS. Chạy `python tools/wazuh_noise.py --normal`, ghi top 20 rule ồn vào mục *Kết quả P0/P1*. Đạt khi ≤ 1 alert / 100 event bình thường. (Thiếu syslog + console trong tập đo: xem lượt đo lại sau B.) Không đạt thì đưa các rule ồn vào Task 12.
-- [ ] **Step 5:** commit `detection/wazuh: chuyển mọi cảnh báo level>=7, chạy bóng theo nhóm, chống trùng`
+- [x] **Step 2:** chạy → FAIL
+- [x] **Step 3:** sửa code. Khóa chống trùng = `(rule.id, data.srcip or agent.id)`. `Suppressor` xóa khóa quá hạn mỗi lần gọi để không phình bộ nhớ.
+- [x] **Step 4:** chạy test → PASS. Chạy `python tools/wazuh_noise.py --normal`, ghi top 20 rule ồn vào mục *Kết quả P0/P1*. Đạt khi ≤ 1 alert / 100 event bình thường. (Windows đạt sau Task 12: 0,596 / 100.) Không đạt thì đưa các rule ồn vào Task 12.
+- [ ] Đo lại độ ồn trên ≥ 24 giờ `archives.json` của agent 000 (syslog + nhật ký console). (hoãn: cần stack thật chạy nhánh; số đo hiện có chưa có hai nguồn này)
+- [x] **Step 5:** commit `detection/wazuh: chuyển mọi cảnh báo level>=7, chạy bóng theo nhóm, chống trùng`
 
 ### Task 3: Ca test dạng log gốc + bộ chạy qua Wazuh + job CI
 
@@ -209,11 +214,11 @@ def test_same_rule_same_source_suppressed_60s():
   - `wazuh_rule_test.run(cases: list[dict], api) -> list[Failure]`. `Failure = (file, index, expected, got_ids)`
   - Ca `eventchannel` chạy bằng chế độ bơm hàng đợi của `tools/wazuh_coverage.run_wazuh`, nếu S3 xác nhận logtest không giải mã được.
 
-- [ ] **Step 1:** test hỏng với API giả: ca dương thiếu id → 1 Failure; ca âm có id → 1 Failure; 5 dòng cùng session → rule `frequency=5` báo ở dòng 5.
-- [ ] **Step 2:** chạy → FAIL
-- [ ] **Step 3:** viết bộ chạy. Thoát mã 1 khi có Failure, in bảng `file:index expected got`.
-- [ ] **Step 4:** chạy test → PASS. Chạy thật trên stack với ca của 100100 → 0 Failure. Push nhánh, job `wazuh-rules` xanh.
-- [ ] **Step 5:** commit `tests: ca test log gốc chạy qua wazuh logtest + job CI wazuh-rules`
+- [x] **Step 1:** test hỏng với API giả: ca dương thiếu id → 1 Failure; ca âm có id → 1 Failure; 5 dòng cùng session → rule `frequency=5` báo ở dòng 5.
+- [x] **Step 2:** chạy → FAIL
+- [x] **Step 3:** viết bộ chạy. Thoát mã 1 khi có Failure, in bảng `file:index expected got`.
+- [x] **Step 4:** chạy test → PASS. Chạy thật trên stack với ca của 100100 → 0 Failure. Push nhánh, job `wazuh-rules` xanh.
+- [x] **Step 5:** commit `tests: ca test log gốc chạy qua wazuh logtest + job CI wazuh-rules`
 
 ### Task 4: Lint rule XML
 
@@ -225,7 +230,7 @@ def test_same_rule_same_source_suppressed_60s():
 - Consumes: `wazuh_rules.parse`, `wazuh_rules.ID_RANGES`.
 - Produces: `wazuh_rule_lint.check(files: dict[str, str], cases: list[dict]) -> list[str]` (mỗi lỗi một dòng).
 
-- [ ] **Step 1:** test hỏng cho từng luật:
+- [x] **Step 1:** test hỏng cho từng luật:
   - id ngoài dải của file
   - id trùng giữa hai file
   - `overwrite="yes"` ngoài `0190-tuning.xml`
@@ -236,8 +241,8 @@ def test_same_rule_same_source_suppressed_60s():
   - rule riêng không có ít nhất 1 ca dương + 1 ca âm
   - regex lồng lượng từ (tái dùng `detection.rules.regex_risk`)
   - rule level 0 không có điều kiện trường ngoài `if_sid`
-- [ ] **Step 2–4:** chạy FAIL → viết → PASS. Chạy trên `wazuh/manager/rules/` → 0 lỗi.
-- [ ] **Step 5:** commit `tools: lint rule XML của Wazuh`
+- [x] **Step 2–4:** chạy FAIL → viết → PASS. Chạy trên `wazuh/manager/rules/` → 0 lỗi.
+- [x] **Step 5:** commit `tools: lint rule XML của Wazuh`
 
 ---
 
@@ -257,13 +262,13 @@ Cách đổi ca ECS sang log gốc:
 **Interfaces:**
 - Produces: `legacy_map.yml`: `{WEB-001: {wazuh: [31103, 31152], decision: builtin|convert|approx, note: str}}`. Task 6–11 đọc trường `decision`.
 
-- [ ] **Step 1:** `python tools/cases_to_raw.py` sinh ca gốc. Chạy `tools/wazuh_rule_test.py --report legacy` trên ruleset gốc (chưa có rule riêng): mỗi ca dương thì những id nào báo, mỗi ca âm có id nào báo không.
-- [ ] **Step 2:** ghi `decision`:
+- [x] **Step 1:** `python tools/cases_to_raw.py` sinh ca gốc. Chạy `tools/wazuh_rule_test.py --report legacy` trên ruleset gốc (chưa có rule riêng): mỗi ca dương thì những id nào báo, mỗi ca âm có id nào báo không.
+- [x] **Step 2:** ghi `decision`:
   - `builtin`: ruleset gốc báo đủ mọi ca dương (cho phép nhiều id) và không báo ca âm.
   - `approx`: có rule gốc gần đúng, cần chỉnh ngưỡng/level ở Task 12.
   - `convert`: còn lại.
-- [ ] **Step 3:** kiểm `legacy_map.yml` có đủ 41 mã. Ca nào không đổi được sang log gốc thì ghi rõ lý do trong `note` (ví dụ TI-001 phụ thuộc MISP).
-- [ ] **Step 4:** commit `rules: đối chiếu 41 rule YAML với ruleset Wazuh 4.14.8`
+- [x] **Step 3:** kiểm `legacy_map.yml` có đủ 41 mã. Ca nào không đổi được sang log gốc thì ghi rõ lý do trong `note` (ví dụ TI-001 phụ thuộc MISP).
+- [x] **Step 4:** commit `rules: đối chiếu 41 rule YAML với ruleset Wazuh 4.14.8`
 
 ### Task 6–11: Rule XML theo lĩnh vực, ở chế độ bóng
 
@@ -280,11 +285,13 @@ Mỗi task một file, cùng một quy trình. Chỉ chuyển các mã có `deci
 
 Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info type="text">shadow_since=<ngày></info>`.
 
-- [ ] **Step 1:** viết ca dương/âm vào `wazuh/manager/tests/cases/<file>.yml`. Lấy từ ca `legacy-*.yml` của Task 5, cộng ca mã hóa (web) hoặc ca biên.
-- [ ] **Step 2:** `python tools/wazuh_rule_test.py wazuh/manager/tests/cases/<file>.yml` → FAIL (chưa có rule)
-- [ ] **Step 3:** viết rule XML
-- [ ] **Step 4:** test → PASS, lint → 0 lỗi. Chạy `tools/wazuh_noise.py --normal --rules <file>` → 0 alert trên tập bình thường.
-- [ ] **Step 5:** commit `rules: <lĩnh vực> dạng XML (chạy bóng)`
+> Đã xong (05/11). Ngoại lệ của Step 4: LNX-005 auditd (102505) báo nhầm 1/36.871 và được chấp nhận ở chế độ bóng (R36), xử lý ở Task 12 và checklist Task 18. Tên file thực tế: `0271-web.xml`, `0541-network.xml`, `0851-linux-audit.xml`, `0845-ti.xml`; xem [RULES.md](../../../RULES.md) mục 9.2.
+
+- [x] **Step 1:** viết ca dương/âm vào `wazuh/manager/tests/cases/<file>.yml`. Lấy từ ca `legacy-*.yml` của Task 5, cộng ca mã hóa (web) hoặc ca biên.
+- [x] **Step 2:** `python tools/wazuh_rule_test.py wazuh/manager/tests/cases/<file>.yml` → FAIL (chưa có rule)
+- [x] **Step 3:** viết rule XML
+- [x] **Step 4:** test → PASS, lint → 0 lỗi. Chạy `tools/wazuh_noise.py --normal --rules <file>` → 0 alert trên tập bình thường.
+- [x] **Step 5:** commit `rules: <lĩnh vực> dạng XML (chạy bóng)`
 
 ### Task 12: `0190-tuning.xml`
 
@@ -295,9 +302,9 @@ Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info 
   - 92021: thiếu `\b`, khớp nhầm `-Uri`.
 - Thêm các rule `approx` của Task 5 và các rule ồn của Task 2.
 
-- [ ] **Step 1:** ca âm `reg add HKCU\Software\X /d 1` → không báo 92041; ca dương của 92041 lấy từ dataset vẫn báo.
-- [ ] **Step 2–4:** FAIL → viết `overwrite="yes"` → PASS. `tools/wazuh_noise.py --normal` đạt ngưỡng của Task 2.
-- [ ] **Step 5:** commit `rules: chỉnh rule gốc (92041, 92021, rule ồn)`
+- [x] **Step 1:** ca âm `reg add HKCU\Software\X /d 1` → không báo 92041; ca dương của 92041 lấy từ dataset vẫn báo.
+- [x] **Step 2–4:** FAIL → viết `overwrite="yes"` → PASS. `tools/wazuh_noise.py --normal` đạt ngưỡng của Task 2.
+- [x] **Step 5:** commit `rules: chỉnh rule gốc (92041, 92021, rule ồn)`
 
 ### Task 13: Báo cáo chạy song song
 
@@ -307,9 +314,10 @@ Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info 
 - Consumes: alert trong `siem-alerts` (YAML có `rule.id` = mã cũ; XML có `rule.legacy_id`).
 - Produces: `parity(alerts: list[dict], since: str) -> dict[legacy_id, {yaml: int, xml: int, only_yaml: list[event.id], only_xml: list[event.id]}]`, in bảng Markdown.
 
-- [ ] **Step 1:** test với 3 alert giả: 1 cặp khớp theo `event.id`, 1 chỉ có ở YAML, 1 chỉ có ở XML → đếm đúng.
-- [ ] **Step 2–4:** FAIL → viết → PASS. Chạy trên stack sau E2E + 24 giờ log lab → lưu `build/parity.md`.
-- [ ] **Step 5:** commit `tools: báo cáo đối chiếu alert YAML với XML`
+- [x] **Step 1:** test với 3 alert giả: 1 cặp khớp theo `event.id`, 1 chỉ có ở YAML, 1 chỉ có ở XML → đếm đúng.
+- [x] **Step 2–4:** FAIL → viết → PASS.
+- [ ] Chạy trên stack sau E2E + 24 giờ log lab → lưu `build/parity.md`. (hoãn: cần triển khai nhánh lên stack thật, chờ người dùng duyệt)
+- [x] **Step 5:** commit `tools: báo cáo đối chiếu alert YAML với XML`
 
 ---
 
@@ -322,9 +330,10 @@ Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info 
 - Lấy toàn bộ rule qua `GET /rules` (phân trang 500, khoảng 4.5k rule). Mỗi rule thành một doc `siem-rules`: id `WZH-<id>`, level → severity, nhóm, MITRE, file, `shadow`, `legacy_id`, số alert 7 ngày.
 - Rule có trạng thái `disabled` vẫn liệt kê, đánh dấu tắt.
 
-- [ ] **Step 1:** test với trang API giả gồm 2 trang (rule gốc, rule riêng có `shadow`) → đủ doc, `severity`, `shadow`, `legacy_id` đúng.
-- [ ] **Step 2–4:** FAIL → viết → PASS. E2E mục 5 (Thư viện rule) đổi số kỳ vọng thành tổng rule từ API.
-- [ ] **Step 5:** commit `rules_catalog: thư viện rule lấy từ Wazuh API`
+- [x] **Step 1:** test với trang API giả gồm 2 trang (rule gốc, rule riêng có `shadow`) → đủ doc, `severity`, `shadow`, `legacy_id` đúng.
+- [x] **Step 2–4:** FAIL → viết → PASS.
+- [ ] E2E mục 5 (Thư viện rule) đổi số kỳ vọng thành tổng rule từ API: đã sửa, chưa chạy. (hoãn: cần stack thật chạy nhánh; đồng bộ lại bản ghi `siem-rules` để có trường `bridged`)
+- [x] **Step 5:** commit `rules_catalog: thư viện rule lấy từ Wazuh API`
 
 ### Task 15: SOAR chọn playbook theo nhóm Wazuh
 
@@ -336,9 +345,9 @@ Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info 
   - `LNX-00x` / `WIN-00x` (kill) → `rule_ids` của rule XML tương ứng (từ `legacy_map.yml`)
 - Giữ mục cũ tới Task 18 để playbook vẫn chạy với rule YAML.
 
-- [ ] **Step 1:** test: alert Wazuh nhóm `sql_injection` level 10 → playbook chặn IP. Alert `shadow=true` → không playbook nào.
-- [ ] **Step 2–4:** FAIL → viết → PASS.
-- [ ] **Step 5:** commit `soar: chọn playbook theo nhóm rule Wazuh`
+- [x] **Step 1:** test: alert Wazuh nhóm `sql_injection` level 10 → playbook chặn IP. Alert `shadow=true` → không playbook nào.
+- [x] **Step 2–4:** FAIL → viết → PASS.
+- [x] **Step 5:** commit `soar: chọn playbook theo nhóm rule Wazuh`
 
 ### Task 16: Ngoại lệ dạng rule level 0
 
@@ -349,20 +358,21 @@ Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info 
   - `wazuh_fields.to_wazuh(ecs_field: str, decoder: str | None) -> str` (không có ánh xạ thì `KeyError`)
   - `exception_rule(parent_id: int, conditions: list[dict], new_id: int, reason: str) -> str` (XML 1 rule)
 
-- [ ] **Step 1:** test:
+- [x] **Step 1:** test:
   - ngoại lệ `{rule: WZH-31103, source.ip: 10.10.40.50}` → rule 110000 level 0, `<if_sid>31103</if_sid><srcip>10.10.40.50</srcip>`
   - ngoại lệ chỉ có rule cha, không có điều kiện → API trả 400
   - XML hỏng → giữ file cũ (Review Focus 2, 4)
-- [ ] **Step 2–4:** FAIL → viết → PASS. Chạy thật: thêm ngoại lệ cho IP host trên WEB SQLi → E2E SQLi không còn chặn IP host, gỡ ngoại lệ → chặn lại.
-- [ ] **Step 5:** commit `manager: ngoại lệ thành rule Wazuh level 0`
+- [x] **Step 2–4:** FAIL → viết → PASS.
+- [ ] Chạy thật: thêm ngoại lệ cho IP host trên WEB SQLi → E2E SQLi không còn chặn IP host, gỡ ngoại lệ → chặn lại. Kèm ba kiểm tra ghi trong docstring `wazuh_exceptions.py`: ngoại lệ con level 0 có thắng rule anh em 31106 không; có che cây con SQLi của 31103 không; `pcre2` trên `<url>` / `<dstuser>`. (hoãn: cần manager thật chạy nhánh)
+- [x] **Step 5:** commit `manager: ngoại lệ thành rule Wazuh level 0`
 
 ### Task 17: KPI độ phủ ATT&CK từ thư viện rule
 
 **Files:** Modify `server/siem/manager/api.py:compute_kpi`, `server/siem/manager/kpi.py` (độ phủ kỹ thuật ưu tiên tính từ doc `siem-rules` nguồn Wazuh, không tính rule `shadow`), `tools/rule_lint.py --layer` → chuyển sang `tools/wazuh_rule_lint.py --layer` (ATT&CK Navigator layer từ rule đang bật); Test `server/tests/test_kpi.py`
 
-- [ ] **Step 1:** test: 3 doc rule (T1190 bật, T1486 bóng, T1110 bật) → kỹ thuật được phủ = {T1190, T1110}.
-- [ ] **Step 2–4:** FAIL → viết → PASS.
-- [ ] **Step 5:** commit `kpi: độ phủ tính từ rule Wazuh đang bật`
+- [x] **Step 1:** test: 3 doc rule (T1190 bật, T1486 bóng, T1110 bật) → kỹ thuật được phủ = {T1190, T1110}.
+- [x] **Step 2–4:** FAIL → viết → PASS.
+- [x] **Step 5:** commit `kpi: độ phủ tính từ rule Wazuh đang bật`
 
 ### Task 18: Cổng chuyển (08/11)
 
@@ -377,6 +387,8 @@ Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info 
 - [ ] bỏ nhóm `shadow` ở các file 0101–0106 và 0845 (trừ rule có `shadow_since` < 7 ngày, giữ đúng tiêu chí chạy bóng của SOC-OPERATIONS mục 4)
 - [ ] `RULE_ENGINE_ENABLED=false` (biến mới trong `settings.py`, analyzer không chạy engine của `detection/rules.py`) + test `test_engine_disabled_no_yaml_alerts`
 - [ ] Map SOAR theo nhóm/rule Wazuh sẽ tác động cả alert THẬT của rule gốc khi nhánh triển khai (R60, danh sách thật từ manager 4.14.8, `stock-groups-soar.txt`): chặn IP (`block_ip`, scope origin, 3600 giây, bỏ qua nguồn `syslog-*`) CHỈ theo id đã duyệt: sshd 5712, 5720, 5763 và web 31152 (31151 bỏ theo R61: Task 12 hạ về level 7), cộng 104095 (level 14, không bóng) và các bản XML của mã YAML từng chặn (AUTH-001/002/003, WIN-001, WEB-*; đang bóng). Mọi rule gốc khác (53 rule nhóm `authentication_failures` như Postfix, Dovecot, WordPress, VPN, Windows; 31153, 31154, 31161, 31163, nhóm `attack`...) chỉ thông báo / mở case, nhóm chỉ dùng chọn playbook case. `SOAR_WHITELIST` mặc định chỉ 127.0.0.0/8: thêm IP proxy, relay, NAT nội bộ trước khi bật — duyệt trước khi bật
+- [ ] Rule AI: pipeline AI vẫn ghi rule YAML vào `server/rules/ai`; tắt engine YAML thì rule AI không chạy — đổi đích sang `rules-dynamic/ai.xml` (dải 109000) trước, hoặc giữ engine cho rule AI
+- [ ] `SOAR_WHITELIST`: thêm IP proxy/relay/NAT nội bộ trước khi bật chặn IP theo rule gốc
 - [ ] xóa mục playbook theo mã YAML
 - [ ] E2E 44/44, commit `chuyển phát hiện sang Wazuh: tắt engine YAML`
 
