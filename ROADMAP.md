@@ -59,7 +59,7 @@ Kế hoạch: [docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md](docs/
 
 | Phần | Trạng thái |
 |---|---|
-| Task 0 đến 17 (P0 đến P3: thử kỹ thuật, nền tảng, 10 file rule XML chạy bóng, tuning, báo cáo song song, thư viện rule, SOAR theo nhóm, ngoại lệ, KPI) | **Xong trên nhánh `feature/wazuh-unified-ruleset`**; CI xanh (596 unit test, 539 ca log gốc qua Wazuh thật). Bốn bước cần stack thật còn hoãn (parity, E2E, ngoại lệ thật, đo độ ồn syslog + console) |
+| Task 0 đến 17 (P0 đến P3: thử kỹ thuật, nền tảng, 10 file rule XML chạy bóng, tuning, báo cáo song song, thư viện rule, SOAR theo nhóm, ngoại lệ, KPI) | **Xong trên nhánh `feature/wazuh-unified-ruleset`**; CI xanh (603 unit test, 556 ca log gốc qua Wazuh thật). Bốn bước cần stack thật còn hoãn (parity, E2E, ngoại lệ thật, đo độ ồn syslog + console) |
 | Task 18, cổng chuyển (tắt engine YAML) | **Chờ người dùng quyết**: chưa triển khai nhánh lên stack thật, chưa tắt engine YAML. Nếu không đạt, giữ YAML bật + XML bóng cho demo 10/11 và chuyển sau 16/11 |
 | Task 19 đến 24 (P4: Sigma → XML, kiểm định AI trên Wazuh, triển khai rule AI dạng XML, SigmaHQ → XML, xóa engine YAML, viết lại tài liệu) | Sau 17/11, **chưa lập kế hoạch chi tiết** |
 | Đổi mô hình AI | Chưa bắt đầu |

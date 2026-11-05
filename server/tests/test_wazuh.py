@@ -272,7 +272,18 @@ def test_stock_rule_outside_old_groups_is_shadow_until_gate(enricher):
 def test_suppress_key_uses_source_or_agent_and_ignores_dead_srcip(enricher):
     d = enricher.enrich(normalize(wz("wazuh_alert", data={"srcip": "9.9.9.9"},
                                      rule={"id": "5710", "level": 8, "groups": ["sshd"]})))
-    assert bridge.suppress_key(d) == ("WZH-5710", get(d, "agent.id"), get(d, "agent.id"), None)   # không còn data.srcip
+    assert bridge.suppress_key(d) == ("WZH-5710", get(d, "agent.id"), get(d, "agent.id"), None, None)   # không còn data.srcip
+
+
+def test_suppress_key_keeps_distinct_processes_on_one_agent(enricher):
+    """Hai tiến trình độc hại khác nhau trên cùng agent trong cửa sổ dập trùng: alert thứ hai (lệnh kill thứ hai) không bị bỏ."""
+    a, b = (enricher.enrich(normalize(wz("wazuh_alert", rule={"id": "102001", "level": 10, "groups": ["siem"]})))
+            for _ in range(2))
+    a.setdefault("process", {})["pid"], b.setdefault("process", {})["pid"] = 4242, 4343
+    assert bridge.suppress_key(a) != bridge.suppress_key(b)
+    s = bridge.Suppressor(60)
+    assert not s.seen(bridge.suppress_key(a), 0.0) and not s.seen(bridge.suppress_key(b), 1.0)
+    assert s.seen(bridge.suppress_key(a), 2.0)              # cùng tiến trình lặp lại trong cửa sổ: vẫn dập trùng
 
 
 

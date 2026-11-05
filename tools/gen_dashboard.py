@@ -219,8 +219,9 @@ def real(q=""):
 
 
 def det(q=""):
-    """Alert thật và không phải sự cố nền tảng: alert.source:health (HLT-*) có ô riêng ở dashboard SOC KPI."""
-    return real(f"({q}) AND NOT alert.source:health" if q else "NOT alert.source:health")
+    """Alert phát hiện để đếm tổng / top: loại health (sự cố nền tảng, ô riêng ở SOC KPI) và rba (alert cộng dồn rủi ro
+    từ các alert khác — đếm chung là đếm hai lần; ô riêng "Alert RBA"). Alert dò ngược TI-002 (retrohunt) vẫn tính."""
+    return real(f"({q}) AND NOT alert.source:(health OR rba)" if q else "NOT alert.source:(health OR rba)")
 
 
 def kpi_alert(q=""):

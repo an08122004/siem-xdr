@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Trạng thái (05/11/2026):** Task 0 đến 17 đã xong trên nhánh `feature/wazuh-unified-ruleset` (CI xanh: 596 unit test, 539 ca log gốc qua Wazuh thật). Bước còn hoãn có ghi `(hoãn: ...)`. Task 18 chờ người dùng duyệt, Task 19 đến 24 chưa lập kế hoạch chi tiết.
+> **Trạng thái (05/11/2026):** Task 0 đến 17 đã xong trên nhánh `feature/wazuh-unified-ruleset` (CI xanh: 603 unit test, 556 ca log gốc qua Wazuh thật). Bước còn hoãn có ghi `(hoãn: ...)`. Task 18 chờ người dùng duyệt, Task 19 đến 24 chưa lập kế hoạch chi tiết.
 > Sổ quyết định: [docs/wazuh-ruleset-decisions.md](../../wazuh-ruleset-decisions.md). Mô tả bộ rule: [RULES.md](../../../RULES.md) mục 9.
 > Tên file thực tế khác kế hoạch ban đầu: `0190-tuning.xml` thành `0999-tuning.xml`, `0103-network.xml` thành `0541-network.xml`, `0104-web.xml` thành `0271-web.xml`, `0107-ti.xml` thành `0845-ti.xml`, thêm `0851-linux-audit.xml`.
 

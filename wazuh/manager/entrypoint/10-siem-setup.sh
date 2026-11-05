@@ -91,10 +91,11 @@ fi
 # 9. File rule hỏng còn trên đĩa thì wazuh-analysisd không lên, kéo theo remoted và apid. Kiểm tra cả ruleset trước khi
 #    start; hỏng thì cách ly file động (AI / ngoại lệ) để manager vẫn khởi động được.
 if ! /var/ossec/bin/wazuh-analysisd -t >/tmp/analysisd-test.log 2>&1; then
-  if [ -n "$(ls -A "$D")" ]; then
+  if [ -n "$(find "$D" -mindepth 1 -maxdepth 1 -name '*.xml')" ]; then
     Q=/var/ossec/etc/rules-dynamic.quarantine/$(date +%Y%m%d-%H%M%S)
     mkdir -p "$Q"
-    find "$D" -mindepth 1 -maxdepth 1 -exec mv -t "$Q" {} +
+    # chỉ file rule *.xml: sổ cái ngoại lệ exceptions.json (bộ đếm id, lịch sử duyệt) không làm analysisd lỗi, phải ở lại
+    find "$D" -mindepth 1 -maxdepth 1 -name '*.xml' -exec mv -t "$Q" {} +
     echo "[siem-setup] CẢNH BÁO: ruleset lỗi (wazuh-analysisd -t), đã chuyển file rule động sang $Q:"
     tail -n 5 /tmp/analysisd-test.log | sed 's/^/[siem-setup]   /'
   fi

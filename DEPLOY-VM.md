@@ -527,6 +527,45 @@ Kết quả đúng: không có alert LNX-002 và không có lệnh *Kill tiến 
 - Xóa sạch backend (mất toàn bộ event, alert, case, tài khoản): `docker compose down -v`, rồi chạy lại `sudo ./install.sh` (bí mật cũ được giữ).
 - Nhanh nhất: quay về snapshot "sạch" của mục 1.5.
 
+## 9. Nâng cấp hệ thống đang chạy lên bộ rule Wazuh XML (chạy bóng)
+
+Áp dụng khi máy đang chạy `main` cũ (engine YAML) và muốn chạy mã của nhánh `feature/wazuh-unified-ruleset` (RULES.md mục 9).
+Lần triển khai này **chưa** là cổng chuyển (Task 18): engine YAML vẫn chạy thật, rule XML của dự án chạy bóng.
+
+**Thay đổi so với `main`:** bí mật mới `secrets/wazuh_rules_api_password` (user API `siem-rules` của console); volume mới
+`wazuh_dynamic_rules` (rule động `ai.xml`, `exceptions.xml` và sổ `exceptions.json`); wazuh-manager mount thư mục
+`wazuh/manager/rules` và `wazuh/manager/decoders` (bỏ mount `local_rules.xml`); `ossec.conf` thêm `<list>` cho
+`etc/lists/siem-misp-ip`; image server phải build lại; 4 dashboard Grafana được sinh lại.
+
+**Hành vi thật thay đổi ngay khi triển khai** (không chờ cổng chuyển):
+- 9 rule gốc bị chỉnh trong `0999-tuning.xml` (RULES.md 9.8): 61627 / 61640 hẹp lại (bớt báo nhầm thật), 92041 / 92021 sửa regex.
+- 104095 (tấn công web từ IP độc hại trả 200, level 14) là alert thật; SOAR chặn IP nguồn trên agent đã thấy (scope `origin`).
+- Rule gốc 5712 / 5720 / 5763 / 31152 có playbook chặn IP nhưng hiện là alert **bóng** (ngoài nhóm hoạt động, level < 12), nên
+  SOAR chưa chặn gì cho tới cổng chuyển.
+- Dashboard: số alert không còn gồm alert bóng, alert sức khỏe nền tảng, RBA; KPI chỉ tính alert phát hiện (SOC-OPERATIONS mục 7).
+
+**Các bước:**
+1. Sao lưu: volume `wazuh_etc`, `wazuh_api_configuration`, `wazuh_logs`, dữ liệu Elasticsearch, và `server/rules/ai`; ghi lại
+   commit đang chạy và id image `siem-xdr-server` (để quay lại).
+2. Lấy mã của nhánh (`git fetch && git checkout feature/wazuh-unified-ruleset`).
+3. `sudo ./install.sh --update` (chạy `tools/init_secrets.py`: chỉ tạo bí mật còn thiếu, giữ bí mật cũ; build lại image; khởi
+   động lại). Làm tay thì: `python3 tools/init_secrets.py`, rồi `docker compose up -d --build`. Thiếu bí mật mới thì Compose
+   báo lỗi file secret và không tạo container.
+4. Kiểm wazuh-manager: log có `[siem-setup] ruleset hợp lệ` (bước 9 của `wazuh/manager/entrypoint/10-siem-setup.sh`);
+   `wazuh-control status` có analysisd, remoted, apid; `GET /rules?rule_ids=104095` (user `siem-rules`) trả về rule.
+5. Kiểm quyền API: token `siem-soar` đẩy được `PUT /lists/files/siem-misp-ip` nhưng bị từ chối với danh sách gốc
+   (`malicious-ioc/malicious-ip`, `audit-keys`); token `siem-rules` nạp lại được ruleset nhưng không ghi được danh sách.
+6. Kiểm console và SOAR: thư viện rule có khoảng 4,5 nghìn bản ghi `origin: wazuh_rule`; thêm một ngoại lệ, duyệt bằng người
+   thứ hai, thấy rule 110000 trong `rules-dynamic/exceptions.xml`, gỡ ngoại lệ; log `analyzer`, `soar` sạch.
+7. Chạy `python tools/e2e_test.py` (mong 44/44); sau 24 giờ chạy `python tools/parity_report.py` (từ thư mục chính) để có
+   `build/parity.md`.
+8. `SOAR_WHITELIST` (`.env`): trước khi bật chặn IP theo rule gốc ở cổng chuyển, thêm IP proxy, mail relay, NAT nội bộ của
+   lab (mặc định chỉ `127.0.0.0/8`).
+
+**Quay lại `main`:** checkout commit cũ, `docker compose up -d --build`. User `siem-rules` và danh sách `siem-misp-ip` còn lại
+trong volume Wazuh nhưng không dùng; ngoại lệ Wazuh đã duyệt nằm trong volume `wazuh_dynamic_rules` (không xóa volume này nếu
+còn muốn giữ chúng).
+
 ## Phụ lục A. Cài máy chủ bằng tay
 
 Chỉ cần khi không dùng `install.sh` (vd máy không phải Ubuntu / Debian). Đây đúng là các bước script làm.

@@ -109,24 +109,24 @@ docker exec siem-xdr-elasticsearch-1 curl -sk -u "grafana:$MATKHAU" \
 | Panel | Hiển thị | Index | Query | Metric và bucket | Cách đọc, lưu ý |
 |---|---|---|---|---|---|
 | Tổng event (không tính console/phản ứng) | Số event log hệ thống trong khoảng thời gian đang chọn. | siem-events-* | `NOT event.module:(console OR siem-xdr)` | count / date_histogram theo thời gian | Loại event nội bộ của nền tảng (`console` = đăng nhập/đăng xuất giao diện SOC, `siem-xdr` = kết quả phản ứng). |
-| Tổng alert | Số alert phát hiện trong khoảng. | siem-alerts | `(NOT alert.source:health) AND NOT alert.shadow:true` | count / date_histogram theo thời gian | Không gồm alert chạy bóng và alert sức khỏe nền tảng (HLT, xem *SOC KPI*). Vẫn gồm alert RBA (có ô riêng bên cạnh). |
-| Alert nghiêm trọng | Số alert mức nghiêm trọng (critical). | siem-alerts | `((severity:critical) AND NOT alert.source:health) AND NOT alert.shadow:true` | count / date_histogram theo thời gian | Cùng quy ước với "Tổng alert". |
+| Tổng alert | Số alert phát hiện trong khoảng. | siem-alerts | `(NOT alert.source:(health OR rba)) AND NOT alert.shadow:true` | count / date_histogram theo thời gian | Không gồm alert chạy bóng, alert sức khỏe nền tảng (HLT, xem *SOC KPI*) và alert RBA (cộng dồn từ alert khác — đếm chung là đếm hai lần; có ô riêng bên cạnh). Vẫn gồm alert dò ngược TI-002 (IOC tìm thấy trong event cũ). |
+| Alert nghiêm trọng | Số alert mức nghiêm trọng (critical). | siem-alerts | `((severity:critical) AND NOT alert.source:(health OR rba)) AND NOT alert.shadow:true` | count / date_histogram theo thời gian | Cùng quy ước với "Tổng alert". |
 | Alert mức cao | Số alert mức cao (high). | siem-alerts | `((severity:high) AND NOT alert.source:health) AND NOT alert.shadow:true` | count / date_histogram theo thời gian | Cùng quy ước. |
 | Alert RBA (cộng dồn rủi ro) | Số alert RBA (`alert.source:rba`), sinh khi điểm rủi ro của một thực thể vượt ngưỡng. | siem-alerts | `(alert.source:rba) AND NOT alert.shadow:true` | count / date_histogram theo thời gian | Cộng dồn từ alert khác nên cùng hoạt động có thể đếm hai lần (một lần ở alert gốc, một lần ở RBA). |
 | Alert chạy bóng | Số alert của rule đang đo thử (`alert.shadow:true`). | siem-alerts | `alert.shadow:true` | count / date_histogram theo thời gian | Không tính vào mọi số alert khác, không mở case, không phản ứng. Chỉ để thấy lượng đo thử. |
 | Case đang mở | Số case chưa đóng (mở, đang xử lý, đã khoanh vùng) tính toàn bộ lịch sử. | siem-cases | `status:(open OR in_progress OR contained)` | count / date_histogram theo thời gian | `timeFrom 10y`: bỏ qua khoảng thời gian của dashboard. "Đã khoanh vùng" vẫn tính là còn mở. |
 | Lệnh phản ứng XDR | Số lệnh phản ứng XDR (block IP, kill process, cô lập máy ...) được tạo trong khoảng. | siem-actions | `*` | count / date_histogram theo thời gian | Tính mọi trạng thái, cả `failed`. |
-| Alert theo mức độ | Đường theo thời gian của số alert, mỗi mức độ một đường. | siem-alerts | `(NOT alert.source:health) AND NOT alert.shadow:true` | count / terms `severity` top 10; date_histogram theo thời gian | `terms severity` rồi `date_histogram`: đọc từng đường như một series. |
+| Alert theo mức độ | Đường theo thời gian của số alert, mỗi mức độ một đường. | siem-alerts | `(NOT alert.source:(health OR rba)) AND NOT alert.shadow:true` | count / terms `severity` top 10; date_histogram theo thời gian | `terms severity` rồi `date_histogram`: đọc từng đường như một series. |
 | Event theo loại (event.category) | Số event theo `event.category`. | siem-events-* | `*` | count / terms `event.category` top 12 | Top 12; phần còn lại bị cắt. |
 
 **Hàng: Phát hiện (Detection)**
 
 | Panel | Hiển thị | Index | Query | Metric và bucket | Cách đọc, lưu ý |
 |---|---|---|---|---|---|
-| Top rule kích hoạt | Rule sinh nhiều alert nhất. | siem-alerts | `(NOT alert.source:health) AND NOT alert.shadow:true` | count / terms `rule.name` top 15 | Gom theo `rule.name`, không phải mã rule: tên có phần biến đổi (đường dẫn file) thì tách thành nhiều dòng. Top 15. |
-| MITRE ATT&CK tactic | Số alert theo tactic MITRE. | siem-alerts | `(NOT alert.source:health) AND NOT alert.shadow:true` | count / terms `rule.mitre.tactic` top 10 | Alert không có tactic không có dòng nào (HLT đã bị loại khỏi query). Rule Wazuh chỉ ghi tactic đầu. |
-| Top IP tấn công (từ alert) | IP nguồn xuất hiện nhiều nhất trong alert. | siem-alerts | `(NOT alert.source:health) AND NOT alert.shadow:true` | count / terms `source.ip` top 10 | Có thể là IP nội bộ / cổng Docker, không hẳn kẻ tấn công. |
-| Host bị nhắm tới | Máy bị nhắm tới nhiều nhất (`host.name` của alert). | siem-alerts | `(NOT alert.source:health) AND NOT alert.shadow:true` | count / terms `host.name` top 10 | Một máy có thể mang nhiều tên (`web-01`, `web01`). |
+| Top rule kích hoạt | Rule sinh nhiều alert nhất. | siem-alerts | `(NOT alert.source:(health OR rba)) AND NOT alert.shadow:true` | count / terms `rule.name` top 15 | Gom theo `rule.name`, không phải mã rule: tên có phần biến đổi (đường dẫn file) thì tách thành nhiều dòng. Top 15. |
+| MITRE ATT&CK tactic | Số alert theo tactic MITRE. | siem-alerts | `(NOT alert.source:(health OR rba)) AND NOT alert.shadow:true` | count / terms `rule.mitre.tactic` top 10 | Alert không có tactic không có dòng nào (HLT đã bị loại khỏi query). Rule Wazuh chỉ ghi tactic đầu. |
+| Top IP tấn công (từ alert) | IP nguồn xuất hiện nhiều nhất trong alert. | siem-alerts | `(NOT alert.source:(health OR rba)) AND NOT alert.shadow:true` | count / terms `source.ip` top 10 | Có thể là IP nội bộ / cổng Docker, không hẳn kẻ tấn công. |
+| Host bị nhắm tới | Máy bị nhắm tới nhiều nhất (`host.name` của alert). | siem-alerts | `(NOT alert.source:(health OR rba)) AND NOT alert.shadow:true` | count / terms `host.name` top 10 | Một máy có thể mang nhiều tên (`web-01`, `web01`). |
 | Alert mới nhất — bấm tên rule để mở trên console | 200 alert mới nhất, bấm tên rule để mở trên console. | siem-alerts | `NOT alert.shadow:true` | raw_data 200 dòng | Cột `alert.id` ẩn dùng cho liên kết `/go/alert/<id>`. Chỉ 200 dòng. Giữ cả alert RBA và HLT, chỉ bỏ alert bóng. |
 
 **Hàng: Telemetry**

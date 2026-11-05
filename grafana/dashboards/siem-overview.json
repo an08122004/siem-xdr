@@ -120,7 +120,7 @@
             "type": "elasticsearch",
             "uid": "siem-alerts"
           },
-          "query": "(NOT alert.source:health) AND NOT alert.shadow:true",
+          "query": "(NOT alert.source:(health OR rba)) AND NOT alert.shadow:true",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -189,7 +189,7 @@
             "type": "elasticsearch",
             "uid": "siem-alerts"
           },
-          "query": "((severity:critical) AND NOT alert.source:health) AND NOT alert.shadow:true",
+          "query": "((severity:critical) AND NOT alert.source:(health OR rba)) AND NOT alert.shadow:true",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -258,7 +258,7 @@
             "type": "elasticsearch",
             "uid": "siem-alerts"
           },
-          "query": "((severity:high) AND NOT alert.source:health) AND NOT alert.shadow:true",
+          "query": "((severity:high) AND NOT alert.source:(health OR rba)) AND NOT alert.shadow:true",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -605,7 +605,7 @@
             "type": "elasticsearch",
             "uid": "siem-alerts"
           },
-          "query": "(NOT alert.source:health) AND NOT alert.shadow:true",
+          "query": "(NOT alert.source:(health OR rba)) AND NOT alert.shadow:true",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -889,7 +889,7 @@
             "type": "elasticsearch",
             "uid": "siem-alerts"
           },
-          "query": "(NOT alert.source:health) AND NOT alert.shadow:true",
+          "query": "(NOT alert.source:(health OR rba)) AND NOT alert.shadow:true",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -993,7 +993,7 @@
             "type": "elasticsearch",
             "uid": "siem-alerts"
           },
-          "query": "(NOT alert.source:health) AND NOT alert.shadow:true",
+          "query": "(NOT alert.source:(health OR rba)) AND NOT alert.shadow:true",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -1097,7 +1097,7 @@
             "type": "elasticsearch",
             "uid": "siem-alerts"
           },
-          "query": "(NOT alert.source:health) AND NOT alert.shadow:true",
+          "query": "(NOT alert.source:(health OR rba)) AND NOT alert.shadow:true",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -1201,7 +1201,7 @@
             "type": "elasticsearch",
             "uid": "siem-alerts"
           },
-          "query": "(NOT alert.source:health) AND NOT alert.shadow:true",
+          "query": "(NOT alert.source:(health OR rba)) AND NOT alert.shadow:true",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [

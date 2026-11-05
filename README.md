@@ -366,7 +366,7 @@ và dưới level 12 chỉ là alert BÓNG (SOAR bỏ qua) tới cổng T18; rul
 và đó là đánh giá cấu hình, không phải sự cố. Xem SCA trong event `event.module: sca`.
 Rule Wazuh riêng đặt ở `wazuh/manager/rules/0100-platform.xml` (ID từ 100000).
 
-**Bộ rule Wazuh XML thống nhất (đang chạy bóng).** Nhánh `feature/wazuh-unified-ruleset` chuyển các rule YAML sang rule XML của Wazuh (10 file ở `wazuh/manager/rules/`, 539 ca test log gốc chạy qua Wazuh thật trong CI). Rule XML ở chế độ bóng cho tới cổng chuyển (Task 18, chưa được duyệt); mục 3 này được viết lại khi đó. Xem [RULES.md mục 9](RULES.md#9-bộ-rule-wazuh-xml-thống-nhất-nhánh-featurewazuh-unified-ruleset-chạy-bóng-tới-cổng-chuyển).
+**Bộ rule Wazuh XML thống nhất (đang chạy bóng).** Nhánh `feature/wazuh-unified-ruleset` chuyển các rule YAML sang rule XML của Wazuh (10 file ở `wazuh/manager/rules/`, 556 ca test log gốc chạy qua Wazuh thật trong CI). Rule XML ở chế độ bóng cho tới cổng chuyển (Task 18, chưa được duyệt); mục 3 này được viết lại khi đó. Xem [RULES.md mục 9](RULES.md#9-bộ-rule-wazuh-xml-thống-nhất-nhánh-featurewazuh-unified-ruleset-chạy-bóng-tới-cổng-chuyển).
 
 **Độ phủ của ruleset gốc Wazuh so với rule tự viết** (đo 6/10/2026, `tools/wazuh_coverage.py`, chi tiết ở
 `datasets/report_wazuh.md`). Cùng dataset với báo cáo độ phủ trong `AI-README.md` (mục 9.1), đưa vào analysisd của một wazuh-manager **tạm**

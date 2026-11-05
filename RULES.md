@@ -524,8 +524,8 @@ Sổ quyết định (61 ruling, phát hiện chính): [docs/wazuh-ruleset-decis
 
 ### 9.1 Trạng thái (05/11/2026)
 
-- Task 0 đến 17 của kế hoạch đã xong trên nhánh. CI (5 job) xanh ở commit `e7f75f6`: 596 unit test đạt trên Linux, 539 ca test log gốc
-  chạy qua một wazuh-manager thật, 0 sai, lint 10 file 0 lỗi (1 cảnh báo: `lsass.exe` chép nguyên từ rule gốc).
+- Task 0 đến 17 của kế hoạch đã xong trên nhánh. CI (5 job) xanh ở commit `0e6e0bb`: 603 unit test đạt trên Linux, 556 ca test log gốc
+  chạy qua một wazuh-manager thật, 0 sai, 0 rule gốc là alert thật chưa ghim, lint 10 file 0 lỗi (1 cảnh báo: `lsass.exe` chép nguyên từ rule gốc).
 - Rule XML riêng chạy **bóng** (nhóm `shadow`): vẫn sinh alert để đo, SOAR bỏ qua. Engine YAML vẫn là thứ chạy thật trên `main`.
   Rule phát hiện của dự án không bóng chỉ có 100100 / 100101 (WEB-010 / WEB-011, chạy thật từ trước nhánh này) và 104095
   (bản sao rule gốc 99906, xem 9.3); ngoài ra là rule bộ đếm level 0 đến 2 và các rule gốc bị chỉnh ở 9.8.

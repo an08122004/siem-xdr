@@ -82,7 +82,9 @@ def suppress_key(doc: Doc) -> tuple:
     # agent 000 dùng chung cho mọi thiết bị syslog: thiếu source.ip thì agent.id (syslog-<ip>) vẫn tách được nguồn
     agent = get(doc, "agent.id")
     # file.path: syscheck 550/554 trên các file KHÁC nhau của một agent là các thay đổi riêng (như main: mỗi thay đổi một alert)
-    return (f"WZH-{get(doc, 'wazuh.rule.id')}", get(doc, "source.ip") or agent, agent, get(doc, "file.path"))
+    # process.pid: hai tiến trình độc hại khác nhau trên cùng agent là hai alert (mỗi cái một lệnh kill), không được gộp
+    return (f"WZH-{get(doc, 'wazuh.rule.id')}", get(doc, "source.ip") or agent, agent, get(doc, "file.path"),
+            get(doc, "process.pid"))
 
 
 def is_shadow_stock(rule: dict, active_groups: set[str] | None = None, any_level: int | None = None) -> bool:
