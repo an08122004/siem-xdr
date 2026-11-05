@@ -29,7 +29,7 @@ FLUSH_SIZE = 500
 class Analyzer:
     def __init__(self) -> None:
         self.enricher = default_enricher()
-        self.engine = RuleEngine(load_rules(settings.RULES_DIR))
+        self.engine = RuleEngine(load_rules(settings.RULES_DIR) if settings.RULE_ENGINE_ENABLED else [])   # R65: tắt = không nạp YAML
         self.rules_fp = rules_fingerprint(settings.RULES_DIR)
         self.last_rules_check = time.time()
         self.detector = ml.AnomalyDetector(
@@ -77,6 +77,8 @@ class Analyzer:
     def reload_rules_if_changed(self) -> None:
         """Nạp lại rule khi file trong rules/ đổi (vd analyst duyệt đề xuất AI).
         Giữ nguyên trạng thái cửa sổ đếm của các rule không đổi; rule lỗi -> giữ bộ cũ."""
+        if not settings.RULE_ENGINE_ENABLED:
+            return
         fp = rules_fingerprint(settings.RULES_DIR)
         if fp == self.rules_fp:
             return

@@ -156,7 +156,14 @@ def _write(path: Path, p: dict[str, Any], approvers: list[str]) -> None:
     tmp.replace(path)
 
 
+def _need_engine() -> None:
+    # R65: đề xuất AI hiện chỉ ghi YAML cho engine YAML; engine tắt thì file đó không có tác dụng
+    if not settings.RULE_ENGINE_ENABLED:
+        raise DeployError(409, "engine YAML đã tắt — rule AI cần đích Wazuh XML (Task 19–22)")
+
+
 def approve(es, pid: str, analyst: str, rules_dir: Path = settings.RULES_DIR, now: str = "") -> dict[str, Any]:
+    _need_engine()
     p, seq, term = _get(es, pid)
     if p["status"] != "pending":
         raise DeployError(409, f"đề xuất đang ở trạng thái {p['status']}, không duyệt được")
@@ -226,6 +233,7 @@ _MODE_LINE = re.compile(r"^(\s*)mode: shadow\s*$", re.M)
 def promote(es, rule_id: str, who: str, rules_dir: Path = settings.RULES_DIR, now: str = "") -> dict[str, Any]:
     """Bật chính thức rule AI đang chạy bóng (rules/ai/<id>.yml): đổi mode, ghi ai bật, lúc nào, số liệu lúc bật.
     Rule viết tay chạy bóng thì bật bằng commit đổi `mode` trong kho rule (qua CI), không qua đây."""
+    _need_engine()
     if not re.match(r"^AI-\d{3,}$", rule_id):
         raise DeployError(400, "chỉ bật được rule AI (AI-xxx) trên console; rule viết tay đổi mode qua kho rule")
     path = rules_dir / "ai" / f"{rule_id}.yml"

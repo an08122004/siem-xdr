@@ -4,7 +4,7 @@
     python tools/wazuh_rule_lint.py --layer build/attack-layer.json   # kèm layer cho MITRE ATT&CK Navigator
     (--layer: CHỈ rule XML dự án đang bật; khác KPI độ phủ, vốn tính cả rule YAML và rule gốc Wazuh có ra alert)
 
-Kiểm thêm (R63): rule dự án level >= 3 phải có nhóm `shadow` + `shadow_since=`; if_sid/if_matched_sid trỏ rule dự án phải trỏ về rule được định nghĩa trước.
+Kiểm thêm (R63, sửa R65): rule có nhóm `shadow` phải có `shadow_since=` (sau cổng cut-over rule mới được phép vào chạy bóng, SOC-OPERATIONS §4); if_sid/if_matched_sid trỏ rule dự án phải trỏ về rule được định nghĩa trước.
 Mỗi dòng: `file:rule_id: thông điệp`; cảnh báo có tiền tố `WARNING: `. Thoát mã 1 khi có LỖI, cảnh báo thì mã 0.
 """
 from __future__ import annotations
@@ -32,7 +32,6 @@ PATTERN_TAGS = ("regex", "match", "field", "url", "id", "status", "data", "extra
 NON_CONDITION = {"if_sid", "if_group", "description", "group", "mitre", "info", "options"}
 BARE_WORD = re.compile(r"[\w.-]+")
 SHADOW_SINCE = re.compile(r"shadow_since=\d{4}-\d{2}-\d{2}")
-SHADOW_EXEMPT = {100100, 100101}      # WEB-010 / WEB-011 đã chạy thật trước khi có chế độ bóng
 
 
 def _split(text):
@@ -97,22 +96,17 @@ def check(files: dict[str, str], cases: list[dict]) -> list[str]:
                 if rid in seen:
                     err(rid, f"id trùng với {seen[rid]}")
                 seen[rid] = name
+                infos = [(i.text or "").strip() for i in el.findall("info")]
+                if "shadow" in groups and not any(SHADOW_SINCE.fullmatch(i) for i in infos):
+                    err(rid, 'rule chạy bóng (nhóm shadow) phải có <info type="text">shadow_since=YYYY-MM-DD</info>')
                 if tuning:
                     if not overwrite or rid >= 100000:
                         err(rid, 'file tuning chỉ chứa rule overwrite="yes" trên id < 100000')
-                    infos = [(i.text or "").strip() for i in el.findall("info")]
-                    if (level or 0) >= 12 and "shadow" not in groups and "real_before=yes" not in infos:
-                        err(rid, 'R58: overwrite lên level >= 12 phải có nhóm shadow (alert thật mới) hoặc <info type="text">real_before=yes</info> (rule gốc vốn đã là alert thật)')
                 else:
                     if rid < 100000:
                         err(rid, "id < 100000 là dải của Wazuh gốc")
                     elif rng and not rng[0] <= rid <= rng[1]:
                         err(rid, f"id ngoài dải {rng[0]}-{rng[1]} của file")
-                    infos = [(i.text or "").strip() for i in el.findall("info")]
-                    if rid >= 100000 and not dynamic and (level or 0) >= 3 and rid not in SHADOW_EXEMPT and not any(i.startswith("port_of_stock=") for i in infos):
-                        if "shadow" not in groups or not any(SHADOW_SINCE.fullmatch(i) for i in infos):
-                            err(rid, 'rule dự án mới (level >= 3) phải chạy bóng: nhóm shadow và <info type="text">shadow_since=YYYY-MM-DD</info> '
-                                     '(ngoại lệ: ' + ", ".join(map(str, sorted(SHADOW_EXEMPT))) + ' và rule có <info>port_of_stock=</info>)')
                     if not (dynamic or tuning):
                         if rid not in pos and not (level == 0 and rid in feeds):   # cha level 0: harness chỉ thấy rule cuối chuỗi
                             err(rid, "thiếu ca test dương (rule: id)")

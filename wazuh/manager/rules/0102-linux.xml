@@ -1,5 +1,5 @@
 <!--
-  Rule tiến trình Linux (LNX-001..006 của bộ rule cũ), chạy BÓNG. Dải ID 102000-102499 (0851-linux-audit.xml giữ 102500-102999). Decoder: decoders/0102-siem-procs.xml.
+  Rule tiến trình Linux (LNX-001..006 của bộ rule cũ), bật từ 05/11/2026 (R65). Dải ID 102000-102499 (0851-linux-audit.xml giữ 102500-102999). Decoder: decoders/0102-siem-procs.xml.
   File này giữ nguồn siem-proc (con của 102000: nhìn trường cmd/name/parent do decoder tách). Nguồn auditd EXECVE (R35) nằm ở 0851-linux-audit.xml,
   vì file rule nạp theo thứ tự TÊN FILE trên cả hai thư mục và rule nối vào 80792/92600 phải nằm SAU 0365-auditd_rules.xml và 0850-audit_rules.xml (xem đầu file đó).
   Mã -> id siem-proc: LNX-001 102001, LNX-002 102002, LNX-003 102003, LNX-004 102004 (nhánh tên) + 102014 (nhánh dòng lệnh), LNX-005 102090 (bộ đếm) -> 102005, LNX-006 102006.
@@ -19,8 +19,7 @@
     <mitre>
       <id>T1059.004</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,</group>
+    <group>siem,linux,</group>
   </rule>
 
   <!-- LNX-001: reverse shell. -->
@@ -31,8 +30,7 @@
     <mitre>
       <id>T1059.004</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,legacy_LNX-001,</group>
+    <group>siem,linux,legacy_LNX-001,</group>
   </rule>
 
   <!-- LNX-002: web server sinh ra shell/công cụ. CHỈ chạy trên siem-proc: auditd không ghi tên tiến trình cha (chỉ ppid), nên không diễn đạt được điều kiện cha-con. -->
@@ -45,8 +43,7 @@
       <id>T1505.003</id>
       <id>T1059.004</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,legacy_LNX-002,</group>
+    <group>siem,linux,legacy_LNX-002,</group>
   </rule>
 
   <!-- LNX-003: tải script rồi chạy qua shell, trừ bộ cài chính thức (cùng danh sách loại trừ với YAML cũ). -->
@@ -58,8 +55,7 @@
       <id>T1105</id>
       <id>T1059.004</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,legacy_LNX-003,</group>
+    <group>siem,linux,legacy_LNX-003,</group>
   </rule>
 
   <!-- LNX-004: crypto miner. Hai rule vì hai trường (field không OR được): 102004 theo tên tiến trình (neo chính xác, xmrigtool không khớp), 102014 theo dòng lệnh. -->
@@ -70,8 +66,7 @@
     <mitre>
       <id>T1496</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,legacy_LNX-004,</group>
+    <group>siem,linux,legacy_LNX-004,</group>
   </rule>
 
   <rule id="102014" level="10">
@@ -81,8 +76,7 @@
     <mitre>
       <id>T1496</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,legacy_LNX-004,</group>
+    <group>siem,linux,legacy_LNX-004,</group>
   </rule>
 
   <!-- LNX-006: can thiệp cơ chế duy trì (authorized_keys, cron, systemd). -->
@@ -95,8 +89,7 @@
       <id>T1098.004</id>
       <id>T1543.002</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,legacy_LNX-006,</group>
+    <group>siem,linux,legacy_LNX-006,</group>
   </rule>
 
   <!-- LNX-005: bộ đếm lệnh trinh sát, đứng sau mọi rule trên (xem đầu file). siem-proc: level 2 (trước đây chỉ là rule 530 level 0, không alert).
@@ -108,8 +101,7 @@
     <mitre>
       <id>T1082</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,legacy_LNX-005,</group>
+    <group>siem,linux,legacy_LNX-005,</group>
   </rule>
 
   <!-- LNX-005: >= 4 lệnh trinh sát KHÁC TÊN trong 60s trên một máy. Mặc định analysisd đếm theo agent (global_frequency mới đếm chéo agent); same_location phân
@@ -125,7 +117,6 @@
       <id>T1033</id>
       <id>T1016</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,legacy_LNX-005,</group>
+    <group>siem,linux,legacy_LNX-005,</group>
   </rule>
 </group>

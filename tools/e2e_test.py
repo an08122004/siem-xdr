@@ -101,8 +101,11 @@ def sh(*cmd):
 
 
 def alert(c, rule_prefix, pred=lambda a: True):
+    """R65: engine YAML đã tắt, phát hiện là rule Wazuh XML (rule.id WZH-<id>). Mã YAML cũ (WEB-001, LNX-002...) nay là
+    rule.legacy_id / legacy_ids của rule XML tương ứng; truyền WZH-... để khớp theo id."""
     return next((a for a in c.get("/api/v1/alerts?size=200") if a["@timestamp"] >= START
-                 and a["rule"]["id"].startswith(rule_prefix) and pred(a)), None)
+                 and (a["rule"]["id"].startswith(rule_prefix) or rule_prefix in (a["rule"].get("legacy_ids") or []))
+                 and pred(a)), None)
 
 
 def action(c, typ, target=None, status="success"):
@@ -175,7 +178,7 @@ check("sqli", "truy cập bình thường", web("/")[0] == 200)
 t0 = time.time()
 web("/products.html?id=1%20union%20select%20username,password%20from%20users")
 a = wait(lambda: alert(admin, "WEB-001"))
-check("sqli", "alert WEB-001", bool(a), f"{a['rule']['name']}, nguồn {a.get('source', {}).get('ip')}, sau {time.time() - t0:.0f}s" if a else "")
+check("sqli", "alert WEB-001 (rule XML WZH-104xxx, legacy_id WEB-001)", bool(a), f"{a['rule']['name']}, nguồn {a.get('source', {}).get('ip')}, sau {time.time() - t0:.0f}s" if a else "")
 b = wait(lambda: action(admin, "block_ip"))
 check("sqli", "SOAR chặn IP qua Wazuh, agent báo success", bool(b), f"{b['target']}: {b['output']}, sau {time.time() - t0:.0f}s" if b else "")
 check("sqli", "máy host không vào được web nữa", web("/", timeout=4)[0] is None)

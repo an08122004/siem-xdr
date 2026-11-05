@@ -88,7 +88,10 @@ def suppress_key(doc: Doc) -> tuple:
 
 
 def is_shadow_stock(rule: dict, active_groups: set[str] | None = None, any_level: int | None = None) -> bool:
-    """Rule gốc của Wazuh ngoài danh sách nhóm cũ và dưới level any: chạy bóng tới cổng T18 (chỉ đo, SOAR bỏ qua)."""
+    """Rule gốc của Wazuh ngoài danh sách nhóm cũ và dưới level any: chạy bóng (chỉ đo, SOAR bỏ qua).
+    Từ R65 mặc định tắt (WAZUH_STOCK_SHADOW=false): rule gốc đủ level là alert thật."""
+    if not settings.WAZUH_STOCK_SHADOW:
+        return False
     active = settings.WAZUH_ALERT_ACTIVE_GROUPS if active_groups is None else active_groups
     any_level = settings.WAZUH_ALERT_ANY_LEVEL if any_level is None else any_level
     if _is_local(rule):
@@ -120,7 +123,7 @@ def covered_by(doc: Doc, rules: Iterable[Rule]) -> str | None:
     của ruleset gốc (550, 553...), nên khi nó đã bắt event thì không chuyển cảnh báo chung nữa: một thay đổi file không
     thành 2 alert. Không áp cho rule Wazuh tự viết (id >= 100000, vd 100100 webshell) và không tính rule chạy bóng: SOAR
     bỏ qua alert bóng, nếu bỏ luôn cảnh báo Wazuh thì thay đổi đó không còn alert nào được xử lý."""
-    if get(doc, "event.module") != "fim":
+    if not settings.RULE_ENGINE_ENABLED or get(doc, "event.module") != "fim":
         return None
     try:
         if int(get(doc, "wazuh.rule.id") or 0) >= LOCAL_RULE_MIN_ID:

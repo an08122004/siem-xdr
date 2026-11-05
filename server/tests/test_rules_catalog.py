@@ -234,10 +234,21 @@ def test_wazuh_rule_docs_pages_and_maps(monkeypatch):
     docs = {d["rule"]["id"]: d for d in rc.wazuh_rule_docs(api, {"WZH-5710": {"d7": 3}})}
     assert api.calls == [0, 1] and set(docs) == {"WZH-5710", "WZH-101010"}
     stock, proj = docs["WZH-5710"], docs["WZH-101010"]
-    assert stock["severity"] == "low" and stock["shadow"] is True and stock["mode"] == "shadow"   # rule gốc level 5 ngoài nhóm cũ
+    assert stock["severity"] == "low" and stock["shadow"] is False and stock["mode"] == "nobridge"   # R65: không còn bóng; level 5 < 7 không ra alert
     assert stock["alerts"]["d7"] == 3 and stock["mitre"]["technique"] == ["T1110"] and stock["file"] == "ruleset/rules/0095-sshd_rules.xml"
     assert proj["severity"] == "high" and proj["shadow"] is True and proj["legacy_id"] == "AUTH-001"
     assert proj["mode"] == "off" and proj["status"] == "disabled" and proj["source"] == "wazuh" and proj["origin"] == "wazuh_rule" and "legacy_id" not in stock
+
+
+def test_wazuh_stock_docs_follow_shadow_setting(monkeypatch):
+    """Thư viện hiển thị rule gốc level 7-11 là chính thức (R65); WAZUH_STOCK_SHADOW=true thì lại là chạy bóng."""
+    api = FakeWazuh()
+    api.items[0]["level"] = 8
+    doc = next(d for d in rc.wazuh_rule_docs(api, {}) if d["rule"]["id"] == "WZH-5710")
+    assert doc["shadow"] is False and doc["mode"] == "active"
+    monkeypatch.setattr(rc.settings, "WAZUH_STOCK_SHADOW", True)
+    doc = next(d for d in rc.wazuh_rule_docs(FakeWazuh(), {}) if d["rule"]["id"] == "WZH-5710")
+    assert doc["shadow"] is True and doc["mode"] == "shadow"
 
 
 def test_sync_includes_wazuh_and_keeps_old_on_api_error(rules_dir, monkeypatch):
@@ -303,3 +314,10 @@ def test_wazuh_rule_docs_not_bridged_never_counts_as_running():
     assert docs["WZH-101100"]["bridged"] is True and docs["WZH-101100"]["mode"] in ("active", "shadow")
     only_bad = [docs[r] for r in ("WZH-550", "WZH-19007", "WZH-101099")]
     assert not attack_coverage(only_bad, {"techniques": [{"id": "T1110"}]})[0]["covered"]
+
+
+def test_yaml_rule_docs_are_off_when_engine_disabled(rules_dir, monkeypatch):
+    """R65: engine YAML tắt -> thư viện ghi mode off, nhãn "đã tắt (engine YAML)"."""
+    monkeypatch.setattr(rc.settings, "RULE_ENGINE_ENABLED", False)
+    docs = rc.rule_docs(rules_dir, {})
+    assert docs and all(d["mode"] == "off" and d["mode_label"] == "đã tắt (engine YAML)" for d in docs)

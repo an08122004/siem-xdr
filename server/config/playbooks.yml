@@ -1,5 +1,5 @@
 # Playbook SOAR: khi alert khớp điều kiện `when` -> thực hiện lần lượt `steps`.
-#   rule_ids: hỗ trợ wildcard (WEB-*; WZH-* là cảnh báo của ruleset Wazuh), min_severity: low|medium|high|critical
+#   rule_ids: hỗ trợ wildcard (WZH-* là cảnh báo của ruleset Wazuh), min_severity: low|medium|high|critical
 #   groups: nhóm rule Wazuh (alert.rule.groups), khớp 1 trong các nhóm. Có cả rule_ids và groups: khớp MỘT trong hai.
 #     R60: hành động phá hủy (block_ip, kill, isolate) CHỈ chọn theo rule_ids rõ ràng đã duyệt, KHÔNG dùng groups:
 #     nhóm như authentication_failures có 50+ rule gốc (Postfix, WordPress, VPN...) mà srcip thường là proxy / NAT
@@ -10,53 +10,8 @@
 #   block_ip: target (trường chứa IP, mặc định source.ip), scope: origin|all, duration (giây, 0 = vĩnh viễn)
 #   approval: true -> không tự chạy, chỉ đề xuất cho analyst duyệt trên console
 playbooks:
-  - name: Chặn IP tấn công brute-force
-    when:
-      rule_ids: [AUTH-001, AUTH-003, WIN-001]
-      min_severity: high
-    steps:
-      - {action: block_ip, target: source.ip, scope: all, duration: 3600}
-      - {action: notify}
-      - {action: create_case}
-
-  - name: Tài khoản có thể đã bị chiếm (brute-force thành công)
-    when:
-      rule_ids: [AUTH-002]
-    steps:
-      - {action: block_ip, target: source.ip, scope: all, duration: 86400}
-      - {action: isolate_host, approval: true}
-      - {action: notify}
-      - {action: create_case}
-
-  - name: Chặn nguồn tấn công Web nghiêm trọng
-    when:
-      rule_ids: ["WEB-*"]
-      min_severity: high
-    steps:
-      - {action: block_ip, target: source.ip, scope: origin, duration: 1800}
-      - {action: notify}
-      - {action: create_case}
-
-  - name: Diệt tiến trình độc hại trên endpoint
-    when:
-      rule_ids: [LNX-001, LNX-002, LNX-004, WIN-006, WIN-007, WIN-010]
-    steps:
-      - {action: kill_process}
-      - {action: isolate_host, approval: true}
-      - {action: notify}
-      - {action: create_case}
-
-  - name: IOC từ Threat Intelligence
-    when:
-      rule_ids: [TI-001]
-    steps:
-      - {action: block_ip, target: threat.indicator.value, scope: all, duration: 86400}
-      - {action: notify}
-      - {action: create_case}
-
-  # ---- Rule Wazuh (XML, thay dần rule YAML; Task 15). Giữ song song với mục YAML ở trên tới Task 18: rule YAML mang mã
-  # AUTH-/WEB-/LNX-/WIN-, rule XML mang WZH-<id>, hai bên không khớp chung playbook nào. Bản XML tương ứng chạy BÓNG
-  # (alert.shadow -> engine.handle bỏ qua hoàn toàn) tới khi chuyển nhánh nên không chặn / kill trùng.
+  # ---- Rule Wazuh (R65, 05/11/2026): engine YAML đã tắt, mọi phát hiện đến từ wazuh-analysisd và mang mã WZH-<id>.
+  # Playbook theo mã YAML cũ (AUTH-/WEB-/LNX-/WIN-/TI-001) đã xóa; chú thích "# AUTH-001" cạnh id là mã cũ để đối chiếu.
   - name: Chặn IP brute-force (rule Wazuh)
     when:
       rule_ids: [WZH-101001, WZH-101003, WZH-105001]     # AUTH-001, AUTH-003, WIN-001
@@ -103,7 +58,7 @@ playbooks:
   - name: Diệt tiến trình độc hại trên endpoint (rule Wazuh)
     when:
       rule_ids: [WZH-102001, WZH-102002, WZH-102004, WZH-102014, WZH-102501, WZH-102504, WZH-102511,
-                 WZH-105006, WZH-105007, WZH-105107, WZH-105207, WZH-105010]
+                 WZH-105006, WZH-105007, WZH-105107, WZH-105207, WZH-105010, WZH-91837]
     steps:
       - {action: kill_process}
       - {action: isolate_host, approval: true}

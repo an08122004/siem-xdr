@@ -131,7 +131,7 @@ Impact) chưa có rule. Layer cho MITRE ATT&CK Navigator: `python tools/rule_lin
 5. Rà soát hằng quý theo cột báo nhầm trong *Thư viện rule*: rule báo nhầm nhiều thì sửa điều kiện, thêm ngoại lệ hoặc hạ mức.
 
 **Rule Wazuh XML: chạy bóng, ngoại lệ (nhánh `feature/wazuh-unified-ruleset`).** Phát hiện đang chuyển từ engine YAML sang rule XML của
-Wazuh (mô tả: [RULES.md](RULES.md) mục 9). Tới Task 18 (cổng chuyển, chưa được duyệt) hai hệ thống cùng chạy và các quy trình trên giữ nguyên cho rule YAML. Phần dưới là cái khác đi với rule XML.
+Wazuh (mô tả: [RULES.md](RULES.md) mục 9). Từ 05/11/2026 (R65) engine YAML tắt và rule XML là alert thật; các quy trình trên (mode YAML, nút *Bật chính thức* cho rule AI) chỉ áp dụng khi bật lại `RULE_ENGINE_ENABLED`. **Đợt chuyển này bỏ tiêu chí 7 ngày chạy bóng theo quyết định của chủ dự án** (R65): rule XML hiện có vào chạy thật mà chưa đủ 7 ngày đo; từ nay rule MỚI vẫn đi qua chạy bóng đủ tiêu chí ở bước 4. Phần dưới là cái khác đi với rule XML.
 
 - *Chạy bóng bằng nhóm.* Rule XML riêng có nhóm `shadow` và `<info type="text">shadow_since=YYYY-MM-DD</info>`; cầu nối đặt `alert.shadow`, SOAR bỏ qua như rule YAML bóng. Hiện 78 rule mang `shadow_since` (31/10 đến 04/11/2026).
 - *Bật chính thức.* Cùng tiêu chí bước 4 ở trên (≥ `SHADOW_MIN_DAYS` ngày, dưới `SHADOW_MAX_ALERTS_PER_DAY` alert/ngày, báo nhầm dưới `SHADOW_MAX_FP_RATE`). Không có nút trên console: commit bỏ nhóm `shadow` khỏi rule, qua CI (`tools/wazuh_rule_lint.py` và các ca test log gốc qua Wazuh thật), rồi reload; Wazuh nạp ngay, không khởi động lại. Ở Task 18 nhóm `shadow` của các file 0101 đến 0106 và 0845 được bỏ hàng loạt, trừ rule có `shadow_since` dưới 7 ngày. Sau Task 18 mục này thay mục 4 hiện tại.
@@ -142,7 +142,7 @@ Wazuh (mô tả: [RULES.md](RULES.md) mục 9). Tới Task 18 (cổng chuyển, 
   4. Gỡ bằng `DELETE /api/v1/exceptions/{id}?reason=...` (cần lý do): một người đủ vì bật lại phát hiện là hướng an toàn. Mục chuyển sang `removed` và **giữ làm lịch sử**; rule rời khỏi XML.
   5. Mọi thao tác POST / DELETE ghi vào nhật ký hoạt động (`exception_added`, `exception_approved`, `exception_removed`).
 
-  Ngoại lệ YAML (`server/rules/exceptions/`, ngoại lệ AI) vẫn là đường đang chạy cho rule YAML tới Task 18. Chưa kiểm trên manager thật: ngoại lệ con level 0 có thắng rule anh em (vd 31106 khi mã 200), có che cây con của rule cha không, `pcre2` trên `<url>`/`<dstuser>` (ghi trong kế hoạch, mục Task 16).
+  Ngoại lệ YAML (`server/rules/exceptions/`, ngoại lệ AI) không còn tác dụng khi engine YAML tắt (R65). Chưa kiểm trên manager thật: ngoại lệ con level 0 có thắng rule anh em (vd 31106 khi mã 200), có che cây con của rule cha không, `pcre2` trên `<url>`/`<dstuser>` (ghi trong kế hoạch, mục Task 16).
 
 **Risk-based alerting (RBA-001).** SOAR cộng `risk_score` của từng alert (severity × mức quan trọng tài sản) vào máy
 (`host.name`) và tài khoản (`user.name`) liên quan, trong cửa sổ `RBA_WINDOW_HOURS` (24) giờ. Khi tổng điểm ≥ `RBA_THRESHOLD`

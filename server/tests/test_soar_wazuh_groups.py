@@ -93,10 +93,36 @@ def test_kill_only_from_agent_not_syslog(monkeypatch):
     assert all(r["status"] != "queued" for r in res if r["action"] == "kill_process")
 
 
-def test_yaml_code_alerts_still_use_yaml_playbooks(monkeypatch):
+def test_yaml_code_alerts_have_no_destructive_playbook_after_cutover(monkeypatch):
+    """R65: engine YAML tắt, playbook theo mã YAML cũ đã xóa: alert mang mã YAML (nếu còn) chỉ được thông báo / mở case."""
     a = {"alert": {"id": "y1", "source": "rule"}, "rule": {"id": "AUTH-001", "name": "bf"}, "severity": "high",
          "severity_score": 3, "source": {"ip": "10.9.9.9"}, "agent": {"id": "web-01"}, "message": "x"}
-    assert blocked(run(a, monkeypatch)[0])
+    res, es = run(a, monkeypatch)
+    assert not blocked(res) and "siem-actions" not in es.docs and any(r["action"] == "create_case" for r in res)
+
+
+def test_playbooks_have_no_yaml_engine_codes():
+    yaml_codes = {str(d["id"]) for f in (ROOT / "rules").glob("*.yml") for d in yaml.safe_load(f.read_text(encoding="utf-8")) or []}
+    pbs = yaml.safe_load((ROOT / "config" / "playbooks.yml").read_text(encoding="utf-8"))["playbooks"]
+    used = {r for p in pbs for r in (p.get("when") or {}).get("rule_ids", [])}
+    assert yaml_codes and not (used & yaml_codes) and "WEB-*" not in used
+
+
+def test_every_xml_twin_of_old_destructive_yaml_playbooks_is_still_in_a_playbook():
+    """Mã YAML từng bị chặn / diệt (AUTH-001/003, WIN-001, AUTH-002, WEB high+, LNX-001/002/004, WIN-006/007/010): mọi rule
+    XML level >= 10 mang legacy_<mã> phải có trong rule_ids của một playbook phá hủy, nếu không cut-over làm mất phản ứng."""
+    old = {"AUTH-001", "AUTH-003", "WIN-001", "AUTH-002", "WEB-001", "WEB-003", "WEB-004", "WEB-007", "WEB-008", "WEB-009",
+           "LNX-001", "LNX-002", "LNX-004", "WIN-006", "WIN-007", "WIN-010"}
+    pbs = yaml.safe_load((ROOT / "config" / "playbooks.yml").read_text(encoding="utf-8"))["playbooks"]
+    covered = {i for p in pbs if {s["action"] for s in p["steps"]} & {"block_ip", "kill_process"}
+               for i in (p.get("when") or {}).get("rule_ids", [])}
+    missing = []
+    for f in sorted(RULES_XML.glob("*.xml")):
+        for m in re.finditer(r'<rule id="(\d+)" level="(\d+)"[^>]*>(.*?)</rule>', f.read_text(encoding="utf-8"), re.S):
+            legacy = set(re.findall(r"legacy_([A-Z]+-\d+)", m.group(3)))
+            if int(m.group(2)) >= 10 and legacy & old and f"WZH-{m.group(1)}" not in covered:
+                missing.append((f.name, m.group(1), sorted(legacy & old)))
+    assert not missing, missing
 
 
 def test_case_playbook_group_step_order(tmp_path):
@@ -168,8 +194,8 @@ def test_every_configured_group_exists_somewhere():
 
 def test_destructive_playbooks_match_explicit_rule_ids_only() -> None:
     """R60: hành động phá hủy chỉ theo id rule cụ thể — không theo nhóm, không mẫu `*` / `WZH-*` (nhóm Wazuh như
-    authentication_failures kéo theo hàng chục rule gốc có srcip là proxy / relay / NAT). Mẫu mã YAML của dự án
-    (vd `WEB-*`) vẫn được: chỉ khớp rule viết tay, bỏ cùng rule YAML ở Task 18."""
+    authentication_failures kéo theo hàng chục rule gốc có srcip là proxy / relay / NAT). Từ R65 không còn mẫu mã
+    YAML (`WEB-*`) nào: engine YAML đã tắt."""
     pbs = yaml.safe_load((ROOT / "config" / "playbooks.yml").read_text(encoding="utf-8"))["playbooks"]
     destructive = [p for p in pbs if {s["action"] for s in p["steps"]} & {"block_ip", "kill_process", "isolate_host"}]
     assert destructive

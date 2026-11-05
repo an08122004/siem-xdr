@@ -1,5 +1,5 @@
 <!--
-  Rule web (WEB-001..005, 007..009 của bộ rule cũ), chạy BÓNG. Dải ID 104000-104999. KHÔNG ĐỔI TÊN FILE: tên phải xếp SAU 0270-web_appsec_rules.xml
+  Rule web (WEB-001..005, 007..009 của bộ rule cũ), bật từ 05/11/2026 (R65). Dải ID 104000-104999. KHÔNG ĐỔI TÊN FILE: tên phải xếp SAU 0270-web_appsec_rules.xml
   (rule con của 31530 nằm ở 0270; if_sid trỏ tới rule ở file nạp sau thì bị bỏ "Signature ID not found") nên file này mang số 0271, không phải 0104 như bảng kế hoạch.
   Đường vào: agent demo-web đọc /usr/local/apache2/logs/access_log (log_format apache), rule thấy location `(demo-web) any->/usr/local/apache2/logs/access_log` (S7);
   rule chỉ nhận vị trí dạng agent (xem mục GIẢ MẠO QUA SYSLOG). Decoder gốc web-accesslog giải thành srcip, protocol (= phương thức GET/POST), url (cả query), id (= mã trạng thái).
@@ -17,7 +17,7 @@
   Thứ tự trong file đi theo mức độ (critical trước): request vừa có RCE vừa có SQLi ra WEB-004; scanner UA (WEB-005, medium) đứng sau các rule payload.
 
   HỆ QUẢ VỚI RULE GỐC (đã đo bằng ca test): event khớp rule của file này không còn là event của rule gốc đã chiếm nó trong lịch sử đếm, nên các rule gốc đếm
-  (31151 nhiều 4xx (T12: 30 lần/60 s, level 7), 31152 nhiều SQLi, 31153 nhiều tấn công thường, 31154 nhiều XSS (level 10); bóng đến T18) KHÔNG đếm những request ấy nữa: lặp lại cùng một tấn công
+  (31151 nhiều 4xx (T12: 30 lần/60 s, level 7), 31152 nhiều SQLi, 31153 nhiều tấn công thường, 31154 nhiều XSS (level 10); bật từ 05/11/2026, R65) KHÔNG đếm những request ấy nữa: lặp lại cùng một tấn công
   nay ra từng alert WEB (level 7-12) chứ không còn alert tổng hợp. 404/4xx thường (không payload) và 31102/31140 giữ nguyên: 31151 vẫn báo sau 30 lần/60 s (có ca).
   WEB-007 (login POST, kể cả 4xx) cũng lấy event khỏi 31101/31530; 31533 (8 POST/20 s, level 10) không đếm POST vào đường dẫn đăng nhập nữa, thay bằng WEB-007.
 
@@ -40,7 +40,7 @@
   RULE IOC GỐC (R56, 0999-malicious-ioc-rules.xml, nạp SAU file này): 99905 (level 9, con của 31103-31171) và 99906 (level 14, status 200, THẬT đang báo) báo khi srcip nằm trong
   etc/lists/malicious-ioc/malicious-ip. Rule WEB là con của 31100 ở level 10-12 nên thắng mọi rule tấn công gốc và 99905/99906 không còn thấy dòng đó. Loại IP IOC khỏi rule WEB
   (R54) bị bỏ vì làm mất dòng chỉ rule WEB bắt. Thay vào đó 104095 cổng 99906 sang nhánh rule WEB VÀ mở rộng nó (cố ý, cho IP đã biết là độc) tới cả tấn công chỉ rule WEB bắt, rule gốc 31103-31106 không bắt: con của mọi rule payload/UA, list match_key + <id>^200</id>, level 14,
-  không `shadow` (phần cổng là hành vi gốc đang chạy thật, không phải phát hiện mới; <info>port_of_stock=99906</info>; lint hiện không bắt buộc nhóm shadow). Hệ quả đã đo:
+  không chạy bóng (phần cổng là hành vi gốc đang chạy thật, không phải phát hiện mới; <info>port_of_stock=99906</info>). Hệ quả đã đo:
   IP IOC + tấn công rule WEB bắt + 200 -> 104095 (14); + 404 -> rule WEB (99905 level 9 gốc không còn báo dòng đó); tấn công chỉ rule gốc bắt -> 99905/99906 như cũ.
   KHÔNG dùng `ignore` (Ràng buộc 7, R55): nó dập cả rule nên nguồn thứ hai trong cửa sổ bị lỡ; khử trùng ở cầu nối (Suppressor). Hệ quả: 104007/104009 báo ở MỌI event vượt ngưỡng
   trong cửa sổ (có ca hai nguồn cùng lúc đều báo).
@@ -57,8 +57,7 @@
       <id>T1059</id>
       <id>T1190</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-004,</group>
+    <group>siem,web,legacy_WEB-004,</group>
   </rule>
 
   <rule id="104041" level="12">
@@ -70,8 +69,7 @@
       <id>T1059</id>
       <id>T1190</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-004,</group>
+    <group>siem,web,legacy_WEB-004,</group>
   </rule>
 
   <rule id="104008" level="12">
@@ -82,8 +80,7 @@
     <mitre>
       <id>T1505.003</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-008,</group>
+    <group>siem,web,legacy_WEB-008,</group>
   </rule>
 
   <rule id="104001" level="10">
@@ -94,8 +91,7 @@
     <mitre>
       <id>T1190</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-001,</group>
+    <group>siem,web,legacy_WEB-001,</group>
   </rule>
 
   <rule id="104013" level="10">
@@ -106,8 +102,7 @@
     <mitre>
       <id>T1190</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-001,</group>
+    <group>siem,web,legacy_WEB-001,</group>
   </rule>
 
   <rule id="104011" level="10">
@@ -118,8 +113,7 @@
     <mitre>
       <id>T1190</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-001,</group>
+    <group>siem,web,legacy_WEB-001,</group>
   </rule>
 
   <rule id="104014" level="10">
@@ -130,8 +124,7 @@
     <mitre>
       <id>T1190</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-001,</group>
+    <group>siem,web,legacy_WEB-001,</group>
   </rule>
 
   <rule id="104012" level="10">
@@ -142,8 +135,7 @@
     <mitre>
       <id>T1190</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-001,</group>
+    <group>siem,web,legacy_WEB-001,</group>
   </rule>
 
   <rule id="104003" level="10">
@@ -154,8 +146,7 @@
     <mitre>
       <id>T1190</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-003,</group>
+    <group>siem,web,legacy_WEB-003,</group>
   </rule>
 
   <rule id="104031" level="10">
@@ -166,8 +157,7 @@
     <mitre>
       <id>T1190</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-003,</group>
+    <group>siem,web,legacy_WEB-003,</group>
   </rule>
 
   <rule id="104002" level="7">
@@ -178,8 +168,7 @@
     <mitre>
       <id>T1189</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-002,</group>
+    <group>siem,web,legacy_WEB-002,</group>
   </rule>
 
   <rule id="104021" level="7">
@@ -190,8 +179,7 @@
     <mitre>
       <id>T1189</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-002,</group>
+    <group>siem,web,legacy_WEB-002,</group>
   </rule>
 
   <rule id="104005" level="7">
@@ -202,8 +190,7 @@
     <mitre>
       <id>T1595.002</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-005,</group>
+    <group>siem,web,legacy_WEB-005,</group>
   </rule>
 
   <rule id="104070" level="2">
@@ -215,8 +202,7 @@
     <mitre>
       <id>T1110.001</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-007,</group>
+    <group>siem,web,legacy_WEB-007,</group>
   </rule>
 
   <rule id="104007" level="10" frequency="10" timeframe="60">
@@ -226,8 +212,7 @@
     <mitre>
       <id>T1110.001</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-007,</group>
+    <group>siem,web,legacy_WEB-007,</group>
   </rule>
 
   <rule id="104090" level="2">
@@ -238,8 +223,7 @@
     <mitre>
       <id>T1498</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-009,</group>
+    <group>siem,web,legacy_WEB-009,</group>
   </rule>
 
   <rule id="104009" level="10" frequency="300" timeframe="60">
@@ -250,8 +234,7 @@
       <id>T1498</id>
       <id>T1499.002</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-03</info>
-    <group>siem,web,shadow,legacy_WEB-009,</group>
+    <group>siem,web,legacy_WEB-009,</group>
   </rule>
 
   <rule id="104095" level="14">

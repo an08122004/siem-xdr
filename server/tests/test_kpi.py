@@ -177,3 +177,19 @@ def test_dashboard_json_matches_generator(tmp_path):
     for f in tmp_path.glob("*.json"):
         assert f.read_bytes() == (repo / "grafana" / "dashboards" / f.name).read_bytes(), f"{f.name} lệch generator: chạy lại tools/gen_dashboard.py"
     assert len(list(tmp_path.glob("*.json"))) == 4
+
+
+def test_kpi_coverage_only_from_wazuh_when_yaml_engine_off(monkeypatch):
+    """R65: engine YAML tắt -> rule YAML trong thư viện mang mode off, không tính phủ; lint YAML không còn là nguồn dự phòng."""
+    from siem.rules_catalog import attack_coverage
+    monkeypatch.setattr(settings, "RULE_ENGINE_ENABLED", False)
+    prof = {"techniques": [{"id": "T1190"}, {"id": "T1110"}]}
+    docs = [_doc("WEB-001", "T1190", mode="off", tests={"tested": True}),
+            _doc("WZH-101", "T1110", origin="wazuh_rule", source="wazuh", mode="active", shadow=False, status="enabled", bridged=True)]
+    cov = {c["id"]: c for c in attack_coverage(docs, prof)}
+    assert not cov["T1190"]["covered"] and cov["T1110"]["sources"] == "wazuh"
+    es = KES()
+    orig = es.search
+    es.search = lambda index, **kw: ({"hits": {"total": {"value": 0}, "hits": []}} if index == settings.IDX_RULES else orig(index, **kw))
+    d = kpi.compute(es, ROOT / "rules", ROOT / "config", days=30, now=NOW)
+    assert d["attack_coverage_source"] == "siem-rules" and d["attack_coverage_pct"] == 0.0
