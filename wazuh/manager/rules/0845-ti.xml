@@ -14,7 +14,10 @@
     - firewall pf / filterlog (OPNsense qua agent hoặc syslog 514): con của 87701 (block) và 103000 (pass, bộ đếm của 0541-network.xml), và của 103003 (NET-003);
       rule cuối của event đổi sang TI-001 nên event đó KHÔNG vào lịch sử đếm của NET-001 / NET-005 / 87702: chấp nhận được vì TI-001 đã báo từng event của nguồn IOC (giống mục 5 đầu 0541-network.xml);
     - Suricata (eve.json): con của 86601 và của 103004.
-  Cũng phủ sshd, web access log, đăng nhập Windows (cuối file, R53). Chưa phủ: DNS, proxy, VPN... (cần cha riêng cho từng nguồn).
+  Cũng phủ sshd, web access log, đăng nhập Windows (cuối file, R53).
+  R63 (nhất quán với R57): CẢ BA con TI-001 theo dịch vụ (107008 sshd, 107009 web, 107010 Windows) loại IP có trong danh sách gốc malicious-ip bằng `not_match_key`, để rule IOC gốc
+  (99903 / 99904, 99905 / 99906, 99919 / 99920) giữ ngữ cảnh. Firewall (107001-107003) không loại vì không có rule IOC gốc cùng cha; Suricata loại ở 107004 / 107005.
+  Riêng Windows: 99919 là con trực tiếp của 60105 (level 9) nên thắng 60122 (level 5) cùng toàn bộ cây con của 60122, nên 107010 (con của 60122) không bao giờ được xét với IP nằm ở cả hai danh sách, kể cả khi level 10 > 9. Chưa phủ: DNS, proxy, VPN... (cần cha riêng cho từng nguồn).
 
   Thứ tự anh em cùng cha (thử trên 4.14.8): rule LEVEL CAO hơn thắng, bằng level thì rule nạp trước thắng; rule gốc (ruleset/rules) nạp trước rule của repo. Vì vậy:
     - TI-001 firewall level 10 ngang NET-003 (103003, nạp trước) nên NET-003 thắng khi trùng; 107003 là CON của 103003 để vẫn ra TI-001 (mô tả nêu IOC).
@@ -117,10 +120,12 @@
 
   <!-- TI-001 sshd: IP nguồn của đăng nhập thành công (5715), thất bại (5716, 5760) hay user không tồn tại (5710) nằm trong danh sách IOC.
        Level 10 > 3/5 của các rule này; 5763 / 5720 / 5712 (brute force, level 10, if_matched_sid) đếm theo rule cuối của event nên KHÔNG đếm event của IP MISP:
-       IP đó ra TI-001 từng event (cùng level 10), xem ghi chú R53 ở đầu file. -->
+       IP đó ra TI-001 từng event (cùng level 10), xem ghi chú R53 ở đầu file.
+       R63: IP có ở CẢ danh sách gốc malicious-ip thì TI-001 nhường 99903 (đăng nhập thành công, level 14) / 99904 (thất bại, level 9, thua level 10 của TI-001 nếu không loại). -->
   <rule id="107008" level="10">
     <if_sid>5715, 5716, 5760, 5710</if_sid>
     <list field="srcip" lookup="match_key">etc/lists/siem-misp-ip</list>
+    <list field="srcip" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <description>TI-001 sshd: IP nguồn $(srcip) nằm trong danh sách IOC (MISP)</description>
     <mitre>
       <id>T1071</id>
@@ -152,6 +157,7 @@
   <rule id="107010" level="10">
     <if_sid>60106, 60122, 92657</if_sid>
     <list field="win.eventdata.ipAddress" lookup="match_key">etc/lists/siem-misp-ip</list>
+    <list field="win.eventdata.ipAddress" lookup="not_match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <description>TI-001 Windows: IP nguồn $(win.eventdata.ipAddress) của đăng nhập nằm trong danh sách IOC (MISP)</description>
     <mitre>
       <id>T1071</id>

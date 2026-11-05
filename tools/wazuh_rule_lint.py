@@ -4,6 +4,7 @@
     python tools/wazuh_rule_lint.py --layer build/attack-layer.json   # kèm layer cho MITRE ATT&CK Navigator
     (--layer: CHỈ rule XML dự án đang bật; khác KPI độ phủ, vốn tính cả rule YAML và rule gốc Wazuh có ra alert)
 
+Kiểm thêm (R63): rule dự án level >= 3 phải có nhóm `shadow` + `shadow_since=`; if_sid/if_matched_sid trỏ rule dự án phải trỏ về rule được định nghĩa trước.
 Mỗi dòng: `file:rule_id: thông điệp`; cảnh báo có tiền tố `WARNING: `. Thoát mã 1 khi có LỖI, cảnh báo thì mã 0.
 """
 from __future__ import annotations
@@ -30,6 +31,8 @@ PATTERN_TAGS = ("regex", "match", "field", "url", "id", "status", "data", "extra
                 "user", "action", "system_name")
 NON_CONDITION = {"if_sid", "if_group", "description", "group", "mitre", "info", "options"}
 BARE_WORD = re.compile(r"[\w.-]+")
+SHADOW_SINCE = re.compile(r"shadow_since=\d{4}-\d{2}-\d{2}")
+SHADOW_EXEMPT = {100100, 100101}      # WEB-010 / WEB-011 đã chạy thật trước khi có chế độ bóng
 
 
 def _split(text):
@@ -84,6 +87,13 @@ def check(files: dict[str, str], cases: list[dict]) -> list[str]:
             desc = (el.findtext("description") or "").strip()
             overwrite = el.get("overwrite") == "yes"
             if rid is not None:
+                if not (tuning or dynamic):
+                    # parent project rule must be loaded earlier (same file above, or an earlier file); Wazuh silently drops the rule otherwise
+                    for tag in ("if_sid", "if_matched_sid"):
+                        for e in el.findall(tag):
+                            for pid in (int(x) for x in re.findall(r"\d+", e.text or "")):
+                                if pid >= 100000 and pid not in seen:
+                                    err(rid, f"<{tag}> {pid}: rule dự án cha phải được định nghĩa TRƯỚC (cùng file ở trên, hoặc file xếp trước); nếu không Wazuh bỏ rule này")
                 if rid in seen:
                     err(rid, f"id trùng với {seen[rid]}")
                 seen[rid] = name
@@ -98,6 +108,11 @@ def check(files: dict[str, str], cases: list[dict]) -> list[str]:
                         err(rid, "id < 100000 là dải của Wazuh gốc")
                     elif rng and not rng[0] <= rid <= rng[1]:
                         err(rid, f"id ngoài dải {rng[0]}-{rng[1]} của file")
+                    infos = [(i.text or "").strip() for i in el.findall("info")]
+                    if rid >= 100000 and not dynamic and (level or 0) >= 3 and rid not in SHADOW_EXEMPT and not any(i.startswith("port_of_stock=") for i in infos):
+                        if "shadow" not in groups or not any(SHADOW_SINCE.fullmatch(i) for i in infos):
+                            err(rid, 'rule dự án mới (level >= 3) phải chạy bóng: nhóm shadow và <info type="text">shadow_since=YYYY-MM-DD</info> '
+                                     '(ngoại lệ: ' + ", ".join(map(str, sorted(SHADOW_EXEMPT))) + ' và rule có <info>port_of_stock=</info>)')
                     if not (dynamic or tuning):
                         if rid not in pos and not (level == 0 and rid in feeds):   # cha level 0: harness chỉ thấy rule cuối chuỗi
                             err(rid, "thiếu ca test dương (rule: id)")
