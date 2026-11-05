@@ -280,7 +280,7 @@ check("grafana", "Sign out trong Grafana → đăng xuất luôn phiên console"
 st, orgs = admin.grafana("/api/user/orgs")
 check("grafana", "quản trị console (e2e-admin) → Admin trong Grafana", st == 200 and orgs[0]["role"] == "Admin")
 st, d = admin.grafana("/api/dashboards/uid/siem-overview")
-check("grafana", "dashboard Tổng quan SOC tải được", st == 200 and len(d["dashboard"]["panels"]) == 36,
+check("grafana", "dashboard Tổng quan SOC tải được", st == 200 and len(d["dashboard"]["panels"]) == 40,
       f"{len(d['dashboard']['panels'])} panel" if st == 200 else str(st))
 q = {"refId": "A", "datasource": {"type": "elasticsearch", "uid": "siem-events"},
      "query": "event.module:console AND event.category:authentication", "metrics": [{"id": "1", "type": "count"}],
@@ -293,7 +293,7 @@ check("grafana", "mục Phiên đăng nhập thấy lượt đăng nhập consol
 st, d = admin.grafana("/api/dashboards/uid/siem-investigate")
 check("grafana", "dashboard Điều tra thực thể (biến q) tải được", st == 200 and d["dashboard"]["templating"]["list"][0]["name"] == "q")
 st, d = admin.grafana("/api/dashboards/uid/siem-rules")
-check("grafana", "dashboard Thư viện rule tải được", st == 200 and len(d["dashboard"]["panels"]) == 17)
+check("grafana", "dashboard Thư viện rule tải được", st == 200 and len(d["dashboard"]["panels"]) == 19)
 
 
 def catalog_count(query):

@@ -18,7 +18,7 @@
   "graphTooltip": 1,
   "panels": [
     {
-      "id": 65,
+      "id": 73,
       "type": "row",
       "title": "Chỉ số chính (30 ngày gần nhất) — xanh: đạt đích giai đoạn 4, vàng: đạt giai đoạn 2, đỏ: chưa đạt",
       "collapsed": false,
@@ -31,7 +31,7 @@
       "panels": []
     },
     {
-      "id": 66,
+      "id": 74,
       "type": "stat",
       "title": "MTTD alert critical",
       "datasource": {
@@ -44,7 +44,7 @@
         "w": 4,
         "h": 4
       },
-      "description": "Từ event đầu tiên của chuỗi tấn công tới lúc sinh alert. Đích: GĐ2 ≤ 30 phút, GĐ4 ≤ 15 phút.",
+      "description": "Từ event đầu tiên của chuỗi tấn công tới lúc sinh alert. Chỉ alert phát hiện (rule/wazuh/ml, không bóng); không tính RBA, health, dò ngược TI-002 (R62). Đích: GĐ2 ≤ 30 phút, GĐ4 ≤ 15 phút.",
       "targets": [
         {
           "refId": "A",
@@ -117,7 +117,7 @@
       }
     },
     {
-      "id": 67,
+      "id": 75,
       "type": "stat",
       "title": "MTTA case P1",
       "datasource": {
@@ -203,7 +203,7 @@
       }
     },
     {
-      "id": 68,
+      "id": 76,
       "type": "stat",
       "title": "MTTC case P1",
       "datasource": {
@@ -289,7 +289,7 @@
       }
     },
     {
-      "id": 69,
+      "id": 77,
       "type": "stat",
       "title": "Tuân thủ SLA",
       "datasource": {
@@ -375,7 +375,7 @@
       }
     },
     {
-      "id": 70,
+      "id": 78,
       "type": "stat",
       "title": "Tỉ lệ báo nhầm",
       "datasource": {
@@ -388,7 +388,7 @@
         "w": 4,
         "h": 4
       },
-      "description": "Alert kết luận báo nhầm / alert đã đóng. Đích: GĐ2 ≤ 50%, GĐ4 ≤ 30%.",
+      "description": "Alert kết luận báo nhầm / alert đã đóng; chỉ alert phát hiện (R62). Đích: GĐ2 ≤ 50%, GĐ4 ≤ 30%.",
       "targets": [
         {
           "refId": "A",
@@ -461,7 +461,7 @@
       }
     },
     {
-      "id": 71,
+      "id": 79,
       "type": "stat",
       "title": "Alert / analyst / ca",
       "datasource": {
@@ -474,7 +474,7 @@
         "w": 4,
         "h": 4
       },
-      "description": "Tải công việc. Đích: GĐ2 ≤ 60, GĐ4 ≤ 40.",
+      "description": "Tải công việc: alert phát hiện (R62) mỗi analyst mỗi ca. Đích: GĐ2 ≤ 60, GĐ4 ≤ 40.",
       "targets": [
         {
           "refId": "A",
@@ -547,7 +547,7 @@
       }
     },
     {
-      "id": 72,
+      "id": 80,
       "type": "stat",
       "title": "Làm giàu tự động",
       "datasource": {
@@ -560,7 +560,7 @@
         "w": 6,
         "h": 4
       },
-      "description": "% alert có ngữ cảnh tài sản. Đích: GĐ2 ≥ 50%, GĐ4 ≥ 80%.",
+      "description": "% alert phát hiện (R62) có ngữ cảnh tài sản. Đích: GĐ2 ≥ 50%, GĐ4 ≥ 80%.",
       "targets": [
         {
           "refId": "A",
@@ -633,7 +633,7 @@
       }
     },
     {
-      "id": 73,
+      "id": 81,
       "type": "stat",
       "title": "Độ phủ ATT&CK ưu tiên",
       "datasource": {
@@ -719,7 +719,7 @@
       }
     },
     {
-      "id": 74,
+      "id": 82,
       "type": "stat",
       "title": "Sức khỏe nguồn log",
       "datasource": {
@@ -805,7 +805,7 @@
       }
     },
     {
-      "id": 75,
+      "id": 83,
       "type": "stat",
       "title": "Hunt hoàn thành / tháng",
       "datasource": {
@@ -891,7 +891,7 @@
       }
     },
     {
-      "id": 76,
+      "id": 84,
       "type": "row",
       "title": "Xu hướng",
       "collapsed": false,
@@ -904,7 +904,7 @@
       "panels": []
     },
     {
-      "id": 77,
+      "id": 85,
       "type": "timeseries",
       "title": "Thời gian phát hiện / nhận / khoanh vùng",
       "datasource": {
@@ -1117,7 +1117,7 @@
       }
     },
     {
-      "id": 78,
+      "id": 86,
       "type": "timeseries",
       "title": "Tỉ lệ (%)",
       "datasource": {
@@ -1373,9 +1373,9 @@
       }
     },
     {
-      "id": 79,
+      "id": 87,
       "type": "row",
-      "title": "Chất lượng cảnh báo (theo khoảng thời gian của dashboard)",
+      "title": "Chất lượng cảnh báo phát hiện (rule/wazuh/ml, không bóng; theo khoảng thời gian của dashboard)",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -1386,7 +1386,7 @@
       "panels": []
     },
     {
-      "id": 80,
+      "id": 88,
       "type": "table",
       "title": "Kết luận khi đóng alert",
       "datasource": {
@@ -1406,7 +1406,7 @@
             "type": "elasticsearch",
             "uid": "siem-alerts"
           },
-          "query": "alert.status:(closed OR false_positive)",
+          "query": "((alert.status:(closed OR false_positive)) AND alert.source:(rule OR wazuh OR ml)) AND NOT alert.shadow:true",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -1490,7 +1490,7 @@
       }
     },
     {
-      "id": 81,
+      "id": 89,
       "type": "table",
       "title": "Rule báo nhầm nhiều nhất",
       "datasource": {
@@ -1510,7 +1510,7 @@
             "type": "elasticsearch",
             "uid": "siem-alerts"
           },
-          "query": "alert.status:false_positive",
+          "query": "((alert.status:false_positive) AND alert.source:(rule OR wazuh OR ml)) AND NOT alert.shadow:true",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -1594,7 +1594,7 @@
       }
     },
     {
-      "id": 82,
+      "id": 90,
       "type": "table",
       "title": "Alert theo mức ưu tiên",
       "datasource": {
@@ -1614,7 +1614,7 @@
             "type": "elasticsearch",
             "uid": "siem-alerts"
           },
-          "query": "NOT alert.shadow:true",
+          "query": "(alert.source:(rule OR wazuh OR ml)) AND NOT alert.shadow:true",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -1698,7 +1698,7 @@
       }
     },
     {
-      "id": 83,
+      "id": 91,
       "type": "table",
       "title": "MTTA theo mức ưu tiên (case)",
       "datasource": {
@@ -1803,7 +1803,7 @@
       }
     },
     {
-      "id": 84,
+      "id": 92,
       "type": "table",
       "title": "Case quá hạn xác nhận (chưa ai nhận) — bấm tiêu đề để mở trên console",
       "datasource": {
@@ -2098,7 +2098,7 @@
       "hideTimeOverride": true
     },
     {
-      "id": 85,
+      "id": 93,
       "type": "row",
       "title": "Nguồn log (soar/health.py, cập nhật mỗi phút)",
       "collapsed": false,
@@ -2111,7 +2111,7 @@
       "panels": []
     },
     {
-      "id": 86,
+      "id": 94,
       "type": "stat",
       "title": "Sự cố nền tảng đang mở",
       "datasource": {
@@ -2182,7 +2182,7 @@
       "hideTimeOverride": true
     },
     {
-      "id": 87,
+      "id": 95,
       "type": "table",
       "title": "Trạng thái từng nguồn",
       "datasource": {
@@ -2368,7 +2368,7 @@
       "hideTimeOverride": true
     },
     {
-      "id": 88,
+      "id": 96,
       "type": "row",
       "title": "Độ phủ kỹ thuật ATT&CK ưu tiên (server/config/threat_profile.yml)",
       "collapsed": false,
@@ -2381,7 +2381,7 @@
       "panels": []
     },
     {
-      "id": 89,
+      "id": 97,
       "type": "table",
       "title": "Kỹ thuật ưu tiên và rule phát hiện",
       "datasource": {
