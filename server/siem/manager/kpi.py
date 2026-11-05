@@ -13,6 +13,8 @@ hiện giá trị mới nhất (tô màu theo đích) và xu hướng; console �
              kiểm thử hoặc rule Wazuh không bóng / không tắt (rules_catalog.attack_coverage); ghi nguồn yaml / wazuh / both
   Nguồn log  % nguồn đã onboard không im lặng (siem-sources, soar/health.py)
   Hunting    số cuộc hunt hoàn thành trong kỳ (siem-hunts)
+Mọi KPI có mẫu số là "alert" chỉ tính alert PHÁT HIỆN (R62): alert.source rule / wazuh / ml, không bóng. Loại rba (cộng dồn
+điểm rủi ro, TTD tính từ event đầu cửa sổ tích lũy), health (sự cố nền tảng), retrohunt (TI-002, dò lại event cũ).
 Alert của rule chạy bóng không tính vào KPI."""
 from __future__ import annotations
 
@@ -29,6 +31,7 @@ IDX_KPI = "siem-kpi"
 IDX_SOURCES = "siem-sources"
 IDX_HUNTS = "siem-hunts"
 NOT_SHADOW = {"term": {"alert.shadow": True}}
+DETECTION_SOURCES = ["rule", "wazuh", "ml"]          # R62: nguồn alert dùng làm mẫu số / TTD của KPI
 # Đích theo kế hoạch SOC (bảng KPI): (cuối giai đoạn 2, cuối giai đoạn 4, hướng tốt: "low" = càng thấp càng tốt)
 TARGETS: dict[str, tuple[float | None, float, str]] = {
     "mttd_critical_s": (30 * 60, 15 * 60, "low"),
@@ -73,7 +76,8 @@ def compute(es, rules_dir: Path | None = None, config_dir: Path | None = None, d
 
     # ---------------------------------------------------------------- alert
     a = es.search(index=settings.IDX_ALERTS, size=0, query={"bool": {
-        "filter": [{"range": {"@timestamp": {"gte": since}}}], "must_not": [NOT_SHADOW]}}, aggs={
+        "filter": [{"range": {"@timestamp": {"gte": since}}}, {"terms": {"alert.source": DETECTION_SOURCES}}],
+        "must_not": [NOT_SHADOW]}}, aggs={
         "ttd_crit": {"filter": {"term": {"severity": "critical"}}, "aggs": {"v": {"avg": {"field": "metrics.ttd_seconds"}}}},
         "ttd": {"avg": {"field": "metrics.ttd_seconds"}},
         "closed": {"filter": {"terms": {"alert.status": ["closed", "false_positive"]}}},

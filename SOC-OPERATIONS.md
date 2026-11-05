@@ -214,11 +214,17 @@ thông báo** = thời điểm tạo case + 72 giờ, hiện trong ngăn chi ti�
 
 Manager tính KPI tự động từ dữ liệu, không nhập tay. Cứ `KPI_SECONDS` (300) giây, manager tính trên cửa sổ `KPI_WINDOW_DAYS`
 (30) ngày và lưu một bản ghi vào index `siem-kpi`. Xem ở dashboard *SOC KPI* (giá trị mới nhất tô màu theo đích, kèm xu hướng),
-trang *KPI* trên console hoặc `GET /api/v1/kpi`. Alert của rule chạy bóng không tính.
+trang *KPI* trên console hoặc `GET /api/v1/kpi`.
+
+**Quy ước alert tính vào KPI (R62).** Mọi KPI có mẫu số là "alert" (MTTD kể cả theo từng mức độ, làm giàu, tải analyst mỗi ca,
+tỉ lệ báo nhầm) chỉ tính alert **phát hiện**: `alert.source` là `rule`, `wazuh` hoặc `ml`, và không phải alert chạy bóng. Loại
+ra: `rba` (cộng dồn điểm rủi ro của alert khác, TTD tính từ event đầu cửa sổ tích lũy nên không phải độ trễ phát hiện),
+`health` (sự cố nền tảng, không phải tấn công) và alert dò ngược TI-002 (`retrohunt`, tìm lại event cũ). RBA và health có ô
+riêng trên dashboard *Tổng quan* và *SOC KPI*.
 
 | KPI | Cách đo | Đích cuối giai đoạn 2 | Đích cuối giai đoạn 4 |
 |---|---|---|---|
-| MTTD (alert critical) | Từ event đầu tiên của chuỗi tới lúc sinh alert | ≤ 30 phút | ≤ 15 phút |
+| MTTD (alert critical) | Từ event đầu tiên của chuỗi tới lúc sinh alert; chỉ alert phát hiện (R62) | ≤ 30 phút | ≤ 15 phút |
 | MTTA P1 | Từ lúc mở case tới khi có người nhận | ≤ 30 phút | ≤ 15 phút |
 | MTTC P1 | Từ lúc mở case tới khi khoanh vùng xong | ≤ 4 giờ | ≤ 1 giờ |
 | Đạt SLA | % case xác nhận và khoanh vùng trong hạn (mục 2) | ≥ 85% | ≥ 95% |

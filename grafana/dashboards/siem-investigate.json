@@ -18,7 +18,7 @@
   "graphTooltip": 1,
   "panels": [
     {
-      "id": 37,
+      "id": 41,
       "type": "row",
       "title": "Thực thể: ${q}",
       "collapsed": false,
@@ -31,7 +31,7 @@
       "panels": []
     },
     {
-      "id": 38,
+      "id": 42,
       "type": "stat",
       "title": "Event",
       "datasource": {
@@ -100,7 +100,7 @@
       }
     },
     {
-      "id": 39,
+      "id": 43,
       "type": "stat",
       "title": "Alert",
       "datasource": {
@@ -120,7 +120,7 @@
             "type": "elasticsearch",
             "uid": "siem-alerts"
           },
-          "query": "(${q:raw})",
+          "query": "((${q:raw})) AND NOT alert.shadow:true",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -169,7 +169,7 @@
       }
     },
     {
-      "id": 40,
+      "id": 44,
       "type": "stat",
       "title": "Alert nghiêm trọng / cao",
       "datasource": {
@@ -189,7 +189,7 @@
             "type": "elasticsearch",
             "uid": "siem-alerts"
           },
-          "query": "(${q:raw}) AND severity:(critical OR high)",
+          "query": "((${q:raw}) AND severity:(critical OR high)) AND NOT alert.shadow:true",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -238,9 +238,9 @@
       }
     },
     {
-      "id": 41,
+      "id": 45,
       "type": "stat",
-      "title": "Đăng nhập thất bại",
+      "title": "Đăng nhập thất bại (cả console)",
       "datasource": {
         "type": "elasticsearch",
         "uid": "siem-events"
@@ -307,7 +307,7 @@
       }
     },
     {
-      "id": 42,
+      "id": 46,
       "type": "table",
       "title": "Event theo loại",
       "datasource": {
@@ -411,7 +411,7 @@
       }
     },
     {
-      "id": 43,
+      "id": 47,
       "type": "timeseries",
       "title": "Alert theo mức độ",
       "datasource": {
@@ -431,7 +431,7 @@
             "type": "elasticsearch",
             "uid": "siem-alerts"
           },
-          "query": "(${q:raw})",
+          "query": "((${q:raw})) AND NOT alert.shadow:true",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -578,7 +578,7 @@
       }
     },
     {
-      "id": 44,
+      "id": 48,
       "type": "table",
       "title": "Hành động (event.action)",
       "datasource": {
@@ -682,7 +682,7 @@
       }
     },
     {
-      "id": 45,
+      "id": 49,
       "type": "table",
       "title": "URL bị truy cập",
       "datasource": {
@@ -786,7 +786,7 @@
       }
     },
     {
-      "id": 46,
+      "id": 50,
       "type": "table",
       "title": "Tiến trình",
       "datasource": {
@@ -890,7 +890,7 @@
       }
     },
     {
-      "id": 47,
+      "id": 51,
       "type": "table",
       "title": "IP liên quan",
       "datasource": {
@@ -994,7 +994,7 @@
       }
     },
     {
-      "id": 48,
+      "id": 52,
       "type": "table",
       "title": "Alert của thực thể — bấm tên rule để mở trên console",
       "datasource": {
@@ -1014,7 +1014,7 @@
             "type": "elasticsearch",
             "uid": "siem-alerts"
           },
-          "query": "(${q:raw})",
+          "query": "((${q:raw})) AND NOT alert.shadow:true",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -1263,7 +1263,7 @@
       }
     },
     {
-      "id": 49,
+      "id": 53,
       "type": "table",
       "title": "Event gần đây",
       "datasource": {
