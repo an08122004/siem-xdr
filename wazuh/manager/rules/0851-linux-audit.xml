@@ -47,13 +47,13 @@
   </rule>
 
   <!-- LNX-001, nhánh payload trong bash -c (đoạn hex): /dev/tcp/, pty.spawn, python ... socket ... connect trong cùng một đối số hex.
-       /dev/tcp/ (T12): bỏ qua đích localhost / 127.0.0.1 và cặp biến $HOST/$PORT (healthcheck, wait-for-it.sh); đích khác (IP, tên miền, IP nội bộ) vẫn báo. Giới hạn: reverse shell về loopback
+       /dev/tcp/ (T12): bỏ qua đích localhost / 127.0.0.1 (phải kết thúc bằng "/", nên localhost.evil.com và 127.0.0.1x vẫn báo) và cặp biến $HOST/$PORT (tên chữ-số-_) (healthcheck, wait-for-it.sh); đích khác (IP, tên miền, IP nội bộ) vẫn báo. Giới hạn: reverse shell về loopback
        hoặc dùng biến cho cả host lẫn port bị bỏ sót; wait-for-it với IP cố định vẫn báo (ca trong tests/cases/0999-tuning.yml). -->
   <rule id="102511" level="12">
     <if_sid>80792, 92600</if_sid>
     <field name="audit.key" type="pcre2">^audit-wazuh-c$</field>
     <location type="pcre2">(^|/)audit\.log$</location>
-    <regex type="pcre2">2F6465762F7463702F(?!6C6F63616C686F7374|3132372E302E302E31|24[0-9A-F]{2,48}2F24)|7074792E737061776E|python[23]?"\s+a\d+="-c"\s+a\d+=\w*736F636B6574\w*636F6E6E656374</regex>
+    <regex type="pcre2">2F6465762F7463702F(?!(?:6C6F63616C686F7374|3132372E302E302E31)2F|24(?:[4-7][0-9A-F]|3[0-9]){1,20}2F24)|7074792E737061776E|python[23]?"\s+a\d+="-c"\s+a\d+=\w*736F636B6574\w*636F6E6E656374</regex>
     <description>LNX-001 Reverse shell trong bash -c / python -c (auditd, payload hex): $(audit.exe)</description>
     <mitre>
       <id>T1059.004</id>

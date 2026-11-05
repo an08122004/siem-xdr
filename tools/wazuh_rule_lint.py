@@ -90,6 +90,9 @@ def check(files: dict[str, str], cases: list[dict]) -> list[str]:
                 if tuning:
                     if not overwrite or rid >= 100000:
                         err(rid, 'file tuning chỉ chứa rule overwrite="yes" trên id < 100000')
+                    infos = [(i.text or "").strip() for i in el.findall("info")]
+                    if (level or 0) >= 12 and "shadow" not in groups and "real_before=yes" not in infos:
+                        err(rid, 'R58: overwrite lên level >= 12 phải có nhóm shadow (alert thật mới) hoặc <info type="text">real_before=yes</info> (rule gốc vốn đã là alert thật)')
                 else:
                     if rid < 100000:
                         err(rid, "id < 100000 là dải của Wazuh gốc")

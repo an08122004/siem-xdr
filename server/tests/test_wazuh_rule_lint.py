@@ -166,11 +166,11 @@ def test_ignore_attribute_is_forbidden():
     assert not has(run(rule(attrs=' frequency="5" timeframe="60"')), "ignore")
 
 
-def test_tuning_level12_new_alerts_are_shadow():
-    """R58: overwrite có hiệu lực ngay; rule gốc bị đè lên level >= 12 mà trước đó KHÔNG phải alert thật phải mang nhóm shadow.
-    61627 / 61640 vốn đã level 12 (chỉ thêm ngoại lệ), nên không đổi trạng thái."""
-    from siem import wazuh_rules
-    rules = wazuh_rules.parse((lint.RULES_DIR / wazuh_rules.TUNING_FILE).read_text(encoding="utf-8"))
-    shadowed = {r["id"] for r in rules if r["level"] >= 12 and "shadow" in r["groups"]}
-    assert shadowed == {63103, 91837}
-    assert {r["id"] for r in rules if r["level"] >= 12 and "shadow" not in r["groups"]} == {61627, 61640}
+def test_tuning_level12_needs_shadow_or_real_before():
+    """R58: overwrite có hiệu lực ngay; level >= 12 phải chạy bóng (shadow) hoặc ghi real_before=yes nếu rule gốc vốn đã là alert thật."""
+    def tune(grp, info=""):
+        return rule(rid=5712, level=12, attrs=' overwrite="yes"', grp=grp).replace("</group></rule>", "</group>" + info + "</rule>")
+    real = '<info type="text">real_before=yes</info>'
+    assert has(lint.check({lint.TUNING_FILE: tune("x,")}, []), "R58")
+    assert not has(lint.check({lint.TUNING_FILE: tune("shadow,")}, []), "R58")
+    assert not has(lint.check({lint.TUNING_FILE: tune("x,", real)}, []), "R58")

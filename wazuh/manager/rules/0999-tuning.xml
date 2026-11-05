@@ -9,7 +9,7 @@
 
   R58: overwrite có hiệu lực NGAY khi triển khai (không có giai đoạn chạy bóng).
     - Hạ level / làm yên: không cần shadow. Alert thật biến mất được ghi ở từng rule.
-    - Rule có level mới >= 12 (alert thật mới) mang nhóm `shadow` + shadow_since cho tới cổng cut-over (alerts.py áp shadow theo nhóm): 63103, 91837.
+    - Rule có level mới >= 12 (alert thật mới) mang nhóm `shadow` + shadow_since cho tới cổng cut-over (lint: level >= 12 cần shadow, hoặc <info>real_before=yes</info> cho rule vốn đã là alert thật: 61627, 61640) (alerts.py áp shadow theo nhóm): 63103, 91837.
     - Không dùng thuộc tính ignore (ràng buộc 7): bản gốc của 87702 / 31151 có ignore="240" / không có; 87702 bỏ ignore, dập trùng làm ở cầu nối.
 
   ĐÃ XÉT NHƯNG KHÔNG ĐÈ (lý do):
@@ -56,12 +56,13 @@
 </group>
 
 <group name="windows,sysmon,sysmon_process-anomalies,">
-  <!-- 61627: lsass.exe là tiến trình cha (level 12). Ngoại lệ hẹp: efsui.exe do lsass.exe mở khi dùng EFS (`efsui.exe /efs /installdra`), thấy trong log nền ghi thật (scenario-background).
+  <!-- 61627: lsass.exe là tiến trình cha (level 12). Ngoại lệ hẹp: efsui.exe trong System32 do lsass.exe mở khi dùng EFS (`efsui.exe /efs /installdra`), thấy trong log nền ghi thật (scenario-background).
        Alert thật mất: chỉ efsui.exe con của lsass.exe. -->
   <rule id="61627" level="12" overwrite="yes">
     <field name="win.eventdata.parentImage">lsass.exe</field>
-    <field name="win.eventdata.image" type="pcre2" negate="yes">(?i)\\efsui\.exe$</field>
+    <field name="win.eventdata.image" type="pcre2" negate="yes">(?i)\\+System32\\+efsui\.exe$</field>
     <description>Sysmon - Suspicious Process - lsass.exe is a Parent Image</description>
+    <info type="text">real_before=yes</info>
     <mitre>
       <id>T1055</id>
     </mitre>
@@ -74,6 +75,7 @@
     <field name="win.eventdata.image">\\explorer.exe</field>
     <field name="win.eventdata.commandLine" type="pcre2" negate="yes">(?i)\/factory,\{[0-9a-f-]+\}\s+-Embedding</field>
     <description>Sysmon - Suspicious Process - explorer.exe</description>
+    <info type="text">real_before=yes</info>
     <mitre>
       <id>T1055</id>
     </mitre>

@@ -176,7 +176,7 @@ Một bài thử được tính là bị bắt khi ít nhất 1 tiến trình c�
 | 80792 | ghi nhận MỌI lệnh auditd có key audit-wazuh-c (89/94 lệnh bình thường cũng khớp) | 1,130 | 87 |
 | 92032 | mọi tiến trình con có cha là `cmd.exe /c` (script, trình cài đặt cũng vậy) | 450 | 0 |
 | 92036 | `net.exe` có cha là `cmd.exe /c` (con của 92032) | 55 | 0 |
-| 92041 | regex `add.+\/d\s+(")?(?:[A-Za-z\d+\/]{4})*(...)?`: mọi nhóm sau `/d` đều tùy chọn nên khớp MỌI `reg add ... /d`, không riêng giá trị Base64 | 223 | 2 |
+| 92041 | regex `add.+\/d\s+(")?(?:[A-Za-z\d+\/]{4})*(...)?`: mọi nhóm sau `/d` đều tùy chọn nên khớp MỌI `reg add ... /d`, không riêng giá trị Base64 (đã sửa bằng overwrite ở 0999-tuning.xml, Task 12) | 223 | 2 |
 
 ## Giới hạn của phép đo
 
