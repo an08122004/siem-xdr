@@ -314,12 +314,18 @@ n_rules = catalog_count("origin:rule AND source:(builtin OR ai)")
 check("grafana", "Thư viện rule liệt kê đủ rule trong server/rules (Grafana đọc qua siem-rules)", n_rules == n_files,
       f"{n_rules}/{n_files} rule")
 n_wzh = catalog_count("origin:wazuh_rule")
+# số id KHÁC NHAU theo Wazuh API: rule gốc bị đè ở 0999-tuning.xml có 2 bản (ruleset/rules và etc/rules), thư viện giữ 1
 wzh_total = manager_py("""
 from siem.wazuh_rules import WazuhApi
-print(WazuhApi.from_settings().rules(0, 1)['data']['total_affected_items'])
+api, ids, off = WazuhApi.from_settings(), set(), 0
+while True:
+    d = api.rules(off, 500)['data']; items = d['affected_items']
+    ids |= {i['id'] for i in items}; off += len(items)
+    if not items or off >= d['total_affected_items']: break
+print(len(ids))
 """).stdout.strip()
-check("grafana", "Thư viện rule liệt kê đủ rule của Wazuh (tổng theo Wazuh API)", wzh_total.isdigit() and n_wzh == int(wzh_total),
-      f"{n_wzh}/{wzh_total} rule Wazuh")
+check("grafana", "Thư viện rule liệt kê đủ rule của Wazuh (số id khác nhau theo Wazuh API)",
+      wzh_total.isdigit() and n_wzh == int(wzh_total), f"{n_wzh}/{wzh_total} rule Wazuh")
 n_prop, n_cmp = catalog_count("origin:ai_proposal"), catalog_count("origin:comparison")
 check("grafana", "đề xuất AI có trong thư viện, kèm cặp so sánh với rule hiện có", n_prop == 0 or n_cmp > 0,
       f"{n_prop} đề xuất, {n_cmp} cặp so sánh")

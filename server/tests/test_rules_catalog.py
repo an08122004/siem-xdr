@@ -321,3 +321,29 @@ def test_yaml_rule_docs_are_off_when_engine_disabled(rules_dir, monkeypatch):
     monkeypatch.setattr(rc.settings, "RULE_ENGINE_ENABLED", False)
     docs = rc.rule_docs(rules_dir, {})
     assert docs and all(d["mode"] == "off" and d["mode_label"] == "đã tắt (engine YAML)" for d in docs)
+
+
+def test_wazuh_rule_docs_real_api_shape_and_overwritten_rules():
+    """Dạng thật của Wazuh 4.14 API (05/11): `mitre` là list mã kỹ thuật; rule gốc bị đè ở 0999-tuning.xml có 2 bản
+    (ruleset/rules và etc/rules) -> một bản ghi, lấy bản đè."""
+    items = [
+        {"id": 5712, "level": 10, "description": "sshd brute force", "groups": ["syslog", "sshd", "authentication_failures"],
+         "mitre": ["T1110"], "status": "enabled", "filename": "0095-sshd_rules.xml", "relative_dirname": "ruleset/rules"},
+        {"id": 92041, "level": 10, "description": "gốc", "groups": ["windows"], "mitre": ["T1027", "T1112"],
+         "status": "enabled", "filename": "0800-sysmon_id_1.xml", "relative_dirname": "ruleset/rules"},
+        {"id": 92041, "level": 10, "description": "bản đè", "groups": ["windows"], "mitre": ["T1027", "T1112"],
+         "status": "enabled", "filename": "0999-tuning.xml", "relative_dirname": "etc/rules"},
+        {"id": 104095, "level": 14, "description": "WEB-012", "groups": ["siem", "web"], "mitre": [],
+         "status": "enabled", "filename": "0271-web.xml", "relative_dirname": "etc/rules"}]
+
+    class Api:
+        def rules(self, offset=0, limit=500):
+            page = items[offset:offset + 2]
+            return {"data": {"affected_items": page, "total_affected_items": len(items)}}
+
+    docs = rc.wazuh_rule_docs(Api(), {})
+    by_id = {d["rule"]["id"]: d for d in docs}
+    assert len(docs) == 3 and set(by_id) == {"WZH-5712", "WZH-92041", "WZH-104095"}
+    assert by_id["WZH-92041"]["description"] == "bản đè" and by_id["WZH-92041"]["file"] == "etc/rules/0999-tuning.xml"
+    assert by_id["WZH-5712"]["mitre"]["technique"] == ["T1110"]
+    assert by_id["WZH-104095"]["mitre"]["technique"] == [rc.NONE_LIST]          # giá trị giữ chỗ cho bộ lọc Grafana
