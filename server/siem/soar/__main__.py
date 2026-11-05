@@ -64,12 +64,12 @@ def main() -> None:
     if settings.WAZUH_API_PASSWORD:
         sync = MispListSync(RulesApi(settings.WAZUH_API_URL, settings.WAZUH_API_USER, settings.WAZUH_API_PASSWORD, settings.WAZUH_API_CA))
 
-        def export_ioc() -> None:                   # TI-001 (rule Wazuh 0845-ti.xml) đọc IP từ danh sách siem-misp-ip; push() bỏ qua nếu nội dung không đổi
+        def export_ioc() -> None:                   # TI-001 (rule Wazuh 0845-ti.xml) đọc IP / domain / hash từ danh sách siem-misp-ip / -domain / -hash (R64); push() bỏ qua nếu nội dung không đổi
             if feed is not None and feed.snapshot() is None:
                 return                              # MISP chưa tải xong lần đầu: chưa đẩy, kẻo ghi đè danh sách bằng bộ IOC cục bộ thiếu
             ti.maybe_reload()
             sync.push(ti.indicators())
-        tasks.append(Every(60, "xuất IOC IP sang danh sách Wazuh (TI-001)", export_ioc))
+        tasks.append(Every(60, "xuất IOC IP / domain / hash sang danh sách Wazuh (TI-001)", export_ioc))
     if settings.RETROHUNT_ENABLED:
         def indicators() -> list:
             ti.maybe_reload()                       # file IOC vừa sửa / IOC vừa hết hạn

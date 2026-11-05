@@ -392,3 +392,165 @@
   location: EventChannel
   events:
   - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 203.0.113.20\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>196.251.85.62</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'
+
+# ================================================================ R64: domain (107011 DNS, 107012 HTTP, 107013 Sysmon 22) và hash (107014 sha256, 107015 sha1, 107016 md5)
+# Danh sách thử lấy IOC demo của server/config/intel (bad_domains.txt, bad_hashes.txt: EICAR md5 / sha1 / sha256) cộng một domain và một sha256 có SẴN trong danh sách gốc
+# malicious-domains / malware-hashes của Wazuh (ca nhường rule gốc 99917 / 99918 / 99901). Khóa CDB khớp chính xác: subdomain và chữ hoa KHÔNG khớp (ca âm bên dưới ghi lại giới hạn này).
+- list_file:
+    name: siem-misp-domain
+    content: |
+      evil-c2.example:misp
+      malware-download.test:misp
+      netflix-clone-two-opal.vercel.app:misp
+
+- list_file:
+    name: siem-misp-hash
+    content: |
+      44d88612fea8a8f36de82e1278abb02f:misp
+      3395856ce81f2b7382dee72602f798b642f14140:misp
+      275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f:misp
+      2fe6a7ae63c878bd84d7b829349b309e7c84194ddbb6a779816f5b84cd8ad45d:misp
+
+- rule: 107011   # Suricata DNS: truy vấn domain IOC
+  legacy: TI-001
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"evil-c2.example","rrtype":"A","tx_id":0}}'
+
+- rule: 107011   # domain IOC thứ hai
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"malware-download.test","rrtype":"A","tx_id":0}}'
+
+- none: [107011, 107012]   # domain sạch; subdomain của domain IOC (giới hạn: không khớp); chữ hoa (CDB phân biệt hoa thường)
+  legacy: TI-001
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"example.org","rrtype":"A","tx_id":0}}'
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"www.evil-c2.example","rrtype":"A","tx_id":0}}'
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"EVIL-C2.example","rrtype":"A","tx_id":0}}'
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"evil-c2.example.org","rrtype":"A","tx_id":0}}'
+
+- rule: 99918   # R64 nhường rule gốc: domain có ở CẢ danh sách gốc lẫn siem-misp-domain -> 99918 (level 9, alert gốc) giữ ngữ cảnh
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"netflix-clone-two-opal.vercel.app","rrtype":"A","tx_id":0}}'
+
+- none: [107011]   # cùng sự kiện: TI-001 loại domain nằm trong danh sách gốc
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"netflix-clone-two-opal.vercel.app","rrtype":"A","tx_id":0}}'
+
+- none: [107011, 107012]   # giả mạo qua syslog 514 (location = IP thiết bị, agent 000): cùng dòng JSON không ra TI-001
+  legacy: TI-001
+  log_format: json
+  location: 10.10.40.254
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"dns","src_ip":"10.0.0.5","src_port":5353,"dest_ip":"10.0.0.2","dest_port":53,"proto":"UDP","dns":{"type":"query","id":1,"rrname":"evil-c2.example","rrtype":"A","tx_id":0}}'
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"http","src_ip":"10.0.0.5","src_port":50000,"dest_ip":"203.0.113.9","dest_port":80,"proto":"TCP","http":{"hostname":"evil-c2.example","url":"/","http_user_agent":"curl/8","http_method":"GET","protocol":"HTTP/1.1","status":200,"length":12}}'
+
+- rule: 107012   # Suricata HTTP: Host là domain IOC
+  legacy: TI-001
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"http","src_ip":"10.0.0.5","src_port":50000,"dest_ip":"203.0.113.9","dest_port":80,"proto":"TCP","http":{"hostname":"evil-c2.example","url":"/","http_user_agent":"curl/8","http_method":"GET","protocol":"HTTP/1.1","status":200,"length":12}}'
+
+- none: [107012]   # Host sạch
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"http","src_ip":"10.0.0.5","src_port":50000,"dest_ip":"203.0.113.9","dest_port":80,"proto":"TCP","http":{"hostname":"example.org","url":"/","http_user_agent":"curl/8","http_method":"GET","protocol":"HTTP/1.1","status":200,"length":12}}'
+
+- rule: 99917   # nhường rule gốc 99917
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"http","src_ip":"10.0.0.5","src_port":50000,"dest_ip":"203.0.113.9","dest_port":80,"proto":"TCP","http":{"hostname":"netflix-clone-two-opal.vercel.app","url":"/","http_user_agent":"curl/8","http_method":"GET","protocol":"HTTP/1.1","status":200,"length":12}}'
+
+- none: [107012]   # cùng sự kiện
+  log_format: json
+  location: (fw01) any->/var/log/suricata/eve.json
+  events:
+  - '{"timestamp":"2026-11-05T10:00:00.000000+0700","flow_id":1,"in_iface":"eth0","event_type":"http","src_ip":"10.0.0.5","src_port":50000,"dest_ip":"203.0.113.9","dest_port":80,"proto":"TCP","http":{"hostname":"netflix-clone-two-opal.vercel.app","url":"/","http_user_agent":"curl/8","http_method":"GET","protocol":"HTTP/1.1","status":200,"length":12}}'
+
+- rule: 107013   # Sysmon 22: tiến trình hỏi DNS domain IOC
+  legacy: TI-001
+  log_format: eventchannel
+  location: EventChannel
+  events:
+  - '{"Message": "Dns query:", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Sysmon'' Guid=''{5770385f-c22a-43e0-bf4c-06f5698ffbd9}''/><EventID>22</EventID><Version>5</Version><Level>4</Level><Task>22</Task><Opcode>0</Opcode><Keywords>0x8000000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''3000'' ThreadID=''4000''/><Channel>Microsoft-Windows-Sysmon/Operational</Channel><Computer>bench-win</Computer><Security UserID=''S-1-5-18''/></System><EventData><Data Name=''RuleName''>-</Data><Data Name=''UtcTime''>2026-02-01 00:00:01.000</Data><Data Name=''ProcessGuid''>{00000000-0000-0000-0000-000000000000}</Data><Data Name=''ProcessId''>4001</Data><Data Name=''QueryName''>evil-c2.example</Data><Data Name=''QueryStatus''>0</Data><Data Name=''QueryResults''>type: 1 203.0.113.9;</Data><Data Name=''Image''>C:\\Windows\\System32\\cmd.exe</Data><Data Name=''User''>WIN\\an</Data></EventData></Event>"}'
+
+- none: [107013]   # Sysmon 22: domain sạch, subdomain của domain IOC (giới hạn)
+  log_format: eventchannel
+  location: EventChannel
+  events:
+  - '{"Message": "Dns query:", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Sysmon'' Guid=''{5770385f-c22a-43e0-bf4c-06f5698ffbd9}''/><EventID>22</EventID><Version>5</Version><Level>4</Level><Task>22</Task><Opcode>0</Opcode><Keywords>0x8000000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''3000'' ThreadID=''4000''/><Channel>Microsoft-Windows-Sysmon/Operational</Channel><Computer>bench-win</Computer><Security UserID=''S-1-5-18''/></System><EventData><Data Name=''RuleName''>-</Data><Data Name=''UtcTime''>2026-02-01 00:00:01.000</Data><Data Name=''ProcessGuid''>{00000000-0000-0000-0000-000000000000}</Data><Data Name=''ProcessId''>4001</Data><Data Name=''QueryName''>example.org</Data><Data Name=''QueryStatus''>0</Data><Data Name=''QueryResults''>type: 1 203.0.113.9;</Data><Data Name=''Image''>C:\\Windows\\System32\\cmd.exe</Data><Data Name=''User''>WIN\\an</Data></EventData></Event>"}'
+  - '{"Message": "Dns query:", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Sysmon'' Guid=''{5770385f-c22a-43e0-bf4c-06f5698ffbd9}''/><EventID>22</EventID><Version>5</Version><Level>4</Level><Task>22</Task><Opcode>0</Opcode><Keywords>0x8000000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''3000'' ThreadID=''4000''/><Channel>Microsoft-Windows-Sysmon/Operational</Channel><Computer>bench-win</Computer><Security UserID=''S-1-5-18''/></System><EventData><Data Name=''RuleName''>-</Data><Data Name=''UtcTime''>2026-02-01 00:00:01.000</Data><Data Name=''ProcessGuid''>{00000000-0000-0000-0000-000000000000}</Data><Data Name=''ProcessId''>4001</Data><Data Name=''QueryName''>www.evil-c2.example</Data><Data Name=''QueryStatus''>0</Data><Data Name=''QueryResults''>type: 1 203.0.113.9;</Data><Data Name=''Image''>C:\\Windows\\System32\\cmd.exe</Data><Data Name=''User''>WIN\\an</Data></EventData></Event>"}'
+
+- rule: 107014   # FIM: file mới có sha256 IOC
+  legacy: TI-001
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /tmp/dropper.bin, type: added, sha256: 275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f}
+
+- rule: 107014   # FIM: file sửa (550)
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /opt/app/tool.bin, type: modified, sha256: 275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f}
+
+- rule: 107015   # FIM: sha1 IOC
+  legacy: TI-001
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /tmp/dropper.bin, type: added, sha1: 3395856ce81f2b7382dee72602f798b642f14140}
+
+- rule: 107016   # FIM: md5 IOC
+  legacy: TI-001
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /tmp/dropper.bin, type: added, md5: 44d88612fea8a8f36de82e1278abb02f}
+
+- none: [107014, 107015, 107016]   # hash không có trong danh sách (sha256 và md5)
+  legacy: TI-001
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /tmp/clean.bin, type: added, sha256: 0000000000000000000000000000000000000000000000000000000000000001}
+    - {path: /tmp/clean2.bin, type: added, md5: 0123456789abcdef0123456789abcdef}
+
+- rule: 99901   # nhường rule gốc: sha256 có ở CẢ hai danh sách -> 99901 (level 14, alert thật) thắng
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /tmp/dropper.bin, type: added, sha256: 2fe6a7ae63c878bd84d7b829349b309e7c84194ddbb6a779816f5b84cd8ad45d}
+
+- none: [107014]   # cùng sự kiện
+  log_format: syscheck
+  location: syscheck
+  events:
+    - {path: /tmp/dropper.bin, type: added, sha256: 2fe6a7ae63c878bd84d7b829349b309e7c84194ddbb6a779816f5b84cd8ad45d}
+
+
+- none: [107013]   # giả mạo qua syslog 514: JSON mang trường win.* không được decoder eventchannel nhận, không tới 61650 nên TI-001 không báo (đã thử: cùng JSON ở location EventChannel cũng không tới 61650)
+  legacy: TI-001
+  log_format: json
+  location: 10.10.40.254
+  events:
+  - '{"win":{"system":{"providerName":"Microsoft-Windows-Sysmon","eventID":"22","channel":"Microsoft-Windows-Sysmon/Operational"},"eventdata":{"queryName":"evil-c2.example","image":"cmd.exe"}}}'
+
+- none: [107014, 107015, 107016]   # giả mạo qua syslog 514: dòng `8:syscheck:{...}` không được decoder syscheck nhận từ thiết bị syslog (không ra 554 / 550)
+  legacy: TI-001
+  log_format: syslog
+  location: 10.10.40.254
+  events:
+  - '8:syscheck:{"type":"event","data":{"path":"/tmp/x","mode":"scheduled","type":"added","timestamp":1767225600,"attributes":{"type":"file","size":10,"hash_md5":"44d88612fea8a8f36de82e1278abb02f","hash_sha256":"275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f","inode":1}}}'
