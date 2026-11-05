@@ -384,13 +384,13 @@ Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info 
 **Đạt:**
 - [ ] TI-001 domain/hash IOC chỉ có ở analyzer — người dùng quyết trước khi tắt rule YAML (Wazuh mới phủ IP: firewall, Suricata, sshd, web, Windows; tên file TI là `0845-ti.xml`)
 - [ ] 102505 (LNX-005) báo nhầm 2,0/100 trên tập Linux bình thường khi phát lại dồn trong vài giây — đo lại với dữ liệu giãn theo thời gian thật trước khi bật
-- [ ] bỏ nhóm `shadow` ở các file 0101–0106 và 0845 (trừ rule có `shadow_since` < 7 ngày, giữ đúng tiêu chí chạy bóng của SOC-OPERATIONS mục 4)
-- [ ] `RULE_ENGINE_ENABLED=false` (biến mới trong `settings.py`, analyzer không chạy engine của `detection/rules.py`) + test `test_engine_disabled_no_yaml_alerts`
+- [x] bỏ nhóm `shadow` ở các file 0101–0106 và 0845 (trừ rule có `shadow_since` < 7 ngày, giữ đúng tiêu chí chạy bóng của SOC-OPERATIONS mục 4) — **R65, 05/11: chủ dự án bỏ qua tiêu chí 7 ngày**, bỏ nhóm `shadow` ở mọi file trừ `0845-ti.xml` (controller bỏ sau khi gộp phần TI domain/hash); cũng bỏ ở 63103 / 91837 (`0999-tuning.xml`); rule gốc level 7 đến 11 thành alert thật (`WAZUH_STOCK_SHADOW=false`); lint bỏ yêu cầu bắt buộc chạy bóng
+- [x] `RULE_ENGINE_ENABLED=false` (biến mới trong `settings.py`, analyzer không chạy engine của `detection/rules.py`) + test `test_engine_disabled_no_yaml_alerts`
 - [ ] Map SOAR theo nhóm/rule Wazuh sẽ tác động cả alert THẬT của rule gốc khi nhánh triển khai (R60, danh sách thật từ manager 4.14.8, `stock-groups-soar.txt`): chặn IP (`block_ip`, scope origin, 3600 giây, bỏ qua nguồn `syslog-*`) CHỈ theo id đã duyệt: sshd 5712, 5720, 5763 và web 31152 (31151 bỏ theo R61: Task 12 hạ về level 7), cộng 104095 (level 14, không bóng) và các bản XML của mã YAML từng chặn (AUTH-001/002/003, WIN-001, WEB-*; đang bóng). Mọi rule gốc khác (53 rule nhóm `authentication_failures` như Postfix, Dovecot, WordPress, VPN, Windows; 31153, 31154, 31161, 31163, nhóm `attack`...) chỉ thông báo / mở case, nhóm chỉ dùng chọn playbook case. `SOAR_WHITELIST` mặc định chỉ 127.0.0.0/8: thêm IP proxy, relay, NAT nội bộ trước khi bật — duyệt trước khi bật
 - [ ] TI-001 Windows: 4624 thành công không qua NTLM từ IP chỉ có trong `siem-misp-ip` ra 92651 (level 0) thay vì 107010 — tìm nguyên nhân (thứ tự anh em không theo level ở nhánh 60106?) trước khi tắt TI-001 YAML
-- [ ] Rule AI: pipeline AI vẫn ghi rule YAML vào `server/rules/ai`; tắt engine YAML thì rule AI không chạy — đổi đích sang `rules-dynamic/ai.xml` (dải 109000) trước, hoặc giữ engine cho rule AI
+- [ ] Rule AI: pipeline AI vẫn ghi rule YAML vào `server/rules/ai`; tắt engine YAML thì rule AI không chạy — đổi đích sang `rules-dynamic/ai.xml` (dải 109000) trước, hoặc giữ engine cho rule AI — **R65: chưa đổi đích**; duyệt / bật chính thức đề xuất AI trả 409 "engine YAML đã tắt" tới Task 19–22
 - [ ] `SOAR_WHITELIST`: thêm IP proxy/relay/NAT nội bộ trước khi bật chặn IP theo rule gốc
-- [ ] xóa mục playbook theo mã YAML
+- [x] xóa mục playbook theo mã YAML (R65: 5 mục AUTH/WEB/LNX/WIN/TI-001; thêm `WZH-91837` (WIN-006) vào playbook kill)
 - [ ] E2E 44/44, commit `chuyển phát hiện sang Wazuh: tắt engine YAML`
 
 **Không đạt:** giữ YAML bật + XML bóng cho demo 10/11. Ghi mã chưa đạt vào ROADMAP.md, chuyển sau 16/11.

@@ -1,5 +1,5 @@
 <!--
-  Rule tiến trình Linux, nguồn auditd EXECVE (key audit-wazuh-c), chạy BÓNG. Dải ID 102500-102999 (0102-linux.xml giữ 102000-102499).
+  Rule tiến trình Linux, nguồn auditd EXECVE (key audit-wazuh-c), bật từ 05/11/2026 (R65). Dải ID 102500-102999 (0102-linux.xml giữ 102000-102499).
   KHÔNG ĐỔI TÊN FILE: tên phải xếp SAU 0850-audit_rules.xml (xem "Thứ tự nạp" dưới).
 
   Bản ghi auditd thật: shell không bao giờ truyền toán tử (`|`, `>>`, `>&`, `&&`) thành đối số riêng. Chúng nằm trong `bash -c "<payload>"`, và auditd ghi mọi
@@ -42,8 +42,7 @@
     <mitre>
       <id>T1059.004</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,legacy_LNX-001,</group>
+    <group>siem,linux,legacy_LNX-001,</group>
   </rule>
 
   <!-- LNX-001, nhánh payload trong bash -c (đoạn hex): /dev/tcp/, pty.spawn, python ... socket ... connect trong cùng một đối số hex.
@@ -58,8 +57,7 @@
     <mitre>
       <id>T1059.004</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,legacy_LNX-001,</group>
+    <group>siem,linux,legacy_LNX-001,</group>
   </rule>
 
   <!-- LNX-003, nhánh 2 của rule cũ: (curl|wget) ... -o|-O /tmp/... && chmod +x, đoạn hex trong cùng đối số bash -c. Nhánh `| sh` không phủ (xem đầu file). -->
@@ -73,8 +71,7 @@
       <id>T1105</id>
       <id>T1059.004</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,legacy_LNX-003,</group>
+    <group>siem,linux,legacy_LNX-003,</group>
   </rule>
 
   <!-- LNX-004: crypto miner theo comm= hoặc đối số rời. -->
@@ -87,8 +84,7 @@
     <mitre>
       <id>T1496</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,legacy_LNX-004,</group>
+    <group>siem,linux,legacy_LNX-004,</group>
   </rule>
 
   <!-- LNX-006, nhánh đối số rời. -->
@@ -102,8 +98,7 @@
       <id>T1053.003</id>
       <id>T1543.002</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,legacy_LNX-006,</group>
+    <group>siem,linux,legacy_LNX-006,</group>
   </rule>
 
   <!-- LNX-006, nhánh payload trong bash -c (hex): ">> [đường dẫn không khoảng trắng] .ssh/authorized_keys" và "echo ... >> /etc/cron". -->
@@ -117,8 +112,7 @@
       <id>T1098.004</id>
       <id>T1053.003</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,legacy_LNX-006,</group>
+    <group>siem,linux,legacy_LNX-006,</group>
   </rule>
 
   <!-- LNX-005: bộ đếm lệnh trinh sát. Level 3 để 12 lệnh này vẫn còn alert level 3 như 80792 "Audit: Command" (chỉ đổi mô tả). Chỉ 80792, không 92600 (không có python trong danh sách). -->
@@ -131,8 +125,7 @@
     <mitre>
       <id>T1082</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,legacy_LNX-005,</group>
+    <group>siem,linux,legacy_LNX-005,</group>
   </rule>
 
   <!-- LNX-005: >= 4 lệnh trinh sát KHÁC TÊN trong 60s trên một máy (cùng cách đếm và giới hạn S4 như 102005: ~2N-2 dòng khi chỉ 2 tên xen kẽ). -->
@@ -146,7 +139,6 @@
       <id>T1033</id>
       <id>T1016</id>
     </mitre>
-    <info type="text">shadow_since=2026-10-31</info>
-    <group>siem,linux,shadow,legacy_LNX-005,</group>
+    <group>siem,linux,legacy_LNX-005,</group>
   </rule>
 </group>

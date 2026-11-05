@@ -399,7 +399,7 @@ def test_soar_playbook_blocks_ip(monkeypatch):
     monkeypatch.setattr(store, "list_agents", lambda _es: [{"agent_id": "S001-Web-01", "status": "online"},
                                                            {"agent_id": "A001-PC-01", "status": "online"}])
     soar = Soar(es, load_playbooks(ROOT / "config" / "playbooks.yml"), whitelist=["127.0.0.0/8"], notifier=Notifier())
-    alert = {"alert": {"id": "a1", "status": "open", "source": "rule"}, "rule": {"id": "AUTH-001", "name": "bf", "tags": []},
+    alert = {"alert": {"id": "a1", "status": "open", "source": "rule"}, "rule": {"id": "WZH-101001", "name": "bf", "tags": []},
              "severity": "high", "severity_score": 3, "source": {"ip": "10.9.9.9"}, "agent": {"id": "S001-Web-01"}, "count": 5,
              "message": "x"}
     results = soar.handle(alert)
@@ -416,7 +416,7 @@ def test_soar_whitelist_and_approval():
     from siem.soar.engine import Notifier, Soar, load_playbooks
     es = FakeES()
     soar = Soar(es, load_playbooks(ROOT / "config" / "playbooks.yml"), whitelist=["10.0.0.0/8"], notifier=Notifier())
-    alert = {"alert": {"id": "a2", "source": "rule"}, "rule": {"id": "AUTH-002", "name": "x"}, "severity": "critical",
+    alert = {"alert": {"id": "a2", "source": "rule"}, "rule": {"id": "WZH-101002", "name": "x"}, "severity": "critical",
              "severity_score": 4, "source": {"ip": "10.9.9.9"}, "agent": {"id": "S001-Web-01"}, "count": 6, "message": "x"}
     results = soar.handle(alert)
     assert next(r for r in results if r["action"] == "block_ip")["status"] == "skipped"

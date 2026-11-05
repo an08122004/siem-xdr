@@ -168,28 +168,22 @@ def test_ignore_attribute_is_forbidden():
     assert not has(run(rule(attrs=' frequency="5" timeframe="60"')), "ignore")
 
 
-def test_tuning_level12_needs_shadow_or_real_before():
-    """R58: overwrite có hiệu lực ngay; level >= 12 phải chạy bóng (shadow) hoặc ghi real_before=yes nếu rule gốc vốn đã là alert thật."""
-    def tune(grp, info=""):
-        return rule(rid=5712, level=12, attrs=' overwrite="yes"', grp=grp, shadow=False).replace("</group></rule>", "</group>" + info + "</rule>")
-    real = '<info type="text">real_before=yes</info>'
-    assert has(lint.check({lint.TUNING_FILE: tune("x,")}, []), "R58")
-    assert not has(lint.check({lint.TUNING_FILE: tune("shadow,")}, []), "R58")
-    assert not has(lint.check({lint.TUNING_FILE: tune("x,", real)}, []), "R58")
+def test_after_cutover_project_rule_and_tuning_need_no_shadow():
+    """R65: sau cổng cut-over rule dự án level >= 3 và tuning level >= 12 không cần chạy bóng nữa."""
+    assert not has(run(rule(shadow=False)), "chạy bóng")
+    assert not has(run(rule(shadow=False, level=12)), "chạy bóng")
+    tune = rule(rid=5712, level=12, attrs=' overwrite="yes"', grp="x,", shadow=False)
+    assert not has(lint.check({lint.TUNING_FILE: tune}, []), "chạy bóng")
+    assert not has(lint.check({lint.TUNING_FILE: tune}, []), "R58")
 
 
-def test_new_rule_level3_needs_shadow_group_and_date():
-    assert has(run(rule(shadow=False)), "chạy bóng")
-    assert has(run(rule(shadow=False, grp="siem,shadow,")), "chạy bóng")                    # có nhóm, thiếu shadow_since
-    assert has(run(rule().replace("shadow_since=2026-11-05", "shadow_since=hom-nay")), "chạy bóng")
-    assert not has(run(rule(level=2, shadow=False)), "chạy bóng")                          # dưới level 3 không đòi
-
-
-def test_shadow_exemptions_pre_live_ids_and_port_of_stock():
-    plat = lint.check({"0100-platform.xml": rule(rid=100100, desc="WEB-010 x", shadow=False)}, cases(100100))
-    assert not has(plat, "chạy bóng")
-    port = rule(shadow=False).replace("</description>", "</description><info type=\"text\">port_of_stock=99906</info>")
-    assert not has(run(port), "chạy bóng")
+def test_shadow_group_still_needs_shadow_since():
+    """Rule mới sau cut-over vẫn được vào chạy bóng (SOC-OPERATIONS §4), nhưng phải ghi ngày bắt đầu."""
+    assert has(run(rule(shadow=False, grp="siem,shadow,")), "shadow_since")
+    assert has(run(rule().replace("shadow_since=2026-11-05", "shadow_since=hom-nay")), "shadow_since")
+    assert not has(run(rule()), "shadow_since")
+    tune = rule(rid=5712, level=7, attrs=' overwrite="yes"', grp="shadow,", shadow=False)
+    assert has(lint.check({lint.TUNING_FILE: tune}, []), "shadow_since")
 
 
 def test_project_parent_must_be_defined_earlier():

@@ -9,7 +9,7 @@ Tài liệu về phần **phát hiện bằng luật** của SIEM/XDR: rule ch�
 - [docs/wazuh-ruleset-decisions.md](docs/wazuh-ruleset-decisions.md): sổ quyết định của bộ rule Wazuh XML thống nhất.
 
 > **Lưu ý (05/11/2026):** các mục 1 đến 8 mô tả engine YAML, là thứ đang chạy trên `main`. Engine này sẽ bị gỡ ở Task 18 (cổng chuyển, chưa được duyệt)
-> và phát hiện chuyển sang bộ rule Wazuh XML: xem [mục 9](#9-bộ-rule-wazuh-xml-thống-nhất-nhánh-featurewazuh-unified-ruleset-chạy-bóng-tới-cổng-chuyển). Cho tới lúc đó cả hai cùng chạy, rule XML ở chế độ bóng.
+> và phát hiện chuyển sang bộ rule Wazuh XML: xem [mục 9](#9-bộ-rule-wazuh-xml-thống-nhất-đã-chuyển-sang-wazuh-r65). Từ 05/11/2026 (R65) engine YAML tắt mặc định (`RULE_ENGINE_ENABLED=false`) và rule XML là alert thật; mục 2 đến 8 mô tả engine cũ, còn trong mã để quay lui.
 
 ## Mục lục
 
@@ -21,7 +21,7 @@ Tài liệu về phần **phát hiện bằng luật** của SIEM/XDR: rule ch�
 6. [Điểm yếu](#6-điểm-yếu)
 7. [Kế hoạch bổ sung độ phủ](#7-kế-hoạch-bổ-sung-độ-phủ-16102026)
 8. [Đo lại](#8-đo-lại)
-9. [Bộ rule Wazuh XML thống nhất (nhánh feature/wazuh-unified-ruleset, chạy bóng tới cổng chuyển)](#9-bộ-rule-wazuh-xml-thống-nhất-nhánh-featurewazuh-unified-ruleset-chạy-bóng-tới-cổng-chuyển)
+9. [Bộ rule Wazuh XML thống nhất (đã chuyển sang Wazuh, R65)](#9-bộ-rule-wazuh-xml-thống-nhất-đã-chuyển-sang-wazuh-r65)
 
 ## 1. Tổng quan
 
@@ -516,7 +516,7 @@ python tools/e2e_test.py                                             # chạy t�
 Dataset công khai cần tải và chuyển đổi trước (`tools/fetch_datasets.py`, `tools/convert_datasets.py`, xem `AI-README.md`
 mục 12).
 
-## 9. Bộ rule Wazuh XML thống nhất (nhánh feature/wazuh-unified-ruleset, chạy bóng tới cổng chuyển)
+## 9. Bộ rule Wazuh XML thống nhất (đã chuyển sang Wazuh, R65)
 
 Nhánh `feature/wazuh-unified-ruleset` chuyển phát hiện từ engine YAML (mục 2 đến 8) sang một bộ rule duy nhất chạy trong
 `wazuh-analysisd`: ruleset gốc Wazuh 4.14.8 cộng rule XML riêng của dự án. Kế hoạch: [docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md](docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md).
@@ -526,12 +526,17 @@ Sổ quyết định (61 ruling, phát hiện chính): [docs/wazuh-ruleset-decis
 
 - Task 0 đến 17 của kế hoạch đã xong trên nhánh. CI (5 job) xanh ở commit `0e6e0bb`: 603 unit test đạt trên Linux, 556 ca test log gốc
   chạy qua một wazuh-manager thật, 0 sai, 0 rule gốc là alert thật chưa ghim, lint 10 file 0 lỗi (1 cảnh báo: `lsass.exe` chép nguyên từ rule gốc).
-- Rule XML riêng chạy **bóng** (nhóm `shadow`): vẫn sinh alert để đo, SOAR bỏ qua. Engine YAML vẫn là thứ chạy thật trên `main`.
-  Rule phát hiện của dự án không bóng chỉ có 100100 / 100101 (WEB-010 / WEB-011, chạy thật từ trước nhánh này) và 104095
-  (bản sao rule gốc 99906, xem 9.3); ngoài ra là rule bộ đếm level 0 đến 2 và các rule gốc bị chỉnh ở 9.8.
-- **Task 18 (cổng chuyển: tắt engine YAML) chưa được người dùng duyệt.** Cho tới lúc đó nhánh chưa được triển khai lên stack thật;
-  bốn việc cần stack thật còn hoãn: báo cáo song song `build/parity.md` (Task 13), kiểm thư viện rule và số kỳ vọng E2E mục Thư viện rule (Task 14), thử ngoại lệ Wazuh trên manager thật (Task 16), và đo lại độ ồn trên ≥ 24 giờ syslog + nhật ký console thật (số đo hiện tại chưa có hai nguồn này).
-- Danh sách việc trước khi bật: mục *Task 18* của kế hoạch.
+- **Đã chuyển (R65, 05/11/2026): chủ dự án quyết định chuyển hẳn.** Engine YAML tắt (`RULE_ENGINE_ENABLED=false`, mặc định); mọi rule XML
+  riêng bỏ nhóm `shadow` và là alert thật (trừ `0845-ti.xml`, bỏ chạy bóng cùng đợt khi phần TI domain/hash được gộp); rule gốc Wazuh level 7 đến 11
+  ngoài nhóm cũ cũng là alert thật (`WAZUH_STOCK_SHADOW=false`, mặc định). Chạy bóng vẫn dùng được cho rule mới sau này (SOC-OPERATIONS mục 4).
+  Lint không còn bắt buộc rule mới phải chạy bóng, chỉ đòi `shadow_since` khi có nhóm `shadow`.
+- **Hai quyết định của chủ dự án, kèm rủi ro đã biết:** (1) **bỏ tiêu chí 7 ngày chạy bóng** của SOC-OPERATIONS mục 4 cho đợt chuyển này; rule chưa được đo trên ≥ 24 giờ syslog + nhật ký console thật,
+  nên số báo nhầm thật chưa biết, theo dõi tỉ lệ báo nhầm và alert/ngày trong tuần đầu rồi hạ level hoặc thêm ngoại lệ ở `0999-tuning.xml`. (2) **rule gốc level 7 đến 11 là alert thật**: có thể thêm vài chục alert medium / high mỗi ngày
+  (dư địa đo ở Task 2 là ≤ 1 alert / 100 event bình thường), mỗi alert mở case; playbook phá hủy vẫn chỉ theo id đã duyệt (R60) nên rủi ro là ngập case, không phải chặn nhầm. Quay lui nhanh: `WAZUH_STOCK_SHADOW=true`.
+- Playbook SOAR theo mã YAML (AUTH-/WEB-/LNX-/WIN-/TI-001) đã xóa; chỉ còn playbook theo `WZH-<id>` (bản XML tương ứng), RBA / HLT / retrohunt giữ qua playbook chung. Đề xuất AI và ngoại lệ YAML bị chặn khi engine tắt (409) tới Task 19 đến 22.
+  Thư viện rule và KPI độ phủ ATT&CK coi rule YAML là `đã tắt (engine YAML)`: độ phủ chỉ tính từ rule Wazuh.
+- Bốn việc cần stack thật còn hoãn: báo cáo song song `build/parity.md` (Task 13), kiểm thư viện rule và số kỳ vọng E2E mục Thư viện rule (Task 14), thử ngoại lệ Wazuh trên manager thật (Task 16), và đo lại độ ồn trên ≥ 24 giờ syslog + nhật ký console thật (số đo hiện tại chưa có hai nguồn này).
+- Danh sách việc triển khai: mục *Task 18* của kế hoạch.
 
 ### 9.2 Mười file rule
 
@@ -581,8 +586,8 @@ Hai dấu đánh dấu trong `<info type="text">`:
   bắt cả dòng chỉ rule WEB nhận ra (RCE) và gồm các tấn công web chỉ rule dự án thấy.
 - `real_before=yes`: rule gốc bị `overwrite` đã là alert thật trước khi sửa (61627, 61640), nên lint cho phép level ≥ 12 mà không cần `shadow`.
 
-Trong file tuning, rule đè lên level mới ≥ 12 phải mang nhóm `shadow` hoặc có `real_before=yes` (R58): thay đổi `overwrite` có hiệu lực ngay khi
-triển khai, không qua chạy bóng, nên không được tạo alert thật mới trước cổng chuyển.
+Trong file tuning, rule đè lên level mới ≥ 12 từng phải mang nhóm `shadow` hoặc có `real_before=yes` (R58, tới cổng chuyển). Từ R65 lint không còn đòi: 63103 và 91837 đã bỏ `shadow`; `real_before=yes` giữ như ghi chú cho 61627 / 61640.
+Thay đổi `overwrite` có hiệu lực ngay khi triển khai.
 
 ### 9.4 Bảng mã cũ → rule XML
 
@@ -687,7 +692,7 @@ Các công cụ đo đi kèm:
 
 CI: job `wazuh-rules` (`.github/workflows/ci.yml`) chạy lint, dựng `wazuh/wazuh-manager:4.14.8` mới mỗi lần, **quét `ossec.log`** (bước dưới), chạy `tools/wazuh_stock_reach.py`, rồi chạy cả thư mục ca.
 
-Lint (`tools/wazuh_rule_lint.py`) còn giữ hai quy tắc của R63: (1) mọi rule dự án (id ≥ 100000, ngoài `rules-dynamic`) level ≥ 3 phải có nhóm `shadow` **và** `<info type="text">shadow_since=YYYY-MM-DD</info>`, trừ 100100 / 101 (WEB-010 / 011 đã chạy thật trước khi có chế độ bóng) và rule mang `<info>port_of_stock=…</info>` (104095, bản sao hành vi gốc đang chạy thật);
+Lint (`tools/wazuh_rule_lint.py`) còn giữ hai quy tắc: (1) rule có nhóm `shadow` phải có `<info type="text">shadow_since=YYYY-MM-DD</info>` (từ R65 không còn bắt rule dự án phải chạy bóng; rule mới được chọn vào chạy bóng theo SOC-OPERATIONS mục 4);
 (2) `if_sid` / `if_matched_sid` trỏ tới một rule dự án thì rule cha phải được định nghĩa **trước** (cùng file ở trên, hoặc file xếp trước theo tên), vì analysisd bỏ rule có cha chưa nạp.
 
 Bước CI quét log (`ossec.log không có lỗi nạp rule của analysisd`) chạy ngay sau khi manager healthy, vì analysisd bỏ rule hỏng chỉ bằng một dòng log (HTTP vẫn 200). Chỉ lấy dòng `wazuh-analysisd` / `wazuh-testrule`
@@ -791,7 +796,7 @@ Ba hệ quả cần nói rõ:
 
 ### 9.10 Những việc còn lại trước khi bật
 
-- Rule AI: pipeline AI vẫn ghi rule YAML vào `server/rules/ai`. Tắt engine YAML thì rule AI không chạy; đổi đích sang `rules-dynamic/ai.xml` (dải 109000) trước, hoặc giữ engine cho rule AI. Xem [AI-README.md](AI-README.md).
-- Ngoại lệ: luồng Wazuh (rule level 0 trong `exceptions.xml`) đã có ở API nhưng chưa kiểm trên manager thật; YAML vẫn là đường chạy tới Task 18 ([SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 4).
+- Rule AI: pipeline AI vẫn ghi rule YAML vào `server/rules/ai`. Engine YAML đã tắt (R65) nên duyệt / bật chính thức đề xuất AI trả 409 "engine YAML đã tắt — rule AI cần đích Wazuh XML (Task 19–22)" cho tới khi đổi đích sang `rules-dynamic/ai.xml` (dải 109000). Xem [AI-README.md](AI-README.md).
+- Ngoại lệ: luồng Wazuh (rule level 0 trong `exceptions.xml`) đã có ở API nhưng chưa kiểm trên manager thật; ngoại lệ YAML không còn tác dụng khi engine tắt ([SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 4).
 - SOAR: phản ứng phá hủy chỉ theo id đã duyệt; `SOAR_WHITELIST` phải thêm IP proxy, relay, NAT nội bộ ([PLAYBOOKS.md](PLAYBOOKS.md) mục 6).
 - Kế hoạch đầy đủ và các điều kiện cổng: mục *Task 18* của kế hoạch. README và mục 1 đến 8 của tài liệu này được viết lại sau khi Task 18 qua.

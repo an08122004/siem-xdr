@@ -101,3 +101,12 @@ def test_analyzer_emits_one_alert_per_fim_change_when_active(rules, enricher):
     an.handle(wz(syscheck={"path": "/etc/sudoers", "event": "modified"}))   # bản archives.json -> rule riêng
     an.handle(_alert("/etc/sudoers"))                                       # bản alerts.json -> cầu nối Wazuh
     assert [a["rule"]["id"] for a in emitted] == ["FIM-001"]
+
+
+def test_generic_fim_alert_kept_when_yaml_engine_off(rules, enricher, monkeypatch):
+    """R65: engine YAML tắt thì covered_by không còn bỏ cảnh báo chung 550 (không còn FIM-001 nào chạy để thay)."""
+    from siem import settings
+    monkeypatch.setattr(settings, "RULE_ENGINE_ENABLED", False)
+    active = [dataclasses.replace(r, mode="active") if r.id == "FIM-001" else r for r in rules.values()]
+    doc = enricher.enrich(normalize(_alert("/etc/sudoers")))
+    assert bridge.covered_by(doc, active) is None

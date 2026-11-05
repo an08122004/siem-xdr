@@ -361,12 +361,12 @@ Trước khi bật lại cần: giai đoạn học trên dữ liệu thật, tá
 `archives.json`. Ruleset Wazuh (hơn 3.000 rule) phần lớn trùng việc với rule tự viết (web, SSH, đăng nhập Windows...), nên
 không chuyển hết thành alert thật để tránh mỗi sự cố thành 2 alert. Cầu nối chuyển mọi cảnh báo level ≥ 7 trong `alerts.json` (mọi nhóm, trừ `sca`) để đo,
 nhưng rule gốc ngoài các nhóm `syscheck`, `rootcheck`, `vulnerability-detector`, `virustotal`, `yara` (`WAZUH_ALERT_ACTIVE_GROUPS`)
-và dưới level 12 chỉ là alert BÓNG (SOAR bỏ qua) tới cổng T18; rule riêng (id ≥ 100000) và mọi cảnh báo level ≥ 12 là alert thật. Alert có `rule.id = WZH-<id rule Wazuh>`, `alert.source = wazuh`. Level ánh xạ sang severity:
+và dưới level 12 chỉ là alert BÓNG (SOAR bỏ qua) khi `WAZUH_STOCK_SHADOW=true` (từ R65 mặc định tắt: rule gốc đủ level là alert thật); rule riêng (id ≥ 100000) và mọi cảnh báo level ≥ 12 là alert thật. Alert có `rule.id = WZH-<id rule Wazuh>`, `alert.source = wazuh`. Level ánh xạ sang severity:
 7–9 medium, 10–11 high, ≥ 12 critical. Kết quả SCA (CIS) KHÔNG chuyển thành alert: máy demo có 83 mục không đạt ngay khi khởi động,
 và đó là đánh giá cấu hình, không phải sự cố. Xem SCA trong event `event.module: sca`.
 Rule Wazuh riêng đặt ở `wazuh/manager/rules/0100-platform.xml` (ID từ 100000).
 
-**Bộ rule Wazuh XML thống nhất (đang chạy bóng).** Nhánh `feature/wazuh-unified-ruleset` chuyển các rule YAML sang rule XML của Wazuh (10 file ở `wazuh/manager/rules/`, 556 ca test log gốc chạy qua Wazuh thật trong CI). Rule XML ở chế độ bóng cho tới cổng chuyển (Task 18, chưa được duyệt); mục 3 này được viết lại khi đó. Xem [RULES.md mục 9](RULES.md#9-bộ-rule-wazuh-xml-thống-nhất-nhánh-featurewazuh-unified-ruleset-chạy-bóng-tới-cổng-chuyển).
+**Bộ rule Wazuh XML thống nhất (đã chuyển, R65, 05/11/2026).** Nhánh `feature/wazuh-unified-ruleset` chuyển các rule YAML sang rule XML của Wazuh (10 file ở `wazuh/manager/rules/`, 556 ca test log gốc chạy qua Wazuh thật trong CI). Theo quyết định của chủ dự án (R65), engine YAML đã tắt (`RULE_ENGINE_ENABLED=false`), rule XML bỏ chế độ bóng (bỏ qua tiêu chí 7 ngày) và rule gốc Wazuh level 7 đến 11 cũng là alert thật (`WAZUH_STOCK_SHADOW=false`); rủi ro và cách quay lui ở RULES.md 9.1. Đoạn "Cảnh báo từ ruleset Wazuh" ngay trên mô tả hành vi trước R65; mục 3 sẽ viết lại ở Task 24. Xem [RULES.md mục 9](RULES.md#9-bộ-rule-wazuh-xml-thống-nhất-đã-chuyển-sang-wazuh-r65).
 
 **Độ phủ của ruleset gốc Wazuh so với rule tự viết** (đo 6/10/2026, `tools/wazuh_coverage.py`, chi tiết ở
 `datasets/report_wazuh.md`). Cùng dataset với báo cáo độ phủ trong `AI-README.md` (mục 9.1), đưa vào analysisd của một wazuh-manager **tạm**

@@ -1,5 +1,5 @@
 <!--
-  Rule mạng (NET-001..005 của bộ rule cũ), chạy BÓNG. Dải ID 103000-103999. KHÔNG ĐỔI TÊN FILE: tên phải xếp SAU 0475-suricata_rules.xml và 0540-pfsense_rules.xml
+  Rule mạng (NET-001..005 của bộ rule cũ), bật từ 05/11/2026 (R65). Dải ID 103000-103999. KHÔNG ĐỔI TÊN FILE: tên phải xếp SAU 0475-suricata_rules.xml và 0540-pfsense_rules.xml
   (Wazuh nạp mọi file theo tên; rule con của 87700/87701/86601 phải nằm sau cha). Vì vậy file này không mang số 0103 như bảng kế hoạch.
 
   HAI ĐƯỜNG VÀO của filterlog (R43); rule không đọc <location> nên phủ cả hai:
@@ -38,8 +38,7 @@
     <mitre>
       <id>T1046</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-02</info>
-    <group>siem,network,shadow,legacy_NET-001,</group>
+    <group>siem,network,legacy_NET-001,</group>
   </rule>
 
   <!-- NET-001 (pass/khác block): >= 20 cổng đích khác nhau từ một nguồn trong 60 s. Mức 7 (medium). -->
@@ -51,8 +50,7 @@
     <mitre>
       <id>T1046</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-02</info>
-    <group>siem,network,shadow,legacy_NET-001,</group>
+    <group>siem,network,legacy_NET-001,</group>
   </rule>
 
   <!-- NET-001 (block): level 11 (giữ từ trước T12 khi 87702 còn level 10); xem mục 2 ở đầu file. Báo ở dòng thứ 20. -->
@@ -64,8 +62,7 @@
     <mitre>
       <id>T1046</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-02</info>
-    <group>siem,network,shadow,legacy_NET-001,</group>
+    <group>siem,network,legacy_NET-001,</group>
   </rule>
 
   <!-- NET-005: một nguồn nối cổng 445 tới >= 10 IP đích khác nhau trong 60 s (chỉ kết nối không bị chặn). Event có rule cuối 103003 (NET-003: nguồn public, cổng quản trị gồm 445)
@@ -80,8 +77,7 @@
     <mitre>
       <id>T1021.002</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-02</info>
-    <group>siem,network,shadow,legacy_NET-005,</group>
+    <group>siem,network,legacy_NET-005,</group>
   </rule>
 
   <!-- NET-003: firewall CHO PHÉP nguồn NGOÀI dải nội bộ vào cổng quản trị. "Nội bộ" theo ip_scope() của pipeline cũ: 10/8, 172.16/12, 192.168/16, 100.64/10 (CGNAT), 169.254/16 và loopback 127/8
@@ -100,8 +96,7 @@
     <mitre>
       <id>T1133</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-02</info>
-    <group>siem,network,shadow,legacy_NET-003,</group>
+    <group>siem,network,legacy_NET-003,</group>
   </rule>
 
   <!-- NET-004: cảnh báo Suricata severity <= 2 (1 = cao nhất). Con của 86601 (event_type alert).
@@ -116,7 +111,6 @@
     <mitre>
       <id>T1190</id>
     </mitre>
-    <info type="text">shadow_since=2026-11-02</info>
-    <group>siem,network,shadow,legacy_NET-004,</group>
+    <group>siem,network,legacy_NET-004,</group>
   </rule>
 </group>

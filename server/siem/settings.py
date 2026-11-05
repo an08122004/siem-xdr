@@ -73,6 +73,10 @@ WAZUH_ALERT_EXCLUDE_GROUPS = {g.strip() for g in os.getenv("WAZUH_ALERT_EXCLUDE_
 # (trừ level >= WAZUH_ALERT_ANY_LEVEL): cầu nối vẫn chuyển để đo, SOAR bỏ qua.
 WAZUH_ALERT_ACTIVE_GROUPS = {g.strip() for g in os.getenv(
     "WAZUH_ALERT_ACTIVE_GROUPS", "syscheck,rootcheck,vulnerability-detector,virustotal,yara").split(",") if g.strip()}
+# R65 (cổng T18, 05/11/2026): engine YAML tắt, phát hiện chạy hoàn toàn trong wazuh-analysisd. =true để bật lại engine YAML.
+RULE_ENGINE_ENABLED = os.getenv("RULE_ENGINE_ENABLED", "false").lower() in ("1", "true", "yes")
+# R65: rule gốc Wazuh level 7-11 ngoài nhóm cũ là alert thật. =true để khôi phục chế độ bóng (R38).
+WAZUH_STOCK_SHADOW = os.getenv("WAZUH_STOCK_SHADOW", "false").lower() in ("1", "true", "yes")
 WAZUH_ALERT_SUPPRESS = int(os.getenv("WAZUH_ALERT_SUPPRESS", "60"))     # giây: cùng rule + cùng nguồn chỉ 1 alert
 
 # Thư mục cấu hình (rules, playbooks, intel, assets)

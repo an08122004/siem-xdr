@@ -260,8 +260,16 @@ def test_non_shadow_wazuh_alert_is_active(enricher):
     assert not get(a, "alert.shadow") and "legacy_id" not in a["rule"] and "legacy_ids" not in a["rule"] and a["rule"]["groups"] == ["siem", "sshd"]
 
 
-def test_stock_rule_outside_old_groups_is_shadow_until_gate(enricher):
-    """A2: rule gốc ngoài danh sách nhóm cũ chỉ chạy bóng (đo cho cổng T18), trừ level >= WAZUH_ALERT_ANY_LEVEL."""
+def test_stock_rule_level_7_to_11_is_real_alert_after_cutover(enricher):
+    """R65: rule gốc level 7-11 ngoài nhóm cũ là alert thật (WAZUH_STOCK_SHADOW mặc định false)."""
+    for a in (_alert(enricher, "87702", 10, ["pfsense", "firewall_block"]), _alert(enricher, "5710", 8, ["sshd"])):
+        assert not get(a, "alert.shadow") and a["rule"].get("mode") != "shadow"
+    assert not bridge.is_shadow_stock({"id": "5710", "level": 8, "groups": ["sshd"]})
+
+
+def test_stock_rule_outside_old_groups_is_shadow_when_setting_on(enricher, monkeypatch):
+    """A2 (R38), khôi phục được bằng WAZUH_STOCK_SHADOW=true: chỉ chạy bóng, trừ level >= WAZUH_ALERT_ANY_LEVEL."""
+    monkeypatch.setattr(settings, "WAZUH_STOCK_SHADOW", True)
     for a in (_alert(enricher, "87702", 10, ["pfsense", "firewall_block"]), _alert(enricher, "5710", 8, ["sshd"])):
         assert a["alert"]["shadow"] is True and a["rule"]["mode"] == "shadow"
     assert not get(_alert(enricher, "550", 7, ["ossec", "syscheck"]), "alert.shadow")        # nhóm cũ: giữ nguyên hành vi
@@ -299,7 +307,8 @@ def test_fim_alerts_on_different_files_are_not_collapsed(enricher, engine):
                      rule={"id": "550", "level": 7, "description": "x", "groups": ["syscheck"]}))
     assert [a["file"]["path"] for a in emitted] == ["/etc/hostname", "/etc/motd"]
 
-def test_analyzer_does_not_suppress_shadow_alerts(enricher, engine):
+def test_analyzer_does_not_suppress_shadow_alerts(enricher, engine, monkeypatch):
+    monkeypatch.setattr(settings, "WAZUH_STOCK_SHADOW", True)
     from siem.analyzer import Analyzer
     an = Analyzer.__new__(Analyzer)
     an.enricher, an.engine, an.detector, an.buffer, an.stats = enricher, engine, None, [], {"events": 0, "alerts": 0}
@@ -655,14 +664,14 @@ def test_longer_block_extends_shorter_one(soar_env):
     block = lambda res: next(r for r in res if r["action"] == "block_ip")   # noqa: E731
     left = lambda: datetime.fromisoformat(docs[0]["expires_at"]) - datetime.now(timezone.utc)   # noqa: E731
 
-    assert block(soar.handle(_auth_alert("AUTH-001", "high", 3)))["status"] == "queued"
+    assert block(soar.handle(_auth_alert("WZH-101001", "high", 3)))["status"] == "queued"
     docs[0]["status"] = "success"
-    r = block(soar.handle(_auth_alert("AUTH-002", "critical", 4)))
+    r = block(soar.handle(_auth_alert("WZH-101002", "critical", 4)))
     assert r["status"] == "extended" and "gia hạn" in r["detail"] and len(docs) == 1   # không gửi lệnh chặn mới
     assert left() > timedelta(hours=23)
     ext, = [c for c in es.calls if c[1] == settings.IDX_ACTIONS]
     assert ext[3] == {"expires_at": docs[0]["expires_at"]} and ext[4]["refresh"] == "wait_for"   # giữ updated_at
-    r = block(soar.handle(_auth_alert("AUTH-001", "high", 3)))                       # chặn ngắn hơn: giữ hạn 24 giờ
+    r = block(soar.handle(_auth_alert("WZH-101001", "high", 3)))                       # chặn ngắn hơn: giữ hạn 24 giờ
     assert r["status"] == "skipped" and left() > timedelta(hours=23)
     alert_status = [c[3]["alert"]["status"] for c in es.calls if c[1] == settings.IDX_ALERTS]
     assert alert_status == ["in_progress", "in_progress", "open"]                    # gia hạn cũng là đã phản ứng
@@ -720,16 +729,16 @@ def test_case_merge_adds_alert_atomically_on_es(monkeypatch):
 
 
 def test_notify_and_case_run_once_per_alert(soar_env):
-    """LNX-002 (critical) khớp playbook "Diệt tiến trình" VÀ "Cảnh báo chung mức critical": trước đây thông báo 2 lần."""
+    """WZH-102002 (LNX-002, critical) khớp playbook "Diệt tiến trình" VÀ các playbook chung: trước đây thông báo 2 lần."""
     from siem.soar.engine import Soar, load_playbooks
     docs, es = soar_env
     soar = Soar(es, load_playbooks(ROOT / "config" / "playbooks.yml"), whitelist=[])
     soar.create_case = lambda alert: {"status": "created"}
-    res = soar.handle({"alert": {"id": "a1", "source": "rule"}, "rule": {"id": "LNX-002", "name": "x"},
+    res = soar.handle({"alert": {"id": "a1", "source": "rule"}, "rule": {"id": "WZH-102002", "name": "x"},
                        "severity": "critical", "severity_score": 4, "agent": {"id": "001"},
                        "process": {"pid": 4242, "name": "sh"}, "message": "x"})
     notify = [r for r in res if r["action"] == "notify"]
-    assert [r["status"] for r in notify] == ["logged", "skipped"] and "playbook trước" in notify[1]["detail"]
+    assert [r["status"] for r in notify] == ["logged", "skipped", "skipped"] and all("playbook trước" in r["detail"] for r in notify[1:])
     assert sum(r["action"] == "create_case" and r["status"] == "created" for r in res) == 1
 
 
@@ -765,3 +774,40 @@ def test_ar_arguments_validation():
 def test_several_legacy_groups_keep_first_and_all(enricher):
     a = _alert(enricher, "104002", 10, ["siem", "legacy_NET-004", "legacy_NET-005"])
     assert a["rule"]["legacy_id"] == "NET-004" and a["rule"]["legacy_ids"] == ["NET-004", "NET-005"]
+
+
+def test_engine_disabled_no_yaml_alerts(enricher, monkeypatch):
+    """R65: RULE_ENGINE_ENABLED=false -> Analyzer không nạp rule YAML; event khớp rule YAML (SQLi) không ra alert YAML,
+    nhưng event vẫn được lưu và nạp lại rule không làm gì."""
+    from siem import analyzer as mod
+    monkeypatch.setattr(settings, "RULE_ENGINE_ENABLED", False)
+    monkeypatch.setattr(mod, "default_enricher", lambda: enricher)
+    monkeypatch.setattr(mod.store, "connect", lambda: None)
+    monkeypatch.setattr(mod.bus, "wait_for_kafka", lambda: None)
+    monkeypatch.setattr(mod.bus, "producer", lambda: None)
+    an = mod.Analyzer()
+    assert an.engine.rules == []
+    emitted = []
+    an.emit = emitted.append
+    sqli = wz(full_log="x", location="/var/log/apache2/access.log")
+    sqli["data"]["full_log"] = '203.0.113.9 - - [28/Sep/2026:15:31:34 +0000] "GET /index.php?id=1%27%20union%20select%201,2-- HTTP/1.1" 200 512 "-" "sqlmap/1.7"'
+    ctrl = RuleEngine(load_rules(ROOT / "rules")).process(enricher.enrich(normalize(sqli)))
+    assert any(d.rule.id == "WEB-001" for d in ctrl)                       # đối chứng: engine bật thì event này ra WEB-001
+    an.handle(sqli)
+    assert len(an.buffer) == 1 and emitted == []
+    an.reload_rules_if_changed()
+    assert an.engine.rules == []
+
+
+def test_engine_disabled_bridge_still_emits_wzh_and_stock_fim(enricher, engine, monkeypatch):
+    from siem.analyzer import Analyzer
+    monkeypatch.setattr(settings, "RULE_ENGINE_ENABLED", False)
+    an = Analyzer.__new__(Analyzer)
+    an.enricher, an.engine, an.detector, an.buffer, an.stats = enricher, RuleEngine([]), None, [], {"events": 0, "alerts": 0}
+    emitted = []
+    an.emit = emitted.append
+    an.suppressor = bridge.Suppressor(60)
+    an.handle(wz("wazuh_alert", rule={"id": "104001", "level": 10, "description": "WEB-001 x", "groups": ["siem", "web", "legacy_WEB-001"]}))
+    an.handle(wz("wazuh_alert", location="syscheck", syscheck={"path": "/etc/passwd", "event": "modified"},
+                 rule={"id": "550", "level": 7, "description": "Integrity checksum changed.", "groups": ["syscheck"]}))
+    assert [a["rule"]["id"] for a in emitted] == ["WZH-104001", "WZH-550"]      # 550 không bị bỏ vì "đã có FIM-001"

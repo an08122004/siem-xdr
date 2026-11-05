@@ -178,7 +178,7 @@ def compute(es, rules_dir: Path | None = None, config_dir: Path | None = None, d
             total = hits["hits"]["total"]["value"]
             if total > len(rows):
                 log.warning("độ phủ ATT&CK: siem-rules có %s rule, chỉ đọc %s", total, len(rows))
-            if any(r.get("origin") == "wazuh_rule" for r in rows):      # chưa có rule Wazuh (khởi động đầu, API Wazuh tắt) = lùi về lint
+            if any(r.get("origin") == "wazuh_rule" for r in rows) or not settings.RULE_ENGINE_ENABLED:      # chưa có rule Wazuh (khởi động đầu, API Wazuh tắt) = lùi về lint
                 cov, doc["attack_coverage_source"] = attack_coverage(rows, rep.profile), "siem-rules"
             else:
                 log.warning("độ phủ ATT&CK: siem-rules chưa có rule Wazuh, dùng kết quả lint YAML")

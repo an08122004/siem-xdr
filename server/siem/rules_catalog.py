@@ -175,7 +175,8 @@ def _common(*, tactic: Any, techniques: Any, tags: Iterable[str], fields: Iterab
 
 
 # ------------------------------------------------------------------ dựng bản ghi
-MODE_LABEL = {"active": "chính thức", "shadow": "chạy bóng", "nobridge": "không tạo alert"}
+MODE_LABEL = {"active": "chính thức", "shadow": "chạy bóng", "nobridge": "không tạo alert",
+              "off": "đã tắt (engine YAML)"}
 
 
 def _text(v: Any) -> str:
@@ -206,7 +207,7 @@ def rule_docs(rules_dir: Path, alert_stats: dict[str, dict[str, Any]], report=No
             st = alert_stats.get(str(d["id"]), {})
             sev = str(d.get("severity", "medium")).lower()
             info = report.rules.get(str(d["id"])) if report else None
-            mode = str(d.get("mode", "active")).lower()
+            mode = str(d.get("mode", "active")).lower() if settings.RULE_ENGINE_ENABLED else "off"   # R65: engine YAML tắt
             closed30, fp30 = st.get("closed30", 0), st.get("fp30", 0)
             docs.append({
                 "_id": f"rule:{d['id']}", "origin": "rule", "origin_label": "Rule AI (đã duyệt)" if ai else "Rule sẵn có",
