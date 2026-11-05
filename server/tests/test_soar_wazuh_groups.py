@@ -204,3 +204,12 @@ def test_destructive_playbooks_match_explicit_rule_ids_only() -> None:
         assert not when.get("groups"), p["name"]
         assert when.get("rule_ids") and not any(r == "*" or (r.startswith("WZH-") and "*" in r)
                                                 for r in when["rule_ids"]), p["name"]
+
+
+@pytest.mark.parametrize("rid,groups", [(107008, ["siem", "threat_intel", "legacy_TI-001"]),
+                                        (107009, ["siem", "threat_intel", "legacy_TI-001"]),
+                                        (107010, ["siem", "threat_intel", "legacy_TI-001"])])
+def test_ti_ioc_from_agent_blocks_everywhere_but_not_from_syslog(rid, groups, monkeypatch):
+    """R65: mục TI-001 YAML (chặn IOC 24 giờ trên mọi agent) chuyển sang rule TI XML lấy dữ liệu từ agent; nguồn syslog thì không."""
+    assert blocked(run(wazuh_alert(rid, 10, groups), monkeypatch)[0])
+    assert not blocked(run(wazuh_alert(rid, 10, groups, agent="syslog-10.1.1.1"), monkeypatch)[0])

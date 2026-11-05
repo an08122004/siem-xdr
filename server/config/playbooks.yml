@@ -55,6 +55,18 @@ playbooks:
       - {action: notify}
       - {action: create_case}
 
+  # TI-001 (R65, thay mục YAML cũ cùng hành vi): IP trong danh sách IOC thấy trên log của agent (sshd, web, đăng nhập
+  # Windows) -> chặn trên mọi agent 24 giờ. Không gồm 107001–107007 (firewall / Suricata: nguồn syslog giả được, IOC có thể
+  # là IP đích) và rule domain / hash (không có IP để chặn).
+  - name: IOC từ Threat Intelligence (rule Wazuh)
+    when:
+      rule_ids: [WZH-107008, WZH-107009, WZH-107010]
+      no_syslog: true
+    steps:
+      - {action: block_ip, target: source.ip, scope: all, duration: 86400}
+      - {action: notify}
+      - {action: create_case}
+
   - name: Diệt tiến trình độc hại trên endpoint (rule Wazuh)
     when:
       rule_ids: [WZH-102001, WZH-102002, WZH-102004, WZH-102014, WZH-102501, WZH-102504, WZH-102511,
