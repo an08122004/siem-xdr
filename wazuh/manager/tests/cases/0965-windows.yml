@@ -171,6 +171,7 @@
   - *e11
 
 - rule: 99919   # WIN-001 x 99919: 160 lần 4625 từ IP trong danh sách malicious-ip (196.251.85.62): rule IOC gốc 99919 (level 9) báo mọi event
+  none: [107010]
   log_format: eventchannel
   location: EventChannel
   events:

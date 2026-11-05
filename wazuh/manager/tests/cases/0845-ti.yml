@@ -377,3 +377,18 @@
   location: /var/log/auth.log
   events:
   - 'Nov  3 10:00:00 host sshd[1234]: Accepted password for bob from 196.251.85.62 port 5555 ssh2'
+
+# ---------------------------------------------------------------- R63: sshd / Windows nhường IOC gốc khi IP có ở CẢ HAI danh sách (196.251.85.62)
+- rule: 99904   # sshd đăng nhập thất bại (5716) từ IP có ở CẢ HAI danh sách -> rule gốc 99904 (level 9); trước R63, 107008 (level 10) thắng và thay ngữ cảnh IOC gốc
+  none: [107008]
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov  3 10:00:00 host sshd[1234]: Failed password for root from 196.251.85.62 port 4444 ssh2'
+
+- rule: 99919   # Windows 4625 từ IP có ở CẢ HAI danh sách -> 99919 (con trực tiếp của 60105, thắng cây con 60122 nơi 107010 treo); 107010 nhường
+  none: [107010]
+  log_format: eventchannel
+  location: EventChannel
+  events:
+  - '{"Message": "Event 4625:\r\nSubjectUserSid: S-1-0-0\r\nSubjectUserName: -\r\nSubjectDomainName: -\r\nSubjectLogonId: 0x0\r\nTargetUserSid: S-1-0-0\r\nTargetUserName: administrator\r\nTargetDomainName: .\r\nLogonType: 3\r\nLogonProcessName: NtLmSsp\r\nAuthenticationPackageName: NTLM\r\nWorkstationName: ATTACKER\r\nProcessId: 0x0\r\nProcessName: -\r\nIpAddress: 203.0.113.20\r\nIpPort: 49152\r\nStatus: 0xc000006d\r\nSubStatus: 0xc000006a\r\nFailureReason: %%2313", "Event": "<Event xmlns=''http://schemas.microsoft.com/win/2004/08/events/event''><System><Provider Name=''Microsoft-Windows-Security-Auditing''/><EventID>4625</EventID><Version>0</Version><Level>0</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8010000000000000</Keywords><TimeCreated SystemTime=''2026-02-01T00:00:01.000000Z''/><EventRecordID>1</EventRecordID><Correlation/><Execution ProcessID=''700'' ThreadID=''800''/><Channel>Security</Channel><Computer>win-host</Computer><Security/></System><EventData><Data Name=''SubjectUserSid''>S-1-0-0</Data><Data Name=''SubjectUserName''>-</Data><Data Name=''SubjectDomainName''>-</Data><Data Name=''SubjectLogonId''>0x0</Data><Data Name=''TargetUserSid''>S-1-0-0</Data><Data Name=''TargetUserName''>administrator</Data><Data Name=''TargetDomainName''>.</Data><Data Name=''LogonType''>3</Data><Data Name=''LogonProcessName''>NtLmSsp</Data><Data Name=''AuthenticationPackageName''>NTLM</Data><Data Name=''WorkstationName''>ATTACKER</Data><Data Name=''ProcessId''>0x0</Data><Data Name=''ProcessName''>-</Data><Data Name=''IpAddress''>196.251.85.62</Data><Data Name=''IpPort''>49152</Data><Data Name=''Status''>0xc000006d</Data><Data Name=''SubStatus''>0xc000006a</Data><Data Name=''FailureReason''>%%2313</Data></EventData></Event>"}'

@@ -10,9 +10,11 @@ AUTH = "0101-auth.xml"
 
 
 def rule(rid=101001, level=5, desc="AUT-001 test", mitre="<mitre><id>T1110</id></mitre>", extra="<match>fail</match>",
-         grp="siem,", attrs="", outer="local,"):
-    return (f'<group name="{outer}"><rule id="{rid}" level="{level}"{attrs}><if_sid>5700</if_sid>{extra}'
-            f"<description>{desc}</description>{mitre}<group>{grp}</group></rule></group>")
+         grp="siem,", attrs="", outer="local,", shadow=True, parent=5700):
+    info = '<info type="text">shadow_since=2026-11-05</info>' if shadow else ""
+    grp = grp + "shadow," if shadow else grp
+    return (f'<group name="{outer}"><rule id="{rid}" level="{level}"{attrs}><if_sid>{parent}</if_sid>{extra}'
+            f"<description>{desc}</description>{mitre}{info}<group>{grp}</group></rule></group>")
 
 
 def cases(rid=101001):
@@ -153,8 +155,8 @@ def test_level0_feeder_exemption_ignores_comments_and_other_files():
 
 
 def test_attack_layer_counts_only_rules_that_are_on():
-    xml = (rule(101001, grp="siem,") + rule(101002, mitre="<mitre><id>T1486</id></mitre>", grp="siem,shadow,")
-           + rule(101003, mitre="<mitre><id>T1110.001</id></mitre>"))
+    xml = (rule(101001, grp="siem,", shadow=False) + rule(101002, mitre="<mitre><id>T1486</id></mitre>", grp="siem,shadow,", shadow=False)
+           + rule(101003, mitre="<mitre><id>T1110.001</id></mitre>", shadow=False))
     layer = lint.attack_layer({AUTH: xml}, {"techniques": [{"id": "T1110"}, {"id": "T1486"}]})
     got = {t["techniqueID"]: t for t in layer["techniques"]}
     assert got["T1110"]["score"] == 1 and got["T1110.001"]["score"] == 1 and got["T1110"]["color"] == "#2e7d32"
@@ -169,8 +171,36 @@ def test_ignore_attribute_is_forbidden():
 def test_tuning_level12_needs_shadow_or_real_before():
     """R58: overwrite có hiệu lực ngay; level >= 12 phải chạy bóng (shadow) hoặc ghi real_before=yes nếu rule gốc vốn đã là alert thật."""
     def tune(grp, info=""):
-        return rule(rid=5712, level=12, attrs=' overwrite="yes"', grp=grp).replace("</group></rule>", "</group>" + info + "</rule>")
+        return rule(rid=5712, level=12, attrs=' overwrite="yes"', grp=grp, shadow=False).replace("</group></rule>", "</group>" + info + "</rule>")
     real = '<info type="text">real_before=yes</info>'
     assert has(lint.check({lint.TUNING_FILE: tune("x,")}, []), "R58")
     assert not has(lint.check({lint.TUNING_FILE: tune("shadow,")}, []), "R58")
     assert not has(lint.check({lint.TUNING_FILE: tune("x,", real)}, []), "R58")
+
+
+def test_new_rule_level3_needs_shadow_group_and_date():
+    assert has(run(rule(shadow=False)), "chạy bóng")
+    assert has(run(rule(shadow=False, grp="siem,shadow,")), "chạy bóng")                    # có nhóm, thiếu shadow_since
+    assert has(run(rule().replace("shadow_since=2026-11-05", "shadow_since=hom-nay")), "chạy bóng")
+    assert not has(run(rule(level=2, shadow=False)), "chạy bóng")                          # dưới level 3 không đòi
+
+
+def test_shadow_exemptions_pre_live_ids_and_port_of_stock():
+    plat = lint.check({"0100-platform.xml": rule(rid=100100, desc="WEB-010 x", shadow=False)}, cases(100100))
+    assert not has(plat, "chạy bóng")
+    port = rule(shadow=False).replace("</description>", "</description><info type=\"text\">port_of_stock=99906</info>")
+    assert not has(run(port), "chạy bóng")
+
+
+def test_project_parent_must_be_defined_earlier():
+    two = rule(101001) + rule(101002, parent=101001)
+    assert not has(run(two, cs=cases(101001) + cases(101002)), "TRƯỚC")                      # cha ở trên cùng file
+    rev = rule(101002, parent=101001) + rule(101001)
+    assert has(run(rev, cs=cases(101001) + cases(101002)), "TRƯỚC")                          # cha ở dưới
+    assert has(run(rule(101002, parent=101999), cs=cases(101002)), "TRƯỚC")                  # cha không tồn tại
+    assert not has(run(rule(parent=5715)), "TRƯỚC")                                          # cha gốc không xét ở đây
+    early = lint.check({AUTH: rule(101001), "0102-linux.xml": rule(102001, parent=101001)}, cases(101001) + cases(102001))
+    late = lint.check({"0100-platform.xml": rule(100001, parent=101001), AUTH: rule(101001)}, cases(100001) + cases(101001))
+    assert not has(early, "TRƯỚC") and has(late, "TRƯỚC")                                    # file xếp trước / sau
+    assert has(run(rule(101002, parent=101001).replace("<if_sid>", "<if_matched_sid>").replace("</if_sid>", "</if_matched_sid>"),
+                   cs=cases(101002)), "TRƯỚC")

@@ -685,7 +685,22 @@ Các công cụ đo đi kèm:
 | `tools/parity_report.py` | Đối chiếu alert YAML với alert XML (`rule.legacy_id`) theo event kích hoạt; ghi `build/parity.md`. Chạy từ thư mục chính khi stack đang chạy; cần cho Task 18 |
 | `tools/misp_to_cdb.py` | In danh sách CDB (IOC IP) từ kết quả MISP `restSearch` để xem trước; logic ở `server/siem/pipeline/misp_cdb.py`, SOAR dùng chính hàm này |
 
-CI: job `wazuh-rules` (`.github/workflows/ci.yml`) chạy lint, dựng `wazuh/wazuh-manager:4.14.8` mới mỗi lần, rồi chạy cả thư mục ca.
+CI: job `wazuh-rules` (`.github/workflows/ci.yml`) chạy lint, dựng `wazuh/wazuh-manager:4.14.8` mới mỗi lần, **quét `ossec.log`** (bước dưới), chạy `tools/wazuh_stock_reach.py`, rồi chạy cả thư mục ca.
+
+Lint (`tools/wazuh_rule_lint.py`) còn giữ hai quy tắc của R63: (1) mọi rule dự án (id ≥ 100000, ngoài `rules-dynamic`) level ≥ 3 phải có nhóm `shadow` **và** `<info type="text">shadow_since=YYYY-MM-DD</info>`, trừ 100100 / 101 (WEB-010 / 011 đã chạy thật trước khi có chế độ bóng) và rule mang `<info>port_of_stock=…</info>` (104095, bản sao hành vi gốc đang chạy thật);
+(2) `if_sid` / `if_matched_sid` trỏ tới một rule dự án thì rule cha phải được định nghĩa **trước** (cùng file ở trên, hoặc file xếp trước theo tên), vì analysisd bỏ rule có cha chưa nạp.
+
+Bước CI quét log (`ossec.log không có lỗi nạp rule của analysisd`) chạy ngay sau khi manager healthy, vì analysisd bỏ rule hỏng chỉ bằng một dòng log (HTTP vẫn 200). Chỉ lấy dòng `wazuh-analysisd` / `wazuh-testrule`
+(manager CI không có indexer nên ERROR của indexer-connector, filebeat, vulnerability-detector là bình thường), đã đo trên 4.14.8 bằng rule cố ý hỏng:
+
+| Mã | Thông điệp | Nguyên nhân |
+|---|---|---|
+| WARNING 7617 | `Signature ID '999998' was not found and will be ignored in the 'if_sid' option of rule '109101'.` | cha không tồn tại, hoặc nằm ở file nạp sau |
+| WARNING 7619 | `Empty 'if_sid' value. Rule '109101' will be ignored.` | rule bị bỏ vì mọi cha đều không có |
+| WARNING 7612 | `Rule ID '109102' is duplicated. Only the first occurrence will be considered.` | id trùng |
+| ERROR 5107 / CRITICAL 1220 | `Syntax error on tag 'regex' in rule 109103` / `Error loading the rules: '…'` | regex hỏng, file không nạp được |
+
+Cảnh báo 7605 (`It is not possible to overwrite 'if_group' value in rule '92021' / '61627' / '61640'`, từ `0999-tuning.xml`) là vô hại (Wazuh giữ `if_group` gốc) và không bị bắt.
 
 ### 9.6 Hành vi của Wazuh đã đo (S1 đến S7 và các lần kiểm sau)
 
@@ -711,9 +726,14 @@ CI: job `wazuh-rules` (`.github/workflows/ci.yml`) chạy lint, dựng `wazuh/wa
 - **Thứ tự anh em.** Trong các rule cùng cha, analysisd thử theo level giảm dần: rule **level cao hơn thắng**; bằng level thì **rule nạp trước thắng** (rule gốc nạp trước rule của repo, đổi thứ tự file không đủ để né). Rule thắng ở một tầng cha thì **cả cây con của các rule anh em thua bị bỏ**, nên rule dự án có thể chặn alert thật của rule gốc ở cấp cháu.
   Kiểm có hệ thống (05/11): rule dự án móc vào 43 rule cha gốc; 22 hậu duệ gốc là alert thật (level ≥ 12 hoặc nhóm hoạt động level ≥ 7); 8 đã có ca chứng minh còn tới được và 14 chưa
   (60154, 60156, 60159, 60162, 60164, 60166, 60171, 60176, 60187, 60188, 60189, 92602, 92650, 99920). 13 trong 14 rule thắng nhờ level cao hơn rule dự án cùng nhánh; 92602 bằng level 12 với 102501 / 102511 nhưng nạp trước.
-  Cả 14 đã có ca ghim (`wazuh/manager/tests/cases/0998-stock-real-alerts.yml`, 17 ca; 99920 và 92602 thử cả rule dự án cùng nhánh). Công cụ `tools/wazuh_stock_reach.py` (đọc `ruleset/rules`, dựng cây `if_sid` / `if_matched_sid`, liệt kê hậu duệ gốc là alert thật của từng cha mà rule dự án móc vào, so với ca `rule:`) chạy trong job CI `wazuh-rules`: còn rule chưa ghim là CI đỏ. Công cụ không theo `if_group`.
+  Cả 14 đã có ca ghim (`wazuh/manager/tests/cases/0998-stock-real-alerts.yml`, 17 ca; 99920 và 92602 thử cả rule dự án cùng nhánh). Công cụ `tools/wazuh_stock_reach.py` (đọc `ruleset/rules`, dựng cây `if_sid` / `if_matched_sid` **và `if_group`**, liệt kê hậu duệ gốc là alert thật của từng cha mà rule dự án móc vào) chạy trong job CI `wazuh-rules`. Với mỗi alert thật nó đòi MỘT trong hai và in rule nào có cái nào: (a) ca `rule:` ghim; (b) bảo đảm cấu trúc: mọi rule dự án móc cùng cha thua con trực tiếp của cha đó trên đường tới nó (level thấp hơn, hoặc bằng level và file gốc xếp trước theo tên). Không có cái nào thì CI đỏ; cũng đỏ khi `if_sid` của rule dự án trỏ tới cha gốc không tồn tại hoặc nằm ở file xếp sau.
+  **`if_group` (R63):** rule có `<if_group>g</if_group>` là con của MỌI rule mang nhóm `g` (thẻ `<group>` trong rule hoặc `<group name>` bao ngoài), nên lộ ra thêm 72 rule gốc alert thật (sysmon_event1 dưới 61603: 61618-61640, 92016-92081, 91000, 91006, 91007; 92900 / 92910 / 92920 dưới 61612; 40101 / 40112 dưới 5715...) mà công cụ cũ không thấy. Kết quả trên 4.14.8: 93 alert thật dưới cha bị móc; 39 có ca ghim, 52 chỉ nhờ bảo đảm cấu trúc, 2 (40112, 40501) là rule tương quan `if_matched_group` mà harness không tái hiện được (S4) nên công cụ liệt kê tường minh trong `UNPINNABLE`. `if_matched_group` không phải cạnh cây (chỉ tra cứu event cũ).
+  **Khoảng trống thật được tìm thấy (R63):** 40101 (hòa level 12 với 101002, 101002 nạp trước) và 15 rule gốc sysmon sâu dưới 61603 (92008-92015, 92024, 92026, 92038, 92040, 92044, 92045, 92071: rule dự án 105005-105007 level 10-12 cao hơn con trực tiếp level 0-8 của 61603) chưa có ca; đã thêm 16 ca ghim ở `0997-stock-if-group.yml`, tất cả báo. Lưu ý: rule dự án vẫn có thể cắt các rule gốc đó khi một event khớp cả hai (chưa thấy trong ca; ca chỉ chứng minh đường tới được).
+  **Thứ tự nạp (đo R63):** analysisd nạp mọi file rule (gốc lẫn dự án) theo tên chung; rule dự án đặt ở file xếp trước `0095-sshd_rules.xml` bị bỏ vì cha 5715 chưa nạp.
+  **99919 thắng 107010 dù level 9 < 10 (R63, đã đo):** 4625 từ 196.251.85.62 (có ở cả `siem-misp-ip` lẫn `malicious-ip`) ra 99919 chứ không ra 107010, kể cả khi danh sách MISP đã nạp (bơm 3 event, danh sách có IP: chỉ 99919 báo). Nguyên nhân: 99919 có `if_sid` 60105, 60122, tức **con trực tiếp của 60105 (level 9)** và là *anh em* của 60122 (level 5);
+  107010 treo dưới 60122 (và 60106, 92657). 99919 thắng 60122 ở tầng 60105 nên cả cây con của 60122, trong đó có 107010, bị bỏ. Vậy 107010 và 99919 không cùng cha, "level cao thắng" áp ở tầng 60105 (9 > 5), không phải giữa 107010 và 99919. Cùng cơ chế "thắng ở tầng cha cao hơn, cắt cây con", nhưng KHÁC ngoại lệ Kerberos bên dưới (không có rule IOC gốc nào dính, IP chỉ có trong MISP). Ca `0965-windows.yml` (99919) vì thế vốn đúng, chỉ là 107010 vô tình nhường. R63 thêm `not_match_key` vào 107010 cho nhất quán và để không phụ thuộc cơ chế đó.
   **Ngoại lệ đã thấy (05/11):** đăng nhập 4624 thành công không qua NTLM (Kerberos) từ IP chỉ có trong `siem-misp-ip` ra rule gốc 92651 (level 0) chứ không ra 107010 (TI-001, level 10) — trái với quy tắc level cao thắng; chưa rõ nguyên nhân, ghi ở checklist Task 18 (khoảng trống TI, không mất alert thật).
-  Ví dụ đã được xử lý: Shellshock 31168 / 31169 (level 15) vẫn tới được dù 104090 / 104005 cùng cha 31108; 31115 (level 13); 99906 (level 14) giữ bằng 104095; 99903 / 99904 và IOC web, sshd, Windows bằng cách loại IP khỏi con TI.
+  Ví dụ đã được xử lý: Shellshock 31168 / 31169 (level 15) vẫn tới được dù 104090 / 104005 cùng cha 31108; 31115 (level 13); 99906 (level 14) giữ bằng 104095; 99903 / 99904 và IOC web, sshd, Windows bằng cách loại IP khỏi con TI (cả 107008, 107009, 107010 từ R63).
 - **Cầu nối alert.** `log_alert_level` của `ossec.conf` là 3, nên rule đếm phụ level 2 (101000, 101010, 103000...) không vào `alerts.json`.
 
 ### 9.7 Giới hạn đã biết
@@ -765,7 +785,7 @@ Ba hệ quả cần nói rõ:
 - IOC của dự án nằm trong danh sách **riêng** `etc/lists/siem-misp-ip`. SOAR mỗi chu kỳ đồng bộ MISP (`MISP_INTERVAL_MINUTES`) gộp IOC MISP loại IP còn hạn với `config/intel/*.txt` (và xuất độc lập với retrohunt), đẩy lên bằng Wazuh API
   (`PUT /lists/files/...`) rồi reload analysisd. Chỉ user API `siem-soar` có quyền ghi danh sách (thử thật: `PUT` vào danh sách gốc bằng token đó bị từ chối); `siem-rules` không còn quyền đó. Hệ quả: `siem-soar` có thêm `manager:restart` (cần cho reload).
 - API Wazuh từ chối file danh sách rỗng, nên entrypoint tạo file giữ chỗ một dòng `240.0.0.0:empty` để analysisd chạy được khi chưa có IOC.
-- Rule TI dùng `match_key` / `not_match_key` (khớp chuỗi chính xác), vì CIDR không khớp (9.7). Phủ: firewall pf (107001, 107002, 107003), Suricata (107004 đến 107007), sshd (107008), web (107009, loại IP có trong danh sách gốc và chỉ nhận location agent), đăng nhập Windows (107010).
+- Rule TI dùng `match_key` / `not_match_key` (khớp chuỗi chính xác), vì CIDR không khớp (9.7). Phủ: firewall pf (107001, 107002, 107003), Suricata (107004 đến 107007), sshd (107008), web (107009 chỉ nhận location agent), đăng nhập Windows (107010). Cả ba (R63) loại IP có trong danh sách gốc `malicious-ip` bằng `not_match_key`, để rule IOC gốc (99903 / 99904, 99905 / 99906, 99919 / 99920) giữ ngữ cảnh; trước R63 chỉ 107009 làm vậy nên 107008 thay 99904 (level 9 < 10) cho đăng nhập sshd thất bại từ IP ở cả hai danh sách.
 - **Chưa phủ:** domain và hash của MISP / `config/intel` (rule gốc 99917 / 99918 dùng danh sách domain gốc; hash cần decoder sysmon / syscheck), DNS, proxy, VPN. Người dùng quyết định trước khi tắt YAML (checklist Task 18).
 - Với IP trong MISP, rule cuối của event là TI-001 nên event đó không vào bộ đếm 5763 / 31151 / 60204: TI-001 báo từng event (level 10 như các rule đếm) thay cho đếm. Rule gốc level > 10 cùng cha (31115, 31168...) vẫn thắng TI-001.
 

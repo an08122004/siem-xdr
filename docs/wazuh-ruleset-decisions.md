@@ -1,6 +1,6 @@
 # Sổ quyết định: bộ rule Wazuh XML thống nhất
 
-Bản cô đọng, lâu dài của 61 ruling (R1 đến R61) và các phát hiện chính khi làm kế hoạch
+Bản cô đọng, lâu dài của các ruling R1 đến R63 và các phát hiện chính khi làm kế hoạch
 [2026-10-31-wazuh-unified-ruleset.md](superpowers/plans/2026-10-31-wazuh-unified-ruleset.md) (Task 0 đến 17, nhánh `feature/wazuh-unified-ruleset`).
 Cách đọc: mỗi dòng là *quyết định, vì sao, nơi thấy trong code*. Mọi ruling là tạm thời: người dùng xem lại ở cổng chuyển (Task 18).
 Mô tả bộ rule và cách dùng: [RULES.md](../RULES.md) mục 9. Khi sổ này và mã nguồn lệch nhau, mã nguồn đúng.
@@ -97,6 +97,7 @@ Quy luật đã đo (Task 8, 9, 11): rule **level cao hơn thắng**, bằng lev
 |---|---|---|---|
 | R58 | `overwrite` có hiệu lực ngay khi triển khai (không qua chạy bóng): (1) rule đè mà level mới ≥ 12 phải mang nhóm `shadow` tới cổng; (2) bản đè chép đủ định nghĩa gốc; (3) file tuning nạp sau mọi file chứa rule bị đè (đổi tên `0190` thành `0999-tuning.xml`); (4) phạm vi: 92041, 92021, rule ồn Windows, các rule `approx` chỉ lệch level / ngưỡng | Không sinh alert thật mới trước cổng | `0999-tuning.xml`, `TUNING_FILE`, lint |
 | R61 | Bỏ 31151 khỏi danh sách chặn IP, giữ 31152 | Task 12 hạ 31151 xuống level 7; WEB-006 YAML cũ chỉ mức medium nên không chặn | `server/config/playbooks.yml` |
+| R63 | `stock_reach` theo `if_group` (ca ghim HOẶC bảo đảm cấu trúc); 107008 / 107010 loại IP ở danh sách gốc như 107009; lint đòi `shadow` + `shadow_since` và cha dự án nạp trước; CI quét `ossec.log` | Review cuối: `if_group` vô hình với công cụ cũ, TI sshd / Windows thay ngữ cảnh IOC gốc (RULES.md 9.6 nói sai), thiếu chốt chặn bóng và thứ tự cha | `tools/wazuh_stock_reach.py`, `tools/wazuh_rule_lint.py`, `0845-ti.xml`, `.github/workflows/ci.yml` |
 
 ## 8. SOAR và ngoại lệ
 

@@ -87,7 +87,18 @@ jobs:
           done
           docker logs wazuh-rules-ci | tail -n 80
           exit 1
-      - name: Mọi alert thật của rule gốc dưới rule cha bị rule dự án móc đều có ca ghim
+      # analysisd bỏ rule hỏng (cha không tồn tại / nạp sau, id trùng, regex sai) chỉ bằng một dòng log, HTTP vẫn 200: quét log ngay sau khi manager healthy.
+      # Chỉ lấy dòng của analysisd / testrule (manager CI không có indexer nên ERROR của indexer-connector, filebeat, vulnerability-detector là bình thường):
+      #   WARNING (7617) Signature ID '...' was not found ... 'if_sid' option of rule '...'   cha không tồn tại hoặc chưa nạp
+      #   WARNING (7619) Empty 'if_sid' value. Rule '...' will be ignored.                    rule bị bỏ vì mọi cha đều không có
+      #   WARNING (7612) Rule ID '...' is duplicated.                                         id trùng
+      #   ERROR / CRITICAL của analysisd (vd 5107 Syntax error on tag, 1220 Error loading the rules)
+      # (7605 "not possible to overwrite 'if_group'" của 0999-tuning.xml là vô hại: Wazuh giữ if_group gốc.)
+      - name: ossec.log không có lỗi nạp rule của analysisd
+        run: |
+          bad=$(docker exec wazuh-rules-ci grep -E 'wazuh-(analysisd|testrule): (ERROR|CRITICAL)|wazuh-(analysisd|testrule): WARNING: \((7617|7619|7612)\)' /var/ossec/logs/ossec.log || true)
+          if [ -n "$bad" ]; then echo "$bad"; exit 1; fi
+      - name: Mọi alert thật của rule gốc dưới rule cha bị rule dự án móc đều có ca ghim hoặc bảo đảm cấu trúc
         run: |
           docker cp wazuh-rules-ci:/var/ossec/ruleset/rules stock-rules
           python tools/wazuh_stock_reach.py stock-rules
