@@ -1,4 +1,39 @@
-# Kết quả kiểm thử toàn bộ siem-xdr — 15/10/2026
+# Kết quả kiểm thử toàn bộ siem-xdr
+
+Hai đợt: **05/11/2026** (nhánh `feature/wazuh-unified-ruleset`, mục 0) và **15/10/2026** (phần còn lại của tài liệu, giữ làm lịch sử).
+
+## 0. Kiểm thử bộ rule Wazuh XML (05/11/2026)
+
+Mã được kiểm thử: nhánh `feature/wazuh-unified-ruleset` @ `e7f75f6` (Task 0 đến 17 của [kế hoạch](docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md)). Chạy trên CI GitHub Actions (Ubuntu 24.04, Python 3.12). Mô tả bộ rule: [RULES.md](RULES.md) mục 9.
+
+| Hạng mục | Kết quả |
+|---|---|
+| Unit test (`pytest`, job `test`) | **596 đạt** trên CI Linux, 1 cảnh báo |
+| Ca test log gốc qua wazuh-manager thật (job `wazuh-rules`) | **539 ca, 0 sai** (đợt chạy cuối) |
+| Lint rule XML (`tools/wazuh_rule_lint.py`) | **10 file, 0 lỗi**, 1 cảnh báo (`lsass.exe` chép nguyên từ rule gốc) |
+| Các job còn lại (`rules`, `vector`, `compose`) | xanh |
+| Độ ồn trên tập bình thường (`tools/wazuh_noise.py`) | Windows 0,596 / 100 event (cổng ≤ 1, đạt; trước tuning 1,341), web 0 / 36.000, Linux 2,0 / 100 (toàn bộ là 102505, giữ bóng) |
+| Độ phủ dataset Windows | Sửa 92041 làm mất 221 khớp chung chung, xem RULES.md mục 9.8 |
+
+Ca test theo file (`wazuh/manager/tests/cases/`): `0100-platform`, `0101-auth` (67), `0102-linux` (86), `0106-fim` (22), `0271-web` (134), `0541-network` (62), `0845-ti` (43), `0965-windows` (66), `0999-tuning` (47), cộng ca kiểm bộ chạy. Ca của rule dương luôn đi kèm ca âm; rule đếm ngưỡng có ca N−1 dòng và ca nguồn thứ hai.
+
+**Công cụ:**
+
+| Công cụ | Việc | Đã chạy |
+|---|---|---|
+| `tools/wazuh_rule_test.py` | Ca test log gốc qua logtest (syslog, json, apache) hoặc bơm hàng đợi (eventchannel, syscheck) | CI mỗi lần push |
+| `tools/wazuh_rule_lint.py` | Dải id, mã đầu mô tả, mitre, nhóm `siem`, ca dương / âm, `pcre2`, cấm `ignore`, quy tắc `overwrite` | CI mỗi lần push |
+| `tools/wazuh_noise.py` | Độ ồn trên tập bình thường | máy dev, project Compose riêng |
+| `tools/wazuh_coverage.py` | Độ phủ trên dataset và hàm bơm event | máy dev |
+| `tools/parity_report.py` | Đối chiếu alert YAML với XML | **chưa chạy thật** |
+
+**Chưa kiểm (cần triển khai nhánh lên stack thật, chờ cổng Task 18):** báo cáo song song `build/parity.md` sau E2E và 24 giờ log lab; E2E 44/44 với SOAR theo playbook mới và số kỳ vọng mục Thư viện rule; ngoại lệ Wazuh trên manager thật (ngoại lệ level 0 so với rule anh em, che cây con, `pcre2` trên `<url>`); đo lại độ ồn trên ≥ 24 giờ syslog và nhật ký console; chạy trên máy Linux thật và SELinux (`:z`); agent OPNsense đọc `eve.json` (chưa cài, nên rule Suricata XML chưa có dữ liệu thật).
+
+**Đính chính:** mục 1 bên dưới (15/10) ghi dashboard Grafana sinh lại "khớp 100%". Điều đó **không còn đúng**: `tools/gen_dashboard.py` sinh `soc-kpi.json` khác bản đã commit. Chỗ lệch có từ trước nhánh này (phát hiện khi làm Task 14, không do nhánh gây ra) và chưa được xử lý; việc cần làm là sinh lại file hoặc cập nhật generator, rồi kiểm lại.
+
+---
+
+# Kết quả kiểm thử toàn bộ siem-xdr — 15/10/2026 (lịch sử)
 
 Mã được kiểm thử: nhánh `feature/wazuh-auth-grafana` @ `52c653d` (bản siem-xdr, trước khi đổi tên sang soc-platform).
 Máy chạy: Windows 11, Docker Desktop 29.7.2, stack dựng lại bằng `docker compose --profile demo up -d --build`.
@@ -15,7 +50,7 @@ Không có lỗi chức năng nào. Có **2 vấn đề bảo mật**, **2 lỗi
 | Unit test cấu hình Vector (`vector test`) | **5/5 đạt** (syslog 2, Wazuh 3) |
 | `docker compose config` (mọi profile + GPU) | **Hợp lệ**, 15 service |
 | Cú pháp toàn repo | **0 lỗi**: 59 Python, 17 YAML, 4 JSON, 1 XML, 3 shell (`bash -n`), JS trong 2 trang console (`node --check`), 1 PowerShell |
-| Dashboard Grafana sinh lại (`tools/gen_dashboard.py`) | **Khớp 100%** với 3 file JSON đã commit |
+| Dashboard Grafana sinh lại (`tools/gen_dashboard.py`) | Khớp 100% với 3 file JSON đã commit *(15/10; không còn đúng với `soc-kpi.json`, xem đính chính ở mục 0)* |
 | Dựng stack | 11 container chạy (thêm `es-certs`, `es-setup` chạy một lần rồi thoát mã 0), `restarts=0`, mọi service có healthcheck đều `healthy` |
 | Kafka | Lag = 0 ở cả `siem-analyzer` lẫn `siem-soar` |
 | End-to-end trên stack thật (`tools/e2e_test.py`) | **44/44 đạt** (100 giây) |

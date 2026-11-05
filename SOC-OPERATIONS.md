@@ -38,7 +38,7 @@ Mỗi người có tài khoản riêng. Quyền tính theo năng lực, không t
 | triage | Xử lý alert / case, chặn IP, kill tiến trình, đánh dấu task cần *Analyst L1* duyệt |
 | contain | Cô lập / bỏ cô lập máy, duyệt bước SOAR cô lập, task cần *Trưởng nhóm IR* duyệt, đổi mức ưu tiên case |
 | hunt | Ghi nhật ký threat hunting (mục 10) |
-| rules | Duyệt / từ chối / gỡ đề xuất AI, bật chính thức rule AI đang chạy bóng, chạy phân tích AI |
+| rules | Duyệt / từ chối / gỡ đề xuất AI, bật chính thức rule AI đang chạy bóng, chạy phân tích AI; tạo, duyệt và gỡ ngoại lệ của rule Wazuh (`/api/v1/exceptions`, mục 4) |
 | declare | Tuyên bố sự cố lớn, ghi nhận đã thông báo cơ quan chức năng (mục 6), task cần *SOC Manager* duyệt |
 | users | Tạo, khóa, đổi vai trò, đặt lại mật khẩu tài khoản |
 
@@ -46,7 +46,7 @@ Mỗi người có tài khoản riêng. Quyền tính theo năng lực, không t
   *Trưởng nhóm IR* cần contain, *Trưởng nhóm IR + chủ hệ thống* cần contain và ghi chú ai đã đồng ý (chủ hệ thống không có
   tài khoản), *SOC Manager* cần declare (việc dính tới nhân sự / pháp chế, vd đóng băng quyền của người trong nội bộ).
   Nhãn lạ cần contain. API kiểm tra quyền; console làm mờ ô đánh dấu với người không đủ quyền.
-- **Hai người khác nhau** phải duyệt một ngoại lệ do AI đề xuất (làm giảm cảnh báo); rule mới cần một người.
+- **Hai người khác nhau** phải duyệt một ngoại lệ do AI đề xuất hoặc một ngoại lệ của rule Wazuh (làm giảm cảnh báo); rule mới cần một người. Gỡ ngoại lệ (bật lại phát hiện) một người là đủ.
 - **Người thực hiện** mọi thao tác lấy từ phiên đăng nhập, không tự khai được. Đăng nhập, đổi mật khẩu, quản lý tài khoản
   được ghi thành event của chính SIEM (`event_type: console_auth`), rule AUTH-001 áp dụng được.
 - **Xác thực 2 lớp TOTP** (RFC 6238, ứng dụng Google / Microsoft Authenticator): mỗi người tự bật bằng nút *Bật 2 lớp* dưới
@@ -99,7 +99,7 @@ và không có căn cứ bật chính thức rule chạy bóng.
 - Chọn *Báo nhầm* thì trạng thái thành `false_positive`. AI worker lấy nhãn báo nhầm theo trạng thái này để đề xuất ngoại lệ.
 - Đóng case thì mặc định đóng luôn các alert còn mở trong case, với cùng kết luận.
 - Hoạt động hợp lệ lặp lại (vd quét lỗ hổng định kỳ) thì xin ngoại lệ thay vì đóng tay mãi: Detection Engineer thêm vào
-  `server/rules/exceptions/`, hoặc duyệt đề xuất ngoại lệ của AI.
+  `server/rules/exceptions/`, hoặc duyệt đề xuất ngoại lệ của AI. Với rule Wazuh XML thì dùng luồng ngoại lệ Wazuh ở mục 4.
 
 ## 4. Detection-as-code, chạy bóng, risk-based alerting
 
@@ -129,6 +129,20 @@ Impact) chưa có rule. Layer cho MITRE ATT&CK Navigator: `python tools/rule_lin
    *Bật chính thức* ở trang *Đề xuất AI*; nút chỉ hiện khi đã đạt, API kiểm tra lại. Rule viết tay: commit đổi
    `mode: active`, đi qua CI như bước 2.
 5. Rà soát hằng quý theo cột báo nhầm trong *Thư viện rule*: rule báo nhầm nhiều thì sửa điều kiện, thêm ngoại lệ hoặc hạ mức.
+
+**Rule Wazuh XML: chạy bóng, ngoại lệ (nhánh `feature/wazuh-unified-ruleset`).** Phát hiện đang chuyển từ engine YAML sang rule XML của
+Wazuh (mô tả: [RULES.md](RULES.md) mục 9). Tới Task 18 (cổng chuyển, chưa được duyệt) hai hệ thống cùng chạy và các quy trình trên giữ nguyên cho rule YAML. Phần dưới là cái khác đi với rule XML.
+
+- *Chạy bóng bằng nhóm.* Rule XML riêng có nhóm `shadow` và `<info type="text">shadow_since=YYYY-MM-DD</info>`; cầu nối đặt `alert.shadow`, SOAR bỏ qua như rule YAML bóng. Hiện 78 rule mang `shadow_since` (31/10 đến 04/11/2026).
+- *Bật chính thức.* Cùng tiêu chí bước 4 ở trên (≥ `SHADOW_MIN_DAYS` ngày, dưới `SHADOW_MAX_ALERTS_PER_DAY` alert/ngày, báo nhầm dưới `SHADOW_MAX_FP_RATE`). Không có nút trên console: commit bỏ nhóm `shadow` khỏi rule, qua CI (`tools/wazuh_rule_lint.py` và các ca test log gốc qua Wazuh thật), rồi reload; Wazuh nạp ngay, không khởi động lại. Ở Task 18 nhóm `shadow` của các file 0101 đến 0106 và 0845 được bỏ hàng loạt, trừ rule có `shadow_since` dưới 7 ngày. Sau Task 18 mục này thay mục 4 hiện tại.
+- *Ngoại lệ Wazuh.* Ngoại lệ là rule con **level 0** của rule cần làm yên, luôn có điều kiện trường (không điều kiện thì API trả 400, vì rule level 0 chỉ có `if_sid` sẽ nuốt cả họ rule).
+  1. Người có quyền `rules` gọi `POST /api/v1/exceptions` với rule cha (vd `WZH-31103`), điều kiện (trường ECS như `source.ip`, được đổi sang trường Wazuh) và lý do (≥ 3 ký tự). Console kiểm rule cha có trong Wazuh qua API (API chết thì 503, từ chối). Ngoại lệ ở trạng thái `pending`, **chưa** vào XML; người tạo là người duyệt thứ nhất.
+  2. Một người **khác** có quyền `rules` gọi `POST /api/v1/exceptions/{id}/approve`. Đủ hai người thì ngoại lệ thành `active`: console sinh rule level 0 vào `rules-dynamic/exceptions.xml`, id từ **110000 đến 110999** (1.000 id, cảnh báo từ 900), kiểm cú pháp rồi reload. Nạp lỗi thì file cũ được giữ và ngoại lệ thành `failed`.
+  3. Id đã cấp **không bao giờ dùng lại** (kể cả ngoại lệ đã gỡ hoặc lỗi). Sổ cái `exceptions.json` nằm cạnh file XML và được ghi trước khi đụng XML.
+  4. Gỡ bằng `DELETE /api/v1/exceptions/{id}?reason=...` (cần lý do): một người đủ vì bật lại phát hiện là hướng an toàn. Mục chuyển sang `removed` và **giữ làm lịch sử**; rule rời khỏi XML.
+  5. Mọi thao tác POST / DELETE ghi vào nhật ký hoạt động (`exception_added`, `exception_approved`, `exception_removed`).
+
+  Ngoại lệ YAML (`server/rules/exceptions/`, ngoại lệ AI) vẫn là đường đang chạy cho rule YAML tới Task 18. Chưa kiểm trên manager thật: ngoại lệ con level 0 có thắng rule anh em (vd 31106 khi mã 200), có che cây con của rule cha không, `pcre2` trên `<url>`/`<dstuser>` (ghi trong kế hoạch, mục Task 16).
 
 **Risk-based alerting (RBA-001).** SOAR cộng `risk_score` của từng alert (severity × mức quan trọng tài sản) vào máy
 (`host.name`) và tài khoản (`user.name`) liên quan, trong cửa sổ `RBA_WINDOW_HOURS` (24) giờ. Khi tổng điểm ≥ `RBA_THRESHOLD`

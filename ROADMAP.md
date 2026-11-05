@@ -52,3 +52,25 @@ Doc *Kế hoạch xây dựng hệ thống SOC chuyên nghiệp*.
 | Script Windows chặn IP / cô lập máy lỗi trên máy thật | Thử ngay tuần 2, có snapshot VM, mở màn hình VMware để tự gỡ |
 | Nhiều phiên Claude cùng sửa repo | Mỗi việc một nhánh / worktree riêng, gộp qua PR, báo trước file sẽ sửa |
 | Trễ tiến độ | Kiểm tra mốc mỗi cuối tuần; trễ thì cắt theo thứ tự: lô SigmaHQ, luồng AI trên stack thật, Suricata |
+
+## 6. Kế hoạch thống nhất rule trên Wazuh (cập nhật 05/11/2026)
+
+Kế hoạch: [docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md](docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md). Mô tả bộ rule: [RULES.md](RULES.md) mục 9. Sổ quyết định: [docs/wazuh-ruleset-decisions.md](docs/wazuh-ruleset-decisions.md).
+
+| Phần | Trạng thái |
+|---|---|
+| Task 0 đến 17 (P0 đến P3: thử kỹ thuật, nền tảng, 10 file rule XML chạy bóng, tuning, báo cáo song song, thư viện rule, SOAR theo nhóm, ngoại lệ, KPI) | **Xong trên nhánh `feature/wazuh-unified-ruleset`**; CI xanh (596 unit test, 539 ca log gốc qua Wazuh thật). Bốn bước cần stack thật còn hoãn (parity, E2E, ngoại lệ thật, đo độ ồn syslog + console) |
+| Task 18, cổng chuyển (tắt engine YAML) | **Chờ người dùng quyết**: chưa triển khai nhánh lên stack thật, chưa tắt engine YAML. Nếu không đạt, giữ YAML bật + XML bóng cho demo 10/11 và chuyển sau 16/11 |
+| Task 19 đến 24 (P4: Sigma → XML, kiểm định AI trên Wazuh, triển khai rule AI dạng XML, SigmaHQ → XML, xóa engine YAML, viết lại tài liệu) | Sau 17/11, **chưa lập kế hoạch chi tiết** |
+| Đổi mô hình AI | Chưa bắt đầu |
+| Lab (mạng 4 vùng, agent OPNsense, Ubuntu / Web-01) | Chưa dựng; rule Suricata XML cần agent OPNsense đọc `eve.json` |
+
+Checklist Task 18 (tóm tắt, bản đầy đủ trong kế hoạch):
+
+- Điều kiện đo: mọi mã `convert` có `only_yaml` = 0 trên ca test và 24 giờ log lab; độ ồn ≤ 1 alert / 100 event bình thường; E2E 44/44 với SOAR theo playbook mới.
+- Người dùng quyết: TI-001 domain và hash chỉ có ở analyzer (Wazuh mới phủ IP).
+- Đo lại 102505 (LNX-005) với dữ liệu giãn theo thời gian thật trước khi bật.
+- Rule AI: pipeline AI vẫn ghi rule YAML vào `server/rules/ai`; tắt engine YAML thì rule AI không chạy, nên phải đổi đích sang `rules-dynamic/ai.xml` (dải 109000) trước, hoặc giữ engine cho rule AI.
+- SOAR: hành động phá hủy chỉ theo id đã duyệt (sshd 5712, 5720, 5763; web 31152; 104095; bản XML của mã YAML từng chặn); thêm IP proxy, relay, NAT nội bộ vào `SOAR_WHITELIST` trước khi bật.
+- Bỏ nhóm `shadow` ở các file 0101 đến 0106 và 0845 (trừ rule có `shadow_since` dưới 7 ngày); `RULE_ENGINE_ENABLED=false`; xóa playbook theo mã YAML.
+

@@ -121,3 +121,27 @@ quan nhân sự / pháp chế, vd đóng băng quyền của người trong nộ
 - Microsoft, Incident response playbooks: https://learn.microsoft.com/en-us/security/operations/incident-response-playbooks
 - NIST SP 800-61r3 (thông báo phát hành): https://www.nist.gov/news-events/news/2025/04/nist-revises-sp-800-61-incident-response-recommendations-and-considerations
 - MITRE ATT&CK: https://attack.mitre.org/
+
+## 6. Chọn playbook cho alert từ rule Wazuh XML (nhánh feature/wazuh-unified-ruleset)
+
+Có hai loại playbook, đừng nhầm: *case playbook* (checklist PB-xx ở trên, `case_playbooks.yml`) và *playbook SOAR* (hành động tự động, `playbooks.yml`).
+Bộ rule XML mô tả ở [RULES.md](RULES.md) mục 9; rule XML hiện chạy bóng nên SOAR bỏ qua alert của chúng cho tới Task 18.
+
+**Chọn case playbook** (`server/siem/soar/cases.py`), theo thứ tự, playbook đầu tiên khớp thắng:
+
+1. mã rule (wildcard), gồm cả mã YAML cũ `legacy_id` của rule XML. Rule XML dùng cùng quy trình với rule YAML tương ứng (vd 101010 là AUTH-002 nên ra PB-09, không rơi theo kỹ thuật sang PB-01);
+2. kỹ thuật ATT&CK, khớp cụ thể nhất thắng;
+3. nhóm rule Wazuh (rule XML mang nhóm `legacy_<mã>`);
+4. tag của rule;
+5. PB-00.
+
+**Playbook SOAR cho alert Wazuh** (`server/config/playbooks.yml`):
+
+- Hành động phá hủy (`block_ip`, `kill_process`, `isolate_host`) **chỉ chọn theo id rule tường minh đã duyệt** (R60), không bao giờ theo nhóm. Lý do: nhóm `authentication_failures` có hơn 50 rule gốc (Postfix, Dovecot, WordPress, VPN, Windows...) mà IP nguồn thường là proxy, relay hoặc NAT. Nhóm (`when.groups`) chỉ dùng để thông báo, mở case và chọn case playbook. Test chặn việc dùng `*` hay `WZH-*` cho playbook phá hủy.
+- Rule gốc Wazuh được phép chặn IP, mỗi id nêu đích danh, `scope: origin` (chỉ agent thấy alert), 3.600 giây: sshd `5712`, `5720`, `5763` và web `31152`. `31151` đã bị bỏ (R61): sau tuning nó là level 7, tương ứng WEB-006 mức medium vốn không chặn.
+- Cộng `104095` (level 14, cổng IOC web, không bóng) và các bản XML của mã YAML từng chặn / diệt (AUTH-001, 002, 003, WIN-001, WEB-001..009, LNX-001, 002, 004, WIN-006, 007, 010), chọn theo id `WZH-<id>`.
+- `no_syslog: true` (R59) bắt buộc với playbook `block_ip` chọn theo rule Wazuh: alert từ nguồn syslog (`agent.id` dạng `syslog-<ip>`) bị bỏ qua, vì IP nguồn qua UDP giả được và kẻ tấn công có thể khiến hệ thống chặn nạn nhân.
+- Alert bóng (`alert.shadow`) không chạy playbook nào.
+- Mọi cảnh báo Wazuh từ mức medium trở lên (`WZH-*`) vẫn được thông báo và mở case.
+- `SOAR_WHITELIST` mặc định chỉ `127.0.0.0/8`: **thêm IP proxy, relay, NAT nội bộ trước khi bật chặn IP theo rule gốc**. Đây là mục trong checklist Task 18.
+

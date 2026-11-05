@@ -4,6 +4,8 @@ Tài liệu này mô tả toàn bộ phần AI của SIEM/XDR (`server/siem/ai/`
 định ra sao, kết quả đo các model, và vì sao tỉ lệ đạt còn thấp. Mọi thay đổi về pipeline AI và kết quả thử nghiệm ghi vào
 file này; `README.md` chỉ giữ phần tóm tắt.
 
+> **Lưu ý (05/11/2026):** đầu ra của pipeline AI hiện vẫn là rule YAML ghi vào `server/rules/ai`, nên chỉ chạy trên engine YAML. Nhánh `feature/wazuh-unified-ruleset` sẽ tắt engine YAML ở Task 18 (chưa được duyệt); trước đó phải đổi đích sang `rules-dynamic/ai.xml` (dải id 109000 đến 109999), hoặc giữ engine cho rule AI. Xem checklist Task 18 trong [kế hoạch](docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md) và [RULES.md](RULES.md) mục 9.10. Phần chuyển đầu ra sang XML (Task 19 đến 21) chưa được lập kế hoạch chi tiết.
+
 **Lưu ý về chữ "huấn luyện".** Hệ thống **không huấn luyện hay fine-tune** model nào. Model chạy nguyên trọng số công bố qua
 Ollama. Cái được gọi là "huấn luyện" ở đây là một quy trình *học trong ngữ cảnh*: chọn mẫu tấn công và mẫu bình thường, đưa
 vào prompt, để model đề xuất chữ ký, đo từng chữ ký trên dữ liệu, hỏi lại model những chỗ còn sót, rồi kiểm định rule cuối trên

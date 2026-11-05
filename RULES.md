@@ -6,6 +6,10 @@ Tài liệu về phần **phát hiện bằng luật** của SIEM/XDR: rule ch�
 - `PLAYBOOKS.md`: quy trình xử lý sự cố (case playbook) gắn vào case khi rule bắn.
 - `AI-README.md`: AI đề xuất rule mới và ngoại lệ.
 - `datasets/report.md`, `datasets/report_wazuh.md`: báo cáo độ phủ đầy đủ.
+- [docs/wazuh-ruleset-decisions.md](docs/wazuh-ruleset-decisions.md): sổ quyết định của bộ rule Wazuh XML thống nhất.
+
+> **Lưu ý (05/11/2026):** các mục 1 đến 8 mô tả engine YAML, là thứ đang chạy trên `main`. Engine này sẽ bị gỡ ở Task 18 (cổng chuyển, chưa được duyệt)
+> và phát hiện chuyển sang bộ rule Wazuh XML: xem [mục 9](#9-bộ-rule-wazuh-xml-thống-nhất-nhánh-featurewazuh-unified-ruleset-chạy-bóng-tới-cổng-chuyển). Cho tới lúc đó cả hai cùng chạy, rule XML ở chế độ bóng.
 
 ## Mục lục
 
@@ -17,6 +21,7 @@ Tài liệu về phần **phát hiện bằng luật** của SIEM/XDR: rule ch�
 6. [Điểm yếu](#6-điểm-yếu)
 7. [Kế hoạch bổ sung độ phủ](#7-kế-hoạch-bổ-sung-độ-phủ-16102026)
 8. [Đo lại](#8-đo-lại)
+9. [Bộ rule Wazuh XML thống nhất (nhánh feature/wazuh-unified-ruleset, chạy bóng tới cổng chuyển)](#9-bộ-rule-wazuh-xml-thống-nhất-nhánh-featurewazuh-unified-ruleset-chạy-bóng-tới-cổng-chuyển)
 
 ## 1. Tổng quan
 
@@ -510,3 +515,262 @@ python tools/e2e_test.py                                             # chạy t�
 
 Dataset công khai cần tải và chuyển đổi trước (`tools/fetch_datasets.py`, `tools/convert_datasets.py`, xem `AI-README.md`
 mục 12).
+
+## 9. Bộ rule Wazuh XML thống nhất (nhánh feature/wazuh-unified-ruleset, chạy bóng tới cổng chuyển)
+
+Nhánh `feature/wazuh-unified-ruleset` chuyển phát hiện từ engine YAML (mục 2 đến 8) sang một bộ rule duy nhất chạy trong
+`wazuh-analysisd`: ruleset gốc Wazuh 4.14.8 cộng rule XML riêng của dự án. Kế hoạch: [docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md](docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md).
+Sổ quyết định (61 ruling, phát hiện chính): [docs/wazuh-ruleset-decisions.md](docs/wazuh-ruleset-decisions.md).
+
+### 9.1 Trạng thái (05/11/2026)
+
+- Task 0 đến 17 của kế hoạch đã xong trên nhánh. CI (5 job) xanh ở commit `e7f75f6`: 596 unit test đạt trên Linux, 539 ca test log gốc
+  chạy qua một wazuh-manager thật, 0 sai, lint 10 file 0 lỗi (1 cảnh báo: `lsass.exe` chép nguyên từ rule gốc).
+- Rule XML riêng chạy **bóng** (nhóm `shadow`): vẫn sinh alert để đo, SOAR bỏ qua. Engine YAML vẫn là thứ chạy thật trên `main`.
+  Rule phát hiện của dự án không bóng chỉ có 100100 / 100101 (WEB-010 / WEB-011, chạy thật từ trước nhánh này) và 104095
+  (bản sao rule gốc 99906, xem 9.3); ngoài ra là rule bộ đếm level 0 đến 2 và các rule gốc bị chỉnh ở 9.8.
+- **Task 18 (cổng chuyển: tắt engine YAML) chưa được người dùng duyệt.** Cho tới lúc đó nhánh chưa được triển khai lên stack thật;
+  bốn việc cần stack thật còn hoãn: báo cáo song song `build/parity.md` (Task 13), kiểm thư viện rule và số kỳ vọng E2E mục Thư viện rule (Task 14), thử ngoại lệ Wazuh trên manager thật (Task 16), và đo lại độ ồn trên ≥ 24 giờ syslog + nhật ký console thật (số đo hiện tại chưa có hai nguồn này).
+- Danh sách việc trước khi bật: mục *Task 18* của kế hoạch.
+
+### 9.2 Mười file rule
+
+Wazuh nạp rule theo thứ tự **tên file**, và rule con bị bỏ nếu `if_sid` trỏ tới rule chưa nạp, nên tên file (số đầu) quyết định
+được móc vào đâu. Vì vậy tên không theo bảng số 0100 đến 0108 ban đầu của kế hoạch. Dải id của từng file nằm ở `ID_RANGES` trong
+`server/siem/wazuh_rules.py`; lint đọc bảng này.
+
+| File | Dải id | Số rule | Phủ |
+|---|---|---|---|
+| `0100-platform.xml` | 100000–100999 | 2 | WEB-010 / WEB-011: file mới / file bị sửa trong thư mục web (con của 554 / 550), chạy thật từ trước |
+| `0101-auth.xml` | 101000–101999 | 10 | AUTH-001..004, AUTH-006 trên sshd và console. 101000 là bộ đếm chung (level 2); 101020..101022 nhận nhật ký đăng nhập console (JSON) |
+| `0102-linux.xml` (+ decoder `decoders/0102-siem-procs.xml`) | 102000–102499 | 9 | LNX-001..006 trên dòng `siem-proc:` do script `siem-procs` của agent gửi |
+| `0851-linux-audit.xml` | 102500–102999 | 8 | LNX-001, 003..006 trên bản ghi auditd EXECVE (payload hex). Phải nạp sau 0850 nên tách khỏi 0102 |
+| `0541-network.xml` | 103000–103999 | 6 | NET-001, 003, 004, 005 trên filterlog (pf) và Suricata `eve.json`. 103000 là bộ đếm filterlog không phải block |
+| `0271-web.xml` | 104000–104999 | 18 | WEB-001..009 trên access log Apache; 104095 là cổng IOC (9.3). Phải nạp sau 0245 (rule web gốc) |
+| `0965-windows.xml` | 105000–105999 | 16 | WIN-001, 002, 004..013 trên eventchannel (Sysmon, Security, System). Con của chuỗi rule gốc 60000 / 61600 / 92000 |
+| `0106-fim.xml` | 106000–106999 | 3 | FIM-001 (Linux, thư mục Startup Windows, khóa Run của registry), con của 550 / 554 / 750 / 752 |
+| `0845-ti.xml` | 107000–107999 | 10 | TI-001 phần IP: firewall, Suricata, sshd, web, đăng nhập Windows (9.9). Phải nạp sau 0840 và 0541 |
+| `0999-tuning.xml` | không có dải | 9 | Chỉ `overwrite="yes"` trên rule gốc (id < 100000), xem 9.8. Nạp cuối cùng |
+
+Dải chưa dùng: `0108-sigmahq.xml` (108000–108999) cho SigmaHQ, `rules-dynamic/ai.xml` (109000–109999) cho rule AI,
+`rules-dynamic/exceptions.xml` (110000–110999) cho ngoại lệ. Hai file trong `rules-dynamic/` nằm trong volume riêng
+`wazuh_dynamic_rules`, console ghi qua `write_dynamic`, không nằm trong repo; `ai.xml` hiện **chưa có ai ghi** (9.10).
+
+### 9.3 Quy ước viết rule
+
+Lint (`tools/wazuh_rule_lint.py`, chạy trong CI) bắt buộc:
+
+- `<description>` bắt đầu bằng mã rule (`WEB-001`, `LNX-005`...); có `<mitre><id>` (trừ file tuning); nhóm chứa `siem`.
+- Nhóm theo dạng `siem,<lĩnh vực>,shadow,legacy_<MÃ>,` (vd `siem,web,shadow,legacy_WEB-001,`). Nhóm `legacy_<MÃ>` nối rule XML với
+  mã YAML cũ: alert mang `rule.legacy_id`, SOAR chọn case playbook theo đó, báo cáo song song ghép theo đó.
+- Rule bóng có thêm `<info type="text">shadow_since=YYYY-MM-DD</info>` (hiện 78 rule, từ 31/10 tới 04/11/2026). Bật chính thức = bỏ nhóm `shadow` rồi reload.
+- Regex dùng `type="pcre2"` cho `<regex>` và `<field>` (mặc định của chúng là OS_Regex). Không lồng lượng từ kiểu `(a+)+`.
+- Mức độ: critical → level 12, high → 10, medium → 7. Alert chỉ sinh từ level ≥ 7; level thấp hơn là bộ đếm hoặc rule cha.
+- Id nằm trong dải của file; id không trùng giữa các file; mỗi rule riêng có ≥ 1 ca dương và ≥ 1 ca âm (rule cha level 0 trong cùng file
+  không đòi ca dương); rule level 0 phải có điều kiện trường ngoài `if_sid`.
+- **Không dùng thuộc tính `ignore`** (ràng buộc toàn cục 7). Dập trùng làm ở cầu nối: cùng `(rule.id, nguồn, agent, file.path)` trong
+  `WAZUH_ALERT_SUPPRESS` giây (60) thì chỉ ra 1 alert, và alert bóng không bị dập để báo cáo song song đếm đủ.
+- `overwrite="yes"` chỉ ở `0999-tuning.xml`; file đó chỉ chứa rule id < 100000 có `overwrite`.
+- Cảnh báo (không chặn): `<field>` chỉ là một từ trần không neo `^…$`; `frequency` dựa trên `if_matched_group` (chưa chứng minh được là chạy, 9.6).
+
+Hai dấu đánh dấu trong `<info type="text">`:
+
+- `port_of_stock=<id>`: rule không bóng, là bản sao hành vi rule gốc đang chạy thật. Hiện có một: **104095** (level 14, nhóm `siem,web,accesslog,attack`)
+  chép 99906 "tấn công web từ IP trong danh sách IOC trả mã 200" sang nhánh rule web của dự án. Lý do: rule WEB (level 10 đến 12) thắng
+  mọi rule tấn công web gốc (level ≤ 7) nên nếu không có bản sao thì 99906 (alert thật level 14 hôm nay) sẽ biến mất. 104095 mở rộng hơn 99906:
+  bắt cả dòng chỉ rule WEB nhận ra (RCE) và gồm các tấn công web chỉ rule dự án thấy.
+- `real_before=yes`: rule gốc bị `overwrite` đã là alert thật trước khi sửa (61627, 61640), nên lint cho phép level ≥ 12 mà không cần `shadow`.
+
+Trong file tuning, rule đè lên level mới ≥ 12 phải mang nhóm `shadow` hoặc có `real_before=yes` (R58): thay đổi `overwrite` có hiệu lực ngay khi
+triển khai, không qua chạy bóng, nên không được tạo alert thật mới trước cổng chuyển.
+
+### 9.4 Bảng mã cũ → rule XML
+
+Nguồn: `wazuh/manager/tests/legacy_map.yml` (quyết định của Task 5, cột *Quyết định*) và nhóm `legacy_*` trong các file XML (cột *Rule XML*).
+`builtin` là rule gốc báo đủ mọi nhánh; `approx` có rule gốc gần đúng, phần thiếu được viết thêm hoặc chỉnh ở file tuning; `convert` viết mới.
+Cả 41 mã đều có dòng. Dòng "tuning" nghĩa là chỉnh rule gốc, "rule gốc" nghĩa là dùng rule gốc không đổi.
+
+| Mã cũ | Quyết định | Rule XML (id) | Ghi chú |
+|---|---|---|---|
+| AUTH-001 | convert | 101000 (bộ đếm), 101001 | đếm chung sshd + console |
+| AUTH-002 | convert | 101010, 101002 | 101002 cũng nhận "thất bại ở một dịch vụ, thành công ở dịch vụ kia" |
+| AUTH-003 | convert | 101003 | `different_srcuser` |
+| AUTH-004 | convert | 101004 | |
+| AUTH-005 | builtin | rule gốc 5902 | |
+| AUTH-006 | convert | 101006 | |
+| FIM-001 | approx | 106001, 106002, 106003 | |
+| LNX-001 | convert | 102001, 102501, 102511 | auditd: chỉ nhánh payload hex |
+| LNX-002 | convert | 102002 | chỉ có trên `siem-procs` (auditd không có tên tiến trình cha) |
+| LNX-003 | convert | 102003, 102503 | `curl \| sh` không phủ được trên auditd |
+| LNX-004 | convert | 102004, 102014, 102504 | |
+| LNX-005 | convert | 102090 + 102005; 102590 + 102505 | bộ đếm + rule báo, bản siem-proc và bản auditd |
+| LNX-006 | convert | 102006, 102506, 102516 | |
+| NET-001 | approx | 103000 (bộ đếm), 103001, 103002 | `different_dstport`; 103002 là mức cao hơn |
+| NET-002 | approx | tuning 87702 | |
+| NET-003 | convert | 103003 | |
+| NET-004 | convert | 103004 | chỉ qua agent OPNsense đọc `eve.json` (9.6) |
+| NET-005 | convert | 103005 | `different_dstip` |
+| TI-001 | convert | 107001..107010 | chỉ phần IP (9.9) |
+| WEB-001 | approx | 104001, 104011..104014 | rule gốc 31103 / 31106 chỉ phủ một phần nhánh |
+| WEB-002 | approx | 104002, 104021 | |
+| WEB-003 | approx | 104003, 104031 | |
+| WEB-004 | convert | 104004, 104041 | |
+| WEB-005 | convert | 104005 | |
+| WEB-006 | approx | tuning 31151 | |
+| WEB-007 | approx | 104070 (bộ đếm), 104007 | |
+| WEB-008 | convert | 104008 | |
+| WEB-009 | convert | 104090 (bộ đếm), 104009 | |
+| WEB-010 / WEB-011 | (không có trong `legacy_map`) | 100100 / 100101 | đang chạy thật từ trước nhánh |
+| WIN-001 | convert | 105001 | |
+| WIN-002 | approx | tuning 63103 + 105002 | 105002 là nhánh System/104 |
+| WIN-003 | approx | tuning 60109 | |
+| WIN-004 | approx | 105004 | cộng rule gốc 60141, 60154, 60159, 60179 |
+| WIN-005 | convert | 105005 | |
+| WIN-006 | approx | tuning 91837 + 105006 | 105006 là nhánh dòng lệnh |
+| WIN-007 | convert | 105007, 105107, 105207 | |
+| WIN-008 | convert | 105008 | |
+| WIN-009 | convert | 105009, 105109 | 105109 là Security 4697 |
+| WIN-010 | convert | 105010 | |
+| WIN-011 | approx | 105011 | |
+| WIN-012 | approx | 105012 | |
+| WIN-013 | convert | 105013, 105113 | 105113 là Security 4698 |
+
+Phần chưa chuyển được và đã ghi để người dùng quyết trước Task 18: TI-001 domain và hash (9.9).
+
+### 9.5 Viết và kiểm thử một rule XML
+
+Mỗi file rule có một file ca test cùng tên trong `wazuh/manager/tests/cases/` (ví dụ `0271-web.yml` cho `0271-web.xml`). Ca test là
+**log gốc**, không phải event đã chuẩn hóa:
+
+```yaml
+- rule: 104001            # id phải báo; hoặc `none: [104001]` cho ca ÂM
+  legacy: WEB-001         # (tùy chọn) mã rule cũ
+  log_format: apache      # syslog | json | apache | eventchannel | syscheck
+  location: '(demo-web) any->/usr/local/apache2/logs/access_log'
+  events:                 # nhiều dòng = cùng một session logtest (rule đếm ngưỡng)
+    - '203.0.113.5 - - [31/Oct/2026:10:00:00 +0700] "GET /p.php?id=1%27%20union%20select%201 HTTP/1.1" 200 12 "-" "curl/8"'
+```
+
+Các khóa tùy chọn: `last: true` (chỉ tính rule của dòng cuối: ca "nguồn thứ hai vẫn báo"), `delay: <giây>` (nghỉ sau mỗi dòng để thử
+`timeframe` thật), một dòng có thể là map `{event, location, log_format}` để đổi nguồn riêng dòng đó, `sha256` (dòng syscheck, để thử
+rule IOC hash), `list_file: {name, content}` (không phải ca: đẩy một danh sách CDB lên manager thử trước khi chạy). Một ca dương cần ca âm đi kèm
+(cùng dạng nhưng hợp lệ). Rule web phải có ca dạng thô và dạng mã hóa (`%27`, `%2527`, `+`, `%u0027`, `%55NION`). Rule đếm ngưỡng phải có ca N−1 dòng (không báo)
+và ca `different_*` "hai giá trị xen kẽ" (không báo).
+
+`tools/wazuh_rule_test.py` có hai chế độ:
+
+| Chế độ | Định dạng | Cách chạy |
+|---|---|---|
+| logtest | syslog, json, apache | `PUT /logtest` của manager, giữ token qua các dòng của ca, xóa session sau mỗi ca, gặp HTTP 429 thì chờ rồi thử lại. Kết quả là mọi rule đã báo, kể cả rule trung gian |
+| inject (bơm hàng đợi) | eventchannel, syscheck | logtest không giải mã được hai loại này, nên bộ chạy dựng một wazuh-manager tạm không nối mạng và bơm thẳng vào hàng đợi analysisd. Bơm **không giữ thứ tự dòng**, nên ca nhiều dòng loại này chỉ khẳng định "báo ít nhất một lần". Chỉ thấy rule có trong `alerts.json` (level ≥ 3 theo `log_alert_level`) |
+
+Chạy với một manager thử đã dựng (CI dựng đúng như compose, mount `wazuh/manager/rules` chỉ đọc, API riêng nâng `max_request_per_minute`):
+
+```bash
+python tools/wazuh_rule_lint.py                                   # 0 lỗi; --layer build/attack-layer.json ra layer ATT&CK Navigator
+python tools/wazuh_rule_test.py --url https://localhost:55000 --insecure wazuh/manager/tests/cases/0271-web.yml   # một file
+python tools/wazuh_rule_test.py --url https://localhost:55000 --insecure                                          # cả thư mục
+python tools/wazuh_rule_test.py --report                          # sinh lại legacy_map.yml (ghi chú sửa tay sẽ mất)
+```
+
+Quy trình đưa một rule vào: viết ca dương và ca âm, chạy thấy hỏng; viết rule; chạy lại **cả thư mục ca** (rule mới có thể chiếm sự kiện của rule khác,
+nhiều lỗi chỉ lộ ở file khác); lint; đo độ ồn. Test trên máy dev phải dùng project Compose riêng vì `docker-compose.yml` có `name: siem-xdr`.
+
+Các công cụ đo đi kèm:
+
+| Công cụ | Việc |
+|---|---|
+| `tools/wazuh_noise.py` | Dựng wazuh-manager tạm, bơm tập bình thường (web CSIC 2010 36.000 dòng, lệnh Windows / Linux nền), đếm alert level ≥ 7 theo rule. Cổng: ≤ 1 alert / 100 event. `--rules <file>` chỉ báo cáo rule của một file. Dùng location agent (`[001] (demo-web) any->…`) như thật |
+| `tools/wazuh_coverage.py` | Độ phủ trên dataset công khai và các hàm bơm event (dùng chung với noise và harness) |
+| `tools/parity_report.py` | Đối chiếu alert YAML với alert XML (`rule.legacy_id`) theo event kích hoạt; ghi `build/parity.md`. Chạy từ thư mục chính khi stack đang chạy; cần cho Task 18 |
+| `tools/misp_to_cdb.py` | In danh sách CDB (IOC IP) từ kết quả MISP `restSearch` để xem trước; logic ở `server/siem/pipeline/misp_cdb.py`, SOAR dùng chính hàm này |
+
+CI: job `wazuh-rules` (`.github/workflows/ci.yml`) chạy lint, dựng `wazuh/wazuh-manager:4.14.8` mới mỗi lần, rồi chạy cả thư mục ca.
+
+### 9.6 Hành vi của Wazuh đã đo (S1 đến S7 và các lần kiểm sau)
+
+Đo ngày 31/10 đến 05/11/2026 trên manager 4.14.8, agent 4.14.7; chi tiết ở mục *Kết quả P0 / P1* của kế hoạch.
+
+- **S1, nạp lại.** `PUT /manager/analysisd/reload` trả lời trong 1 giây, không mất event (10.000 dòng gửi, 10.000 lưu, 0 rớt). File hỏng: HTTP vẫn 200,
+  lỗi cú pháp thì `error: 1` và giữ ruleset cũ; trùng id hoặc `if_sid` không tồn tại thì chỉ có `msg` cảnh báo và rule bị bỏ âm thầm. Vì vậy `write_dynamic` xét
+  `error`, `failed_items` và `msg`, không xét HTTP status, và khôi phục file cũ khi lỗi. File hỏng còn trên đĩa làm manager không khởi động lại được, nên
+  `10-siem-setup.sh` chạy `wazuh-analysisd -t` mỗi lần khởi động và chuyển file của `rules-dynamic` sang `rules-dynamic.quarantine/` khi lỗi.
+- **S2, thư mục rule.** `wazuh/manager/rules` mount chỉ đọc vào `etc/rules`; `local_rules.xml` đã bỏ. File rule động nằm trong volume riêng, thư mục được chown cho user `10001` mỗi lần khởi động.
+  analysisd chỉ nạp file đuôi `.xml` (file tạm `ai.xml.tmp` bị bỏ qua). `GET /rules` KHÔNG thấy `rules-dynamic`, nên thư viện rule đọc thêm các file này bằng `wazuh_rules.parse`.
+- **S3, logtest.** Chạy được với syslog, json, apache (giữ token, đếm ngưỡng đúng dòng thứ N). Không giải mã được eventchannel, vì decoder `windows_eventchannel` nằm trong mã analysisd: đó là lý do có chế độ inject.
+  Logtest đọc ruleset trên đĩa, không chứng minh analysisd đang chạy đã nạp.
+- **S4, đếm giá trị khác nhau.** Có `different_srcip / dstip / dstport / srcuser / url / field...`, nhưng Wazuh đếm "N−1 event trước có giá trị khác giá trị hiện tại", không đếm số giá trị phân biệt.
+  Giá trị phân tán (quét cổng, spraying) cho kết quả như rule cũ; chỉ vài giá trị lặp xen kẽ thì báo muộn, sau khoảng 2N−2 event. Áp cho NET-001, NET-005, AUTH-003, LNX-005.
+  `<field name="x">proc</field>` là regex tìm chuỗi con (khớp cả `proc2`), phải neo `^proc$`. `frequency` + `if_matched_group` không tái hiện được (kể cả rule gốc 40111); `if_matched_sid` thì chạy.
+- **S5, không giải mã URL.** Trường `url` giữ nguyên chuỗi trong log. Rule gốc bỏ sót `%2527`, `+`, `%u0027` và từ khóa mã hóa từng chữ (`%55NION`); rule web của dự án bắt cả các dạng này. Trạng thái 200 thì rule gốc ra 31106 thay cho rule tấn công cụ thể.
+- **S6, syslog.** `remoted` không tách được RFC 5424 (không có `program_name`): sshd và filterlog qua RFC 5424 không có decoder. **Phải gửi RFC 3164**
+  (DEPLOY-VM.md và LAB-VMWARE.md ghi bắt buộc; CI ghim bằng ca `0100-platform.yml`, `0101-auth.yml`). Suricata qua syslog 514 không có decoder Wazuh ở cả hai dạng: rule Suricata (86601, NET-004, TI-001 Suricata)
+  **chỉ chạy khi agent OPNsense đọc `eve.json`** (`log_format json`). Agent này chưa cài; trước đó các rule đó không có hiệu lực.
+- **S7, location của agent.** analysisd so `<location>` của rule với chuỗi có tiền tố agent: `(demo-web) any->siem-procs`, `(demo-web) any->/var/log/audit/audit.log`. Rule dùng `(^|/|->)siem-procs$` và `audit\.log$`; bản neo `(^|/)` ban đầu không bao giờ khớp agent thật.
+  Syslog (location = IP gửi) có thể giả bất kỳ dòng nào, nên **mọi rule web chỉ nhận agent** bằng `<location type="pcre2">^\(</location>`, rule Windows là con của chuỗi rule gốc eventchannel, rule auditd ràng buộc location. Đã thấy lỗ hổng cũ (F8) trên `main`: syslog từ IP được phép giả `auditd` hoặc JSON `win.*`; đã vá bằng PR #12.
+- **Thứ tự anh em.** Trong các rule cùng cha, analysisd thử theo level giảm dần: rule **level cao hơn thắng**; bằng level thì **rule nạp trước thắng** (rule gốc nạp trước rule của repo, đổi thứ tự file không đủ để né). Rule thắng ở một tầng cha thì **cả cây con của các rule anh em thua bị bỏ**, nên rule dự án có thể chặn alert thật của rule gốc ở cấp cháu.
+  Kiểm có hệ thống (05/11): rule dự án móc vào 43 rule cha gốc; 22 hậu duệ gốc là alert thật (level ≥ 12 hoặc nhóm hoạt động level ≥ 7); 8 đã có ca chứng minh còn tới được và 14 chưa
+  (60154, 60156, 60159, 60162, 60164, 60166, 60171, 60176, 60187, 60188, 60189, 92602, 92650, 99920). 13 trong 14 rule thắng nhờ level cao hơn rule dự án cùng nhánh; 92602 bằng level 12 với 102501 / 102511 nhưng nạp trước.
+  Danh sách ca ghim cho các rule này và công cụ `tools/wazuh_stock_reach.py` (đọc `ruleset/rules`, dựng cây `if_sid`, liệt kê hậu duệ gốc của từng cha mà rule dự án móc vào) nằm ở nhánh `wzh/pin-real`, chưa gộp lúc viết mục này; xem mục *Task 18* của kế hoạch.
+  Ví dụ đã được xử lý: Shellshock 31168 / 31169 (level 15) vẫn tới được dù 104090 / 104005 cùng cha 31108; 31115 (level 13); 99906 (level 14) giữ bằng 104095; 99903 / 99904 và IOC web, sshd, Windows bằng cách loại IP khỏi con TI.
+- **Cầu nối alert.** `log_alert_level` của `ossec.conf` là 3, nên rule đếm phụ level 2 (101000, 101010, 103000...) không vào `alerts.json`.
+
+### 9.7 Giới hạn đã biết
+
+- **R52, IOC gốc chiếm sự kiện.** Rule IOC gốc trong `0999-malicious-ioc-rules.xml` (99903 / 99904 sshd, 99905 / 99906 web, 99919 Windows, 99915 / 99916 Suricata...) nạp **sau** file dự án và chiếm sự kiện của IP trong
+  `etc/lists/malicious-ioc/malicious-ip`. Hệ quả: các bộ đếm của dự án (AUTH-001, WEB-006, 007, 009, WIN-001) không đếm sự kiện từ IP đó. Chấp nhận, vì rule IOC gốc báo từng event (99903 / 99906 là level 14, alert thật). Số liệu parity của các mã này sẽ thấp hơn YAML với IP trong danh sách. Có ca ghim trong `0999-tuning.yml`.
+- **`different_*`:** báo muộn khi chỉ có vài giá trị lặp xen kẽ (S4); mỗi rule có ca âm ghi rõ ranh giới 2N−2 dòng.
+- **Không giải mã URL:** rule web liệt kê từng dạng mã hóa, dạng lồng mã mới hơn sẽ lọt.
+- **Danh sách CDB không khớp khóa CIDR** (đã thử, cả `address_match_key`): MISP có CIDR /24 đến /31 được bung thành từng IP, tối đa /24. Dải lớn hơn bị bỏ.
+- **Rule có từ 3 thẻ `<list>` trở lên bị xét sai**, nên mỗi rule TI chỉ có tối đa hai thẻ. Hệ quả: nguồn trong danh sách MISP còn đích trong danh sách gốc (hoặc ngược lại) thì TI-001 (level 10) thắng 99915 / 99916 (level 9); chỉ IP có ở cả hai danh sách cùng một trường mới nhường rule gốc.
+- **Console và sshd dùng chung bộ đếm 101000** (R42): thất bại ở hai dịch vụ cùng IP cộng dồn, và thất bại ở dịch vụ này rồi thành công ở dịch vụ kia cũng ra AUTH-002 (101002, critical). Rộng hơn YAML cũ.
+- **5763 / 5712 gốc không còn báo** (sshd 8 lần / 120 giây): bộ đếm chung 101000 nhận trước. Phần hở là 4 đến 5 lần sai mỗi phút từ một IP không kèm thành công; rule YAML cũ cũng không bắt. Không có cách chữa nhỏ (rule `frequency` "tiêu" sự kiện đã đếm), nên chỉ ghi lại.
+- **102505 (LNX-005, auditd) báo nhầm** 2,0 / 100 event trên tập Linux nền, giữ ở chế độ bóng: chuỗi `id; whoami; uname -a; ...` liền nhau đúng nghĩa "≥ 4 lệnh trinh sát khác nhau trong 60 giây", và tập đo bơm dồn trong vài giây. Cần đo lại với dữ liệu giãn theo thời gian thật. Còn theo dõi 102511 (`/dev/tcp/` trong hex) với script healthcheck.
+- **Syslog và nhật ký console:** số đo độ ồn hiện chưa có hai nguồn này; cần đo lại trên ≥ 24 giờ `archives.json` của agent 000.
+- **auditd:** `curl | sh` và một số tách tham số (`socat exec:`, python tách tham số, `/dev/tcp` tách tham số) không phủ được vì auditd mã hóa hex payload trong `bash -c`.
+- **TI-001** chỉ phủ IP (9.9).
+- Nhóm `sca` không thành alert (cấu hình CIS, không phải phát hiện), mặc định `WAZUH_ALERT_EXCLUDE_GROUPS=sca`.
+- 104095 mang mã `WEB-010`, trùng mã với 100100; id Wazuh phân biệt được, mã trong mô tả thì không.
+
+### 9.8 File tuning `0999-tuning.xml`
+
+Tên xếp **sau** `0999-malicious-ioc-rules.xml` (chữ `t` > `m`), nên nạp sau mọi file gốc và mọi file dự án; `overwrite` chỉ có hiệu lực khi rule gốc đã được nạp (tên cũ `0190-tuning` nạp trước web, Windows, Sysmon nên không đè được gì).
+Mỗi rule chép đủ định nghĩa gốc (nhóm, mitre, tuân thủ, điều kiện), chỉ đổi phần ghi trong chú thích. `if_sid` / `if_group` do Wazuh giữ nguyên khi overwrite.
+
+| Rule gốc | Trước | Sau | Vì sao |
+|---|---|---|---|
+| 92041 | level 10, regex khớp **mọi** `reg add ... /d` | level 10, chỉ khớp giá trị Base64-like (≥ 8 ký tự có đệm `=`, hoặc ≥ 20 ký tự có chữ số) | Lỗi regex của Wazuh (mọi nhóm sau `/d` đều tùy chọn) |
+| 92021 | level 3, thiếu `\b` đầu nhánh | thêm `\b` đầu từ | `ri` khớp trong `-Uri` |
+| 61627 | level 12 | thêm ngoại lệ `efsui.exe` trong System32 (con của `lsass.exe` khi dùng EFS), `real_before=yes` | Báo nhầm trong log nền ghi thật |
+| 61640 | level 12 | thêm ngoại lệ `explorer.exe /factory,{GUID} -Embedding` (DCOM do svchost mở), `real_before=yes` | Báo nhầm trong log nền ghi thật |
+| 63103 | level 5, xóa nhật ký Security | level 12, **bóng**, mã WIN-002 | Phủ WIN-002 (approx chỉ lệch level) |
+| 91837 | level 4, PowerShell script block | level 12, **bóng**, mã WIN-006 | Phủ WIN-006 |
+| 60109 | level 8, tạo hoặc bật tài khoản (sự kiện 624, 626, 4720, 4722) | level 8, bỏ sự kiện 4722 (bật tài khoản), mã WIN-003 | WIN-003 chỉ tính tạo tài khoản; bật lại tài khoản là việc thường ngày |
+| 87702 | level 10, 18 lần / 45 giây, `ignore` | level 7, 50 lần / 60 giây, bỏ `ignore`, mã NET-002 | Khớp ngưỡng YAML cũ; bản gốc nhạy hơn |
+| 31151 | level 10, 14 lần mã 4xx / 90 giây | level 7, 30 lần / 60 giây, mã WEB-006 | Khớp ngưỡng YAML cũ (WEB-006 chỉ mức medium); level 7 không còn là high nên 31151 đã bị bỏ khỏi playbook chặn IP (R61) |
+
+Ba hệ quả cần nói rõ:
+
+- **Độ ồn Windows** trên tập bình thường: từ 1,341 xuống 0,596 alert / 100 event (đạt cổng ≤ 1) nhờ sửa 61627, 61640 và 92041. Linux: 2,0 / 100, toàn bộ là 102505 (giữ bóng, 9.7).
+- **Độ phủ trên dataset Windows trong phép đo của Task 12 giảm từ 297 xuống 76 (trên 2.218 mẫu đo)**, mất 221. Cả 221 là rule 92041 trước khi sửa, khớp **mọi** lệnh `reg add /d`, tức khớp chung chung chứ không phải phát hiện. Những khớp ngẫu nhiên này vốn đã bị loại khỏi số liệu *Wazuh cụ thể*
+  ở mục 4.3 và README (danh sách `GENERIC` của `wazuh_coverage.py`). Con số 76 là số thật; 297 là số thổi phồng bởi một lỗi regex của Wazuh. Số mục 4 ghi theo đo ngày 6/10 chưa được đo lại sau tuning.
+- **Alert thật mất đi sau tuning**, đã ghi ở từng rule: chỉ 61627 (efsui.exe) và 61640 (`/factory`), có log ghi thật làm chứng; 92041 mất mọi `reg add /d` giá trị thường (khoảng 220 sự kiện atomic T1112 trong tập đo, vốn không đặc hiệu).
+
+Đã xét nhưng không đè: 61618 (ồn do cách dựng event thiếu ParentImage), 60141 (cha chung; Administrators, Domain Admins, Enterprise Admins đã có con), 92043 / 92074 / 92057 (không phân biệt được với tấn công), 102505 (không phân biệt được bằng nội dung lệnh).
+
+### 9.9 TI-001 và các danh sách CDB
+
+- Danh sách gốc `etc/lists/malicious-ioc/malicious-ip` của Wazuh (199 IP đơn) **không bị đụng**: rule gốc 99915 / 99916 và loại trừ của 103004 (NET-004) dùng nó (R50).
+- IOC của dự án nằm trong danh sách **riêng** `etc/lists/siem-misp-ip`. SOAR mỗi chu kỳ đồng bộ MISP (`MISP_INTERVAL_MINUTES`) gộp IOC MISP loại IP còn hạn với `config/intel/*.txt` (và xuất độc lập với retrohunt), đẩy lên bằng Wazuh API
+  (`PUT /lists/files/...`) rồi reload analysisd. Chỉ user API `siem-soar` có quyền ghi danh sách (thử thật: `PUT` vào danh sách gốc bằng token đó bị từ chối); `siem-rules` không còn quyền đó. Hệ quả: `siem-soar` có thêm `manager:restart` (cần cho reload).
+- API Wazuh từ chối file danh sách rỗng, nên entrypoint tạo file giữ chỗ một dòng `240.0.0.0:empty` để analysisd chạy được khi chưa có IOC.
+- Rule TI dùng `match_key` / `not_match_key` (khớp chuỗi chính xác), vì CIDR không khớp (9.7). Phủ: firewall pf (107001, 107002, 107003), Suricata (107004 đến 107007), sshd (107008), web (107009, loại IP có trong danh sách gốc và chỉ nhận location agent), đăng nhập Windows (107010).
+- **Chưa phủ:** domain và hash của MISP / `config/intel` (rule gốc 99917 / 99918 dùng danh sách domain gốc; hash cần decoder sysmon / syscheck), DNS, proxy, VPN. Người dùng quyết định trước khi tắt YAML (checklist Task 18).
+- Với IP trong MISP, rule cuối của event là TI-001 nên event đó không vào bộ đếm 5763 / 31151 / 60204: TI-001 báo từng event (level 10 như các rule đếm) thay cho đếm. Rule gốc level > 10 cùng cha (31115, 31168...) vẫn thắng TI-001.
+
+### 9.10 Những việc còn lại trước khi bật
+
+- Rule AI: pipeline AI vẫn ghi rule YAML vào `server/rules/ai`. Tắt engine YAML thì rule AI không chạy; đổi đích sang `rules-dynamic/ai.xml` (dải 109000) trước, hoặc giữ engine cho rule AI. Xem [AI-README.md](AI-README.md).
+- Ngoại lệ: luồng Wazuh (rule level 0 trong `exceptions.xml`) đã có ở API nhưng chưa kiểm trên manager thật; YAML vẫn là đường chạy tới Task 18 ([SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 4).
+- SOAR: phản ứng phá hủy chỉ theo id đã duyệt; `SOAR_WHITELIST` phải thêm IP proxy, relay, NAT nội bộ ([PLAYBOOKS.md](PLAYBOOKS.md) mục 6).
+- Kế hoạch đầy đủ và các điều kiện cổng: mục *Task 18* của kế hoạch. README và mục 1 đến 8 của tài liệu này được viết lại sau khi Task 18 qua.
