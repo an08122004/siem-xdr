@@ -730,7 +730,7 @@ CI: job `wazuh-rules` (`.github/workflows/ci.yml`) chạy lint, dựng `wazuh/wa
 - **auditd:** `curl | sh` và một số tách tham số (`socat exec:`, python tách tham số, `/dev/tcp` tách tham số) không phủ được vì auditd mã hóa hex payload trong `bash -c`.
 - **TI-001** chỉ phủ IP (9.9).
 - Nhóm `sca` không thành alert (cấu hình CIS, không phải phát hiện), mặc định `WAZUH_ALERT_EXCLUDE_GROUPS=sca`.
-- 104095 mang mã `WEB-010`, trùng mã với 100100; id Wazuh phân biệt được, mã trong mô tả thì không.
+- 104095 mang mã `WEB-012` (trước 05/11 ghi nhầm `WEB-010`, trùng với 100100).
 
 ### 9.8 File tuning `0999-tuning.xml`
 

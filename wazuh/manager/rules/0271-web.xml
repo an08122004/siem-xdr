@@ -258,7 +258,7 @@
     <if_sid>104004,104041,104008,104001,104013,104011,104014,104012,104003,104031,104002,104021,104005</if_sid>
     <list field="srcip" lookup="match_key">etc/lists/malicious-ioc/malicious-ip</list>
     <id>^200</id>
-    <description>WEB-010 Tấn công web từ IP độc hại $(srcip) trả mã 200 (thành công): $(url)</description>
+    <description>WEB-012 Tấn công web từ IP độc hại $(srcip) trả mã 200 (thành công): $(url)</description>
     <mitre>
       <id>T1190</id>
     </mitre>
