@@ -40,7 +40,7 @@ def blocked(results):
 
 @pytest.mark.parametrize("rid,groups", [(5712, ["syslog", "authentication_failures"]), (5720, ["syslog", "authentication_failures"]),
                                         (5763, ["syslog", "authentication_failures"]),
-                                        (31151, ["web", "web_scan"]), (31152, ["web", "attack", "sql_injection"])])
+                                        (31152, ["web", "attack", "sql_injection"])])
 def test_approved_stock_ids_block_ip_on_origin_agent_only(rid, groups, monkeypatch):
     res, es = run(wazuh_alert(rid, 10, groups), monkeypatch)
     assert blocked(res) and {a["agent_id"] for a in es.docs["siem-actions"].values()} == {"web-01"}
@@ -51,6 +51,7 @@ def test_approved_stock_ids_block_ip_on_origin_agent_only(rid, groups, monkeypat
                                         (9551, ["wordpress", "authentication_failures"]),
                                         (9750, ["dovecot", "authentication_failures"]),
                                         (60204, ["windows", "authentication_failures"]),
+                                        (31151, ["web", "web_scan"]),       # R61: WEB-006 hạ về level 7 (0999-tuning.xml)
                                         (31161, ["web", "web_scan"]), (31163, ["web", "web_scan"])])
 def test_other_stock_rules_in_groups_never_block(rid, groups, monkeypatch):
     res, es = run(wazuh_alert(rid, 10, groups), monkeypatch)
@@ -127,7 +128,7 @@ def test_every_playbook_rule_id_exists_in_repo_xml():
     xml_ids = {m for f in RULES_XML.glob("*.xml") for m in re.findall(r'<rule id="(\d+)"', f.read_text(encoding="utf-8"))}
     pbs = yaml.safe_load((ROOT / "config" / "playbooks.yml").read_text(encoding="utf-8"))["playbooks"]
     explicit = {i[4:] for p in pbs for i in (p.get("when") or {}).get("rule_ids", []) if re.fullmatch(r"WZH-\d+", str(i))}
-    stock = {"5712", "5720", "5763", "31151", "31152"}          # rule gốc đã duyệt (R60), không nằm trong repo
+    stock = {"5712", "5720", "5763", "31152"}          # rule gốc đã duyệt (R60), không nằm trong repo
     assert explicit and explicit - stock <= xml_ids, sorted(explicit - stock - xml_ids)
     assert not stock & xml_ids
 
