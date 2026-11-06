@@ -522,10 +522,11 @@ Nhánh `feature/wazuh-unified-ruleset` chuyển phát hiện từ engine YAML (m
 `wazuh-analysisd`: ruleset gốc Wazuh 4.14.8 cộng rule XML riêng của dự án. Kế hoạch: [docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md](docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md).
 Sổ quyết định (61 ruling, phát hiện chính): [docs/wazuh-ruleset-decisions.md](docs/wazuh-ruleset-decisions.md).
 
-### 9.1 Trạng thái (05/11/2026)
+### 9.1 Trạng thái (06/11/2026)
 
-- Task 0 đến 17 của kế hoạch đã xong trên nhánh. CI (5 job) xanh ở commit `0e6e0bb`: 603 unit test đạt trên Linux, 556 ca test log gốc
-  chạy qua một wazuh-manager thật, 0 sai, 0 rule gốc là alert thật chưa ghim, lint 10 file 0 lỗi (1 cảnh báo: `lsass.exe` chép nguyên từ rule gốc).
+- Task 0 đến 18 của kế hoạch đã xong. **Đã triển khai lên stack thật 05–06/11/2026** (main `597cd5d` = PR #13, sửa nóng #14 thư viện rule gọi đúng `WazuhApi`, #15 đọc `mitre` dạng list của API và gộp rule gốc bị đè). E2E trên stack thật **45/45** (06/11): đăng nhập 13/13, SQLi → chặn IP 6/6, command injection → kill 3/3, webshell → FIM → case 3/3, Grafana 16/16 (thư viện 4600/4600 rule Wazuh), hồi quy 4/4.
+  CI (5 job) xanh ở `397a774`: 663 unit test trên Linux, 597 ca log gốc qua wazuh-manager thật 0 sai, `ossec.log` không lỗi nạp rule,
+  93 alert thật của rule gốc dưới cha bị móc đều có ca ghim hoặc bảo đảm cấu trúc, lint 10 file 0 lỗi (1 cảnh báo: `lsass.exe` chép nguyên từ rule gốc).
 - **Đã chuyển (R65, 05/11/2026): chủ dự án quyết định chuyển hẳn.** Engine YAML tắt (`RULE_ENGINE_ENABLED=false`, mặc định); mọi rule XML
   riêng bỏ nhóm `shadow` và là alert thật (trừ `0845-ti.xml`, bỏ chạy bóng cùng đợt khi phần TI domain/hash được gộp); rule gốc Wazuh level 7 đến 11
   ngoài nhóm cũ cũng là alert thật (`WAZUH_STOCK_SHADOW=false`, mặc định). Chạy bóng vẫn dùng được cho rule mới sau này (SOC-OPERATIONS mục 4).
@@ -535,7 +536,8 @@ Sổ quyết định (61 ruling, phát hiện chính): [docs/wazuh-ruleset-decis
   (dư địa đo ở Task 2 là ≤ 1 alert / 100 event bình thường), mỗi alert mở case; playbook phá hủy vẫn chỉ theo id đã duyệt (R60) nên rủi ro là ngập case, không phải chặn nhầm. Quay lui nhanh: `WAZUH_STOCK_SHADOW=true`.
 - Playbook SOAR theo mã YAML (AUTH-/WEB-/LNX-/WIN-/TI-001) đã xóa; chỉ còn playbook theo `WZH-<id>` (bản XML tương ứng), RBA / HLT / retrohunt giữ qua playbook chung. Đề xuất AI và ngoại lệ YAML bị chặn khi engine tắt (409) tới Task 19 đến 22.
   Thư viện rule và KPI độ phủ ATT&CK coi rule YAML là `đã tắt (engine YAML)`: độ phủ chỉ tính từ rule Wazuh.
-- Bốn việc cần stack thật còn hoãn: báo cáo song song `build/parity.md` (Task 13), kiểm thư viện rule và số kỳ vọng E2E mục Thư viện rule (Task 14), thử ngoại lệ Wazuh trên manager thật (Task 16), và đo lại độ ồn trên ≥ 24 giờ syslog + nhật ký console thật (số đo hiện tại chưa có hai nguồn này).
+- Việc kiểm trên stack thật: thư viện rule và số kỳ vọng E2E (Task 14) **đã đạt** (4600/4600). Báo cáo song song `build/parity.md` (Task 13)
+  **không còn làm được** vì engine YAML đã tắt (R65). Còn hoãn: thử ngoại lệ Wazuh trên manager thật (Task 16) và đo độ ồn trên ≥ 24 giờ syslog / nhật ký console thật.
 - Danh sách việc triển khai: mục *Task 18* của kế hoạch.
 
 ### 9.2 Mười file rule
@@ -796,9 +798,9 @@ Ba hệ quả cần nói rõ:
   - **Giới hạn đã chấp nhận:** (1) khóa CDB khớp chính xác và phân biệt hoa thường nên `www.evil.example` KHÔNG khớp khi IOC là `evil.example`, và `EVIL.example` không khớp (rule YAML cũ khớp subdomain; không có cách thuần CDB: cần liệt kê từng tên được hỏi, hoặc một decoder rút domain gốc, nhưng decoder không chạy được trên eventchannel / JSON nên không thử); (2) Sysmon sự kiện 1 `win.eventdata.hashes` là một chuỗi `SHA1=..,MD5=..,SHA256=..` mà CDB không tách được, nên hash tiến trình (`process.hash` của rule YAML) chưa phủ, chỉ có hash file của FIM; (3) FIM-001 (106001-106003) và WEB-010 / 011 (100100 / 100101), level 10 và nạp trước, thắng TI-001 hash khi cùng cha cùng khớp đường dẫn (alert vẫn ra, mất ngữ cảnh IOC); (4) DNS qua proxy / VPN, và domain chỉ có trong log không phải Suricata / Sysmon, chưa phủ.
 - Với IP trong MISP, rule cuối của event là TI-001 nên event đó không vào bộ đếm 5763 / 31151 / 60204: TI-001 báo từng event (level 10 như các rule đếm) thay cho đếm. Rule gốc level > 10 cùng cha (31115, 31168...) vẫn thắng TI-001.
 
-### 9.10 Những việc còn lại trước khi bật
+### 9.10 Những việc còn lại sau khi chuyển
 
 - Rule AI: pipeline AI vẫn ghi rule YAML vào `server/rules/ai`. Engine YAML đã tắt (R65) nên duyệt / bật chính thức đề xuất AI trả 409 "engine YAML đã tắt — rule AI cần đích Wazuh XML (Task 19–22)" cho tới khi đổi đích sang `rules-dynamic/ai.xml` (dải 109000). Xem [AI-README.md](AI-README.md).
 - Ngoại lệ: luồng Wazuh (rule level 0 trong `exceptions.xml`) đã có ở API nhưng chưa kiểm trên manager thật; ngoại lệ YAML không còn tác dụng khi engine tắt ([SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 4).
 - SOAR: phản ứng phá hủy chỉ theo id đã duyệt; `SOAR_WHITELIST` phải thêm IP proxy, relay, NAT nội bộ ([PLAYBOOKS.md](PLAYBOOKS.md) mục 6).
-- Kế hoạch đầy đủ và các điều kiện cổng: mục *Task 18* của kế hoạch. README và mục 1 đến 8 của tài liệu này được viết lại sau khi Task 18 qua.
+- Kế hoạch đầy đủ và các điều kiện cổng: mục *Task 18* của kế hoạch. Task 18 đã qua (06/11); viết lại README và mục 1 đến 8 của tài liệu này là Task 24 (P4).

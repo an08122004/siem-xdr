@@ -2,14 +2,16 @@
 
 Hai đợt: **05/11/2026** (nhánh `feature/wazuh-unified-ruleset`, mục 0) và **15/10/2026** (phần còn lại của tài liệu, giữ làm lịch sử).
 
-## 0. Kiểm thử bộ rule Wazuh XML (05/11/2026)
+## 0. Kiểm thử bộ rule Wazuh XML (06/11/2026)
 
-Mã được kiểm thử: nhánh `feature/wazuh-unified-ruleset` @ `0e6e0bb` (Task 0 đến 17, ghim alert thật, sửa dashboard của [kế hoạch](docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md)). Chạy trên CI GitHub Actions (Ubuntu 24.04, Python 3.12). Mô tả bộ rule: [RULES.md](RULES.md) mục 9.
+Triển khai: **Đã triển khai lên stack thật 05–06/11/2026** (main `597cd5d` = PR #13, sửa nóng #14 thư viện rule gọi đúng `WazuhApi`, #15 đọc `mitre` dạng list của API và gộp rule gốc bị đè). E2E trên stack thật **45/45** (06/11): đăng nhập 13/13, SQLi → chặn IP 6/6, command injection → kill 3/3, webshell → FIM → case 3/3, Grafana 16/16 (thư viện 4600/4600 rule Wazuh), hồi quy 4/4.
+
+Mã được kiểm thử trên CI: nhánh `feature/wazuh-unified-ruleset` @ `397a774` (Task 0 đến 18, ghim alert thật, sửa dashboard của [kế hoạch](docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md)). Chạy trên CI GitHub Actions (Ubuntu 24.04, Python 3.12). Mô tả bộ rule: [RULES.md](RULES.md) mục 9.
 
 | Hạng mục | Kết quả |
 |---|---|
-| Unit test (`pytest`, job `test`) | **603 đạt** trên CI Linux, 1 cảnh báo |
-| Ca test log gốc qua wazuh-manager thật (job `wazuh-rules`) | **556 ca, 0 sai**; bước `tools/wazuh_stock_reach.py`: 0 rule gốc là alert thật chưa ghim |
+| Unit test (`pytest`, job `test`) | **663 đạt** trên CI Linux, 1 cảnh báo |
+| Ca test log gốc qua wazuh-manager thật (job `wazuh-rules`) | **597 ca, 0 sai**; `ossec.log` không lỗi nạp rule; `tools/wazuh_stock_reach.py`: 93 alert thật của rule gốc, 0 lỗi |
 | Lint rule XML (`tools/wazuh_rule_lint.py`) | **10 file, 0 lỗi**, 1 cảnh báo (`lsass.exe` chép nguyên từ rule gốc) |
 | Các job còn lại (`rules`, `vector`, `compose`) | xanh |
 | Độ ồn trên tập bình thường (`tools/wazuh_noise.py`) | Windows 0,596 / 100 event (cổng ≤ 1, đạt; trước tuning 1,341), web 0 / 36.000, Linux 2,0 / 100 (toàn bộ là 102505, giữ bóng) |
