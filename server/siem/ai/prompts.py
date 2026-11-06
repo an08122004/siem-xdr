@@ -77,6 +77,32 @@ Requirements: be as narrow as possible; anchor it on a specific entity (exact so
 user.name, host.name, agent.id, process.executable, url.path...), never exclude a whole event.category
 or event.module; the exception must not match any sample in true_positives."""
 
+# Ngoại lệ cho rule Wazuh (R73): chỉ những trường wazuh_fields.exception_rule ánh xạ được, so khớp CHÍNH XÁC
+EXCEPTION_FIELDS = ("process.command_line", "source.ip", "destination.ip", "user.name", "url.original", "file.path")
+WAZUH_EXCEPTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "rationale": _STR(400),
+        "conditions": {"type": "array", "minItems": 1, "maxItems": 4, "items": {
+            "type": "object", "properties": {"field": {"type": "string", "enum": list(EXCEPTION_FIELDS)},
+                                             "value": _STR(400)}, "required": ["field", "value"]}},
+    },
+    "required": ["rationale", "conditions"],
+}
+
+
+def exception_fields_text() -> str:
+    return ", ".join(f"`{f}`" for f in EXCEPTION_FIELDS)
+
+
+WAZUH_EXCEPTION_SYSTEM = _COMMON + f"""
+TASK: propose ONE exception for a noisy Wazuh rule: a set of conditions (ALL must hold) that excludes the
+confirmed false positives while every true positive keeps firing.
+Allowed fields (only these can be translated to Wazuh): {exception_fields_text()}.
+Each field at most once. Each value is an EXACT, CASE-SENSITIVE string copied from the false_positives samples
+(no wildcards, no regex). Be as narrow as possible: anchor on a specific entity (an exact user.name, source.ip,
+command line...). The exception must not match any sample in true_positives."""
+
 # ----------------------------------------------------------------------------- rule mới: Sigma
 # Chạy thử 4-7/10 với DSL (JSON {field, op, value}): model 7-9B chép nguyên lệnh, đưa từ đơn, viết regex đường
 # dẫn Windows sai (thoát '\' hai lần trong JSON), không ghép được chương trình với đối số. Sigma là định dạng model
@@ -177,6 +203,17 @@ def exception_prompt(rule_yaml: str, fp: list[Doc], tp: list[Doc], rejected: lis
         "rule": rule_yaml,
         "false_positives": [compact(d) for d in fp[:8]],
         "true_positives": [compact(d) for d in tp[:8]],
+        "previously_rejected_reasons": [sanitize(r, 300) for r in rejected[:3]],
+    }
+    return "DATA:\n" + _dump(data) + "\n\nPropose the exception now."
+
+
+def wazuh_exception_prompt(rule: dict[str, Any], fp: list[Doc], tp: list[Doc], rejected: list[str]) -> str:
+    """`rule`: description / level / groups của rule Wazuh lấy từ danh mục rule."""
+    data = {
+        "rule": {k: rule.get(k) for k in ("id", "description", "level", "groups")},
+        "false_positives": [compact(d, list(EXCEPTION_FIELDS), 400) for d in fp[:8]],
+        "true_positives": [compact(d, list(EXCEPTION_FIELDS), 400) for d in tp[:8]],
         "previously_rejected_reasons": [sanitize(r, 300) for r in rejected[:3]],
     }
     return "DATA:\n" + _dump(data) + "\n\nPropose the exception now."

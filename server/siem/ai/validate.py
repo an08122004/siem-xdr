@@ -22,7 +22,8 @@ from ..detection.rules import Rule, RuleEngine, RuleException, _eval, regex_risk
 from ..pipeline.normalize import Doc, get
 from .atomic import ARTIFACT_RE
 from .golden import PublicDatasets
-from .prompts import EXC_OPS, RULE_OPS
+from .. import wazuh_fields
+from .prompts import EXC_OPS, EXCEPTION_FIELDS, RULE_OPS
 
 FIELD_RE = re.compile(r"^[a-z_@][a-z0-9_.@]*$")
 SPECIFIC_OPS = {"eq", "in", "cidr", "startswith"}
@@ -522,6 +523,38 @@ def validate_exception(rule: Rule, exc: dict[str, Any], fp: list[Doc], tp: list[
     passed = all(c.ok for c in checks if c.blocking)
     risk = "cao" if (not tp and not golden_pos) or ratio > 0.8 else "thấp"
     return Validation(passed, risk, checks, metrics)
+
+
+def validate_exception_wazuh(rule_id: str, conditions: list[dict[str, Any]], fp: list[Doc], tp: list[Doc],
+                             recent: list[Doc]) -> Validation:
+    """Ngoại lệ cho rule Wazuh (R73): các điều kiện AND, so `==` phân biệt hoa thường như wazuh_fields.literal."""
+    checks: list[Check] = []
+
+    def hit(d: Doc) -> bool:
+        return bool(conditions) and all(get(d, c["field"]) is not None and str(get(d, c["field"])) == str(c["value"])
+                                        for c in conditions)
+
+    try:
+        if (bad := [c.get("field") for c in conditions if c.get("field") not in EXCEPTION_FIELDS]):
+            raise ValueError(f"trường không được hỗ trợ: {bad}")
+        wazuh_fields.exception_rule(int(rule_id.removeprefix("WZH-")), conditions, 110000, "kiểm tra")
+        checks.append(Check("ánh xạ được sang Wazuh", True, "mọi điều kiện đều ánh xạ được"))
+    except (ValueError, KeyError) as e:
+        checks.append(Check("ánh xạ được sang Wazuh", False, f"không ánh xạ được: {e}"))
+    names = [c.get("field") for c in conditions]
+    checks.append(Check("mỗi trường một lần", len(set(names)) == len(names),
+                        "ok" if len(set(names)) == len(names) else "có trường lặp lại"))
+    fp_hit = sum(map(hit, fp))
+    cover = fp_hit / len(fp) if fp else 0
+    checks.append(Check("khớp báo nhầm", cover >= 0.5, f"khớp {fp_hit}/{len(fp)} alert báo nhầm ({cover:.0%}, cần ≥ 50%)"))
+    tp_hit = sum(map(hit, tp))
+    checks.append(Check("không chặn alert đúng", tp_hit == 0,
+                        f"khớp {tp_hit}/{len(tp)} event của case đã xác nhận thật" + (" — LOẠI" if tp_hit else "")))
+    rec = sum(map(hit, recent))
+    checks.append(Check("ước lượng alert bị chặn", True, f"khớp {rec}/{len(recent)} alert gần đây", blocking=False))
+    metrics = {"fp_total": len(fp), "fp_matched": fp_hit, "tp_total": len(tp), "tp_matched": tp_hit,
+               "recent_total": len(recent), "recent_matched": rec}
+    return Validation(all(c.ok for c in checks if c.blocking), "cao" if not tp else "thấp", checks, metrics)
 
 
 # ---------------------------------------------------------------- rule mới

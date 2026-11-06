@@ -20,7 +20,7 @@ from typing import Any
 
 import yaml
 
-from .. import settings
+from .. import settings, wazuh_exceptions, wazuh_rules
 from ..detection.rules import Rule, RuleException, load_rules
 from .dataset import ESDataSource
 from .golden import PublicDatasets
@@ -162,9 +162,25 @@ def _need_engine() -> None:
         raise DeployError(409, "engine YAML đã tắt — rule AI cần đích Wazuh XML (Task 19–22)")
 
 
-def approve(es, pid: str, analyst: str, rules_dir: Path = settings.RULES_DIR, now: str = "") -> dict[str, Any]:
-    _need_engine()
+def _wazuh(fn, *args):
+    """Gọi wazuh_exceptions, đổi lỗi sang DeployError (cùng mã HTTP như route /api/v1/exceptions)."""
+    try:
+        return fn(*args)
+    except wazuh_rules.WazuhUnavailable as e:            # không xác nhận được với Wazuh: từ chối (fail closed)
+        raise DeployError(503, str(e)) from None
+    except wazuh_exceptions.NotFound:
+        raise DeployError(404, "không có ngoại lệ này") from None
+    except (wazuh_exceptions.Duplicate, wazuh_rules.WazuhRuleError) as e:      # WazuhRuleError là ValueError: bắt trước
+        raise DeployError(409, str(e)) from None
+    except (ValueError, KeyError) as e:
+        raise DeployError(400, f"ngoại lệ không hợp lệ: {e}") from None
+
+
+def approve(es, pid: str, analyst: str, api, now: str = "") -> dict[str, Any]:
+    rules_dir = settings.RULES_DIR
     p, seq, term = _get(es, pid)
+    if p.get("kind") != "exception":
+        _need_engine()
     if p["status"] != "pending":
         raise DeployError(409, f"đề xuất đang ở trạng thái {p['status']}, không duyệt được")
     if any(a["by"].lower() == analyst.lower() for a in p.get("approvals", [])):
@@ -172,7 +188,14 @@ def approve(es, pid: str, analyst: str, rules_dir: Path = settings.RULES_DIR, no
     p["approvals"] = p.get("approvals", []) + [{"by": analyst, "at": now}]
     p["updated_at"] = now
     p.setdefault("history", []).append({"at": now, "by": analyst, "text": "duyệt"})
-    if len(p["approvals"]) >= int(p.get("required_approvals", 1)):
+    if p.get("kind") == "exception" and len(p["approvals"]) >= int(p.get("required_approvals", 1)):
+        # R73: người duyệt tạo ngoại lệ Wazuh ở trạng thái chờ duyệt; người thứ hai duyệt ở trang ngoại lệ
+        ex = p["proposal"]
+        item = _wazuh(wazuh_exceptions.add, ex["rule"], ex["conditions"], ex.get("reason") or "AI đề xuất", analyst, api)
+        p.update(status="approved", deployed_at=now, exception_id=item["id"])
+        p["history"].append({"at": now, "by": "hệ thống",
+                             "text": f"đã tạo ngoại lệ Wazuh #{item['id']} (chờ người khác duyệt ở trang ngoại lệ)"})
+    elif len(p["approvals"]) >= int(p.get("required_approvals", 1)):
         problems = recheck(p, es, rules_dir)
         if problems:
             p["status"] = "invalid"
@@ -275,13 +298,17 @@ def reject(es, pid: str, analyst: str, reason: str, now: str = "") -> dict[str, 
     return p
 
 
-def rollback(es, pid: str, analyst: str, reason: str, rules_dir: Path = settings.RULES_DIR, now: str = "") -> dict:
+def rollback(es, pid: str, analyst: str, reason: str, api, now: str = "") -> dict:
     p, seq, term = _get(es, pid)
     if p["status"] != "approved":
         raise DeployError(409, "chỉ gỡ được đề xuất đã triển khai")
-    path = target_file(p, rules_dir)
-    if path.exists():
-        path.unlink()
+    if p.get("kind") == "exception":
+        path = Path(f"ngoai-le-{p.get('exception_id')}")
+        _wazuh(wazuh_exceptions.remove, int(p["exception_id"]), analyst, reason, api)
+    else:
+        path = target_file(p, settings.RULES_DIR)
+        if path.exists():
+            path.unlink()
     p.update(status="rolled_back", reject_reason=reason, updated_at=now)
     p.setdefault("history", []).append({"at": now, "by": analyst, "text": f"gỡ: {reason}"})
     _save(es, pid, p, seq, term)

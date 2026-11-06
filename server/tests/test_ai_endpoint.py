@@ -334,6 +334,7 @@ def test_approval_rechecks_dataset_rule_against_current_baseline(tmp_path, monke
     from siem.ai import deploy
     from test_ai import PropES
     rd = write_rules(tmp_path)
+    monkeypatch.setattr(deploy.settings, "RULES_DIR", rd)
     normal = [Labeled(d, {"dataset": "baseline-endpoint", "class": "normal", "platform": "linux"})
               for d in ordinary_processes("linux")]
     monkeypatch.setattr(deploy, "golden", lambda: PublicDatasets(directory=Path("."), normal=normal))
@@ -348,12 +349,12 @@ def test_approval_rechecks_dataset_rule_against_current_baseline(tmp_path, monke
 
     es = proposal(["find / -name", "aws.credential-access.ec2-get-password-data"])
     with pytest.raises(deploy.DeployError) as e:
-        deploy.approve(es, "0123456789ab", "an", rd, now="t1")
+        deploy.approve(es, "0123456789ab", "an", None, now="t1")
     assert "lệnh linux bình thường" in str(e.value) and "find / -name nginx.conf" in str(e.value)
     assert "aws.credential-access.ec2-get-password-data" in str(e.value)
     assert not list((rd / "ai").glob("*.yml")) and es.doc["status"] == "invalid"
     es = proposal(["-path '*/.aws/credentials'"])
-    assert deploy.approve(es, "0123456789ab", "an", rd, now="t2")["status"] == "approved"
+    assert deploy.approve(es, "0123456789ab", "an", None, now="t2")["status"] == "approved"
 
 
 # ------------------------------------------------------------------ bước 1 (8/10): vế SigmaHQ + lượt kiến thức
