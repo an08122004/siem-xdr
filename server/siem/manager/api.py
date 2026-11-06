@@ -835,7 +835,7 @@ def rule_promote(rule_id: str, s: Session = Depends(rules_perm)) -> dict[str, An
 def ai_approve(pid: str, s: Session = Depends(rules_perm)) -> dict[str, Any]:
     # Detection Engineer duyệt (quyền rules): người xử lý cảnh báo không tự duyệt rule mình dùng. Ngoại lệ cần 2 người
     # KHÁC NHAU duyệt: danh tính lấy từ phiên nên không giả được bằng cách đổi tên
-    return _ai(ai_deploy.approve, es(), pid, s.username, settings.RULES_DIR, now=store.now_iso())
+    return _ai(ai_deploy.approve, es(), pid, s.username, wazuh_rules.WazuhApi.from_settings(), now=store.now_iso())
 
 
 @app.post("/api/v1/ai/proposals/{pid}/reject")
@@ -849,7 +849,8 @@ def ai_reject(pid: str, body: AIDecision, s: Session = Depends(rules_perm)) -> d
 def ai_rollback(pid: str, body: AIDecision, s: Session = Depends(rules_perm)) -> dict[str, Any]:
     if len(body.reason.strip()) < 3:
         raise HTTPException(400, "gỡ phải ghi lý do")
-    return _ai(ai_deploy.rollback, es(), pid, s.username, body.reason.strip(), settings.RULES_DIR, now=store.now_iso())
+    return _ai(ai_deploy.rollback, es(), pid, s.username, body.reason.strip(),
+               wazuh_rules.WazuhApi.from_settings(), now=store.now_iso())
 
 
 class WazuhCondition(BaseModel):

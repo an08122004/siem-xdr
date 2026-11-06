@@ -32,12 +32,12 @@ from .deploy import recheck_dataset_rule
 from .golden import OS_NAME, PublicDatasets
 from . import sigma
 from .llm import LLMError, LLMResult, LLMTooLong, OllamaClient
-from .prompts import (EXCEPTION_SCHEMA, EXCEPTION_SYSTEM, SIGMA_KNOWLEDGE_SYSTEM, SIGMA_REFINE_SYSTEM, SIGMA_SYSTEM,
-                      exception_prompt, rule_to_yaml, sigma_knowledge_prompt, sigma_refine_prompt, sigma_rule_prompt,
+from .prompts import (WAZUH_EXCEPTION_SCHEMA, WAZUH_EXCEPTION_SYSTEM, wazuh_exception_prompt, SIGMA_KNOWLEDGE_SYSTEM, SIGMA_REFINE_SYSTEM, SIGMA_SYSTEM,
+                      rule_to_yaml, sigma_knowledge_prompt, sigma_refine_prompt, sigma_rule_prompt,
                       sigma_view)
 from .sigma import SigmaError
 from .validate import (Check, Validation, _app_specific, build_condition, common_program_only, describe, lab_wrapper,
-                       leaves_of, ordinary_hits, scope_match, validate_exception, validate_new_rule, weak_values)
+                       leaves_of, ordinary_hits, scope_match, validate_exception_wazuh, validate_new_rule, weak_values)
 
 log = logging.getLogger("ai.worker")
 OPEN = ["pending", "approved"]
@@ -69,7 +69,7 @@ def now_iso() -> str:
 def generator_id(model: str) -> str:
     """Dấu vân tay của model + system prompt + phiên bản logic sinh rule (GENERATOR_REVISION), ghi vào mỗi đề xuất.
     Đổi một trong ba thì mục tiêu từng bị kiểm định loại được thử lại ngay."""
-    return hashlib.sha1("\n".join([model, EXCEPTION_SYSTEM, SIGMA_SYSTEM, SIGMA_REFINE_SYSTEM, SIGMA_KNOWLEDGE_SYSTEM,
+    return hashlib.sha1("\n".join([model, WAZUH_EXCEPTION_SYSTEM, SIGMA_SYSTEM, SIGMA_REFINE_SYSTEM, SIGMA_KNOWLEDGE_SYSTEM,
                                    GENERATOR_REVISION]).encode()).hexdigest()[:10]
 
 
@@ -188,17 +188,18 @@ class AIWorker:
                 rejected[p["target"]].append(p["reject_reason"])
         budget = settings.AI_MAX_PROPOSALS_PER_RUN
 
-        # 1) ngoại lệ cho rule ồn
+        # 1) ngoại lệ cho rule Wazuh ồn: alert WZH-<id> bị analyst đánh dấu báo nhầm
         evidence = ds.evidence()
-        for rule in sorted(rules, key=lambda r: -len(evidence.get(r.id).fp if r.id in evidence else [])):
-            ev = evidence.get(rule.id)
-            if budget <= 0 or not ev or len(ev.fp) < settings.AI_MIN_FALSE_POSITIVES:
-                continue
-            target = f"exception:{rule.id}"
+        noisy = [(rid, ev) for rid, ev in evidence.items()
+                 if re.fullmatch(r"WZH-\d+", str(rid)) and len(ev.fp) >= settings.AI_MIN_FALSE_POSITIVES]
+        for rid, ev in sorted(noisy, key=lambda x: -len(x[1].fp)):
+            if budget <= 0:
+                break
+            target = f"exception:{rid}"
             if target in open_targets:
                 summary["skipped"].append(f"{target}: đã có đề xuất đang chờ/đã duyệt")
                 continue
-            self._try(summary, target, lambda: self.propose_exception(rule, ev, ds, rejected[target]))
+            self._try(summary, target, lambda: self.propose_exception(rid, ev, ds, rejected[target]))
             budget -= 1
 
         # 2) khoảng trống so với dataset công khai
@@ -297,18 +298,28 @@ class AIWorker:
                     "raw": llm_res.raw[:8000]},
         }
 
-    def propose_exception(self, rule: Rule, ev, ds: ESDataSource, rejected: list[str]) -> dict[str, Any]:
-        res = self.llm.chat_json(EXCEPTION_SYSTEM, exception_prompt(rule_yaml(rule), ev.fp, ev.tp, rejected),
-                                 EXCEPTION_SCHEMA)
-        pid = uuid.uuid4().hex[:12]
-        exc = {"id": f"EXC-{pid}", "rule_id": rule.id,
-               "description": str(res.data.get("rationale", ""))[:500],
-               "condition": build_condition(res.data.get("match", "all"), res.data.get("clauses") or []),
-               "source": "ai", "proposal_id": pid}
-        val = validate_exception(rule, exc, ev.fp, ev.tp, self.golden, ds.replay_events())
-        p = self._base("exception", f"exception:{rule.id}", res, f"Ngoại lệ cho {rule.id} — {rule.title}")
-        p.update(id=pid, target_rule_id=rule.id, proposal=exc, yaml=rule_to_yaml(exc),
-                 validation=val.to_dict(), risk=val.risk, required_approvals=2,
+    def _wazuh_rule_info(self, rid: str) -> dict[str, Any]:
+        """Mô tả / level / nhóm của rule Wazuh từ danh mục rule (siem-rules); không có thì chỉ còn id."""
+        try:
+            d = self.es.get(index=settings.IDX_RULES, id=f"rule:{rid}")["_source"]
+        except Exception:  # noqa: BLE001 - danh mục chưa đồng bộ: vẫn đề xuất được
+            d = {}
+        return {"id": rid, "description": d.get("description"), "level": d.get("level"), "groups": d.get("groups")}
+
+    def propose_exception(self, rid: str, ev, ds: ESDataSource, rejected: list[str]) -> dict[str, Any]:
+        info = self._wazuh_rule_info(rid)
+        res = self.llm.chat_json(WAZUH_EXCEPTION_SYSTEM, wazuh_exception_prompt(info, ev.fp, ev.tp, rejected),
+                                 WAZUH_EXCEPTION_SCHEMA)
+        # dòng lệnh: decoder như form ngoại lệ trên console gửi (siem-procs = Linux; thiếu = Windows eventchannel)
+        decoder = None if get(ev.fp[0], "winlog.channel") else "siem-procs"
+        conds = [{"field": str(c.get("field")), "value": str(c.get("value"))}
+                 | ({"decoder": decoder} if c.get("field") == "process.command_line" and decoder else {})
+                 for c in res.data.get("conditions") or []]
+        val = validate_exception_wazuh(rid, conds, ev.fp, ev.tp, ds.replay_events())
+        exc = {"rule": rid, "conditions": conds, "reason": str(res.data.get("rationale", ""))[:500]}
+        p = self._base("exception", f"exception:{rid}", res, f"Ngoại lệ cho {rid} — {info.get('description') or ''}")
+        p.update(target_rule_id=rid, proposal=exc, yaml=rule_to_yaml(exc), validation=val.to_dict(), risk=val.risk,
+                 required_approvals=1,        # R73: người bấm duyệt tạo ngoại lệ chờ duyệt, người thứ hai duyệt ở trang ngoại lệ
                  status="pending" if val.passed else "invalid",
                  evidence={"fp_alert_ids": ev.fp_alert_ids[:200], "tp_alert_ids": ev.tp_alert_ids[:200]})
         return p

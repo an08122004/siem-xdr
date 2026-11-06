@@ -178,12 +178,12 @@ def test_worker_cycle_creates_validated_proposals(tmp_path, monkeypatch):
     rd = write_rules(tmp_path)
     monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
     fp = [ev("10.50.0.7", sec=i) for i in range(4)]
-    evidence = {"T-001": RuleEvidence(fp=fp, tp=[ev("203.0.113.9")], fp_alert_ids=["a1", "a2", "a3", "a4"])}
+    evidence = {"WZH-5710": RuleEvidence(fp=fp, tp=[ev("203.0.113.9")], fp_alert_ids=["a1", "a2", "a3", "a4"])}
     golden = PublicDatasets(directory=Path("."),
                             attack=[Labeled(ev(f"10.7.0.{i}", "/admin/backup.zip", 200, i=i), {"dataset": "t"}) for i in range(20)],
                             normal=[Labeled(ev(f"10.8.0.{i}", "/admin/backup.zip", 404, i=i), {"class": "normal"}) for i in range(20)])
     llm = FakeLLM({
-        "exception": {"rationale": "máy giám sát", "match": "all", "clauses": [{"field": "source.ip", "op": "eq", "value": "10.50.0.7"}]},
+        "exception": {"rationale": "máy giám sát", "conditions": [{"field": "source.ip", "value": "10.50.0.7"}]},
         # model viết thêm lời dẫn ngoài khối yaml; level high; tag attack.* có cả tên tự do
         "new_rule": "Đây là rule:\n```yaml\ntitle: Tải file sao lưu\ndescription: tải file backup\nlevel: high\n"
                     "tags: [attack.collection, attack.t1005, attack.sqli-thing, attack.T1005]\n"
@@ -194,7 +194,7 @@ def test_worker_cycle_creates_validated_proposals(tmp_path, monkeypatch):
     w = AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS(evidence, fp), save=saved.append)
     summary = w.run_cycle("an")
     kinds = {p["kind"]: p for p in saved}
-    assert kinds["exception"]["status"] == "pending" and kinds["exception"]["required_approvals"] == 2
+    assert kinds["exception"]["status"] == "pending" and kinds["exception"]["required_approvals"] == 1
     nr = kinds["new_rule"]
     assert nr["status"] == "pending", nr["validation"]["checks"]
     assert nr["proposal"]["id"] == "AI-001" and nr["proposal"]["severity"] == "medium"   # AI không được đặt high
@@ -220,41 +220,9 @@ class PropES:
         self.doc, self.seq = document, self.seq + 1
 
 
-def test_approve_two_person_then_rollback(tmp_path, monkeypatch):
-    rd = write_rules(tmp_path)
-    monkeypatch.setattr(deploy, "golden", lambda: PublicDatasets(directory=Path(".")))
-    monkeypatch.setattr(deploy.ESDataSource, "evidence", lambda self: {})
-    exc = {"id": "EXC-abc", "rule_id": "T-001", "condition": {"all": [{"field": "source.ip", "op": "eq", "value": "10.50.0.7"}]}}
-    es = PropES({"id": "0123456789ab", "kind": "exception", "target_rule_id": "T-001", "proposal": exc, "status": "pending",
-                 "required_approvals": 2, "approvals": [], "llm": {"model": "fake"}, "updated_at": ""})
-    p = deploy.approve(es, "0123456789ab", "an", rd, now="t1")
-    assert p["status"] == "pending" and not list((rd / "exceptions").glob("*.yml"))
-    with pytest.raises(deploy.DeployError):
-        deploy.approve(es, "0123456789ab", "AN", rd, now="t2")        # cùng người không duyệt 2 lần
-    p = deploy.approve(es, "0123456789ab", "binh", rd, now="t3")
-    f = rd / "exceptions" / "0123456789ab.yml"
-    assert p["status"] == "approved" and f.exists()
-    assert [e.id for e in {r.id: r for r in load_rules(rd)}["T-001"].exceptions] == ["EXC-abc"]
-    deploy.rollback(es, "0123456789ab", "an", "thử", rd, now="t4")
-    assert not f.exists() and es.doc["status"] == "rolled_back"
-
-
-def test_approve_blocked_when_new_true_positive(tmp_path, monkeypatch):
-    rd = write_rules(tmp_path)
-    monkeypatch.setattr(deploy, "golden", lambda: PublicDatasets(directory=Path(".")))
-    monkeypatch.setattr(deploy.ESDataSource, "evidence",
-                        lambda self: {"T-001": RuleEvidence(tp=[ev("10.50.0.7")])})   # case thật vừa được xác nhận
-    exc = {"id": "EXC-x", "rule_id": "T-001", "condition": {"all": [{"field": "source.ip", "op": "eq", "value": "10.50.0.7"}]}}
-    es = PropES({"id": "aaaaaaaaaaaa", "kind": "exception", "target_rule_id": "T-001", "proposal": exc, "status": "pending",
-                 "required_approvals": 1, "approvals": [], "updated_at": ""})
-    with pytest.raises(deploy.DeployError):
-        deploy.approve(es, "aaaaaaaaaaaa", "an", rd, now="t")
-    assert es.doc["status"] == "invalid" and not list((rd / "exceptions").glob("*.yml"))
-
-
 def test_invalid_proposal_id_rejected():
     with pytest.raises(deploy.DeployError):
-        deploy.approve(PropES({}), "../../etc", "an", Path("."))
+        deploy.approve(PropES({}), "../../etc", "an", None)
 
 
 # ------------------------------------------------------------------ gom nhóm theo loại tấn công
@@ -510,7 +478,8 @@ def test_approved_ai_rule_runs_in_shadow_then_promoted(tmp_path, monkeypatch):
     es = PropES({"id": "0123456789ab", "kind": "new_rule", "target_rule_id": "AI-077", "proposal": rule,
                  "status": "pending", "required_approvals": 1, "approvals": [], "llm": {"model": "fake"},
                  "updated_at": "2026-10-13T10:00:00+00:00"})
-    deploy.approve(es, "0123456789ab", "de", rd, now="2026-10-13T10:00:00+00:00")
+    monkeypatch.setattr(deploy.settings, "RULES_DIR", rd)
+    deploy.approve(es, "0123456789ab", "de", None, now="2026-10-13T10:00:00+00:00")
     f = rd / "ai" / "AI-077.yml"
     written = yaml.safe_load(f.read_text(encoding="utf-8"))[0]
     assert written["mode"] == "shadow" and written["shadow_since"] == "2026-10-13" and written["owner"] == "de"
@@ -538,15 +507,14 @@ def test_approved_ai_rule_runs_in_shadow_then_promoted(tmp_path, monkeypatch):
         deploy.promote(es, "WEB-001", "de", rd, now="t")
 
 
-@pytest.mark.parametrize("kind", ["new_rule", "exception"])
-def test_approve_and_promote_refused_when_yaml_engine_off(tmp_path, monkeypatch, kind):
+def test_approve_and_promote_refused_when_yaml_engine_off(tmp_path, monkeypatch):
     """R65: engine YAML tắt -> duyệt / bật chính thức đề xuất AI (ghi YAML vào rules/ai hoặc rules/exceptions) trả 409, không ghi gì."""
     from siem import settings
     monkeypatch.setattr(settings, "RULE_ENGINE_ENABLED", False)
-    es = PropES({"id": "0123456789ab", "kind": kind, "target_rule_id": "AI-077", "proposal": {"id": "AI-077"},
+    es = PropES({"id": "0123456789ab", "kind": "new_rule", "target_rule_id": "AI-077", "proposal": {"id": "AI-077"},
                  "status": "pending", "required_approvals": 1, "approvals": [], "llm": {"model": "fake"}, "updated_at": ""})
     with pytest.raises(deploy.DeployError, match="engine YAML đã tắt") as e:
-        deploy.approve(es, "0123456789ab", "de", tmp_path, now="t")
+        deploy.approve(es, "0123456789ab", "de", None, now="t")
     assert e.value.code == 409 and es.doc["approvals"] == [] and not list(tmp_path.rglob("*.yml"))
     with pytest.raises(deploy.DeployError, match="engine YAML đã tắt"):
         deploy.promote(es, "AI-077", "de", tmp_path, now="t")
