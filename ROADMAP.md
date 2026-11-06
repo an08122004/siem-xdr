@@ -53,19 +53,19 @@ Doc *Kế hoạch xây dựng hệ thống SOC chuyên nghiệp*.
 | Nhiều phiên Claude cùng sửa repo | Mỗi việc một nhánh / worktree riêng, gộp qua PR, báo trước file sẽ sửa |
 | Trễ tiến độ | Kiểm tra mốc mỗi cuối tuần; trễ thì cắt theo thứ tự: lô SigmaHQ, luồng AI trên stack thật, Suricata |
 
-## 6. Kế hoạch thống nhất rule trên Wazuh (cập nhật 05/11/2026)
+## 6. Kế hoạch thống nhất rule trên Wazuh (cập nhật 06/11/2026)
 
 Kế hoạch: [docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md](docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md). Mô tả bộ rule: [RULES.md](RULES.md) mục 9. Sổ quyết định: [docs/wazuh-ruleset-decisions.md](docs/wazuh-ruleset-decisions.md).
 
 | Phần | Trạng thái |
 |---|---|
 | Task 0 đến 17 (P0 đến P3: thử kỹ thuật, nền tảng, 10 file rule XML chạy bóng, tuning, báo cáo song song, thư viện rule, SOAR theo nhóm, ngoại lệ, KPI) | **Xong trên nhánh `feature/wazuh-unified-ruleset`**; CI xanh (603 unit test, 556 ca log gốc qua Wazuh thật). Bốn bước cần stack thật còn hoãn (parity, E2E, ngoại lệ thật, đo độ ồn syslog + console) |
-| Task 18, cổng chuyển (tắt engine YAML) | **Chờ người dùng quyết**: chưa triển khai nhánh lên stack thật, chưa tắt engine YAML. Nếu không đạt, giữ YAML bật + XML bóng cho demo 10/11 và chuyển sau 16/11 |
+| Task 18, cổng chuyển (tắt engine YAML) | **Đã chuyển hẳn 05–06/11 (phương án A, R65)**: main `597cd5d` chạy trên stack thật, E2E 45/45; engine YAML tắt, rule gốc level 7–11 là alert thật, bỏ tiêu chí 7 ngày chạy bóng (quyết định của chủ dự án). Việc còn mở: RULES.md 9.10 |
 | Task 19 đến 24 (P4: Sigma → XML, kiểm định AI trên Wazuh, triển khai rule AI dạng XML, SigmaHQ → XML, xóa engine YAML, viết lại tài liệu) | Sau 17/11, **chưa lập kế hoạch chi tiết** |
 | Đổi mô hình AI | Chưa bắt đầu |
 | Lab (mạng 4 vùng, agent OPNsense, Ubuntu / Web-01) | Chưa dựng; rule Suricata XML cần agent OPNsense đọc `eve.json` |
 
-Checklist Task 18 (tóm tắt, bản đầy đủ trong kế hoạch):
+Checklist Task 18 (đã qua 06/11; mục còn mở ở RULES.md 9.10, bản đầy đủ trong kế hoạch):
 
 - Điều kiện đo: mọi mã `convert` có `only_yaml` = 0 trên ca test và 24 giờ log lab; độ ồn ≤ 1 alert / 100 event bình thường; E2E 44/44 với SOAR theo playbook mới.
 - Người dùng quyết: TI-001 domain và hash chỉ có ở analyzer (Wazuh mới phủ IP).
