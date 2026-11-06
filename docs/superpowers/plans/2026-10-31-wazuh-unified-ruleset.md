@@ -399,7 +399,7 @@ Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info 
 
 ## P4 — Sau v1.0 (từ 17/11)
 
-Mỗi task dưới đây viết kế hoạch chi tiết riêng khi tới lượt. Chúng phụ thuộc kết quả P2 (định dạng ca test, `wazuh_fields`).
+**Kế hoạch chi tiết (06/11/2026): `docs/superpowers/plans/2026-11-06-p4-ai-wazuh-xml.md`** — đánh số lại thành Task 19–26 (thêm sandbox và ngoại lệ AI). Phác thảo dưới đây giữ để đối chiếu. Chúng phụ thuộc kết quả P2 (định dạng ca test, `wazuh_fields`).
 
 - **Task 19 — Sigma → XML:** `server/siem/ai/wazuh_xml.py: emit(sigma_rule: dict, rule_id: int) -> str`, dùng cây điều kiện của `sigma.py` và `wazuh_fields`. Mỗi vế OR của DNF thành một rule con cùng mã. `not` → `negate="yes"`. Không ánh xạ được trường → `SigmaError`. Test: 20 rule SigmaHQ process_creation/webserver đã biên dịch được (theo AI-README §9.5) → XML qua lint + logtest khớp ca của chính rule đó.
 - **Task 20 — Kiểm định AI trên Wazuh:** `ai/validate.py` thay `replay` bằng bơm tập train/test/bình thường vào manager tạm (cách `tools/wazuh_coverage.py`), giữ các ngưỡng recall/báo nhầm hiện có. Tăng `GENERATOR_REVISION`.
