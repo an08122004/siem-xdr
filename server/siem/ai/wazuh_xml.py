@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import re
 from typing import NamedTuple
-from xml.sax.saxutils import escape, quoteattr
+from xml.sax.saxutils import escape
 
+from ..detection.rules import regex_risk
 from ..wazuh_fields import escape_literal
 from .sigma import MAX_TERMS, SigmaError
 
@@ -112,6 +113,14 @@ def _map_leaf(leaf: dict, domain: str) -> dict:
             raise SigmaError(f"phép so {op} trên {f} không dịch được (chỉ eq / in / endswith)")
         out["value"] = [("" if op == "endswith" else "\\") + v for v in _vals(leaf)]
         out["op"] = "not_endswith" if op == "neq" else "endswith"
+    if op == "regex":                       # giá trị từ LLM / SigmaHQ: phải tự cân ngoặc (không thoát được `(?:…)`) và không ReDoS
+        for v in _vals(leaf):
+            try:
+                re.compile(v)
+            except re.error as e:
+                raise SigmaError(f"regex không hợp lệ ({e}): {v[:80]}") from None
+            if (why := regex_risk(v)):
+                raise SigmaError(f"{why}: {v[:80]}")
     if mode == "ua" and op != "contains":
         raise SigmaError("User-Agent chỉ dịch được phép contains")
     return out
@@ -124,9 +133,10 @@ def _prep(node: dict, domain: str) -> dict:
         return {"not": _prep(node["not"], domain)}
     if "any" in node:
         kids = [_prep(c, domain) for c in node["any"]]
-        if (kids and all("w" in k and k["op"] not in _NEG for k in kids)
-                and len({(k["w"], k["url"]) for k in kids}) == 1):      # R-P7: một trường, toàn lá dương -> một alternation
-            return {"alts": kids, "w": kids[0]["w"], "mode": kids[0]["mode"]}
+        if (kids and all("w" in k and k.get("op") not in _NEG for k in kids)
+                and len({(k["w"], k.get("url", k["alts"][0]["url"] if "alts" in k else False)) for k in kids}) == 1):
+            # R-P7: một trường, toàn lá dương -> một alternation (any lồng nhau được làm phẳng)
+            return {"alts": [a for k in kids for a in k.get("alts", [k])], "w": kids[0]["w"], "mode": kids[0]["mode"]}
         return {"any": kids}
     if "field" in node:
         return _map_leaf(node, domain)
@@ -179,7 +189,8 @@ def emit(tree: dict, *, domain: str, first_id: int, level: int, code: str, title
         raise SigmaError("rule không có vế nào")
     parent = PARENTS[domain]
     gs = [g for g in (re.sub(r"[^A-Za-z0-9_.\-]", "", x) for x in groups) if g] + (["shadow"] if shadow_since else [])
-    extra = [f"<info type={quoteattr(_clean(k, 20))}>{escape(_clean(v, 300))}</info>" for k, v in (info or {}).items()]
+    extra = [f'<info type="text">{re.sub(r"[^A-Za-z0-9_]", "", str(k))}={escape(_clean(v, 300))}</info>'
+             for k, v in (info or {}).items() if re.sub(r"[^A-Za-z0-9_]", "", str(k))]
     if shadow_since:
         extra.insert(0, f'<info type="text">shadow_since={shadow_since}</info>')
     mitre = [t for t in techniques if re.fullmatch(r"T\d{4}(\.\d{3})?", t)]

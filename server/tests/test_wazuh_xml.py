@@ -106,3 +106,22 @@ def test_unshadow_removes_only_shadow_markers():
 
 def test_level_map():
     assert wx.LEVEL == {"low": 5, "medium": 7, "high": 10, "critical": 10}
+
+
+def test_info_entries_are_text_key_value():
+    e = wx.emit(WIN, **KW, info={"sigmahq_id": 'a<b&"]]>\x07x', "au thor!": "Bob"})
+    infos = [(i.get("type"), i.text) for i in rules(e.xml)[0].findall("info")]
+    assert ("text", 'sigmahq_id=a<b&"]]>x') in infos and ("text", "author=Bob") in infos
+    assert all(t == "text" for t, _ in infos)
+
+def test_nested_any_is_flattened_not_keyerror():
+    a, b, c = (({"field": "process.command_line", "op": "contains", "value": v}) for v in ("aa", "bb", "cc"))
+    assert len(wx.emit({"any": [{"any": [a, b]}, c]}, **KW).ids) == 1
+
+@pytest.mark.parametrize("bad", ["x)(?=", "a)", "(a+)+$"])
+def test_hostile_or_risky_regex_raises(bad):
+    with pytest.raises(SigmaError):
+        wx.emit({"field": "process.command_line", "op": "regex", "value": bad}, **KW)
+
+def test_normal_regex_still_emits():
+    assert wx.emit({"field": "process.command_line", "op": "regex", "value": r"-enc\s+\w{10,}"}, **KW).ids == [109000]
