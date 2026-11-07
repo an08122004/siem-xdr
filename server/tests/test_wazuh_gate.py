@@ -276,3 +276,31 @@ def test_stale_recheck_keeps_proposal_when_sandbox_down(tmp_path):
     summary = {"rechecked": [], "errors": []}
     w._recheck_stale([p], gen, summary, WazuhGate(FakeSandbox([SandboxError("hết giờ")]), golden_events(g, g.directory)))
     assert es.docs["301"]["status"] == "pending" and any("sandbox" in e for e in summary["errors"])
+
+
+def test_broken_stale_proposal_does_not_stop_the_recheck(tmp_path):
+    """Một đề xuất cũ hỏng (mức độ lạ -> KeyError ở LEVEL) bị đánh invalid kèm lý do; đề xuất sau vẫn được kiểm định."""
+    g = _web_golden()
+    gen = generator_id("fake")
+
+    def prop(pid, severity):
+        return {"id": pid, "kind": "new_rule", "target": "gap-dataset:csic2010:backup-file", "status": "pending",
+                "proposal": {"id": f"AI-{pid}", "title": "t", "severity": severity, "type": "match",
+                             "condition": {"field": "url.path", "op": "endswith", "value": ".bak"}},
+                "llm": {"generator": gen}, "history": []}
+
+    history = [prop("401", "khong-ro"), prop("402", "medium")]
+    es = _DocsES(history)
+    w = AIWorker(es, FakeLLM({}), g, rules_dir=tmp_path, ds_factory=lambda e: FakeDS({}, []), save=None)
+    summary = {"rechecked": [], "errors": []}
+    w._recheck_stale(history, gen, summary, WazuhGate(ScriptSandbox(), golden_events(g, g.directory)))
+    assert es.docs["401"]["status"] == "invalid" and "KeyError" in es.docs["401"]["history"][-1]["text"]
+    assert es.docs["402"]["status"] == "pending" and es.docs["402"]["wazuh"]["emitter"] == wazuh_xml.EMITTER_VERSION
+    assert summary["errors"] == [] and len(summary["rechecked"]) == 2
+
+
+def test_generator_id_changes_with_emitter_version(monkeypatch):
+    """Kết luận của cổng Wazuh phụ thuộc bộ dịch: đổi EMITTER_VERSION thì mục tiêu bị cổng loại được thử lại ngay."""
+    before = generator_id("m")
+    monkeypatch.setattr(wazuh_xml, "EMITTER_VERSION", "2-thu")
+    assert generator_id("m") != before

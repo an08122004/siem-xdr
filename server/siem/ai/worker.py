@@ -31,7 +31,7 @@ from .attack_types import TYPES
 from .dataset import ESDataSource, EventGroup
 from .deploy import recheck_dataset_rule
 from .golden import OS_NAME, PublicDatasets
-from . import sigma
+from . import sigma, wazuh_xml
 from .llm import LLMError, LLMResult, LLMTooLong, OllamaClient
 from .prompts import (WAZUH_EXCEPTION_SCHEMA, WAZUH_EXCEPTION_SYSTEM, wazuh_exception_prompt, SIGMA_KNOWLEDGE_SYSTEM, SIGMA_REFINE_SYSTEM, SIGMA_SYSTEM,
                       rule_to_yaml, sigma_knowledge_prompt, sigma_refine_prompt, sigma_rule_prompt,
@@ -72,10 +72,11 @@ def now_iso() -> str:
 
 
 def generator_id(model: str) -> str:
-    """Dấu vân tay của model + system prompt + phiên bản logic sinh rule (GENERATOR_REVISION), ghi vào mỗi đề xuất.
-    Đổi một trong ba thì mục tiêu từng bị kiểm định loại được thử lại ngay."""
+    """Dấu vân tay của model + system prompt + phiên bản logic sinh rule (GENERATOR_REVISION) + phiên bản bộ dịch Wazuh
+    XML (kết luận của cổng Wazuh phụ thuộc vào nó), ghi vào mỗi đề xuất. Đổi một thứ thì mục tiêu từng bị kiểm định loại
+    được thử lại ngay."""
     return hashlib.sha1("\n".join([model, WAZUH_EXCEPTION_SYSTEM, SIGMA_SYSTEM, SIGMA_REFINE_SYSTEM, SIGMA_KNOWLEDGE_SYSTEM,
-                                   GENERATOR_REVISION]).encode()).hexdigest()[:10]
+                                   GENERATOR_REVISION, wazuh_xml.EMITTER_VERSION]).encode()).hexdigest()[:10]
 
 
 def wazuh_block(domain: str, rd: dict[str, Any], metrics: dict[str, Any]) -> dict[str, Any]:
@@ -287,21 +288,27 @@ class AIWorker:
                     if groups is None:
                         groups = dict(self.dataset_gaps(gate))
                     key, rd = p["target"].removeprefix("gap-dataset:"), p["proposal"]
-                    if key not in groups:
-                        problems = ["nhóm mẫu không còn là khoảng trống trên Wazuh (rule Wazuh đã bắt, hoặc không dựng "
-                                    "được log thô để đo)"]
-                    else:
-                        # shortcut: tách lại train / kiểm tra trên nhóm khoảng trống HIỆN TẠI (có thể khác lúc đề xuất)
-                        train, test = self._split(key, groups[key])
-                        domain = self.golden.domain(groups[key][0])
-                        normal = self.golden.normal_for("web") if domain == "web" else \
-                            self.golden.normal_for("endpoint", domain)
-                        checks, metrics = gate.check(
-                            rd["condition"], domain=domain, level=LEVEL[rd["severity"]], title=rd["title"],
-                            techniques=(rd.get("mitre") or {}).get("technique") or [], train=[x.doc for x in train],
-                            test=[x.doc for x in test], normal=normal)
-                        problems = [f"{c.name}: {c.detail}" for c in checks if c.blocking and not c.ok]
-                        block = None if problems else wazuh_block(domain, rd, metrics)
+                    try:
+                        if key not in groups:
+                            problems = ["nhóm mẫu không còn là khoảng trống trên Wazuh (rule Wazuh đã bắt, hoặc không "
+                                        "dựng được log thô để đo)"]
+                        else:
+                            # shortcut: tách lại train / kiểm tra trên nhóm khoảng trống HIỆN TẠI (có thể khác lúc đề xuất)
+                            train, test = self._split(key, groups[key])
+                            domain = self.golden.domain(groups[key][0])
+                            normal = self.golden.normal_for("web") if domain == "web" else \
+                                self.golden.normal_for("endpoint", domain)
+                            checks, metrics = gate.check(
+                                rd["condition"], domain=domain, level=LEVEL[rd["severity"]], title=rd["title"],
+                                techniques=(rd.get("mitre") or {}).get("technique") or [], train=[x.doc for x in train],
+                                test=[x.doc for x in test], normal=normal)
+                            problems = [f"{c.name}: {c.detail}" for c in checks if c.blocking and not c.ok]
+                            block = None if problems else wazuh_block(domain, rd, metrics)
+                    except SandboxError:
+                        raise
+                    except Exception as e:  # noqa: BLE001 — một đề xuất hỏng (thiếu khóa, cây lạ) không được làm sập cả chu kỳ
+                        checks, metrics, block = [], {}, None
+                        problems = [f"không kiểm định lại được trên Wazuh ({type(e).__name__}: {e})"]
                 if not problems and not block:
                     continue
                 try:
