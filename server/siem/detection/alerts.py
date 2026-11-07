@@ -1,13 +1,18 @@
 """Dựng alert document chuẩn từ kết quả rule engine / ML."""
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .. import priority as prio
 from ..pipeline.normalize import Doc, get
 from ..store import new_id, now_iso
-from .rules import SEVERITY_SCORE, Detection, event_time
+
+if TYPE_CHECKING:
+    from .rules import Detection
+
+SEVERITY_SCORE = {"low": 1, "medium": 2, "high": 3, "critical": 4}
 
 # Các trường thực thể (entity) được sao chép từ event kích hoạt lên alert,
 # để SOAR/analyst biết "ai / máy nào / IP nào" mà không cần mở event gốc.
@@ -30,6 +35,16 @@ def _copy_entities(src: Doc, dst: Doc) -> None:
         for p in parts[:-1]:
             cur = cur.setdefault(p, {})
         cur[parts[-1]] = v
+
+
+def event_time(doc: Doc) -> float:
+    ts = doc.get("@timestamp")
+    if isinstance(ts, str):
+        try:
+            return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            pass
+    return time.time()
 
 
 def _risk(severity: str, event: Doc) -> float:

@@ -2,7 +2,7 @@ import re, xml.etree.ElementTree as ET
 import pytest
 from siem.ai import wazuh_xml as wx
 from siem.ai.sigma import SigmaError
-from siem.detection.rules import Condition      # Task 25 chuyển sang siem.ai.condition
+from siem.ai.condition import Condition
 
 def py_match(leaf, actual):                      # ngữ nghĩa chuẩn: cây Python mà AI đang dùng
     return Condition(leaf).match({"process": {"command_line": actual}})

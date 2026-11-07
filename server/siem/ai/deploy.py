@@ -21,7 +21,8 @@ from pathlib import Path
 from typing import Any
 
 from .. import settings, wazuh_exceptions, wazuh_rules
-from ..detection.rules import Rule, RuleException, load_rules
+from ..detection.rules import load_rules
+from .condition import Rule, RuleException
 from .dataset import ESDataSource
 from .golden import PublicDatasets
 from .wazuh_xml import EMITTER_VERSION, emit, unshadow

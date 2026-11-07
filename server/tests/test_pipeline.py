@@ -521,7 +521,7 @@ def test_soar_opens_case_for_every_medium_alert():
     """Trước 11/10/2026 chỉ alert khớp playbook phản ứng riêng mới có case: 23/40 rule (vd WIN-004 thêm vào nhóm quản
     trị, WIN-002 xóa nhật ký mức critical) không bao giờ có case, PB-04 / PB-05 không bao giờ được dùng. Giờ mọi alert
     từ medium có đúng 1 case (đúng case playbook), từ high có đúng 1 thông báo."""
-    from siem.detection.rules import SEVERITY_SCORE
+    from siem.detection.alerts import SEVERITY_SCORE
     from siem.soar.cases import CasePlaybooks
     from siem.soar.engine import Notifier, Soar, load_playbooks
     cp = CasePlaybooks(ROOT / "config" / "case_playbooks.yml")
@@ -576,7 +576,7 @@ def test_priority_matrix_by_asset_criticality():
 def test_alert_priority_detection_time_and_shadow_mode():
     """Alert mang ưu tiên theo tài sản và thời gian phát hiện từ event ĐẦU TIÊN của chuỗi (KPI MTTD); rule `mode:
     shadow` sinh alert gắn alert.shadow."""
-    from siem.detection.rules import Rule
+    from siem.ai.condition import Rule
     rule = Rule.from_dict({"id": "T-001", "title": "thử", "severity": "high", "type": "threshold", "mode": "shadow",
                            "condition": {"field": "event.outcome", "op": "eq", "value": "failure"},
                            "threshold": {"count": 3, "window": 600, "group_by": ["source.ip"]}})

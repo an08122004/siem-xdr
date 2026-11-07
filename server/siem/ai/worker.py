@@ -25,7 +25,8 @@ from typing import Any, Callable, TypeVar
 import yaml
 
 from .. import settings
-from ..detection.rules import Rule, load_rules, regex_risk
+from ..detection.rules import load_rules
+from .condition import Rule, regex_risk
 from ..pipeline.normalize import Doc, get
 from .attack_types import TYPES
 from .dataset import ESDataSource, EventGroup

@@ -17,7 +17,7 @@ from siem.ai.deploy import recheck_dataset_rule
 from siem.ai.golden import Labeled, PublicDatasets
 from siem.ai.validate import common_program_only, lab_wrapper
 from siem.ai.worker import AIWorker, generator_id
-from siem.detection.rules import Rule
+from siem.ai.condition import Rule
 from test_ai import FakeDS, SeqLLM
 from test_ai_endpoint import _tech, _test, atomic_labeled
 

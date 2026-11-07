@@ -31,7 +31,7 @@ from .. import priority as prio
 from .. import settings, store
 from .cases import CasePlaybooks
 from .wazuh import PROC_NAME
-from ..detection.rules import SEVERITY_SCORE
+from ..detection.alerts import SEVERITY_SCORE
 from ..pipeline.normalize import get
 
 log = logging.getLogger("soar")

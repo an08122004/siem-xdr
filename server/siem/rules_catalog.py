@@ -30,7 +30,8 @@ from typing import Any, Iterable
 import yaml
 
 from . import settings
-from .detection.rules import EXCEPTIONS_DIR, SEVERITY_SCORE, SKIP_DIRS
+from .detection.alerts import SEVERITY_SCORE
+from .detection.rules import EXCEPTIONS_DIR, SKIP_DIRS
 
 log = logging.getLogger("rules_catalog")
 

@@ -13,7 +13,8 @@ from siem.ai.golden import Labeled, PublicDatasets
 from siem.ai.llm import LLMResult
 from siem.ai.validate import build_condition, scope_match, validate_exception, validate_new_rule
 from siem.ai.worker import AIWorker
-from siem.detection.rules import Rule, RuleEngine, load_rules, regex_risk, rules_fingerprint
+from siem.ai.condition import Rule, regex_risk
+from siem.detection.rules import RuleEngine, load_rules, rules_fingerprint
 
 T0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
 

@@ -24,7 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..detection.rules import Rule, RuleEngine
+from ..detection.rules import RuleEngine
+from .condition import Rule
 from ..pipeline.enrich import Enricher
 from .attack_types import DATASET_ARTIFACTS, TYPES, WebProfile, inspect_web
 from .baseline import ordinary_processes

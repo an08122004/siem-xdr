@@ -19,7 +19,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote_plus
 
-from ..detection.rules import Rule, RuleEngine, RuleException, _eval, regex_risk
+from ..detection.rules import RuleEngine
+from .condition import Rule, RuleException, _eval, regex_risk
 from ..pipeline.normalize import Doc, get
 from .atomic import ARTIFACT_RE
 from .golden import PublicDatasets
