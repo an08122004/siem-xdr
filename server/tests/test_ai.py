@@ -157,6 +157,16 @@ class FakeLLM:
                          output_tokens=5)
 
 
+class NoWazuh:
+    """Cổng Wazuh giả cho test worker: Wazuh chưa bắt mẫu nào, ứng viên nào cũng qua (cổng thật: test_wazuh_gate.py)."""
+
+    def gaps(self, docs):
+        return list(docs)
+
+    def check(self, tree, **_):
+        return [], {"wazuh_rules": 1}
+
+
 class FakeDS:
     def __init__(self, evidence, events, groups=(), history=()):
         self._e, self._ev, self._g, self._h = evidence, events, list(groups), list(history)
@@ -191,7 +201,8 @@ def test_worker_cycle_creates_validated_proposals(tmp_path, monkeypatch):
                     "    sc-status: 200\n  condition: selection\n```\n",
     })
     saved = []
-    w = AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS(evidence, fp), save=saved.append)
+    w = AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS(evidence, fp), save=saved.append,
+                 gate_factory=NoWazuh)
     summary = w.run_cycle("an")
     kinds = {p["kind"]: p for p in saved}
     assert kinds["exception"]["status"] == "pending" and kinds["exception"]["required_approvals"] == 1
@@ -267,7 +278,8 @@ def test_dataset_gaps_grouped_by_type_and_app_specific_skipped(tmp_path, monkeyp
                             normal=[Labeled(web(u, i), {"class": "normal"}) for i, u in enumerate(NORMAL_URLS * 5)])
     llm = FakeLLM({"new_rule": "title: Dò file .bak\nlevel: medium\nlogsource: {category: webserver}\ndetection:\n  sel:\n    cs-uri-stem|endswith: '.bak'\n  condition: sel\n"})
     saved = []
-    w = AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append)
+    w = AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
+                 gate_factory=NoWazuh)
     summary = w.run_cycle("an")
     assert [p["target"] for p in saved] == ["gap-dataset:t:backup-file"]
     assert saved[0]["status"] == "pending", saved[0]["validation"]["checks"]
@@ -302,7 +314,7 @@ def test_retry_policy_depends_on_generator(tmp_path, monkeypatch):
     def run(history):
         saved = []
         AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, [], history=history),
-                 save=saved.append).run_cycle("an")
+                 save=saved.append, gate_factory=NoWazuh).run_cycle("an")
         return [p["target"] for p in saved]
 
     assert run([{"target": target, "status": "invalid", "llm": {"generator": "prompt-cu"}}]) == [target]
@@ -372,7 +384,8 @@ def test_dataset_rule_assembled_from_measured_patterns(tmp_path, monkeypatch):
         "    cs-uri-stem|endswith: '.old'\n  condition: selection\n```",
     ])
     saved = []
-    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append).run_cycle("an")
+    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
+             gate_factory=NoWazuh).run_cycle("an")
     p = saved[0]
     assert p["status"] == "pending", p["validation"]["checks"]
     assert p["proposal"]["condition"] == {"any": [{"field": "url.path", "op": "endswith", "value": [".bak", ".old"]},
@@ -436,7 +449,8 @@ def test_too_long_answer_spoils_one_round_not_the_whole_proposal(tmp_path, monke
 
     llm = LongLLM(["detection:\n  sel:\n    cs-uri-stem|endswith: '.bak'\n  condition: sel\n"])
     saved = []
-    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append).run_cycle("an")
+    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
+             gate_factory=NoWazuh).run_cycle("an")
     assert saved and saved[0]["status"] == "pending", saved
     assert "1024" in " ".join(saved[0]["llm"]["attempts"][1]["rejected"])
 
@@ -455,7 +469,8 @@ def test_web_keeps_no_unverified_sigmahq_atoms(tmp_path, monkeypatch):
     golden._sigma_tokens = [{"vulnerable", "endpoint", "backup", "probing"}]
     llm = SeqLLM(["detection:\n  sel:\n    cs-uri-stem|endswith: '.bak'\n  condition: sel\n"] * 10)
     saved = []
-    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append).run_cycle("an")
+    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
+             gate_factory=NoWazuh).run_cycle("an")
     assert saved[0]["status"] == "pending"
     assert not [a for a in saved[0]["llm"]["atoms"] if a["source"] == "sigmahq"]
     assert "cve-1" not in saved[0]["sigma"]

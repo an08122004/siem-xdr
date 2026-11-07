@@ -6,8 +6,9 @@ Ngoại lệ (giảm cảnh báo) — rủi ro cao nhất vì có thể "làm m�
   replay dữ liệu thật để ước lượng số alert bị tắt, hiệu năng.
 Rule mới:
   cấu trúc, trường có thật, regex an toàn, ID không trùng, bắt được mẫu nghi vấn ở TẬP KIỂM TRA
-  (tách riêng với mẫu đưa cho LLM -> tránh học vẹt), báo nhầm trên tập bình thường, số alert/ngày khi
-  replay dữ liệu thật, hiệu năng.
+  (tách riêng với mẫu đưa cho LLM -> tránh học vẹt), báo nhầm trên tập bình thường, ước lượng số alert/ngày khi
+  replay dữ liệu thật (cây Python, R74), hiệu năng; rồi cổng Wazuh (wazuh_gate.py, R66): recall / báo nhầm / che rule
+  khác tính trên alert của sandbox Wazuh — chỉ chạy khi mọi check Python đã đạt (mỗi lần mất hàng chục giây).
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ import re
 import time
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote_plus
 
 from ..detection.rules import Rule, RuleEngine, RuleException, _eval, regex_risk
@@ -24,6 +25,10 @@ from .atomic import ARTIFACT_RE
 from .golden import PublicDatasets
 from .. import wazuh_fields
 from .prompts import EXC_OPS, EXCEPTION_FIELDS, RULE_OPS
+from .wazuh_xml import LEVEL
+
+if TYPE_CHECKING:
+    from .wazuh_gate import WazuhGate
 
 FIELD_RE = re.compile(r"^[a-z_@][a-z0-9_.@]*$")
 SPECIFIC_OPS = {"eq", "in", "cidr", "startswith"}
@@ -561,7 +566,10 @@ def validate_exception_wazuh(rule_id: str, conditions: list[dict[str, Any]], fp:
 def validate_new_rule(rule_dict: dict[str, Any], existing: list[Rule], suspicious_train: list[Doc],
                       suspicious_test: list[Doc], normal: list[Doc], replay_events: list[Doc],
                       max_alerts_per_day: float, app_tokens: set[str] | None = None,
-                      normal_label: str = "event bình thường") -> Validation:
+                      normal_label: str = "event bình thường", gate: WazuhGate | None = None,
+                      domain: str = "") -> Validation:
+    """gate: cổng Wazuh của chu kỳ (None = chỉ kiểm định bằng cây Python, như test / công cụ đo), domain: lĩnh vực của rule
+    (web / windows / linux) để dịch sang Wazuh XML."""
     checks: list[Check] = []
     metrics: dict[str, Any] = {}
     clauses = leaves_of(rule_dict["condition"])
@@ -619,19 +627,24 @@ def validate_new_rule(rule_dict: dict[str, Any], existing: list[Rule], suspiciou
 
     n, t = replay(rule, replay_events)
     per_day = n / span_days(replay_events) if replay_events else 0
-    metrics.update(replay_events=len(replay_events), replay_alerts=n, alerts_per_day=round(per_day, 2))
-    checks.append(Check("số alert khi replay", per_day <= max_alerts_per_day,
+    # Wazuh không xử lý lại event cũ: số alert/ngày trên event thật vẫn ước lượng bằng cây Python (R74)
+    metrics.update(replay_events=len(replay_events), replay_alerts=n, alerts_per_day=round(per_day, 2),
+                   replay_estimate="python")
+    checks.append(Check("ước lượng alert khi replay (Python)", per_day <= max_alerts_per_day,
                         f"{n} alert trên {len(replay_events)} event thật (~{per_day:.1f}/ngày, tối đa {max_alerts_per_day:g})"))
     ref = Rule.from_dict({"id": "_ref", "title": "ref", "condition": {"field": "event.category", "op": "eq", "value": "web"}})
     _, t_ref = replay(ref, replay_events)
     slow = t > 5 * t_ref + 0.5
     checks.append(Check("hiệu năng", not slow, f"{t:.2f}s (tham chiếu {t_ref:.2f}s)"))
 
-    covered_by = [r.id for r in existing if r.type == "match" and test and
-                  sum(r.condition.match(d) for d in test) >= 0.8 * len(test)]
-    checks.append(Check("trùng rule sẵn có", not covered_by, "không trùng" if not covered_by
-                        else f"rule {covered_by} đã bắt phần lớn các mẫu này", blocking=False))
-
     passed = all(c.ok for c in checks if c.blocking)
-    risk = "cao" if nh > 0 or per_day > max_alerts_per_day / 2 else "thấp"
+    if gate is not None and passed:
+        w_checks, w_metrics = gate.check(rule_dict["condition"], domain=domain, level=LEVEL[rule_dict["severity"]],
+                                         title=rule_dict["title"],
+                                         techniques=(rule_dict.get("mitre") or {}).get("technique") or [],
+                                         train=suspicious_train, test=test, normal=normal)
+        checks += w_checks
+        metrics.update(w_metrics)
+        passed = all(c.ok for c in checks if c.blocking)
+    risk = "cao" if nh > 0 or metrics.get("wazuh_normal_hits") or per_day > max_alerts_per_day / 2 else "thấp"
     return Validation(passed, risk, checks, metrics)
