@@ -143,16 +143,16 @@ def next_ids(deployed: list[dict[str, Any]], n: int) -> list[int]:
     return list(range(top + 1, top + n + 1))
 
 
-def _deployed(es, skip: str = "") -> list[dict[str, Any]]:
+def _deployed(es, skip: str = "", used: bool = False) -> list[dict[str, Any]]:
     """Đề xuất rule mới đang nằm trong ai.xml (trừ `skip`). ES không đọc được thì từ chối: ghi file từ danh sách thiếu
-    sẽ làm mất khối của đề xuất khác."""
+    sẽ làm mất khối của đề xuất khác. used=True: cả đề xuất đã gỡ (chỉ để tính id: id đã dùng không được giải phóng)."""
     try:
         res = es.search(index=settings.IDX_AI_PROPOSALS, size=1000, query={"bool": {"filter": [
-            {"term": {"kind": "new_rule"}}, {"terms": {"status": ["approved", "promoted"]}}]}})
+            {"term": {"kind": "new_rule"}}, {"terms": {"status": ["approved", "promoted"] + (["rolled_back"] if used else [])}}]}})
     except Exception as e:  # noqa: BLE001
         raise DeployError(503, f"không đọc được danh sách rule AI đã triển khai: {e}") from None
     docs = [h["_source"] | {"id": h["_source"].get("id") or h["_id"]} for h in res["hits"]["hits"]]
-    return [d for d in docs if d["id"] != skip and (d.get("wazuh") or {}).get("deployed_xml")]
+    return [d for d in docs if d["id"] != skip and (d.get("wazuh") or {}).get("ids" if used else "deployed_xml")]
 
 
 def _publish(deployed: list[dict[str, Any]], api) -> None:
@@ -167,8 +167,11 @@ def _deploy_new(es, pid: str, p: dict[str, Any], seq: int, term: int, now: str, 
     day = now[:10] if re.fullmatch(r"\d{4}-\d{2}-\d{2}", now[:10]) else datetime.now(timezone.utc).date().isoformat()
     prop = p["proposal"]
     with _lock:
-        others = _deployed(es)
-        ids = next_ids(others, int(w.get("rules") or 1))
+        fresh, seq, term = _get(es, pid)         # đọc lại trong khóa: người khác có thể đã duyệt / gỡ đề xuất này
+        if fresh["status"] != "pending":
+            raise DeployError(409, f"đề xuất đang ở trạng thái {fresh['status']}, không duyệt được")
+        others = _deployed(es, skip=pid)
+        ids = next_ids(_deployed(es, skip=pid, used=True), int(w.get("rules") or 1))
         code = f"AI-{ids[0] % 1000:03d}"
         try:
             em = emit(prop["condition"], domain=w["domain"], first_id=ids[0], level=int(w["level"]), code=code,
@@ -264,6 +267,10 @@ def promote(es, pid: str, who: str, api, now: str = "") -> dict[str, Any]:
     if (problems := promotion_problems(stats)):
         raise DeployError(409, "chưa đạt tiêu chí bật chính thức: " + "; ".join(problems))
     with _lock:
+        fresh, seq, term = _get(es, pid)
+        if fresh["status"] != "approved" or not (fresh.get("wazuh") or {}).get("shadow_since"):
+            raise DeployError(409, "đề xuất không ở chế độ chạy bóng")
+        p, w = fresh, fresh["wazuh"]
         others = _deployed(es, skip=pid)
         w = {k: v for k, v in w.items() if k != "shadow_since"} | {"deployed_xml": unshadow(w["deployed_xml"]), "promoted_at": now}
         p.update(wazuh=w, updated_at=now, promoted_at=now, promoted_by=who)
@@ -289,14 +296,21 @@ def rollback(es, pid: str, analyst: str, reason: str, api, now: str = "") -> dic
     p, seq, term = _get(es, pid)
     if p["status"] != "approved":
         raise DeployError(409, "chỉ gỡ được đề xuất đã triển khai")
-    p.update(status="rolled_back", reject_reason=reason, updated_at=now)
-    p.setdefault("history", []).append({"at": now, "by": analyst, "text": f"gỡ: {reason}"})
+    done = {"status": "rolled_back", "reject_reason": reason, "updated_at": now}
+    note = {"at": now, "by": analyst, "text": f"gỡ: {reason}"}
     if p.get("kind") == "exception":
         _wazuh(wazuh_exceptions.remove, int(p["exception_id"]), analyst, reason, api)
+        p.update(done)
+        p.setdefault("history", []).append(note)
         _save(es, pid, p, seq, term)
     else:
         with _lock:
+            p, seq, term = _get(es, pid)                   # đọc lại trong khóa
+            if p["status"] != "approved":
+                raise DeployError(409, "chỉ gỡ được đề xuất đã triển khai")
             _publish(_deployed(es, skip=pid), api)         # dựng lại ai.xml không có khối này
+            p.update(done)
+            p.setdefault("history", []).append(note)
             _save(es, pid, p, seq, term)
     log.warning("gỡ đề xuất AI %s bởi %s", pid, analyst)
     return p

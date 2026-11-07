@@ -1234,3 +1234,23 @@ def test_refresh_catalog_passes_a_wazuh_api(monkeypatch):
     monkeypatch.setattr(wazuh_rules.WazuhApi, "from_settings", classmethod(lambda cls: "wazuh-api"))
     api.refresh_catalog()
     assert seen["api"] == "wazuh-api"
+
+
+def test_ai_routes_no_longer_409(env, monkeypatch, tmp_path):
+    """Duyệt đề xuất rule mới qua route thật: ghi ai.xml chạy bóng, không còn 409 'engine YAML đã tắt'."""
+    from siem import wazuh_rules
+    from siem.ai import deploy
+    from siem.manager import api
+    from test_ai_deploy_xml import Env, FakeApi
+    e = Env(tmp_path, monkeypatch)
+    p = e.pending()
+    monkeypatch.setitem(api._state, "es", e.es)
+    monkeypatch.setattr(wazuh_rules.WazuhApi, "from_settings", classmethod(lambda cls: FakeApi()))
+    monkeypatch.setattr(api, "refresh_catalog", lambda: None)
+    monkeypatch.setattr(settings, "RULE_ENGINE_ENABLED", False)
+    pw = activate(env, "de", "detection")
+    login(env, "de", pw)
+    r = env.post(f"/api/v1/ai/proposals/{p['id']}/approve", json={}, headers=H)
+    assert r.status_code == 200 and r.json()["status"] == "approved" and r.json()["wazuh"]["ids"][0] == 109000
+    assert "shadow_since=" in (tmp_path / "ai.xml").read_text(encoding="utf-8")
+    assert env.post(f"/api/v1/ai/proposals/{p['id']}/rollback", json={"reason": "thử gỡ"}, headers=H).status_code == 200

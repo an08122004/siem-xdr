@@ -33,8 +33,9 @@ class FakeES:
             ids = next(f["terms"]["rule.id"] for f in query["bool"]["filter"] if "terms" in f and "rule.id" in f["terms"])
             n = sum(a in ids for a in self.alerts)
             return {"hits": {"total": {"value": n}}, "aggregations": {"v": {"buckets": []}}}
+        statuses = next(f["terms"]["status"] for f in query["bool"]["filter"] if "terms" in f)
         hits = [{"_id": i, "_source": d} for i, d in self.docs.items()
-                if d.get("kind") == "new_rule" and d.get("status") in ("approved", "promoted")]
+                if d.get("kind") == "new_rule" and d.get("status") in statuses]
         return {"hits": {"hits": hits}}
 
 
@@ -152,3 +153,45 @@ def test_id_range_exhausted():
         deploy.next_ids([{"wazuh": {"ids": [109999]}}], 1)
     assert e.value.code == 409 and "hết dải id" in str(e.value)
     assert deploy.next_ids([], 2) == [109000, 109001]
+
+
+def test_rolled_back_ids_are_not_reused(env):
+    a = env.approved()
+    deploy.rollback(env.es, a["id"], "an", "báo nhầm", env.api)
+    b = env.approved()
+    assert b["wazuh"]["ids"][0] > a["wazuh"]["ids"][-1]
+
+
+def test_double_approve_same_pid_writes_one_block(env):
+    p = env.pending()
+    results = []
+
+    def go(who):
+        try:
+            results.append(deploy.approve(env.es, p["id"], who, env.api))
+        except deploy.DeployError as e:
+            results.append(e)
+    ts = [threading.Thread(target=go, args=(w,)) for w in ("an", "binh")]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    errs = [r for r in results if isinstance(r, deploy.DeployError)]
+    assert env.text().count(f"ai_{p['id']}") == 1 and len(errs) == 1 and errs[0].code == 409
+    assert len(results) == 2 and env.text().count("<rule ") == 1
+
+
+def test_stale_rollback_and_promote_recheck_under_lock(env):
+    a = env.approved()
+    deploy.rollback(env.es, a["id"], "an", "báo nhầm", env.api)
+    with pytest.raises(deploy.DeployError) as e:
+        deploy.rollback(env.es, a["id"], "an", "lần hai", env.api)
+    assert e.value.code == 409
+
+
+def test_stale_read_in_deploy_new_is_refused(env):
+    p = env.pending()
+    stale = dict(env.es.docs[p["id"]])
+    deploy.approve(env.es, p["id"], "an", env.api)
+    stale["history"] = []
+    with pytest.raises(deploy.DeployError) as e:
+        deploy._deploy_new(env.es, p["id"], stale, 1, 1, "2026-11-20T00:00:00+00:00", env.api)
+    assert e.value.code == 409 and env.text().count(f"ai_{p['id']}") == 1
