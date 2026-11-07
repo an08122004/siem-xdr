@@ -163,6 +163,10 @@ AI_MAX_PROPOSALS_PER_RUN = int(os.getenv("AI_MAX_PROPOSALS_PER_RUN", "5"))
 AI_REFINE_ROUNDS = int(os.getenv("AI_REFINE_ROUNDS", "6"))            # rule từ dataset: số lượt LLM bổ sung mẫu cho biến thể còn sót
 AI_SIGMAHQ_CANDIDATES = os.getenv("AI_SIGMAHQ_CANDIDATES", "true").lower() in ("1", "true", "yes")  # vế từ rule SigmaHQ
 AI_KNOWLEDGE_ROUND = os.getenv("AI_KNOWLEDGE_ROUND", "true").lower() in ("1", "true", "yes")        # hỏi cách làm khác
+# Sandbox Wazuh (R67, ai/sandbox.py): thư mục job dùng chung với container wazuh-sandbox (volume ai_sandbox), và số giây
+# tối đa chờ một job (gồm restart manager ~13 giây; 50.000 event ~95 giây, đo S4 06/11/2026)
+AI_SANDBOX_DIR = Path(os.getenv("AI_SANDBOX_DIR", "/sandbox"))
+AI_SANDBOX_TIMEOUT = float(os.getenv("AI_SANDBOX_TIMEOUT", "900"))
 
 # Log từng request HTTP tới Elasticsearch quá nhiều -> chỉ giữ cảnh báo
 import logging as _logging  # noqa: E402
