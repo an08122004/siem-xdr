@@ -123,7 +123,7 @@ ACTIVITY = [(re.compile(p), op) for p, op in (
     (r"^/api/v1/actions$", "action_requested"), (r"^/api/v1/cases/[^/]+$", "case_updated"),
     (r"^/api/v1/ai/proposals/[^/]+/approve$", "ai_approved"), (r"^/api/v1/ai/proposals/[^/]+/reject$", "ai_rejected"),
     (r"^/api/v1/ai/proposals/[^/]+/rollback$", "ai_rolled_back"), (r"^/api/v1/ai/run$", "ai_run"),
-    (r"^/api/v1/cases/[^/]+/incident$", "case_incident"), (r"^/api/v1/rules/[^/]+/promote$", "rule_promoted"),
+    (r"^/api/v1/cases/[^/]+/incident$", "case_incident"), (r"^/api/v1/ai/proposals/[^/]+/promote$", "rule_promoted"),
     (r"^/api/v1/hunts$", "hunt_created"), (r"^/api/v1/hunts/[^/]+$", "hunt_updated"),
     (r"^/api/v1/handover$", "handover_saved"), (r"^/api/v1/ai/assist$", "ai_assist"),
     (r"^/api/v1/ai/assist/[^/]+/feedback$", "ai_assist_feedback"),
@@ -799,16 +799,15 @@ def _rule_modes() -> dict[str, Any]:
 def ai_proposals(status: str | None = None, size: int = 100) -> list[dict[str, Any]]:
     q = {"bool": {"filter": [{"term": {"status": status}}]}} if status else None
     rows = store.search(es(), settings.IDX_AI_PROPOSALS, q, size=min(size, 500), sort=[{"created_at": "desc"}])
-    modes = _rule_modes() if any(r.get("status") == "approved" and r.get("kind") == "new_rule" for r in rows) else {}
     out = []
     for r in rows:
         # nhãn để mở phần "So sánh với rule hiện có" của dashboard Thư viện rule đúng đề xuất này
         r = r | {"catalog_pick": rules_catalog.pick(r | {"id": r.get("id") or r["_id"]})}
-        rule = modes.get(str((r.get("proposal") or {}).get("id"))) if r.get("status") == "approved" else None
-        if rule is not None:
-            r["rule_mode"] = rule.mode
-            if rule.mode == "shadow":
-                st = ai_deploy.shadow_stats(es(), rule.id, rule.shadow_since)
+        w = r.get("wazuh") or {}
+        if r.get("status") == "approved" and r.get("kind") == "new_rule" and w.get("ids"):
+            r["rule_mode"] = "shadow" if w.get("shadow_since") else "active"
+            if w.get("shadow_since"):
+                st = ai_deploy.shadow_stats(es(), [f"WZH-{i}" for i in w["ids"]], w["shadow_since"])
                 r["shadow"] = st | {"problems": ai_deploy.promotion_problems(st)}
         out.append(r)
     return out
@@ -820,15 +819,9 @@ def rule_shadow(rule_id: str) -> dict[str, Any]:
     rule = _rule_modes().get(rule_id)
     if not rule:
         raise HTTPException(404, "không có rule này")
-    st = ai_deploy.shadow_stats(es(), rule.id, rule.shadow_since) if rule.mode == "shadow" else None
+    st = ai_deploy.shadow_stats(es(), [rule.id], rule.shadow_since) if rule.mode == "shadow" else None
     return {"rule_id": rule.id, "mode": rule.mode, "stats": st,
             "problems": ai_deploy.promotion_problems(st) if st else []}
-
-
-@app.post("/api/v1/rules/{rule_id}/promote")
-def rule_promote(rule_id: str, s: Session = Depends(rules_perm)) -> dict[str, Any]:
-    """Bật chính thức rule AI đang chạy bóng (Detection Engineer). Rule viết tay đổi `mode` qua kho rule + CI."""
-    return _ai(ai_deploy.promote, es(), rule_id, s.username, settings.RULES_DIR, now=store.now_iso())
 
 
 @app.post("/api/v1/ai/proposals/{pid}/approve")
@@ -836,6 +829,12 @@ def ai_approve(pid: str, s: Session = Depends(rules_perm)) -> dict[str, Any]:
     # Detection Engineer duyệt (quyền rules): người xử lý cảnh báo không tự duyệt rule mình dùng. Ngoại lệ cần 2 người
     # KHÁC NHAU duyệt: danh tính lấy từ phiên nên không giả được bằng cách đổi tên
     return _ai(ai_deploy.approve, es(), pid, s.username, wazuh_rules.WazuhApi.from_settings(), now=store.now_iso())
+
+
+@app.post("/api/v1/ai/proposals/{pid}/promote")
+def ai_promote(pid: str, s: Session = Depends(rules_perm)) -> dict[str, Any]:
+    """Bật chính thức rule AI đang chạy bóng (Detection Engineer). Rule viết tay đổi `mode` qua kho rule + CI."""
+    return _ai(ai_deploy.promote, es(), pid, s.username, wazuh_rules.WazuhApi.from_settings(), now=store.now_iso())
 
 
 @app.post("/api/v1/ai/proposals/{pid}/reject")

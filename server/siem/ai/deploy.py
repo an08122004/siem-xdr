@@ -5,8 +5,9 @@ Nguyên tắc:
     mới cần 1.
   - Ngay trước khi ghi file, KIỂM TRA LẠI với nhãn mới nhất (case thật vừa xác nhận sau khi đề xuất được tạo)
     và bộ mẫu vàng: không đạt thì không triển khai.
-  - Triển khai = ghi 1 file YAML riêng cho mỗi đề xuất -> analyzer tự nạp lại; gỡ = xóa đúng file đó.
-  - Rule mới vào chế độ CHẠY BÓNG (mode: shadow): sinh alert để đo nhưng SOAR bỏ qua. Bật chính thức (promote) khi đã
+  - Triển khai rule mới = dựng lại rules-dynamic/ai.xml từ MỌI đề xuất đã triển khai trong ES (R72), mỗi đề xuất một
+    khối <group>; ghi qua wazuh_rules.write_dynamic (kiểm tra + nạp lại ruleset). Gỡ = dựng lại file không có khối đó.
+  - Rule mới vào chế độ CHẠY BÓNG (nhóm shadow, R71): sinh alert để đo nhưng SOAR bỏ qua. Bật chính thức (promote) khi đã
     chạy bóng tối thiểu SHADOW_MIN_DAYS ngày, dưới SHADOW_MAX_ALERTS_PER_DAY alert/ngày và tỉ lệ báo nhầm dưới
     SHADOW_MAX_FP_RATE trên các alert đã có kết luận (SOC-OPERATIONS.md mục 4).
 """
@@ -14,22 +15,24 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 from .. import settings, wazuh_exceptions, wazuh_rules
 from ..detection.rules import Rule, RuleException, load_rules
 from .dataset import ESDataSource
 from .golden import PublicDatasets
-from .sigma import dump
+from .wazuh_xml import EMITTER_VERSION, emit, unshadow
 from .validate import _app_specific, common_program_only, describe, lab_wrapper, leaves_of, ordinary_hits, weak_values
 
 log = logging.getLogger("ai.deploy")
 _ID = re.compile(r"^[a-f0-9]{12}$")
 _golden: PublicDatasets | None = None
+AI_FILE = "ai.xml"
+AI_FIRST, AI_LAST = 109000, 109999
+_lock = threading.Lock()          # mọi thay đổi ai.xml đi qua khóa: hai người duyệt cùng lúc không làm mất khối của nhau
 
 
 class DeployError(Exception):
@@ -63,15 +66,6 @@ def _save(es, pid: str, doc: dict[str, Any], seq: int, term: int) -> None:
         raise DeployError(409, "đề xuất vừa được người khác cập nhật, hãy tải lại") from None
 
 
-def target_file(p: dict[str, Any], rules_dir: Path) -> Path:
-    if p["kind"] == "exception":
-        return rules_dir / "exceptions" / f"{p['id']}.yml"
-    rid = p["proposal"]["id"]
-    if not re.match(r"^AI-\d{3,}$", rid):
-        raise DeployError(400, "ID rule AI không hợp lệ")
-    return rules_dir / "ai" / f"{rid}.yml"
-
-
 def recheck(p: dict[str, Any], es, rules_dir: Path) -> list[str]:
     """Kiểm tra lại ngay trước khi triển khai. Trả về danh sách lý do KHÔNG được triển khai."""
     problems = []
@@ -87,8 +81,6 @@ def recheck(p: dict[str, Any], es, rules_dir: Path) -> list[str]:
         if (n := sum(ex.match(x.doc) for x in golden().positives_for(rule))):
             problems.append(f"ngoại lệ làm mất {n} mẫu tấn công của bộ mẫu vàng")
     else:
-        if p["proposal"]["id"] in rules:
-            problems.append(f"ID {p['proposal']['id']} đã tồn tại")
         rule = Rule.from_dict(p["proposal"])
         if str(p.get("target", "")).startswith("gap-dataset:"):
             problems += recheck_dataset_rule(p["proposal"], rule, golden())
@@ -121,47 +113,6 @@ def recheck_dataset_rule(rd: dict[str, Any], rule: Rule, g: PublicDatasets) -> l
     return problems
 
 
-def deployed_rule(p: dict[str, Any], approvers: list[str], now: str) -> dict[str, Any]:
-    """Rule ghi ra file: đề xuất + metadata bắt buộc của kho rule (detection/lint.py) + chế độ chạy bóng. Ngoại lệ ghi
-    nguyên đề xuất. Nguồn log và ghi chú báo nhầm lấy từ rule Sigma AI viết."""
-    rule = dict(p["proposal"])
-    if p["kind"] == "exception":
-        return rule
-    try:
-        sig = yaml.safe_load(rule.get("sigma") or "") or {}
-    except yaml.YAMLError:
-        sig = {}
-    sig = sig if isinstance(sig, dict) else {}
-    fps = [str(x) for x in sig.get("falsepositives") or [] if str(x).strip() and str(x).lower() != "unknown"]
-    rule.setdefault("logsource", sig.get("logsource") or {"product": "unknown"})
-    rule.setdefault("owner", ", ".join(approvers))
-    rule.setdefault("falsepositives", fps or ["Chưa biết: AI không nêu; xem alert chạy bóng trước khi bật chính thức"])
-    day = now[:10] if re.match(r"^\d{4}-\d{2}-\d{2}$", now[:10]) else datetime.now(timezone.utc).date().isoformat()
-    rule.update(mode="shadow", shadow_since=day)
-    return rule
-
-
-def _write(path: Path, p: dict[str, Any], approvers: list[str]) -> None:
-    header = (f"# Sinh bởi AI worker (model {p.get('llm', {}).get('model')}), đề xuất {p['id']}\n"
-              f"# Duyệt bởi: {', '.join(approvers)} — {p['updated_at']}\n"
-              f"# Gỡ: nút 'Gỡ' trên console (hoặc xóa file này). Không sửa tay để còn truy vết.\n"
-              + ("# Khóa `sigma`: rule Sigma AI viết (nguồn); `condition`: bản đã biên dịch mà analyzer chạy.\n"
-                 if p["proposal"].get("sigma") else "")
-              + ("# mode: shadow = chạy bóng (SOAR bỏ qua); Detection Engineer bấm 'Bật chính thức' khi đạt tiêu chí.\n"
-                 if p["kind"] != "exception" else ""))
-    body = dump([deployed_rule(p, approvers, p.get("updated_at") or "")])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(header + body, encoding="utf-8", newline="\n")
-    tmp.replace(path)
-
-
-def _need_engine() -> None:
-    # R65: đề xuất AI hiện chỉ ghi YAML cho engine YAML; engine tắt thì file đó không có tác dụng
-    if not settings.RULE_ENGINE_ENABLED:
-        raise DeployError(409, "engine YAML đã tắt — rule AI cần đích Wazuh XML (Task 19–22)")
-
-
 def _wazuh(fn, *args):
     """Gọi wazuh_exceptions, đổi lỗi sang DeployError (cùng mã HTTP như route /api/v1/exceptions)."""
     try:
@@ -176,11 +127,68 @@ def _wazuh(fn, *args):
         raise DeployError(400, f"ngoại lệ không hợp lệ: {e}") from None
 
 
+def render_ai_file(deployed: list[dict[str, Any]]) -> str:
+    """ai.xml dựng từ các đề xuất đã triển khai (theo `deployed_at`): mỗi đề xuất một khối, XML đóng băng lúc duyệt."""
+    head = "<!-- Sinh tự động từ đề xuất AI đã duyệt (nguồn sự thật là Elasticsearch). Không sửa tay: dùng nút 'Gỡ' trên console. -->\n"
+    blocks = "".join(f'<group name="siem,ai,ai_{p["id"]},">\n{p["wazuh"]["deployed_xml"]}</group>\n'
+                     for p in sorted(deployed, key=lambda d: d.get("deployed_at") or ""))
+    return head + (blocks or '<group name="siem,ai,">\n</group>\n')
+
+
+def next_ids(deployed: list[dict[str, Any]], n: int) -> list[int]:
+    """n id liền nhau ngay sau id lớn nhất đã dùng trong dải 109000–109999."""
+    top = max([i for p in deployed for i in p["wazuh"]["ids"]] or [AI_FIRST - 1])
+    if top + n > AI_LAST:
+        raise DeployError(409, f"hết dải id rule AI ({AI_FIRST}–{AI_LAST})")
+    return list(range(top + 1, top + n + 1))
+
+
+def _deployed(es, skip: str = "", used: bool = False) -> list[dict[str, Any]]:
+    """Đề xuất rule mới đang nằm trong ai.xml (trừ `skip`). ES không đọc được thì từ chối: ghi file từ danh sách thiếu
+    sẽ làm mất khối của đề xuất khác. used=True: cả đề xuất đã gỡ (chỉ để tính id: id đã dùng không được giải phóng)."""
+    try:
+        res = es.search(index=settings.IDX_AI_PROPOSALS, size=1000, query={"bool": {"filter": [
+            {"term": {"kind": "new_rule"}}, {"terms": {"status": ["approved", "promoted"] + (["rolled_back"] if used else [])}}]}})
+    except Exception as e:  # noqa: BLE001
+        raise DeployError(503, f"không đọc được danh sách rule AI đã triển khai: {e}") from None
+    docs = [h["_source"] | {"id": h["_source"].get("id") or h["_id"]} for h in res["hits"]["hits"]]
+    return [d for d in docs if d["id"] != skip and (d.get("wazuh") or {}).get("ids" if used else "deployed_xml")]
+
+
+def _publish(deployed: list[dict[str, Any]], api) -> None:
+    _wazuh(lambda: wazuh_rules.write_dynamic(AI_FILE, render_ai_file(deployed), api, root=wazuh_rules.DYNAMIC_DIR))
+
+
+def _deploy_new(es, pid: str, p: dict[str, Any], seq: int, term: int, now: str, api) -> None:
+    """Phát ai.xml với khối mới ở chế độ chạy bóng. Lỗi bất kỳ trước khi file ghi xong -> đề xuất vẫn pending."""
+    w = p.get("wazuh") or {}
+    if w.get("emitter") != EMITTER_VERSION:
+        raise DeployError(409, "đề xuất chưa được kiểm định trên Wazuh hoặc bộ dịch đã đổi — cần kiểm định lại")
+    day = now[:10] if re.fullmatch(r"\d{4}-\d{2}-\d{2}", now[:10]) else datetime.now(timezone.utc).date().isoformat()
+    prop = p["proposal"]
+    with _lock:
+        fresh, seq, term = _get(es, pid)         # đọc lại trong khóa: người khác có thể đã duyệt / gỡ đề xuất này
+        if fresh["status"] != "pending":
+            raise DeployError(409, f"đề xuất đang ở trạng thái {fresh['status']}, không duyệt được")
+        others = _deployed(es, skip=pid)
+        ids = next_ids(_deployed(es, skip=pid, used=True), int(w.get("rules") or 1))
+        code = f"AI-{ids[0] % 1000:03d}"
+        try:
+            em = emit(prop["condition"], domain=w["domain"], first_id=ids[0], level=int(w["level"]), code=code,
+                      title=prop["title"], techniques=(prop.get("mitre") or {}).get("technique") or [],
+                      groups=["siem", "ai"], shadow_since=day)
+        except ValueError as e:                                         # SigmaError: cây không dịch được nữa
+            raise DeployError(409, f"không dịch được sang Wazuh XML, cần kiểm định lại: {e}") from None
+        p["wazuh"] = w | {"ids": em.ids, "deployed_xml": em.xml, "code": code, "shadow_since": day}
+        p.update(status="approved", deployed_at=now, file=f"rules-dynamic/{AI_FILE}")
+        p["history"].append({"at": now, "by": "hệ thống",
+                             "text": f"đã triển khai {p['file']} (rule {em.ids[0]}–{em.ids[-1]}, chạy bóng)"})
+        _publish(others + [p], api)
+        _save(es, pid, p, seq, term)       # shortcut: file đã ghi mà lưu ES lỗi thì lệch tới lần dựng lại kế tiếp
+
+
 def approve(es, pid: str, analyst: str, api, now: str = "") -> dict[str, Any]:
-    rules_dir = settings.RULES_DIR
     p, seq, term = _get(es, pid)
-    if p.get("kind") != "exception":
-        _need_engine()
     if p["status"] != "pending":
         raise DeployError(409, f"đề xuất đang ở trạng thái {p['status']}, không duyệt được")
     if any(a["by"].lower() == analyst.lower() for a in p.get("approvals", [])):
@@ -196,25 +204,23 @@ def approve(es, pid: str, analyst: str, api, now: str = "") -> dict[str, Any]:
         p["history"].append({"at": now, "by": "hệ thống",
                              "text": f"đã tạo ngoại lệ Wazuh #{item['id']} (chờ người khác duyệt ở trang ngoại lệ)"})
     elif len(p["approvals"]) >= int(p.get("required_approvals", 1)):
-        problems = recheck(p, es, rules_dir)
+        problems = recheck(p, es, settings.RULES_DIR)
         if problems:
             p["status"] = "invalid"
             p["history"].append({"at": now, "by": "hệ thống", "text": "kiểm tra lại thất bại: " + "; ".join(problems)})
             _save(es, pid, p, seq, term)
             raise DeployError(409, "không triển khai: " + "; ".join(problems))
-        path = target_file(p, rules_dir)
-        _write(path, p, [a["by"] for a in p["approvals"]])
-        p.update(status="approved", deployed_at=now, file=str(path.relative_to(rules_dir)).replace("\\", "/"))
-        p["history"].append({"at": now, "by": "hệ thống", "text": f"đã triển khai {p['file']}"})
+        _deploy_new(es, pid, p, seq, term, now, api)
         log.warning("triển khai đề xuất AI %s -> %s (duyệt: %s)", pid, p["file"], [a["by"] for a in p["approvals"]])
+        return p
     _save(es, pid, p, seq, term)
     return p
 
 
-def shadow_stats(es, rule_id: str, since: str | None, now: str = "") -> dict[str, Any]:
-    """Số alert chạy bóng của rule kể từ `since` (YYYY-MM-DD) tới `now` (ISO, mặc định giờ hiện tại) và kết luận
-    analyst đã ghi."""
-    flt: list[dict[str, Any]] = [{"term": {"rule.id": rule_id}}, {"term": {"alert.shadow": True}}]
+def shadow_stats(es, rule_ids: list[str], since: str | None, now: str = "") -> dict[str, Any]:
+    """Số alert chạy bóng của các rule (`WZH-<id>`) kể từ `since` (YYYY-MM-DD) tới `now` (ISO, mặc định giờ hiện tại) và
+    kết luận analyst đã ghi."""
+    flt: list[dict[str, Any]] = [{"terms": {"rule.id": rule_ids}}, {"term": {"alert.shadow": True}}]
     if since:
         flt.append({"range": {"@timestamp": {"gte": since}}})
     try:
@@ -223,7 +229,7 @@ def shadow_stats(es, rule_id: str, since: str | None, now: str = "") -> dict[str
         total = res["hits"]["total"]["value"]
         verdicts = {b["key"]: b["doc_count"] for b in res["aggregations"]["v"]["buckets"]}
     except Exception as e:  # noqa: BLE001 - chưa có alert nào: index / trường chưa có mapping
-        log.debug("không đếm được alert chạy bóng của %s: %s", rule_id, e)
+        log.debug("không đếm được alert chạy bóng của %s: %s", rule_ids, e)
         total, verdicts = 0, {}
     start = datetime.fromisoformat(since).replace(tzinfo=timezone.utc) if since else None
     try:
@@ -250,42 +256,30 @@ def promotion_problems(stats: dict[str, Any]) -> list[str]:
     return out
 
 
-_MODE_LINE = re.compile(r"^(\s*)mode: shadow\s*$", re.M)
-
-
-def promote(es, rule_id: str, who: str, rules_dir: Path = settings.RULES_DIR, now: str = "") -> dict[str, Any]:
-    """Bật chính thức rule AI đang chạy bóng (rules/ai/<id>.yml): đổi mode, ghi ai bật, lúc nào, số liệu lúc bật.
-    Rule viết tay chạy bóng thì bật bằng commit đổi `mode` trong kho rule (qua CI), không qua đây."""
-    _need_engine()
-    if not re.match(r"^AI-\d{3,}$", rule_id):
-        raise DeployError(400, "chỉ bật được rule AI (AI-xxx) trên console; rule viết tay đổi mode qua kho rule")
-    path = rules_dir / "ai" / f"{rule_id}.yml"
-    if not path.exists():
-        raise DeployError(404, f"không có file rule {rule_id}")
-    text = path.read_text(encoding="utf-8")
-    rule = next((d for d in yaml.safe_load(text) or [] if isinstance(d, dict) and str(d.get("id")) == rule_id), None)
-    if not rule or rule.get("mode") != "shadow" or not _MODE_LINE.search(text):
-        raise DeployError(409, f"{rule_id} không ở chế độ chạy bóng")
-    stats = shadow_stats(es, rule_id, rule.get("shadow_since"), now)
+def promote(es, pid: str, who: str, api, now: str = "") -> dict[str, Any]:
+    """Bật chính thức rule AI đang chạy bóng (R71): bỏ nhóm shadow + shadow_since khỏi khối của đề xuất, ghi ai bật, lúc
+    nào, số liệu lúc bật. Rule viết tay chạy bóng thì bật bằng commit qua CI, không qua đây."""
+    p, seq, term = _get(es, pid)
+    w = p.get("wazuh") or {}
+    if p.get("kind") != "new_rule" or p["status"] != "approved" or not w.get("shadow_since"):
+        raise DeployError(409, "đề xuất không ở chế độ chạy bóng")
+    stats = shadow_stats(es, [f"WZH-{i}" for i in w["ids"]], w["shadow_since"], now)
     if (problems := promotion_problems(stats)):
         raise DeployError(409, "chưa đạt tiêu chí bật chính thức: " + "; ".join(problems))
-    note = (f"\\1mode: active\n\\1promoted: {{by: {who}, at: '{now}', alerts_per_day: {stats['alerts_per_day']}, "
-            f"fp_rate: {stats['fp_rate'] if stats['fp_rate'] is not None else 'null'}}}")
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(_MODE_LINE.sub(note, text, count=1), encoding="utf-8", newline="\n")
-    tmp.replace(path)
-    pid = rule.get("ai_proposal_id")
-    if pid and _ID.match(str(pid)):
-        try:
-            p, seq, term = _get(es, str(pid))
-            p.setdefault("history", []).append({"at": now, "by": who, "text": f"bật chính thức {rule_id} sau chạy bóng: "
-                                                f"{stats['alerts']} alert / {stats['days']} ngày"})
-            p.update(updated_at=now, promoted_at=now, promoted_by=who)
-            _save(es, str(pid), p, seq, term)
-        except DeployError as e:            # file đã đổi; lịch sử đề xuất ghi không được thì chỉ log
-            log.warning("bật %s: không ghi được lịch sử đề xuất %s: %s", rule_id, pid, e)
-    log.warning("bật chính thức rule AI %s bởi %s (%s)", rule_id, who, stats)
-    return {"rule_id": rule_id, "mode": "active", "stats": stats}
+    with _lock:
+        fresh, seq, term = _get(es, pid)
+        if fresh["status"] != "approved" or not (fresh.get("wazuh") or {}).get("shadow_since"):
+            raise DeployError(409, "đề xuất không ở chế độ chạy bóng")
+        p, w = fresh, fresh["wazuh"]
+        others = _deployed(es, skip=pid)
+        w = {k: v for k, v in w.items() if k != "shadow_since"} | {"deployed_xml": unshadow(w["deployed_xml"]), "promoted_at": now}
+        p.update(wazuh=w, updated_at=now, promoted_at=now, promoted_by=who)
+        p.setdefault("history", []).append({"at": now, "by": who, "text": f"bật chính thức {w['code']} sau chạy bóng: "
+                                            f"{stats['alerts']} alert / {stats['days']} ngày"})
+        _publish(others + [p], api)
+        _save(es, pid, p, seq, term)
+    log.warning("bật chính thức rule AI %s bởi %s (%s)", pid, who, stats)
+    return {"proposal_id": pid, "mode": "active", "stats": stats}
 
 
 def reject(es, pid: str, analyst: str, reason: str, now: str = "") -> dict[str, Any]:
@@ -302,15 +296,21 @@ def rollback(es, pid: str, analyst: str, reason: str, api, now: str = "") -> dic
     p, seq, term = _get(es, pid)
     if p["status"] != "approved":
         raise DeployError(409, "chỉ gỡ được đề xuất đã triển khai")
+    done = {"status": "rolled_back", "reject_reason": reason, "updated_at": now}
+    note = {"at": now, "by": analyst, "text": f"gỡ: {reason}"}
     if p.get("kind") == "exception":
-        path = Path(f"ngoai-le-{p.get('exception_id')}")
         _wazuh(wazuh_exceptions.remove, int(p["exception_id"]), analyst, reason, api)
+        p.update(done)
+        p.setdefault("history", []).append(note)
+        _save(es, pid, p, seq, term)
     else:
-        path = target_file(p, settings.RULES_DIR)
-        if path.exists():
-            path.unlink()
-    p.update(status="rolled_back", reject_reason=reason, updated_at=now)
-    p.setdefault("history", []).append({"at": now, "by": analyst, "text": f"gỡ: {reason}"})
-    _save(es, pid, p, seq, term)
-    log.warning("gỡ đề xuất AI %s (%s) bởi %s", pid, path.name, analyst)
+        with _lock:
+            p, seq, term = _get(es, pid)                   # đọc lại trong khóa
+            if p["status"] != "approved":
+                raise DeployError(409, "chỉ gỡ được đề xuất đã triển khai")
+            _publish(_deployed(es, skip=pid), api)         # dựng lại ai.xml không có khối này
+            p.update(done)
+            p.setdefault("history", []).append(note)
+            _save(es, pid, p, seq, term)
+    log.warning("gỡ đề xuất AI %s bởi %s", pid, analyst)
     return p
