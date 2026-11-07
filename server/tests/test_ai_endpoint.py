@@ -14,7 +14,7 @@ from siem.ai.llm import LLMResult
 from siem.ai.validate import validate_new_rule
 from siem.ai.worker import AIWorker, split_by_test
 from siem.pipeline.normalize import get, normalize
-from test_ai import NORMAL_URLS, FakeDS, SeqLLM, web, write_rules
+from test_ai import NORMAL_URLS, FakeDS, NoWazuh, SeqLLM, web, write_rules
 
 
 def _test(name, platforms, executor, command, guid, args=None):
@@ -122,7 +122,7 @@ def test_gaps_interleave_web_windows_linux():
     }})
     attack += [Labeled(web(f"/shop/img/logo{i}.gif.bak", i), {"dataset": "t"}) for i in range(12)]
     g = PublicDatasets(directory=Path("."), attack=attack)
-    gaps = AIWorker(None, None, g).dataset_gaps([])
+    gaps = AIWorker(None, None, g).dataset_gaps(NoWazuh())
     # T1070 Linux chỉ có 3 bài thử (< 4) -> không đủ để tách train / kiểm tra; kỹ thuật con đủ bài thử thành nhóm riêng
     assert [k for k, _ in gaps] == ["t:backup-file", "atomic-red-team:windows-T1053.005",
                                     "atomic-red-team:linux-T1053.003"]
@@ -226,7 +226,8 @@ def test_endpoint_rule_assembled_from_command_line_patterns(tmp_path, monkeypatc
     # Lượt bổ sung dồn vào LSASS (comsvcs trong train) -> vế comsvcs + minidump.
     llm = SeqLLM([FIRST_ANSWER, LSASS_ANSWER, SHADOW_ANSWER] * 3)
     saved = []
-    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append).run_cycle("an")
+    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
+             gate_factory=NoWazuh).run_cycle("an")
     p = next(p for p in saved if p["target"] == "gap-dataset:atomic-red-team:windows-T1003")
     assert p["status"] == "pending", p["validation"]["checks"]
     rule = p["proposal"]
@@ -397,7 +398,8 @@ def test_sigmahq_candidates_and_knowledge_round_cover_procedures_missing_from_tr
     golden = PublicDatasets(directory=Path("."), attack=atomic_labeled(), normal=normal, sigma=SIGMAHQ)
     llm = SeqLLM([COMSVCS, KNOWLEDGE] + ["no_rule: không có gì thêm"] * 30)
     saved = []
-    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append).run_cycle("an")
+    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
+             gate_factory=NoWazuh).run_cycle("an")
     p = next(p for p in saved if p["target"] == "gap-dataset:atomic-red-team:windows-T1003")
     assert p["status"] == "pending", p["validation"]["checks"]
     sources = {(a["source"], a["verified"]) for a in p["llm"]["atoms"]}
