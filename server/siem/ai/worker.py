@@ -404,6 +404,7 @@ class AIWorker:
         hàng chục kiểu sửa registry) -> model chỉ viết được chữ ký cho từng bài thử, bắt 2-13% bài thử chưa thấy.
         Trả về cả nhóm riêng ứng dụng (không giao cho AI) để ghi vào tóm tắt chu kỳ."""
         missed = {id(d) for d in gate.gaps([x.doc for x in self.golden.attack])}
+        log.info("khoảng trống trên Wazuh: %d/%d mẫu tấn công chưa có alert phát hiện", len(missed), len(self.golden.attack))
         groups: dict[str, list] = defaultdict(list)
         for x in self.golden.attack:
             if id(x.doc) in missed:

@@ -63,13 +63,15 @@ def by_name(checks, name):
 
 
 # ------------------------------------------------------------------ khoảng trống
-def test_gaps_ignore_generic_and_low_level(gate_with):
+def test_gaps_ignore_generic_and_low_level(gate_with, caplog):
+    caplog.set_level("INFO", logger="ai.wazuh_gate")
     g = gate_with(baseline={1: [Hit(92032, 10)], 2: [Hit(92213, 12)], 3: [Hit(60103, 5)], 4: []})
     assert [d["n"] for d in g.gaps(DOCS[1:5])] == [1, 3, 4]          # 92032 nằm trong GENERIC
     assert g.gaps([NO_RAW]) == []                                      # không đo được trên Wazuh: không phải khoảng trống
     assert len(g.fake.jobs) == 1 and g.fake.jobs[0][1] is None         # MỘT job nền mỗi chu kỳ, không có ứng viên
     assert set(g.fake.jobs[0][0]) == {e.ident for e in RAW.values()}  # ... gồm mọi log thô của bộ mẫu vàng
     assert g.baseline([DOCS[2], NO_RAW]) == {id(DOCS[2]): [Hit(92213, 12)]}
+    assert "giao job nền" in caplog.text and "job nền xong" in caplog.text     # job dài phải thấy được trong log
 
 
 def test_sandbox_error_is_raised_and_remembered_for_the_cycle():

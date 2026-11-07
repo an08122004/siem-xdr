@@ -8,6 +8,8 @@ Sandbox hỏng -> SandboxError cho bên gọi: chu kỳ ghi lỗi, KHÔNG coi l�
 """
 from __future__ import annotations
 
+import logging
+
 from ..detection.rules import Condition
 from .sandbox import Hit, Sandbox, SandboxError, SandboxResult
 from .sigma import SigmaError
@@ -15,7 +17,8 @@ from .validate import Check
 from .wazuh_events import GENERIC, RawEvent
 from .wazuh_xml import emit
 
-CANDIDATE_BASE = 119000          # id ứng viên, chỉ tồn tại trong sandbox
+log = logging.getLogger("ai.wazuh_gate")
+CANDIDATE_BASE = 119000         # id ứng viên, chỉ tồn tại trong sandbox
 DETECT_LEVEL = 7
 _FMT = {"windows": "eventchannel", "linux": "siem-proc", "web": "apache"}      # lĩnh vực rule -> định dạng log thô
 
@@ -43,7 +46,9 @@ class WazuhGate:
     def baseline(self, docs: list[dict]) -> dict[int, list[Hit]]:
         """Alert Wazuh của từng doc (khóa id(doc)) khi không có ứng viên. Doc không có log thô thì không có khóa."""
         if self._base is None:
+            log.info("cổng Wazuh: giao job nền %d event cho sandbox", len(self.raw))
             res = self._run(sorted(self.raw.values(), key=lambda e: e.ident))
+            log.info("cổng Wazuh: job nền xong sau %.0f giây, %d event có alert", res.seconds, len(res.hits))
             if res.load_error:             # không có ứng viên mà ruleset không nạp được: lỗi hạ tầng, không phải của rule
                 self._error = SandboxError(f"ruleset Wazuh hiện tại không nạp được trong sandbox: {res.load_error}")
                 raise self._error
@@ -70,6 +75,7 @@ class WazuhGate:
         self.baseline([])
         mine = {self.raw[id(d)].ident for d in train + test + normal if id(d) in self.raw}
         events = sorted((e for e in self.raw.values() if e.fmt == _FMT[domain] or e.ident in mine), key=lambda e: e.ident)
+        log.info("cổng Wazuh: giao job ứng viên %r (%d rule, %d event)", title[:80], len(em.ids), len(events))
         res = self._run(events, f'<group name="siem,ai,ai_candidate,">\n{em.xml}</group>\n')
         m.update(wazuh_events=len(events), wazuh_seconds=res.seconds)
         if res.load_error:
@@ -110,4 +116,6 @@ class WazuhGate:
         checks.append(Check("khớp Python", not (py_only or wz_only),
                             f"trên {len(both)} mẫu: {py_only} mẫu chỉ cây Python khớp, {wz_only} mẫu chỉ Wazuh báo"
                             + (" (thường do trường vắng mặt kết hợp phủ định)" if py_only else ""), blocking=False))
+        log.info("cổng Wazuh: ứng viên %r sau %.0f giây: bắt %d/%d mẫu kiểm tra, báo nhầm %d/%d, che %d event, "
+                 "lệch Python %d/%d", title[:80], res.seconds, hit, len(test), nh, len(normal), len(lost), py_only, wz_only)
         return checks, m
