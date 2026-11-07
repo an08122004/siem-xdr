@@ -2,7 +2,8 @@
 
 Ba nguồn ứng viên:
   1. exception   — rule có nhiều alert bị analyst đánh dấu false positive (nhãn thật từ case / console)
-  2. gap-dataset — mẫu tấn công trong dataset công khai mà chưa rule nào bắt: web gom theo LOẠI tấn công
+  2. gap-dataset — mẫu tấn công trong dataset công khai mà Wazuh chưa bắt (alert của sandbox Wazuh, wazuh_gate.py;
+                   rule mới cũng phải qua cổng Wazuh mới được chờ duyệt): web gom theo LOẠI tấn công
                    (attack_types.py), endpoint Windows / Linux gom theo KỸ THUẬT ATT&CK (Atomic Red Team);
                    tách tập đưa cho LLM / tập kiểm tra, xếp lượt xen kẽ web / Windows / Linux
   3. gap-own     — nhóm event thật (module/category/action) chưa có rule nào xem xét
@@ -16,7 +17,7 @@ import logging
 import re
 import uuid
 from collections import Counter, defaultdict
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TypeVar
@@ -30,12 +31,15 @@ from .attack_types import TYPES
 from .dataset import ESDataSource, EventGroup
 from .deploy import recheck_dataset_rule
 from .golden import OS_NAME, PublicDatasets
-from . import sigma
+from . import sigma, wazuh_xml
 from .llm import LLMError, LLMResult, LLMTooLong, OllamaClient
 from .prompts import (WAZUH_EXCEPTION_SCHEMA, WAZUH_EXCEPTION_SYSTEM, wazuh_exception_prompt, SIGMA_KNOWLEDGE_SYSTEM, SIGMA_REFINE_SYSTEM, SIGMA_SYSTEM,
                       rule_to_yaml, sigma_knowledge_prompt, sigma_refine_prompt, sigma_rule_prompt,
                       sigma_view)
+from .sandbox import SandboxError
 from .sigma import SigmaError
+from .wazuh_gate import WazuhGate
+from .wazuh_xml import EMITTER_VERSION, LEVEL
 from .validate import (Check, Validation, _app_specific, build_condition, common_program_only, describe, lab_wrapper,
                        leaves_of, ordinary_hits, scope_match, validate_exception_wazuh, validate_new_rule, weak_values)
 
@@ -46,8 +50,9 @@ T = TypeVar("T")
 # tăng khi đổi cách chọn mẫu / ghép mẫu / kiểm định (không đổi prompt) để đề xuất cũ bị loại được thử lại
 # 7: rule mới viết bằng Sigma (7/10); 8: nới / tổng quát hóa vế Sigma (8/10);
 # 9: vế ứng viên SigmaHQ, lượt hỏi kiến thức, tập bình thường lớn hơn (8/10);
-# 10: chặn vế chỉ có tên chương trình phổ biến / lớp bọc `& {` / tên file bài thử tự đặt, trần số vế SigmaHQ (11/10)
-GENERATOR_REVISION = "10"
+# 10: chặn vế chỉ có tên chương trình phổ biến / lớp bọc `& {` / tên file bài thử tự đặt, trần số vế SigmaHQ (11/10);
+# 11: khoảng trống và kiểm định rule mới tính trên alert của sandbox Wazuh (R66, 07/11)
+GENERATOR_REVISION = "11"
 DOMAIN_ORDER = ("web", "windows", "linux")
 MIN_GAP_EVENTS = 10          # nhóm web / EVTX: số mẫu tối thiểu
 MIN_GAP_TESTS = 4            # nhóm Atomic Red Team: số bài thử tối thiểu (tách đôi train / kiểm tra theo bài thử)
@@ -67,10 +72,17 @@ def now_iso() -> str:
 
 
 def generator_id(model: str) -> str:
-    """Dấu vân tay của model + system prompt + phiên bản logic sinh rule (GENERATOR_REVISION), ghi vào mỗi đề xuất.
-    Đổi một trong ba thì mục tiêu từng bị kiểm định loại được thử lại ngay."""
+    """Dấu vân tay của model + system prompt + phiên bản logic sinh rule (GENERATOR_REVISION) + phiên bản bộ dịch Wazuh
+    XML (kết luận của cổng Wazuh phụ thuộc vào nó), ghi vào mỗi đề xuất. Đổi một thứ thì mục tiêu từng bị kiểm định loại
+    được thử lại ngay."""
     return hashlib.sha1("\n".join([model, WAZUH_EXCEPTION_SYSTEM, SIGMA_SYSTEM, SIGMA_REFINE_SYSTEM, SIGMA_KNOWLEDGE_SYSTEM,
-                                   GENERATOR_REVISION]).encode()).hexdigest()[:10]
+                                   GENERATOR_REVISION, wazuh_xml.EMITTER_VERSION]).encode()).hexdigest()[:10]
+
+
+def wazuh_block(domain: str, rd: dict[str, Any], metrics: dict[str, Any]) -> dict[str, Any]:
+    """Khối `wazuh` của đề xuất đã qua cổng Wazuh; deploy.approve dịch lại từ proposal.condition, đổi emitter thì 409."""
+    return {"emitter": EMITTER_VERSION, "domain": domain, "level": LEVEL[rd["severity"]], "rules": metrics["wazuh_rules"],
+            "validated_at": now_iso()}
 
 
 def _path_key(d: Doc) -> str:
@@ -154,8 +166,11 @@ def split_by_test(items: list, variant: Callable[[Any], str]) -> tuple[list, lis
 class AIWorker:
     def __init__(self, es, llm: OllamaClient, golden: PublicDatasets | None,
                  rules_dir: Path = settings.RULES_DIR, ds_factory: Callable[[Any], ESDataSource] = ESDataSource,
-                 save: Callable[[dict], None] | None = None):
+                 save: Callable[[dict], None] | None = None, gate_factory: Callable[[], WazuhGate] | None = None):
+        """gate_factory: tạo cổng Wazuh mới cho mỗi chu kỳ (job nền chạy lại mỗi chu kỳ). None = không có sandbox:
+        bỏ nhánh khoảng trống (ghi lỗi), KHÔNG coi mọi mẫu là khoảng trống."""
         self.es = es
+        self.gate_factory = gate_factory
         self.llm = llm
         self.golden = golden
         self.rules_dir = rules_dir
@@ -173,7 +188,8 @@ class AIWorker:
         gen = generator_id(self.llm.model)
         summary = {"started_at": now_iso(), "requested_by": requested_by, "model": self.llm.model,
                    "created": [], "skipped": [], "errors": [], "rechecked": []}
-        self._recheck_stale(history, gen, summary)
+        gate = self.gate_factory() if self.gate_factory else None
+        self._recheck_stale(history, gen, summary, gate)
         open_targets = {p["target"] for p in history if p.get("status") in OPEN}
         rejected: dict[str, list[str]] = defaultdict(list)
         recent_closed = set()
@@ -202,74 +218,133 @@ class AIWorker:
             self._try(summary, target, lambda: self.propose_exception(rid, ev, ds, rejected[target]))
             budget -= 1
 
-        # 2) khoảng trống so với dataset công khai
-        if budget > 0 and self.golden and self.golden.attack:
-            for key, missed in self.dataset_gaps(rules):
-                if budget <= 0:
-                    break
-                target = f"gap-dataset:{key}"
-                kind = key.rsplit(":", 1)[-1]
-                if not PublicDatasets.transferable(kind):
-                    summary["skipped"].append(f"{target}: {len(missed)} mẫu — {TYPES[kind].label}, "
-                                              "không viết được rule chữ ký dùng chung")
-                    continue
-                if target in open_targets or target in recent_closed:
-                    continue
-                self._try(summary, target, lambda: self.propose_dataset_rule(key, missed, rules, ds, rejected[target]))
-                budget -= 1
+        # 2) + 3) khoảng trống: kiểm định trên sandbox Wazuh. Sandbox hỏng -> ghi lỗi, bỏ hai nhánh này trong chu kỳ
+        # (Review Focus #2: không coi là "rule không bắt" hay "mọi mẫu là khoảng trống")
+        try:
+            if budget > 0 and self.golden and self.golden.attack:
+                if gate is None:
+                    raise SandboxError("AI worker chưa được cấu hình sandbox Wazuh")
+                for key, missed in self.dataset_gaps(gate):
+                    if budget <= 0:
+                        break
+                    target = f"gap-dataset:{key}"
+                    kind = key.rsplit(":", 1)[-1]
+                    if not PublicDatasets.transferable(kind):
+                        summary["skipped"].append(f"{target}: {len(missed)} mẫu — {TYPES[kind].label}, "
+                                                  "không viết được rule chữ ký dùng chung")
+                        continue
+                    if target in open_targets or target in recent_closed:
+                        continue
+                    self._try(summary, target,
+                              lambda: self.propose_dataset_rule(key, missed, rules, ds, rejected[target], gate))
+                    budget -= 1
 
-        # 3) nhóm event thật chưa có rule nào xem xét
-        if budget > 0:
-            for g in ds.event_groups(settings.AI_MIN_GROUP_EVENTS):
-                if budget <= 0:
-                    break
-                target = f"gap-own:{g.key_str}"
-                if target in open_targets or target in recent_closed or not g.samples:
-                    continue
-                if any(scope_match(r, s) for r in rules for s in g.samples):
-                    continue
-                self._try(summary, target, lambda: self.propose_own_rule(g, rules, ds, rejected[target]))
-                budget -= 1
+            # 3) nhóm event thật chưa có rule nào xem xét
+            if budget > 0:
+                for g in ds.event_groups(settings.AI_MIN_GROUP_EVENTS):
+                    if budget <= 0:
+                        break
+                    target = f"gap-own:{g.key_str}"
+                    if target in open_targets or target in recent_closed or not g.samples:
+                        continue
+                    if any(scope_match(r, s) for r in rules for s in g.samples):
+                        continue
+                    self._try(summary, target, lambda: self.propose_own_rule(g, rules, ds, rejected[target], gate))
+                    budget -= 1
+        except SandboxError as e:
+            summary["errors"].append(f"sandbox Wazuh lỗi, bỏ nhánh khoảng trống của chu kỳ: {e}")
+            log.warning("sandbox Wazuh lỗi, bỏ nhánh khoảng trống: %s", e)
 
         summary["finished_at"] = now_iso()
         log.info("chu kỳ AI xong: %d đề xuất, %d lỗi", len(summary["created"]), len(summary["errors"]))
         return summary
 
-    def _recheck_stale(self, history: list[dict[str, Any]], gen: str, summary: dict[str, Any]) -> None:
+    def _recheck_stale(self, history: list[dict[str, Any]], gen: str, summary: dict[str, Any],
+                       gate: WazuhGate | None = None) -> None:
         """Đề xuất rule dataset đang chờ duyệt do logic / model CŨ sinh ra: chạy lại đúng bước kiểm tra lúc duyệt
         (deploy.recheck_dataset_rule: tập bình thường, dấu vết lab, độ đặc trưng HIỆN TẠI). Trượt -> invalid kèm lý do,
         như khi analyst bấm duyệt — để rule chắc chắn không triển khai được không giữ chỗ mãi (target có đề xuất pending
-        thì không được đề xuất lại bằng logic mới). Rà soát 11/10: 11/44 đề xuất cũ như vậy. Không tự duyệt / từ chối
-        thay người: đề xuất qua được vẫn chờ analyst."""
+        thì không được đề xuất lại bằng logic mới). Rà soát 11/10: 11/44 đề xuất cũ như vậy. Đề xuất chưa qua cổng Wazuh
+        (thiếu khối `wazuh` hoặc bộ dịch đã đổi) thì chạy cổng trên nhóm khoảng trống hiện tại: đạt -> ghi khối `wazuh`
+        (duyệt được), trượt -> invalid. Không tự duyệt / từ chối thay người: đề xuất qua được vẫn chờ analyst."""
         if not self.golden:
             return
-        for p in history:
-            if p.get("status") != "pending" or p.get("kind") != "new_rule" or (p.get("llm") or {}).get("generator") == gen                     or not str(p.get("target", "")).startswith("gap-dataset:"):
-                continue
-            try:
-                problems = recheck_dataset_rule(p["proposal"], Rule.from_dict(p["proposal"]), self.golden)
-            except Exception as e:  # noqa: BLE001
-                problems = [f"không dựng lại được rule: {e}"]
-            if not problems:
-                continue
-            try:
-                cur = self.es.get(index=settings.IDX_AI_PROPOSALS, id=p["id"])
-                doc = cur["_source"]
-                if doc.get("status") != "pending":
+        groups: dict[str, list] | None = None
+        try:
+            for p in history:
+                if p.get("status") != "pending" or p.get("kind") != "new_rule" \
+                        or not str(p.get("target", "")).startswith("gap-dataset:"):
                     continue
-                doc.update(status="invalid", updated_at=now_iso())
-                doc.setdefault("history", []).append({
-                    "at": now_iso(), "by": "ai-worker",
-                    "text": "kiểm tra lại theo luật kiểm định hiện tại thất bại (đề xuất do phiên bản cũ của AI worker "
-                            "sinh ra): " + "; ".join(problems)})
-                self.es.index(index=settings.IDX_AI_PROPOSALS, id=p["id"], document=doc, refresh="wait_for",
-                              if_seq_no=cur["_seq_no"], if_primary_term=cur["_primary_term"])
-            except Exception as e:  # noqa: BLE001 — analyst vừa cập nhật đề xuất / ES lỗi: để chu kỳ sau
-                log.warning("không kiểm tra lại được đề xuất %s: %s", p.get("id"), e)
-                continue
-            p["status"] = "invalid"
-            summary["rechecked"].append(f"{p['id']} {p.get('title', '')[:80]}: {'; '.join(problems)[:200]}")
-            log.info("đề xuất cũ %s không còn qua kiểm định: %s", p["id"], "; ".join(problems)[:200])
+                old = (p.get("llm") or {}).get("generator") != gen
+                ungated = gate is not None and (p.get("wazuh") or {}).get("emitter") != EMITTER_VERSION
+                if not (old or ungated):
+                    continue
+                try:
+                    problems = recheck_dataset_rule(p["proposal"], Rule.from_dict(p["proposal"]), self.golden) if old else []
+                except Exception as e:  # noqa: BLE001
+                    problems = [f"không dựng lại được rule: {e}"]
+                checks, metrics, block = [], {}, None
+                if not problems and ungated:
+                    if groups is None:
+                        groups = dict(self.dataset_gaps(gate))
+                    key, rd = p["target"].removeprefix("gap-dataset:"), p["proposal"]
+                    try:
+                        if key not in groups:
+                            problems = ["nhóm mẫu không còn là khoảng trống trên Wazuh (rule Wazuh đã bắt, hoặc không "
+                                        "dựng được log thô để đo)"]
+                        else:
+                            # shortcut: tách lại train / kiểm tra trên nhóm khoảng trống HIỆN TẠI (có thể khác lúc đề xuất)
+                            train, test = self._split(key, groups[key])
+                            domain = self.golden.domain(groups[key][0])
+                            normal = self.golden.normal_for("web") if domain == "web" else \
+                                self.golden.normal_for("endpoint", domain)
+                            checks, metrics = gate.check(
+                                rd["condition"], domain=domain, level=LEVEL[rd["severity"]], title=rd["title"],
+                                techniques=(rd.get("mitre") or {}).get("technique") or [], train=[x.doc for x in train],
+                                test=[x.doc for x in test], normal=normal)
+                            problems = [f"{c.name}: {c.detail}" for c in checks if c.blocking and not c.ok]
+                            block = None if problems else wazuh_block(domain, rd, metrics)
+                    except SandboxError:
+                        raise
+                    except Exception as e:  # noqa: BLE001 — một đề xuất hỏng (thiếu khóa, cây lạ) không được làm sập cả chu kỳ
+                        checks, metrics, block = [], {}, None
+                        problems = [f"không kiểm định lại được trên Wazuh ({type(e).__name__}: {e})"]
+                if not problems and not block:
+                    continue
+                try:
+                    cur = self.es.get(index=settings.IDX_AI_PROPOSALS, id=p["id"])
+                    doc = cur["_source"]
+                    if doc.get("status") != "pending":
+                        continue
+                    doc["updated_at"] = now_iso()
+                    if checks:
+                        v = doc.setdefault("validation", {})
+                        v["checks"] = (v.get("checks") or []) + [asdict(c) for c in checks]
+                        v.setdefault("metrics", {}).update(metrics)
+                    if problems:
+                        doc["status"] = "invalid"
+                        text = ("kiểm tra lại theo luật kiểm định hiện tại thất bại (đề xuất do phiên bản cũ của AI "
+                                "worker sinh ra): " + "; ".join(problems))
+                    else:
+                        doc["wazuh"] = block
+                        text = (f"đạt kiểm định trên sandbox Wazuh ({metrics.get('wazuh_test_recall', 0):.0%} mẫu kiểm "
+                                f"tra, {metrics.get('wazuh_normal_hits', 0)} báo nhầm): duyệt được")
+                    doc.setdefault("history", []).append({"at": now_iso(), "by": "ai-worker", "text": text})
+                    self.es.index(index=settings.IDX_AI_PROPOSALS, id=p["id"], document=doc, refresh="wait_for",
+                                  if_seq_no=cur["_seq_no"], if_primary_term=cur["_primary_term"])
+                except Exception as e:  # noqa: BLE001 — analyst vừa cập nhật đề xuất / ES lỗi: để chu kỳ sau
+                    log.warning("không kiểm tra lại được đề xuất %s: %s", p.get("id"), e)
+                    continue
+                if problems:
+                    p["status"] = "invalid"
+                else:
+                    p["wazuh"] = block
+                done = "; ".join(problems) or "đạt kiểm định Wazuh"
+                summary["rechecked"].append(f"{p['id']} {p.get('title', '')[:80]}: {done[:200]}")
+                log.info("kiểm tra lại đề xuất %s: %s", p["id"], done[:200])
+        except SandboxError as e:
+            summary["errors"].append(f"kiểm tra lại đề xuất cũ: sandbox Wazuh lỗi, để chu kỳ sau: {e}")
+            log.warning("sandbox Wazuh lỗi khi kiểm tra lại đề xuất cũ: %s", e)
 
     def _try(self, summary: dict, target: str, fn: Callable[[], dict | None]) -> None:
         try:
@@ -278,6 +353,8 @@ class AIWorker:
             summary["errors"].append(f"{target}: {e}")
             log.warning("LLM lỗi với %s: %s", target, e)
             return
+        except SandboxError:
+            raise                       # hạ tầng hỏng, không phải lỗi của đề xuất: run_cycle bỏ cả nhánh khoảng trống
         except Exception as e:  # noqa: BLE001
             summary["errors"].append(f"{target}: {e}")
             log.exception("đề xuất %s lỗi", target)
@@ -324,18 +401,20 @@ class AIWorker:
                  evidence={"fp_alert_ids": ev.fp_alert_ids[:200], "tp_alert_ids": ev.tp_alert_ids[:200]})
         return p
 
-    def dataset_gaps(self, rules: list[Rule]) -> list[tuple[str, list]]:
-        """Mẫu tấn công dataset chưa rule match nào bắt, gom theo loại tấn công (web), kỹ thuật ATT&CK theo hệ
+    def dataset_gaps(self, gate: WazuhGate) -> list[tuple[str, list]]:
+        """Mẫu tấn công dataset Wazuh chưa phát hiện (gate.gaps: không có alert level >= 7 ngoài GENERIC trong job nền;
+        mẫu không dựng được log thô không tính), gom theo loại tấn công (web), kỹ thuật ATT&CK theo hệ
         điều hành (Atomic Red Team) hoặc tactic (EVTX). Thứ tự: xen kẽ web / Windows / Linux, trong mỗi lĩnh vực
         nhóm đông trước — để ngân sách mỗi chu kỳ không dồn hết cho một lĩnh vực.
         Endpoint: kỹ thuật CON có đủ bài thử thành nhóm riêng (vd windows-T1218.011 Rundll32), phần còn lại ở nhóm
         kỹ thuật gốc (windows-T1218). Chạy thật 4/10: nhóm theo kỹ thuật gốc rộng quá (T1218 gồm >10 LOLBin, T1112
         hàng chục kiểu sửa registry) -> model chỉ viết được chữ ký cho từng bài thử, bắt 2-13% bài thử chưa thấy.
         Trả về cả nhóm riêng ứng dụng (không giao cho AI) để ghi vào tóm tắt chu kỳ."""
-        match_rules = [r for r in rules if r.type == "match"]
+        missed = {id(d) for d in gate.gaps([x.doc for x in self.golden.attack])}
+        log.info("khoảng trống trên Wazuh: %d/%d mẫu tấn công chưa có alert phát hiện", len(missed), len(self.golden.attack))
         groups: dict[str, list] = defaultdict(list)
         for x in self.golden.attack:
-            if not any(self.golden.event_hit(r, x.doc) for r in match_rules):
+            if id(x.doc) in missed:
                 groups[f"{x.label.get('dataset')}:{self.golden.attack_type(x)}"].append(x)
         by_domain: dict[str, list[tuple[str, list]]] = defaultdict(list)
         for k, v in groups.items():
@@ -405,12 +484,20 @@ class AIWorker:
                                   derived=sig.get("_derived") or []),
         }
 
-    def propose_dataset_rule(self, key: str, missed: list, rules: list[Rule], ds: ESDataSource,
-                             rejected: list[str]) -> dict[str, Any]:
+    def _split(self, key: str, missed: list) -> tuple[list, list]:
+        """Tách train (đưa cho LLM) / kiểm tra. Endpoint: theo BÀI THỬ (split_by_test), biến thể là chương trình chính
+        với nhóm kỹ thuật con; web: xen kẽ theo URL. Kiểm tra lại đề xuất cũ (_recheck_stale) tách đúng như vậy."""
         if missed[0].label.get("technique"):
-            return self.propose_endpoint_rule(key, missed, rules, ds, rejected)
+            sub = "." in key.rsplit(":", 1)[-1].split("-", 1)[1]
+            return split_by_test(missed, _program if sub else self.golden.variant)
         items = sorted(missed, key=lambda x: str(get(x.doc, "url.original") or get(x.doc, "event.id")))
-        train, test = items[0::2], items[1::2]          # tách tập: LLM chỉ thấy (một phần) tập train
+        return items[0::2], items[1::2]
+
+    def propose_dataset_rule(self, key: str, missed: list, rules: list[Rule], ds: ESDataSource,
+                             rejected: list[str], gate: WazuhGate | None = None) -> dict[str, Any]:
+        if missed[0].label.get("technique"):
+            return self.propose_endpoint_rule(key, missed, rules, ds, rejected, gate)
+        train, test = self._split(key, missed)          # tách tập: LLM chỉ thấy (một phần) tập train
         picked = diverse(train, 8, key=self.golden.variant)   # trải đều theo biến thể, biến thể đông trước
         shown = [x.doc for x in picked]
         # thống kê biến thể trên CẢ tập train (không chỉ 8 mẫu) -> rule phủ biến thể phổ biến; tập kiểm tra vẫn giữ riêng
@@ -449,10 +536,10 @@ class AIWorker:
                                      [x.doc for x in test], key, ["dataset-gap", kind], domain,
                                      app_tokens=self.golden.profile.app_tokens(), attempts=attempts,
                                      normal=normal_all if web else None,
-                                     normal_label="request bình thường" if web else "event bình thường")
+                                     normal_label="request bình thường" if web else "event bình thường", gate=gate)
 
     def propose_endpoint_rule(self, key: str, missed: list, rules: list[Rule], ds: ESDataSource,
-                              rejected: list[str]) -> dict[str, Any]:
+                              rejected: list[str], gate: WazuhGate | None = None) -> dict[str, Any]:
         """Kỹ thuật ATT&CK trên Windows / Linux chưa rule nào bắt -> rule Sigma process_creation.
         Khác web: tập kiểm tra là các BÀI THỬ LLM chưa thấy (mỗi bài thử sinh tiến trình shell + tiến trình con gần
         trùng dòng lệnh; tách theo event thì tập kiểm tra chứa gần nguyên văn mẫu đã đưa) -> rule phải khái quát
@@ -466,7 +553,7 @@ class AIWorker:
         # nhóm kỹ thuật con: biến thể = chương trình chính (cùng kỹ thuật con thì g.variant giống nhau hết)
         variant = _program if sub else g.variant
         name = str(lab.get("technique_name")) if sub else str(lab["group_name"])
-        train, test = split_by_test(missed, variant)
+        train, test = self._split(key, missed)
         picked = diverse(train, 8, key=variant)
         shown = [x.doc for x in picked]
         variants = dict(Counter(variant(x) for x in train).most_common(15))
@@ -503,7 +590,8 @@ class AIWorker:
                                      [x.doc for x in test], key, ["dataset-gap", "endpoint", platform, kind], platform,
                                      app_tokens=lab_tokens, attempts=attempts, normal=normal_all,
                                      normal_label=f"lệnh {OS_NAME[platform]} bình thường",
-                                     known_mitre={"technique": [tid], "tactic": tactics[0] if tactics else ""})
+                                     known_mitre={"technique": [tid], "tactic": tactics[0] if tactics else ""},
+                                     gate=gate)
 
     def _refine(self, first: LLMResult, key: str, domain: str, train: list, normals: list[Doc],
                 measure_normal: list[Doc], app_tokens: set[str], variant: Callable[[Any], str], what: str = "",
@@ -784,7 +872,8 @@ class AIWorker:
         return ({i for i, x in enumerate(train) if compiled.match(x.doc)},
                 [d for d in normal if compiled.match(d)], None)
 
-    def propose_own_rule(self, g: EventGroup, rules: list[Rule], ds: ESDataSource, rejected: list[str]) -> dict | None:
+    def propose_own_rule(self, g: EventGroup, rules: list[Rule], ds: ESDataSource, rejected: list[str],
+                         gate: WazuhGate | None = None) -> dict | None:
         module = g.key.get("event.module")
         refs = [sigma.reference(r) for r in self.golden.similar_sigma(g.samples, module)] if self.golden else []
         ctx = (f"Group of {g.count} real events ({g.key}) observed in the last {settings.AI_REPLAY_DAYS} days "
@@ -792,13 +881,13 @@ class AIWorker:
         res = self._ask_sigma(SIGMA_SYSTEM, sigma_rule_prompt(ctx, "other", [sigma_view(d, "other") for d in g.samples],
                                                               [], refs, rejected))
         return self._finish_new_rule(res, f"gap-own:{g.key_str}", rules, ds, g.samples, [], g.key_str,
-                                     ["coverage-gap"], "other")
+                                     ["coverage-gap"], "other", gate=gate)
 
     def _finish_new_rule(self, res, target: str, rules: list[Rule], ds: ESDataSource, train: list[Doc],
                          test: list[Doc], key: str, tags: list[str], domain: str,
                          app_tokens: set[str] | None = None, attempts: list[dict] | None = None,
                          normal: list[Doc] | None = None, normal_label: str = "event bình thường",
-                         known_mitre: dict[str, Any] | None = None) -> dict[str, Any]:
+                         known_mitre: dict[str, Any] | None = None, gate: WazuhGate | None = None) -> dict[str, Any]:
         pid = uuid.uuid4().hex[:12]
         if res.data.get("no_rule"):
             p = self._base("new_rule", target, res, f"{key}: AI không đề xuất rule")
@@ -819,12 +908,14 @@ class AIWorker:
             normal = [x.doc for x in self.golden.normal] if self.golden else []
         val = validate_new_rule(rd, rules, train, test, normal, ds.replay_events(),
                                 settings.AI_MAX_NEW_RULE_ALERTS_PER_DAY, app_tokens=app_tokens,
-                                normal_label=normal_label)
+                                normal_label=normal_label, gate=gate, domain=domain)
         p = self._base("new_rule", target, res, f"Rule mới {rd['id']} — {rd['title']}")
         p.update(id=pid, target_rule_id=rd["id"], proposal=rd, sigma=rd["sigma"],
                  yaml=rule_to_yaml({k: v for k, v in rd.items() if k != "sigma"}),
                  validation=val.to_dict(), risk=val.risk, required_approvals=1,
                  status="pending" if val.passed else "invalid")
+        if val.passed and "wazuh_rules" in val.metrics:
+            p["wazuh"] = wazuh_block(domain, rd, val.metrics)
         if res.data.get("_atoms"):
             p["llm"]["atoms"] = res.data["_atoms"]
         if attempts:
