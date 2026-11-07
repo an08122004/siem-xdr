@@ -114,3 +114,19 @@ def test_license_header(tmp_path, three_sigma_rules):
     imp.write_batch(three_sigma_rules, rules_file=tmp_path / "r.xml", cases_file=tmp_path / "c.yml", first_id=108000,
                     today="2026-11-20")
     assert "DRL 1.1" in (tmp_path / "r.xml").read_text(encoding="utf-8")[:600]
+
+
+def test_skips_values_wazuh_keeps_as_xml_entities():
+    row, text = sigma_rule("rules/g.yml", "Redirect", "  sel:\n    CommandLine|contains: ' > '\n  condition: sel", EVASION)
+    cands, skipped = imp.candidates(ITEMS, [row], {row["path"]: text}, CONFIG)
+    assert cands == [] and skipped == {"giá trị có & < > (Wazuh giữ thực thể XML)": 1}
+
+
+def test_positive_sample_is_not_shadowed_by_an_earlier_rule_of_the_batch():
+    items = [win(0, RUNDLL + " aaa bbb", "attack"), win(1, RUNDLL + " bbb", "attack"), win(2, RUNDLL + " zzz", "normal")]
+    rows = [sigma_rule("rules/a.yml", "Has bbb", JS.replace("javascript:", "bbb"), EVASION),
+            sigma_rule("rules/b.yml", "Has aaa", JS.replace("javascript:", "aaa"), EVASION)]
+    cands, _ = imp.candidates(items, [r for r, _ in rows], {r["path"]: t for r, t in rows}, CONFIG)
+    picked = imp.pick(cands, items, covered=set(), batch=30)
+    assert [c.title for c in picked] == ["Has bbb"]       # "Has aaa" chỉ có mẫu 0, đã bị "Has bbb" (id nhỏ hơn) che: bỏ
+    assert picked[0].pos["i"] in (0, 1)

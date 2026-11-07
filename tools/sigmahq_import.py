@@ -132,6 +132,11 @@ def candidates(items: list[dict], rows: list[dict], originals: dict[str, str], c
         if any(regex_risk(e.text or "") for e in ET.fromstring("<g>" + em.xml + "</g>").iter() if e.get("type") == "pcre2"):
             skipped["mẫu regex quá dài / ReDoS (lint)"] += 1
             continue
+        if dom == "windows" and re.search(r"\\x(?:3c|3e|26)", em.xml):
+            # Wazuh giữ nguyên thực thể XML (&gt; &lt; &amp;) trong win.eventdata.*, còn emit viết `>` `<` `&` thành > < &
+            # (đo 07/11/2026: mẫu có `>` không khớp): rule không bắn được trên event thật cho tới khi emit xử lý thực thể
+            skipped["giá trị có & < > (Wazuh giữ thực thể XML)"] += 1
+            continue
         cond = Condition(tree)
         if any(cond.match(d) for d in normal[dom]):
             skipped["báo nhầm trên tập bình thường"] += 1
@@ -162,12 +167,23 @@ def pick(cands: list[Candidate], items: list[dict], covered: set[int], batch: in
         got |= best.hits
         pool.remove(best)
     by_i = {it["i"]: it for it in items}
-    for c in picked:
-        # mẫu dương: ưu tiên mẫu Atomic (ghi thật chưa có ở lô này); chọn mẫu đầu theo chỉ số cho lặp lại được
-        c.pos = by_i[min(c.hits)]
+    conds = [Condition(c.tree) for c in picked]
+    kept: list[Candidate] = []
+    for k, c in enumerate(picked):
+        # Wazuh chọn rule anh em level cao nhất, cùng level thì rule nạp trước (id nhỏ): mẫu dương không được bị rule
+        # SigmaHQ khác của lô che, nếu không ca dương báo nhầm id rule kia
+        beat = [conds[m] for m, d in enumerate(picked) if m != k and (LEVEL[d.row["level"]], -m) > (LEVEL[c.row["level"]], -k)
+                and d.domain == c.domain]
+        own = [i for i in sorted(c.hits) if not any(b.match(by_i[i]["doc"]) for b in beat)]
+        if not own:
+            print(f"bỏ {c.title}: mọi mẫu của rule đều bị rule khác của lô che", file=sys.stderr)
+            continue
+        c.pos = by_i[own[0]]
         t = _tokens(c.pos)
         normals = [it for it in items if it["class"] == "normal" and it["domain"] == c.domain]
         c.neg = max(normals, key=lambda n: len(t & _tokens(n)) / (len(t | _tokens(n)) or 1))
+        kept.append(c)
+    picked = kept
     return picked
 
 

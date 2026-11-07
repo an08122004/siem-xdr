@@ -6,7 +6,7 @@
 -->
 <group name="siem,sigmahq,">
   <rule id="108000" level="10">
-    <if_sid>61603</if_sid>
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:\.DownloadString\x28|\.DownloadFile\x28|Invoke-WebRequest\x20|iwr\x20|Invoke-RestMethod\x20|irm\x20))(?=[\s\S]*?(?:\x3biex\x20\x24|\x7c\x20IEX|\x7cIEX\x20|I\x60E\x60X|I\x60EX|IE\x60X|iex\x20|IEX\x20\x28|IEX\x28|Invoke-Expression))</field>
     <description>SHQ-001 PowerShell Download and Execution Cradles</description>
     <mitre><id>T1059</id></mitre>
@@ -16,299 +16,300 @@
     <group>siem,sigmahq,shadow,</group>
   </rule>
   <rule id="108001" level="10">
-    <if_sid>61603</if_sid>
-    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:REG))(?=[\s\S]*?(?:ADD))(?=[\s\S]*?(?:\x5cSOFTWARE\x5cPolicies\x5cMicrosoft\x5cFVE))(?=[\s\S]*?(?:/v))(?=[\s\S]*?(?:/f))(?=[\s\S]*?(?:EnableBDEWithNoTPM|UseAdvancedStartup|UseTPM|UseTPMKey|UseTPMKeyPIN|RecoveryKeyMessageSource|UseTPMPIN|RecoveryKeyMessage))</field>
-    <description>SHQ-002 Suspicious Reg Add BitLocker</description>
-    <mitre><id>T1486</id></mitre>
-    <info type="text">shadow_since=2026-11-07</info>
-    <info type="text">sigmahq_id=0e0255bf-2548-47b8-9582-c0955c9283f5</info>
-    <info type="text">author=frack113</info>
-    <group>siem,sigmahq,shadow,</group>
-  </rule>
-  <rule id="108002" level="10">
-    <if_sid>61603</if_sid>
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:DumpCreds|mimikatz|::aadcookie|::detours|::memssp|::mflt|::ncroutemon|::ngcsign|::printnightmare|::skeleton|::preshutdown|::mstsc|::multirdp|rpc::|token::|crypto::|dpapi::|sekurlsa::|kerberos::|lsadump::|privilege::|process::|vault::))</field>
-    <description>SHQ-003 HackTool - Mimikatz Execution</description>
+    <description>SHQ-002 HackTool - Mimikatz Execution</description>
     <mitre><id>T1003.001</id><id>T1003.002</id><id>T1003.004</id><id>T1003.005</id><id>T1003.006</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=a642964e-bead-4bed-8910-1bb4d63e3b4d</info>
     <info type="text">author=Teymur Kheirkhabarov, oscd.community, David ANDRE (additional keywords), Tim Shelton</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108003" level="10">
-    <if_sid>61603</if_sid>
+  <rule id="108002" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:::FromBase64String\x28))</field>
-    <description>SHQ-004 Base64 Encoded PowerShell Command Detected</description>
+    <description>SHQ-003 Base64 Encoded PowerShell Command Detected</description>
     <mitre><id>T1027</id><id>T1140</id><id>T1059.001</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=e32d4572-9826-4738-b651-95fa63747e8a</info>
     <info type="text">author=Florian Roth (Nextron Systems)</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108004" level="10">
-    <if_sid>61603</if_sid>
+  <rule id="108003" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:\x20/INJECTRUNNING\x20))</field>
-    <field name="win.eventdata.parentImage" type="pcre2">(?i)^(?!(?:C:\x5cWindows\x5cSystem32\x5cAppVClient\.exe)\z)</field>
-    <description>SHQ-005 Mavinject Inject DLL Into Running Process</description>
+    <field name="win.eventdata.parentImage" type="pcre2">(?i)^(?!(?:C:(?:\x5c){1,2}Windows(?:\x5c){1,2}System32(?:\x5c){1,2}AppVClient\.exe)\z)</field>
+    <description>SHQ-004 Mavinject Inject DLL Into Running Process</description>
     <mitre><id>T1055.001</id><id>T1218.013</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=4f73421b-5a0b-4bbf-a892-5a7fb99bea66</info>
     <info type="text">author=frack113, Florian Roth</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108005" level="7">
-    <if_sid>61603</if_sid>
+  <rule id="108004" level="7">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:Wscript\.))(?=[\s\S]*?(?:\.Shell))(?=[\s\S]*?(?:\.Run))</field>
-    <description>SHQ-006 Wscript Shell Run In CommandLine</description>
+    <description>SHQ-005 Wscript Shell Run In CommandLine</description>
     <mitre><id>T1059</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=2c28c248-7f50-417a-9186-a85b223010ee</info>
     <info type="text">author=Nasreddine Bencherchali (Nextron Systems)</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108006" level="10">
-    <if_sid>61603</if_sid>
+  <rule id="108005" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:\x5bchar\x5d0x|\x28WCHAR\x290x))</field>
-    <description>SHQ-007 Potential PowerShell Obfuscation Via WCHAR/CHAR</description>
+    <description>SHQ-006 Potential PowerShell Obfuscation Via WCHAR/CHAR</description>
     <mitre><id>T1059.001</id><id>T1027</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=e312efd0-35a1-407f-8439-b8d434b438a6</info>
     <info type="text">author=Florian Roth (Nextron Systems)</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108007" level="7">
-    <if_sid>61603</if_sid>
+  <rule id="108006" level="7">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:Export-PfxCertificate\x20|Export-Certificate\x20))</field>
-    <description>SHQ-008 Certificate Exported Via PowerShell</description>
+    <description>SHQ-007 Certificate Exported Via PowerShell</description>
     <mitre><id>T1552.004</id><id>T1059.001</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=9e716b33-63b2-46da-86a4-bd3c3b9b5dfb</info>
     <info type="text">author=Nasreddine Bencherchali (Nextron Systems)</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108008" level="10">
-    <if_sid>61603</if_sid>
+  <rule id="108007" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:Get-Process\x20lsas|ps\x20lsas|gps\x20lsas))</field>
-    <description>SHQ-009 PowerShell Get-Process LSASS</description>
+    <description>SHQ-008 PowerShell Get-Process LSASS</description>
     <mitre><id>T1552.004</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=b2815d0d-7481-4bf0-9b6c-a4c48a94b349</info>
     <info type="text">author=Florian Roth (Nextron Systems)</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108009" level="10">
-    <if_sid>61603</if_sid>
-    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:SOFTWARE\x5cMicrosoft\x5cProvisioning\x5cCommands\x5c))</field>
-    <description>SHQ-010 Potential Provisioning Registry Key Abuse For Binary Proxy Execution</description>
+  <rule id="108008" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:SOFTWARE(?:\x5c){1,2}Microsoft(?:\x5c){1,2}Provisioning(?:\x5c){1,2}Commands(?:\x5c){1,2}))</field>
+    <description>SHQ-009 Potential Provisioning Registry Key Abuse For Binary Proxy Execution</description>
     <mitre><id>T1218</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=2a4b3e61-9d22-4e4a-b60f-6e8f0cde6f25</info>
     <info type="text">author=Nasreddine Bencherchali (Nextron Systems), Swachchhanda Shrawan Poudel</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108010" level="7">
-    <if_sid>61603</if_sid>
+  <rule id="108009" level="7">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:InfDefaultInstall\.exe\x20))(?=[\s\S]*?(?:\.inf))</field>
-    <description>SHQ-011 InfDefaultInstall.exe .inf Execution</description>
+    <description>SHQ-010 InfDefaultInstall.exe .inf Execution</description>
     <mitre><id>T1218</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=ce7cf472-6fcc-490a-9481-3786840b5d9b</info>
     <info type="text">author=frack113</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108011" level="7">
-    <if_sid>61603</if_sid>
-    <field name="win.eventdata.image" type="pcre2">(?i)^(?=[\s\S]*?(?:\x5cpcalua\.exe)\z)</field>
+  <rule id="108010" level="7">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)^(?=[\s\S]*?(?:(?:\x5c){1,2}pcalua\.exe)\z)</field>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:\x20-a))</field>
-    <description>SHQ-012 Use of Pcalua For Execution</description>
+    <description>SHQ-011 Use of Pcalua For Execution</description>
     <mitre><id>T1059</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=0955e4e1-c281-4fb9-9ee1-5ee7b4b754d2</info>
     <info type="text">author=Nasreddine Bencherchali (Nextron Systems), E.M. Anhaus (originally from Atomic Blue Detections, Endgame), oscd.community</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108012" level="7">
-    <if_sid>61603</if_sid>
-    <field name="win.eventdata.image" type="pcre2">(?i)^(?=[\s\S]*?(?:\x5creplace\.exe)\z)</field>
+  <rule id="108011" level="7">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)^(?=[\s\S]*?(?:(?:\x5c){1,2}replace\.exe)\z)</field>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:-a|/a|–a))</field>
-    <description>SHQ-013 Replace.exe Usage</description>
+    <description>SHQ-012 Replace.exe Usage</description>
     <mitre><id>T1105</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=9292293b-8496-4715-9db6-37028dcda4b3</info>
     <info type="text">author=frack113</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108013" level="7">
-    <if_sid>61603</if_sid>
+  <rule id="108012" level="7">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:-i|/install|-a|/add-driver|\.inf))</field>
-    <field name="win.eventdata.image" type="pcre2">(?i)^(?=[\s\S]*?(?:\x5cpnputil\.exe)\z)</field>
-    <description>SHQ-014 Suspicious Driver Install by pnputil.exe</description>
+    <field name="win.eventdata.image" type="pcre2">(?i)^(?=[\s\S]*?(?:(?:\x5c){1,2}pnputil\.exe)\z)</field>
+    <description>SHQ-013 Suspicious Driver Install by pnputil.exe</description>
     <mitre><id>T1547</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=a2ea3ae7-d3d0-40a0-a55c-25a45c87cac1</info>
     <info type="text">author=Hai Vaknin @LuxNoBulIshit, Avihay eldad @aloneliassaf, Austin Songer @austinsonger</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108014" level="7">
-    <if_sid>61603</if_sid>
-    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:\x5cSyncAppvPublishingServer\.vbs))(?=[\s\S]*?(?:\x3b))</field>
-    <description>SHQ-015 SyncAppvPublishingServer VBS Execute Arbitrary PowerShell Code</description>
+  <rule id="108013" level="7">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:(?:\x5c){1,2}SyncAppvPublishingServer\.vbs))(?=[\s\S]*?(?:\x3b))</field>
+    <description>SHQ-014 SyncAppvPublishingServer VBS Execute Arbitrary PowerShell Code</description>
     <mitre><id>T1218</id><id>T1216</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=36475a7d-0f6d-4dce-9b01-6aeb473bbaf1</info>
     <info type="text">author=frack113</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108015" level="10">
-    <if_sid>61603</if_sid>
+  <rule id="108014" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:nslookup))(?=[\s\S]*?(?:_ldap\._tcp\.dc\._msdcs\.))</field>
-    <description>SHQ-016 Network Reconnaissance Activity</description>
+    <description>SHQ-015 Network Reconnaissance Activity</description>
     <mitre><id>T1087</id><id>T1082</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=e6313acd-208c-44fc-a0ff-db85d572e90e</info>
     <info type="text">author=Florian Roth (Nextron Systems)</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108016" level="7">
-    <if_sid>61603</if_sid>
-    <field name="win.eventdata.image" type="pcre2">(?i)^(?=[\s\S]*?(?:\x5cntdsutil\.exe)\z)</field>
-    <description>SHQ-017 Invocation of Active Directory Diagnostic Tool (ntdsutil.exe)</description>
+  <rule id="108015" level="7">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)^(?=[\s\S]*?(?:(?:\x5c){1,2}ntdsutil\.exe)\z)</field>
+    <description>SHQ-016 Invocation of Active Directory Diagnostic Tool (ntdsutil.exe)</description>
     <mitre><id>T1003.003</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=2afafd61-6aae-4df4-baed-139fa1f4c345</info>
     <info type="text">author=Thomas Patzke</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108017" level="7">
-    <if_sid>61603</if_sid>
+  <rule id="108016" level="7">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:for\x20|foreach\x20))(?=[\s\S]*?(?:nslookup|ping))</field>
-    <description>SHQ-018 Suspicious Scan Loop Network</description>
+    <description>SHQ-017 Suspicious Scan Loop Network</description>
     <mitre><id>T1059</id><id>T1018</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=f8ad2e2c-40b6-4117-84d7-20b89896ab23</info>
     <info type="text">author=frack113</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108018" level="10">
-    <if_sid>61603</if_sid>
-    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:\x3e))(?=[\s\S]*?(?:\x5c\x5c127\.0\.0\.1\x5cadmin\x24\x5c|\x5c\x5clocalhost\x5cadmin\x24\x5c))</field>
-    <description>SHQ-019 Suspicious Redirection to Local Admin Share</description>
-    <mitre><id>T1048</id></mitre>
-    <info type="text">shadow_since=2026-11-07</info>
-    <info type="text">sigmahq_id=ab9e3b40-0c85-4ba1-aede-455d226fd124</info>
-    <info type="text">author=Florian Roth (Nextron Systems)</info>
-    <group>siem,sigmahq,shadow,</group>
-  </rule>
-  <rule id="108019" level="10">
-    <if_sid>61603</if_sid>
-    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:\x5c\x5c\x3f\x5cGLOBALROOT\x5cDevice\x5cHarddiskVolumeShadowCopy))(?=[\s\S]*?(?:\x5cNTDS\.dit|\x5cSYSTEM|\x5cSECURITY))</field>
-    <description>SHQ-020 Sensitive File Access Via Volume Shadow Copy Backup</description>
+  <rule id="108017" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:(?:\x5c){1,2}(?:\x5c){1,2}\x3f(?:\x5c){1,2}GLOBALROOT(?:\x5c){1,2}Device(?:\x5c){1,2}HarddiskVolumeShadowCopy))(?=[\s\S]*?(?:(?:\x5c){1,2}NTDS\.dit|(?:\x5c){1,2}SYSTEM|(?:\x5c){1,2}SECURITY))</field>
+    <description>SHQ-018 Sensitive File Access Via Volume Shadow Copy Backup</description>
     <mitre><id>T1490</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=f57f8d16-1f39-4dcb-a604-6c73d9b54b3d</info>
     <info type="text">author=Max Altgelt (Nextron Systems), Tobias Michalski (Nextron Systems)</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108020" level="10">
-    <if_sid>61603</if_sid>
+  <rule id="108018" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:\x20/dest:rdp-tcp\x23))</field>
-    <description>SHQ-021 Suspicious RDP Redirect Using TSCON</description>
+    <description>SHQ-019 Suspicious RDP Redirect Using TSCON</description>
     <mitre><id>T1563.002</id><id>T1021.001</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=f72aa3e8-49f9-4c7d-bd74-f8ab84ff9bbb</info>
     <info type="text">author=Florian Roth (Nextron Systems)</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108021" level="10">
-    <if_sid>61603</if_sid>
-    <field name="win.eventdata.image" type="pcre2">(?i)^(?=[\s\S]*?(?:\x5cat\.exe)\z)</field>
+  <rule id="108019" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)^(?=[\s\S]*?(?:(?:\x5c){1,2}at\.exe)\z)</field>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:interactive))</field>
-    <description>SHQ-022 Interactive AT Job</description>
+    <description>SHQ-020 Interactive AT Job</description>
     <mitre><id>T1053.002</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=60fc936d-2eb0-4543-8a13-911c750a1dfc</info>
     <info type="text">author=E.M. Anhaus (originally from Atomic Blue Detections, Endgame), oscd.community</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108022" level="10">
-    <if_sid>61603</if_sid>
+  <rule id="108020" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:mklink))(?=[\s\S]*?(?:HarddiskVolumeShadowCopy))</field>
-    <description>SHQ-023 VolumeShadowCopy Symlink Creation Via Mklink</description>
+    <description>SHQ-021 VolumeShadowCopy Symlink Creation Via Mklink</description>
     <mitre><id>T1003.002</id><id>T1003.003</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=40b19fa6-d835-400c-b301-41f3a2baacaf</info>
     <info type="text">author=Teymur Kheirkhabarov, oscd.community</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108023" level="10">
-    <if_sid>61603</if_sid>
-    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:copy\x20))(?=[\s\S]*?(?:/y\x20))(?=[\s\S]*?(?:C:\x5cwindows\x5csystem32\x5ccmd\.exe\x20C:\x5cwindows\x5csystem32\x5csethc\.exe))</field>
-    <description>SHQ-024 Persistence Via Sticky Key Backdoor</description>
+  <rule id="108021" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:copy\x20))(?=[\s\S]*?(?:/y\x20))(?=[\s\S]*?(?:C:(?:\x5c){1,2}windows(?:\x5c){1,2}system32(?:\x5c){1,2}cmd\.exe\x20C:(?:\x5c){1,2}windows(?:\x5c){1,2}system32(?:\x5c){1,2}sethc\.exe))</field>
+    <description>SHQ-022 Persistence Via Sticky Key Backdoor</description>
     <mitre><id>T1546.008</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=1070db9a-3e5d-412e-8e7b-7183b616e1b3</info>
     <info type="text">author=Sreeman</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108024" level="10">
-    <if_sid>61603</if_sid>
-    <field name="win.eventdata.image" type="pcre2">(?i)^(?=[\s\S]*?(?:\x5cPrintBrm\.exe)\z)</field>
+  <rule id="108022" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)^(?=[\s\S]*?(?:(?:\x5c){1,2}PrintBrm\.exe)\z)</field>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:\x20-f))(?=[\s\S]*?(?:\.zip))</field>
-    <description>SHQ-025 PrintBrm ZIP Creation of Extraction</description>
+    <description>SHQ-023 PrintBrm ZIP Creation of Extraction</description>
     <mitre><id>T1105</id><id>T1564.004</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=cafeeba3-01da-4ab4-b6c4-a31b1d9730c7</info>
     <info type="text">author=frack113</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108025" level="7">
-    <if_sid>61603</if_sid>
+  <rule id="108023" level="7">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:\x20msiexec))(?=[\s\S]*?(?:://))</field>
-    <description>SHQ-026 MsiExec Web Install</description>
+    <description>SHQ-024 MsiExec Web Install</description>
     <mitre><id>T1218.007</id><id>T1105</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=f7b5f842-a6af-4da5-9e95-e32478f3cd2f</info>
     <info type="text">author=Florian Roth (Nextron Systems)</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108026" level="7">
-    <if_sid>61603</if_sid>
+  <rule id="108024" level="7">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:Invoke-RestMethod\x20|Invoke-WebRequest\x20|IRM\x20|IWR\x20))(?=[\s\S]*?(?:http))(?=[\s\S]*?(?:OutFile))(?=[\s\S]*?(?:\.dll))</field>
-    <description>SHQ-027 Potential DLL File Download Via PowerShell Invoke-WebRequest</description>
+    <description>SHQ-025 Potential DLL File Download Via PowerShell Invoke-WebRequest</description>
     <mitre><id>T1059.001</id><id>T1105</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=0f0450f3-8b47-441e-a31b-15a91dc243e2</info>
     <info type="text">author=Florian Roth (Nextron Systems), Hieu Tran</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108027" level="10">
-    <if_sid>61603</if_sid>
+  <rule id="108025" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:Invoke-ATHRemoteFXvGPUDisablementCommand|Invoke-ATHRemoteFXvGPUDisableme))</field>
-    <description>SHQ-028 RemoteFXvGPUDisablement Abuse Via AtomicTestHarnesses</description>
+    <description>SHQ-026 RemoteFXvGPUDisablement Abuse Via AtomicTestHarnesses</description>
     <mitre><id>T1218</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=a6fc3c46-23b8-4996-9ea2-573f4c4d88c5</info>
     <info type="text">author=frack113</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108028" level="10">
-    <if_sid>61603</if_sid>
+  <rule id="108026" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:Get-WmiObject|gwmi|Get-CimInstance|gcim))(?=[\s\S]*?(?:Win32_ShadowCopy))(?=[\s\S]*?(?:\.Delete\x28\x29|Remove-WmiObject|rwmi|Remove-CimInstance|rcim))</field>
-    <description>SHQ-029 Deletion of Volume Shadow Copies via WMI with PowerShell</description>
+    <description>SHQ-027 Deletion of Volume Shadow Copies via WMI with PowerShell</description>
     <mitre><id>T1490</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=21ff4ca9-f13a-41ad-b828-0077b2af2e40</info>
     <info type="text">author=Tim Rauch, Elastic (idea)</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
-  <rule id="108029" level="7">
-    <if_sid>61603</if_sid>
-    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:powershell\.exe|\x5cpowershell|\x5cpwsh|pwsh\.exe))(?=[\s\S]*?(?:/c\x20))(?=[\s\S]*?(?:\x5cAppData\x5c))(?=[\s\S]*?(?:Local\x5c|Roaming\x5c))</field>
-    <description>SHQ-030 PowerShell Script Run in AppData</description>
+  <rule id="108027" level="7">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:powershell\.exe|(?:\x5c){1,2}powershell|(?:\x5c){1,2}pwsh|pwsh\.exe))(?=[\s\S]*?(?:/c\x20))(?=[\s\S]*?(?:(?:\x5c){1,2}AppData(?:\x5c){1,2}))(?=[\s\S]*?(?:Local(?:\x5c){1,2}|Roaming(?:\x5c){1,2}))</field>
+    <description>SHQ-028 PowerShell Script Run in AppData</description>
     <mitre><id>T1059.001</id></mitre>
     <info type="text">shadow_since=2026-11-07</info>
     <info type="text">sigmahq_id=ac175779-025a-4f12-98b0-acdaeb77ea85</info>
     <info type="text">author=Florian Roth (Nextron Systems), Jonhnathan Ribeiro, oscd.community</info>
+    <group>siem,sigmahq,shadow,</group>
+  </rule>
+  <rule id="108028" level="7">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)^(?=[\s\S]*?(?:(?:\x5c){1,2}print\.exe)\z)</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=(?:print))(?=[\s\S]*?(?:/D))(?=[\s\S]*?(?:\.exe))(?![\s\S]*?(?:print\.exe))</field>
+    <description>SHQ-029 Abusing Print Executable</description>
+    <mitre><id>T1218</id></mitre>
+    <info type="text">shadow_since=2026-11-07</info>
+    <info type="text">sigmahq_id=bafac3d6-7de9-4dd9-8874-4a1194b493ed</info>
+    <info type="text">author=Furkan CALISKAN, @caliskanfurkan_, @oscd_initiative</info>
+    <group>siem,sigmahq,shadow,</group>
+  </rule>
+  <rule id="108029" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:(?:\x5c){1,2}CurrentVersion(?:\x5c){1,2}Image\x20File\x20Execution\x20Options(?:\x5c){1,2}))(?=[\s\S]*?(?:sethc\.exe|utilman\.exe|osk\.exe|magnify\.exe|narrator\.exe|displayswitch\.exe|atbroker\.exe|HelpPane\.exe))</field>
+    <description>SHQ-030 Suspicious Debugger Registration Cmdline</description>
+    <mitre><id>T1546.008</id></mitre>
+    <info type="text">shadow_since=2026-11-07</info>
+    <info type="text">sigmahq_id=ae215552-081e-44c7-805f-be16f975c8a2</info>
+    <info type="text">author=Florian Roth (Nextron Systems), oscd.community, Jonhnathan Ribeiro</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
 </group>
