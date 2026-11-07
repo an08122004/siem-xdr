@@ -365,11 +365,30 @@ services:
       - ./server/rules:/app/rules:ro
       - ./server/config:/app/config:ro
       - ./datasets/processed:/datasets:ro
+      - ${AI_SANDBOX_PATH:-ai_sandbox}:/sandbox            # thư mục job của wazuh-sandbox (siem/ai/sandbox.py)
       - *ca-mount
     depends_on:
       elasticsearch: {condition: service_healthy}
       es-setup: {condition: service_completed_successfully}
       ollama: {condition: service_started}
+
+  # Sandbox Wazuh cho AI (R67): kiểm rule ứng viên trên analysisd thật, cùng image với wazuh-manager. KHÔNG mạng, không
+  # secrets, không cổng -> alert của nó không đi đâu (không ES, không SOAR). ai-worker giao việc qua thư mục job trên
+  # volume ai_sandbox (giao thức ở wazuh/sandbox/runner.py), không cần docker socket. Rule động thật chỉ đọc (/live-dynamic).
+  wazuh-sandbox:
+    image: wazuh/wazuh-manager:4.14.8
+    hostname: wazuh-sandbox
+    restart: unless-stopped
+    profiles: [ai]
+    network_mode: none
+    volumes:
+      - ./wazuh/manager/rules:/var/ossec/etc/rules:ro
+      - ./wazuh/manager/decoders:/var/ossec/etc/decoders:ro
+      - ./wazuh/manager/ossec.conf:/wazuh-config-mount/etc/ossec.conf:ro
+      - wazuh_dynamic_rules:/live-dynamic:ro
+      - ${AI_SANDBOX_PATH:-ai_sandbox}:/sandbox
+      - ./wazuh/sandbox:/sandbox-runner:ro
+      - ./wazuh/sandbox/entrypoint:/entrypoint-scripts:ro   # tắt filebeat, list CDB, chạy runner (dịch vụ s6)
 
   # Máy chủ web demo (vai trò S001) có cài Wazuh agent 4.14.7 — dùng để kiểm tra luồng XDR end-to-end
   demo-web:
@@ -436,3 +455,4 @@ volumes:
   grafanadata:
   mldata:
   ollama:
+  ai_sandbox:

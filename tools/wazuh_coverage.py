@@ -30,23 +30,14 @@ import tempfile
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
-from xml.sax.saxutils import escape
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "server"))
+from siem.ai.wazuh_events import GENERIC, sysmon_message  # noqa: E402,F401 - dùng chung với sandbox AI
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 DATA = ROOT / "datasets" / "processed"
 CONTAINER = os.getenv("WAZUH_BENCH", "wazuh-bench")
 LEVELS = (3, 7, 10)
-# Rule Wazuh khớp theo CẤU TRÚC chung chung chứ không theo hành vi tấn công (đọc định nghĩa trong ruleset 4.14.7).
-# Báo cáo tính riêng cột "bỏ rule chung chung" để không thổi phồng độ phủ.
-GENERIC = {
-    "80792": "ghi nhận MỌI lệnh auditd có key audit-wazuh-c (89/94 lệnh bình thường cũng khớp)",
-    "92032": "mọi tiến trình con có cha là `cmd.exe /c` (script, trình cài đặt cũng vậy)",
-    "92036": "`net.exe` có cha là `cmd.exe /c` (con của 92032)",
-    "92041": "regex `add.+\\/d\\s+(\")?(?:[A-Za-z\\d+\\/]{4})*(...)?`: mọi nhóm sau `/d` đều tùy chọn nên khớp MỌI "
-             "`reg add ... /d`, không riêng giá trị Base64",
-}
 ENV = {**os.environ, "MSYS_NO_PATHCONV": "1"}
 
 # chạy TRONG container bằng python của Wazuh: gửi từng event vào socket hàng đợi của analysisd (datagram)
@@ -78,27 +69,6 @@ def _read(name: str):
 
 
 # ---------------------------------------------------------------- dựng event như agent gửi
-def sysmon_message(rid: int, image: str, cmd: str, parent: str, parent_cmd: str, user: str) -> str:
-    base = re.split(r"[\\/]", image)[-1]
-    fields = {"RuleName": "-", "UtcTime": "2026-02-01 00:00:01.000", "ProcessGuid": "{00000000-0000-0000-0000-000000000000}",
-              "ProcessId": str(4000 + rid % 60000), "Image": image, "FileVersion": "-", "Description": "-",
-              "Product": "-", "Company": "-", "OriginalFileName": base, "CommandLine": cmd, "CurrentDirectory": "C:\\",
-              "User": user, "LogonGuid": "{00000000-0000-0000-0000-000000000000}", "LogonId": "0x3e7",
-              "TerminalSessionId": "1", "IntegrityLevel": "High", "Hashes": "-",
-              "ParentProcessGuid": "{00000000-0000-0000-0000-000000000000}", "ParentProcessId": "3999",
-              "ParentImage": parent, "ParentCommandLine": parent_cmd, "ParentUser": user}
-    data = "".join(f"<Data Name='{k}'>{escape(str(v))}</Data>" for k, v in fields.items())
-    xml = ("<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System>"
-           "<Provider Name='Microsoft-Windows-Sysmon' Guid='{5770385f-c22a-43e0-bf4c-06f5698ffbd9}'/>"
-           "<EventID>1</EventID><Version>5</Version><Level>4</Level><Task>1</Task><Opcode>0</Opcode>"
-           "<Keywords>0x8000000000000000</Keywords><TimeCreated SystemTime='2026-02-01T00:00:01.000000Z'/>"
-           f"<EventRecordID>{rid}</EventRecordID><Correlation/><Execution ProcessID='3000' ThreadID='4000'/>"
-           "<Channel>Microsoft-Windows-Sysmon/Operational</Channel><Computer>bench-win</Computer>"
-           "<Security UserID='S-1-5-18'/></System><EventData>" + data + "</EventData></Event>")
-    message = "Process Create:\r\n" + "\r\n".join(f"{k}: {v}" for k, v in fields.items())
-    return "f:EventChannel:" + json.dumps({"Message": message, "Event": xml})
-
-
 def _audit_arg(a: str) -> str:
     # auditd ghi tham số có khoảng trắng / dấu nháy / ký tự lạ dưới dạng hex
     return f'"{a}"' if a and re.fullmatch(r"[\x21-\x7e]+", a) and '"' not in a else a.encode().hex().upper()
