@@ -7,7 +7,8 @@ Giao thức, thư mục /sandbox/jobs/<12 hex>/ (client: server/siem/ai/sandbox.
   - worker ghi events.jsonl ({"msg": ...} mỗi dòng, msg = message hàng đợi analysisd), có thể kèm candidate.xml, rồi
     ghi `ready` CUỐI CÙNG;
   - runner ghi result.json {"sent", "processed", "dropped", "canary", "seconds", "load_error"} (+ "error" khi chính runner
-    lỗi), alerts.jsonl (alert của job, bỏ alert canary), rồi `done`;
+    / hạ tầng lỗi: restart hỏng, quá giờ, alerts.json xoay vòng, quá MAX_EVENTS), alerts.jsonl (alert của job, bỏ alert
+    canary), rồi `done`. "load_error" CHỈ dành cho ruleset không nạp được;
   - worker đọc xong thì xóa job; job cũ hơn 1 giờ (worker chết giữa chừng) runner tự xóa.
 Mỗi job: chép rule động thật (/live-dynamic, chỉ đọc) + ứng viên vào rules-dynamic -> `wazuh-analysisd -t` -> restart
 manager -> làm rỗng alerts.json -> bơm event + canary syscheck (rule 554) -> chờ analysisd đứng yên -> chép alert.
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import errno
 import json
+import os
 import re
 import shutil
 import socket
@@ -141,10 +143,14 @@ def send(msgs: list[str]) -> int:
     return sent
 
 
-def wait_idle(before: dict[str, float]) -> dict[str, float]:
-    """Chờ events_processed đứng yên 3 lần x 5 giây (như wazuh_coverage.run_wazuh)."""
+def wait_idle(before: dict[str, float], timeout: float) -> dict[str, float]:
+    """Chờ events_processed đứng yên 3 lần x 5 giây (như wazuh_coverage.run_wazuh). Quá `timeout` giây mà vẫn còn tiến
+    thì lỗi job: không để một job chiếm runner mãi (worker hết giờ, mọi job sau cũng hết giờ theo)."""
+    deadline = time.time() + timeout
     last, stable, c = -1.0, 0, before
     while stable < 3:
+        if time.time() > deadline:
+            raise RuntimeError(f"analysisd vẫn xử lý sau {timeout:.0f} giây chờ")
         time.sleep(5)
         c = counters()
         done = c.get("events_processed", 0) - before.get("events_processed", 0)
@@ -153,13 +159,29 @@ def wait_idle(before: dict[str, float]) -> dict[str, float]:
     return c
 
 
+def copy_alerts(dst: Path, ino: int) -> bool:
+    """Chép alert của job từ alerts.json sang `dst` (bỏ alert canary), trả có thấy canary không. Qua ngày analysisd xoay
+    vòng alerts.json (file ngày mới, inode mới): alert trước lúc đó nằm ở file cũ -> lỗi job, không trả kết quả thiếu."""
+    canary = False
+    with ALERTS.open(encoding="utf-8", errors="replace") as src, open(dst, "x", encoding="utf-8") as out:
+        if os.fstat(src.fileno()).st_ino != ino:
+            raise RuntimeError("alerts.json đã xoay vòng (qua ngày) giữa job: thiếu alert, cần chạy lại job")
+        for line in src:
+            if line.strip():
+                if is_canary(json.loads(line)):
+                    canary = True
+                else:
+                    out.write(line)
+    return canary
+
+
 def run_job(job: Path) -> dict:
     msgs: list[str] = []
     with (job / "events.jsonl").open(encoding="utf-8") as f:
         for line in f:
             if line.strip():
                 if len(msgs) >= MAX_EVENTS:
-                    return {"load_error": "quá nhiều event"}
+                    return {"error": f"quá nhiều event (tối đa {MAX_EVENTS}), client phải chặn trước"}
                 msgs.append(str(json.loads(line)["msg"]))
     cand = job / "candidate.xml"
     sync_rules(LIVE, DYNAMIC, cand.read_text(encoding="utf-8") if cand.is_file() else None)
@@ -168,18 +190,14 @@ def run_job(job: Path) -> dict:
         return {"load_error": err}
     restart()
     ALERTS.write_text("", encoding="utf-8")         # bỏ alert lúc khởi động (502...), chỉ giữ alert của job
+    ino = ALERTS.stat().st_ino
     before = counters()
     sent = send(msgs)
-    send([canary_message()])                         # sau cùng: canary ra alert = analysisd đã đọc tới cuối job
-    after = wait_idle(before)
-    canary = False
-    with ALERTS.open(encoding="utf-8", errors="replace") as src, open(job / "alerts.jsonl", "x", encoding="utf-8") as dst:
-        for line in src:
-            if line.strip():
-                if is_canary(json.loads(line)):
-                    canary = True
-                else:
-                    dst.write(line)
+    # canary (hàng đợi syscheck) ra alert = analysisd còn sống và xử lý được event; KHÔNG chứng minh hàng đợi event/winevt
+    # đã rỗng (luồng giải mã riêng) -> đủ hay chưa là việc của wait_idle + client so processed với sent
+    send([canary_message()])
+    after = wait_idle(before, max(300, len(msgs) / 200))
+    canary = copy_alerts(job / "alerts.jsonl", ino)
     return {"sent": sent, "canary": canary,
             "processed": int(after.get("events_processed", 0) - before.get("events_processed", 0)),
             "dropped": int(after.get("events_dropped", 0) - before.get("events_dropped", 0))}

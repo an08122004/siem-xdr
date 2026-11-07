@@ -90,3 +90,18 @@ def test_alert_ident():
     assert alert_ident({"data": {"win": {"system": {"eventRecordID": "17"}}}, "agent": {"name": "wazuh-sandbox"}}) == 17
     assert alert_ident({"agent": {"id": "001", "name": "sbx-42"}, "location": "siem-procs"}) == 42
     assert alert_ident({"agent": {"name": "wazuh-sandbox"}, "location": "syscheck"}) is None
+
+
+def test_run_raises_when_analysisd_processed_less_than_sent(tmp_path, fake_runner):
+    # canary đi hàng đợi syscheck riêng, có thể ra alert trước event của job: phải kiểm processed >= sent + canary
+    fake_runner(tmp_path, alerts=[], canary=True, processed=1)
+    with pytest.raises(SandboxError, match="xử lý"):
+        Sandbox(tmp_path, timeout=5).run([we.apache_event(1, "a"), we.apache_event(2, "b")])
+
+
+def test_too_many_events_is_sandbox_error_not_load_error(tmp_path, monkeypatch):
+    from siem.ai import sandbox as sb
+    monkeypatch.setattr(sb, "MAX_EVENTS", 2)
+    with pytest.raises(SandboxError, match="quá nhiều"):
+        Sandbox(tmp_path, timeout=5).run([we.apache_event(i, "l") for i in range(3)])
+    assert not (tmp_path / "jobs").exists() or not any((tmp_path / "jobs").iterdir())    # không giao job

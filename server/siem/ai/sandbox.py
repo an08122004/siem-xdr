@@ -2,7 +2,8 @@
 wazuh-manager). Worker giao job qua thư mục trên volume ai_sandbox, KHÔNG có docker socket; giao thức và cách runner xử lý
 một job ở wazuh/sandbox/runner.py.
 
-Sandbox hỏng (runner không chạy, hết giờ, canary 554 không ra, gửi thiếu / analysisd bỏ event) -> SandboxError: bên gọi
+Sandbox hỏng (runner không chạy, hết giờ, canary 554 không ra, gửi thiếu / analysisd bỏ hoặc chưa xử lý hết event, quá
+MAX_EVENTS, alerts.json xoay vòng giữa job) -> SandboxError: bên gọi
 ghi lỗi chu kỳ, KHÔNG được coi là "rule không bắt". Ruleset không nạp được (rule ứng viên sai) -> SandboxResult.load_error.
 """
 from __future__ import annotations
@@ -19,6 +20,7 @@ from .. import settings
 from .wazuh_events import RawEvent
 
 _AGENT = re.compile(r"\bsbx-(\d+)\b")
+MAX_EVENTS = 200_000          # = runner.MAX_EVENTS; vượt là giới hạn hạ tầng (SandboxError), không phải rule sai
 
 
 class SandboxError(RuntimeError):
@@ -59,6 +61,8 @@ class Sandbox:
         idents = {e.ident for e in events}
         if len(idents) != len(events):
             raise ValueError("ident của event phải khác nhau (dùng để ghép alert)")
+        if len(events) > MAX_EVENTS:
+            raise SandboxError(f"quá nhiều event cho một job sandbox: {len(events)} > {MAX_EVENTS}, chia nhỏ job")
         t0 = time.monotonic()
         job = self.root / "jobs" / secrets.token_hex(6)
         try:
@@ -91,6 +95,9 @@ class Sandbox:
         if int(res.get("sent", 0)) < len(events) or int(res.get("dropped", 0)):
             raise SandboxError(f"analysisd không nhận đủ event: gửi {res.get('sent')}/{len(events)}, "
                                f"bỏ {res.get('dropped')}")
+        # canary đi hàng đợi syscheck (luồng giải mã riêng) nên có thể ra alert trước event của job: phải đủ sent + canary
+        if int(res.get("processed", 0)) < int(res.get("sent", 0)) + 1:
+            raise SandboxError(f"analysisd chưa xử lý hết job: xử lý {res.get('processed')}, gửi {res.get('sent')} + canary")
         hits: dict[int, list[Hit]] = {}
         for a in alerts:
             if (i := alert_ident(a)) in idents:
