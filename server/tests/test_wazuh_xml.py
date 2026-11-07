@@ -18,7 +18,7 @@ def test_single_term_windows():
     e = wx.emit(WIN, **KW)
     assert e.ids == [109000]
     r, = rules(e.xml)
-    assert (r.get("id"), r.get("level"), r.findtext("if_sid")) == ("109000", "7", "61603")
+    assert (r.get("id"), r.get("level"), r.findtext("if_sid")) == ("109000", "7", "61603,92025,92028,92042,92069")
     assert {f.get("name") for f in r.findall("field")} == {"win.eventdata.image", "win.eventdata.commandLine"}
     assert all(f.get("type") == "pcre2" for f in r.findall("field"))
     assert r.findtext("group").split(",")[:3] == ["siem", "ai", "shadow"]
@@ -125,3 +125,39 @@ def test_hostile_or_risky_regex_raises(bad):
 
 def test_normal_regex_still_emits():
     assert wx.emit({"field": "process.command_line", "op": "regex", "value": r"-enc\s+\w{10,}"}, **KW).ids == [109000]
+
+
+# ---- Task 19b: eventchannel của Wazuh nhân đôi mọi dấu `\` trong win.eventdata.*
+def _win_py(op, value, field="process.executable"):
+    r, = rules(wx.emit({"field": field, "op": op, "value": value}, **KW).xml)
+    return re.compile(r.findtext("field").replace(r"\z", r"\Z"))
+
+@pytest.mark.parametrize("op,value,single,doubled", [
+    ("endswith", "\\reg.exe", "C:\\Windows\\reg.exe", "C:\\\\Windows\\\\reg.exe"),
+    ("contains", "C:\\Windows\\Temp\\", "x C:\\Windows\\Temp\\a", "x C:\\\\Windows\\\\Temp\\\\a"),
+    ("startswith", "C:\\Win", "C:\\Windows", "C:\\\\Windows")])
+def test_windows_backslash_matches_single_and_doubled(op, value, single, doubled):
+    py = _win_py(op, value)
+    assert py.search(single) and py.search(doubled) and not py.search("C:/Windows/reg.exe")
+
+def test_windows_process_name_prefix_tolerates_doubled_backslash():
+    py = _win_py("eq", "reg.exe", "process.name")
+    assert py.search("C:\\\\Windows\\\\reg.exe") and py.search("C:\\Windows\\reg.exe") and not py.search("C:\\xreg.exe")
+
+def test_linux_and_web_backslash_unchanged():
+    r, = rules(wx.emit({"field": "process.command_line", "op": "contains", "value": "a\\b"}, **{**KW, "domain": "linux"}).xml)
+    assert "{1,2}" not in r.findtext("field")
+    r, = rules(wx.emit({"field": "url.path", "op": "contains", "value": "a\\b"}, **{**KW, "domain": "web"}).xml)
+    assert "{1,2}" not in r.findtext("url")
+
+def test_windows_regex_with_literal_backslash_raises_but_classes_ok():
+    with pytest.raises(SigmaError):
+        wx.emit({"field": "process.executable", "op": "regex", "value": r"C:\\Windows"}, **KW)
+    assert wx.emit({"field": "process.command_line", "op": "regex", "value": r"\d{3}\s+x"}, **KW).ids
+    assert wx.emit({"field": "process.command_line", "op": "regex", "value": r"C:\\x"}, **{**KW, "domain": "linux"}).ids
+
+def test_emitter_version_is_2():
+    assert wx.EMITTER_VERSION == "2"
+
+def test_windows_parents_pinned():
+    assert wx.PARENTS["windows"]["if_sid"] == "61603,92025,92028,92042,92069"

@@ -19,11 +19,13 @@ from ..detection.rules import regex_risk
 from ..wazuh_fields import escape_literal
 from .sigma import MAX_TERMS, SigmaError
 
-EMITTER_VERSION = "1"
+EMITTER_VERSION = "2"      # 2: dấu `\` trong trường Windows khớp cả dạng đơn lẫn nhân đôi (eventchannel)
 LEVEL = {"low": 5, "medium": 7, "high": 10, "critical": 10}      # R70: không thắng rule gốc level 11-12 cùng cha
 _WEB_PARENTS = "31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123"
 PARENTS: dict[str, dict] = {
-    "windows": {"if_sid": "61603"},
+    # 61603 + các rule gốc level 0 có con và móc vào sysmon_event1 (Wazuh 4.14.8, 0800-sysmon_id_1.xml: 92025 reg.exe, 92028 powershell script,
+    # 92042 netsh, 92069 WmiPrvSE): chúng nuốt event trước các anh em dưới 61603, nên rule sinh ra phải móc cả vào đó
+    "windows": {"if_sid": "61603,92025,92028,92042,92069"},
     "linux": {"if_sid": "102000"},
     "web": {"if_sid": _WEB_PARENTS, "location": r"^\("},
 }
@@ -70,6 +72,22 @@ def _url_lit(value: str) -> str:
     return "".join(one(c) for c in value)
 
 
+def _win_lit(value: str) -> str:
+    """Eventchannel của Wazuh NHÂN ĐÔI mọi dấu gạch chéo ngược trong win.eventdata.*: khớp cả một lẫn hai dấu (đo trên Wazuh 4.14.8, Task 21)."""
+    return escape_literal(value).replace(r"\x5c", r"(?:\x5c){1,2}")
+
+
+def _has_literal_backslash(rx: str) -> bool:
+    i = 0
+    while i < len(rx):
+        if rx[i] == "\\":
+            if rx[i + 1:i + 2] == "\\":
+                return True
+            i += 1
+        i += 1
+    return False
+
+
 def _body(leaf: dict) -> str:
     if "alts" in leaf:
         return "(?:" + "|".join(_body(a) for a in leaf["alts"]) + ")"
@@ -77,7 +95,8 @@ def _body(leaf: dict) -> str:
     if op == "regex":
         rs = [f"(?-i:{v})" if leaf.get("case_sensitive") else v for v in vals]
         return r"[\s\S]*?(?:" + "|".join(rs) + ")"
-    alt = "(?:" + "|".join((_url_lit if leaf.get("url") else escape_literal)(v) for v in vals) + ")"
+    lit = _url_lit if leaf.get("url") else _win_lit if leaf.get("win") else escape_literal
+    alt = "(?:" + "|".join(lit(v) for v in vals) + ")"
     return {"contains": r"[\s\S]*?" + alt, "startswith": alt, "endswith": r"[\s\S]*?" + alt + r"\z",
             "eq": alt + r"\z", "in": alt + r"\z"}[op]
 
@@ -107,7 +126,7 @@ def _map_leaf(leaf: dict, domain: str) -> dict:
     if op not in _OPS:
         raise SigmaError(f"phép so {op} không dịch được sang rule Wazuh")
     w, mode = FIELDS[domain][f]
-    out = {**leaf, "op": op, "w": w, "mode": mode, "url": mode == "url"}
+    out = {**leaf, "op": op, "w": w, "mode": mode, "url": mode == "url", "win": domain == "windows"}
     if mode == "base":                      # tên tiến trình = phần sau dấu `\` cuối của đường dẫn đầy đủ
         if op not in ("eq", "neq", "in", "endswith"):
             raise SigmaError(f"phép so {op} trên {f} không dịch được (chỉ eq / in / endswith)")
@@ -119,6 +138,9 @@ def _map_leaf(leaf: dict, domain: str) -> dict:
                 re.compile(v)
             except re.error as e:
                 raise SigmaError(f"regex không hợp lệ ({e}): {v[:80]}") from None
+            # shortcut: regex có dấu \\ chữ trên eventchannel bị từ chối (Wazuh nhân đôi dấu, không sửa được regex tùy ý), khi cần thì tự viết lại \\ thành \\{1,2}
+            if domain == "windows" and _has_literal_backslash(v):
+                raise SigmaError("regex có dấu \\ chưa hỗ trợ trên eventchannel")
             if (why := regex_risk(v)):
                 raise SigmaError(f"{why}: {v[:80]}")
     if mode == "ua" and op != "contains":

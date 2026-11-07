@@ -352,7 +352,7 @@ def test_approval_rechecks_dataset_rule_against_current_baseline(tmp_path, monke
         return PropES({"id": "0123456789ab", "kind": "new_rule", "target": "gap-dataset:atomic-red-team:linux-T1552",
                        "target_rule_id": "AI-050", "proposal": rule, "status": "pending", "required_approvals": 1,
                        "approvals": [], "llm": {"model": "fake"}, "updated_at": "",
-                       "wazuh": {"emitter": "1", "domain": "linux", "level": 7, "rules": 1}})
+                       "wazuh": {"emitter": "2", "domain": "linux", "level": 7, "rules": 1}})
 
     es = proposal(["find / -name", "aws.credential-access.ec2-get-password-data"])
     with pytest.raises(deploy.DeployError) as e:
