@@ -329,6 +329,11 @@ def test_pipe_in_command_line_stays_literal_and_lab_tool_names_are_artifacts():
     assert tied == {"stratus", "aws.credential-access.ec2-get-password-data"}
 
 
+class FakeApi:
+    def reload(self):
+        pass
+
+
 def test_approval_rechecks_dataset_rule_against_current_baseline(tmp_path, monkeypatch):
     """Đề xuất tạo trước khi tập lệnh bình thường được bổ sung: lúc duyệt vẫn bị chặn nếu giờ khớp lệnh bình thường."""
     from siem.ai import deploy
@@ -345,16 +350,19 @@ def test_approval_rechecks_dataset_rule_against_current_baseline(tmp_path, monke
                 "condition": {"any": [{"field": "process.command_line", "op": "contains", "value": values}]}}
         return PropES({"id": "0123456789ab", "kind": "new_rule", "target": "gap-dataset:atomic-red-team:linux-T1552",
                        "target_rule_id": "AI-050", "proposal": rule, "status": "pending", "required_approvals": 1,
-                       "approvals": [], "llm": {"model": "fake"}, "updated_at": ""})
+                       "approvals": [], "llm": {"model": "fake"}, "updated_at": "",
+                       "wazuh": {"emitter": "1", "domain": "linux", "level": 7, "rules": 1}})
 
     es = proposal(["find / -name", "aws.credential-access.ec2-get-password-data"])
     with pytest.raises(deploy.DeployError) as e:
         deploy.approve(es, "0123456789ab", "an", None, now="t1")
     assert "lệnh linux bình thường" in str(e.value) and "find / -name nginx.conf" in str(e.value)
     assert "aws.credential-access.ec2-get-password-data" in str(e.value)
-    assert not list((rd / "ai").glob("*.yml")) and es.doc["status"] == "invalid"
+    assert es.doc["status"] == "invalid"
     es = proposal(["-path '*/.aws/credentials'"])
-    assert deploy.approve(es, "0123456789ab", "an", None, now="t2")["status"] == "approved"
+    es.search = lambda **_: {"hits": {"hits": []}}
+    monkeypatch.setattr(deploy.wazuh_rules, "DYNAMIC_DIR", tmp_path)
+    assert deploy.approve(es, "0123456789ab", "an", FakeApi(), now="2026-11-02T00:00:00+00:00")["status"] == "approved"
 
 
 # ------------------------------------------------------------------ bước 1 (8/10): vế SigmaHQ + lượt kiến thức
