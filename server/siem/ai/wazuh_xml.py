@@ -23,7 +23,9 @@ EMITTER_VERSION = "2"      # 2: dấu `\` trong trường Windows khớp cả d�
 LEVEL = {"low": 5, "medium": 7, "high": 10, "critical": 10}      # R70: không thắng rule gốc level 11-12 cùng cha
 _WEB_PARENTS = "31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123"
 PARENTS: dict[str, dict] = {
-    "windows": {"if_sid": "61603"},
+    # 61603 + các rule gốc level 0 có con và móc vào sysmon_event1 (Wazuh 4.14.8, 0800-sysmon_id_1.xml: 92025 reg.exe, 92028 powershell script,
+    # 92042 netsh, 92069 WmiPrvSE): chúng nuốt event trước các anh em dưới 61603, nên rule sinh ra phải móc cả vào đó
+    "windows": {"if_sid": "61603,92025,92028,92042,92069"},
     "linux": {"if_sid": "102000"},
     "web": {"if_sid": _WEB_PARENTS, "location": r"^\("},
 }

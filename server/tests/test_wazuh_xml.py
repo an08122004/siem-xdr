@@ -18,7 +18,7 @@ def test_single_term_windows():
     e = wx.emit(WIN, **KW)
     assert e.ids == [109000]
     r, = rules(e.xml)
-    assert (r.get("id"), r.get("level"), r.findtext("if_sid")) == ("109000", "7", "61603")
+    assert (r.get("id"), r.get("level"), r.findtext("if_sid")) == ("109000", "7", "61603,92025,92028,92042,92069")
     assert {f.get("name") for f in r.findall("field")} == {"win.eventdata.image", "win.eventdata.commandLine"}
     assert all(f.get("type") == "pcre2" for f in r.findall("field"))
     assert r.findtext("group").split(",")[:3] == ["siem", "ai", "shadow"]
@@ -158,3 +158,6 @@ def test_windows_regex_with_literal_backslash_raises_but_classes_ok():
 
 def test_emitter_version_is_2():
     assert wx.EMITTER_VERSION == "2"
+
+def test_windows_parents_pinned():
+    assert wx.PARENTS["windows"]["if_sid"] == "61603,92025,92028,92042,92069"
