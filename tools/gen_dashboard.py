@@ -331,8 +331,8 @@ q_var = {"type": "textbox", "name": "q", "label": "Bộ lọc (Lucene)", "query"
 # ------------------------------------------------------------------ Thư viện rule (tra cứu rule Wazuh + đề xuất AI)
 # Dữ liệu: index siem-rules do manager đồng bộ (server/siem/rules_catalog.py). Danh mục không theo thời gian -> dashboard
 # xem 20 năm; số alert 24 giờ / 7 ngày của từng rule đã tính sẵn trong danh mục.
-# Từ Task 25 (P4) không còn rule YAML: rule AI đã duyệt là rule Wazuh nhóm `ai` (rules-dynamic/ai.xml), ngoại lệ là rule
-# Wazuh nhóm `exception` (rules-dynamic/exceptions.xml); cặp so sánh đề xuất <-> rule YAML (origin comparison) đã bỏ.
+# Từ Task 25 (P4) không còn rule YAML; cặp so sánh đề xuất <-> rule YAML (origin comparison) đã bỏ. Wazuh API (GET /rules) không
+# liệt kê rules-dynamic/ (đo lại 08/11/2026, 4.14.8) nên danh mục không có rule AI / ngoại lệ: rule AI đếm theo đề xuất đã triển khai.
 RU = {"type": "elasticsearch", "uid": "siem-rules"}
 CATALOG = "origin:${origin:raw} AND mitre.tactic:$tactic AND tags:$tag AND fields:$field AND (${q:raw})"
 
@@ -369,11 +369,10 @@ rules_lib = [
     stat("Rule đã tắt", RU, f"{LIB} AND mode:off", 12, 1, w=4),
     stat("Rule Wazuh (tổng, mọi chế độ)", RU, "origin:wazuh_rule", 16, 1, w=4),
     stat("Rule im lặng 7 ngày (đang chạy)", RU, f"{RUN} AND alerts.d7:0", 20, 1, w=4),
-    stat("Rule do AI viết (đã duyệt, rules-dynamic/ai.xml)", RU, f"{LIB} AND groups:ai", 0, 5, w=6),
-    stat("Ngoại lệ đang áp dụng (rules-dynamic/exceptions.xml)", RU, f"{LIB} AND groups:exception", 6, 5, w=6),
-    stat("Đề xuất AI chờ duyệt", RU, "origin:ai_proposal AND proposal.status:pending", 12, 5, w=6),
+    stat("Đề xuất AI đã triển khai (rules-dynamic/ai.xml)", RU, "origin:ai_proposal AND proposal.status:approved", 0, 5, w=8),
+    stat("Đề xuất AI chờ duyệt", RU, "origin:ai_proposal AND proposal.status:pending", 8, 5, w=8),
     # cùng định nghĩa với dòng "không đạt kiểm định" của biểu đồ trạng thái bên dưới (status invalid)
-    stat("Đề xuất không đạt kiểm định", RU, "origin:ai_proposal AND proposal.status:invalid", 18, 5, w=6),
+    stat("Đề xuất không đạt kiểm định", RU, "origin:ai_proposal AND proposal.status:invalid", 16, 5, w=8),
     bars("Rule đang chạy theo MITRE tactic", RU, RUN, "mitre.tactic", 0, 9, w=8),
     bars("Đề xuất AI theo trạng thái", RU, "origin:ai_proposal", "proposal.status_label", 8, 9, w=8),
     bars("Rule kêu nhiều nhất (7 ngày): mã rule và tên", RU, f"{LIB} AND alerts.d7:>0", "rule.id", 16, 9, w=8,

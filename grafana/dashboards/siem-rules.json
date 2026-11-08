@@ -447,7 +447,7 @@
     {
       "id": 61,
       "type": "stat",
-      "title": "Rule do AI viết (đã duyệt, rules-dynamic/ai.xml)",
+      "title": "Đề xuất AI đã triển khai (rules-dynamic/ai.xml)",
       "datasource": {
         "type": "elasticsearch",
         "uid": "siem-rules"
@@ -455,7 +455,7 @@
       "gridPos": {
         "x": 0,
         "y": 5,
-        "w": 6,
+        "w": 8,
         "h": 4
       },
       "targets": [
@@ -465,7 +465,7 @@
             "type": "elasticsearch",
             "uid": "siem-rules"
           },
-          "query": "origin:wazuh_rule AND groups:ai",
+          "query": "origin:ai_proposal AND proposal.status:approved",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -516,84 +516,15 @@
     {
       "id": 62,
       "type": "stat",
-      "title": "Ngoại lệ đang áp dụng (rules-dynamic/exceptions.xml)",
-      "datasource": {
-        "type": "elasticsearch",
-        "uid": "siem-rules"
-      },
-      "gridPos": {
-        "x": 6,
-        "y": 5,
-        "w": 6,
-        "h": 4
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "elasticsearch",
-            "uid": "siem-rules"
-          },
-          "query": "origin:wazuh_rule AND groups:exception",
-          "alias": "",
-          "timeField": "@timestamp",
-          "metrics": [
-            {
-              "id": "1",
-              "type": "count"
-            }
-          ],
-          "bucketAggs": [
-            {
-              "id": "2",
-              "type": "date_histogram",
-              "field": "@timestamp",
-              "settings": {
-                "interval": "auto",
-                "min_doc_count": "0"
-              }
-            }
-          ]
-        }
-      ],
-      "maxDataPoints": 30,
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "sum"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "none",
-        "graphMode": "area",
-        "textMode": "value",
-        "justifyMode": "auto"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "#6b7280"
-          },
-          "unit": "short",
-          "decimals": 0
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 63,
-      "type": "stat",
       "title": "Đề xuất AI chờ duyệt",
       "datasource": {
         "type": "elasticsearch",
         "uid": "siem-rules"
       },
       "gridPos": {
-        "x": 12,
+        "x": 8,
         "y": 5,
-        "w": 6,
+        "w": 8,
         "h": 4
       },
       "targets": [
@@ -652,7 +583,7 @@
       }
     },
     {
-      "id": 64,
+      "id": 63,
       "type": "stat",
       "title": "Đề xuất không đạt kiểm định",
       "datasource": {
@@ -660,9 +591,9 @@
         "uid": "siem-rules"
       },
       "gridPos": {
-        "x": 18,
+        "x": 16,
         "y": 5,
-        "w": 6,
+        "w": 8,
         "h": 4
       },
       "targets": [
@@ -721,7 +652,7 @@
       }
     },
     {
-      "id": 65,
+      "id": 64,
       "type": "table",
       "title": "Rule đang chạy theo MITRE tactic",
       "datasource": {
@@ -825,7 +756,7 @@
       }
     },
     {
-      "id": 66,
+      "id": 65,
       "type": "table",
       "title": "Đề xuất AI theo trạng thái",
       "datasource": {
@@ -929,7 +860,7 @@
       }
     },
     {
-      "id": 67,
+      "id": 66,
       "type": "table",
       "title": "Rule kêu nhiều nhất (7 ngày): mã rule và tên",
       "datasource": {
@@ -1045,7 +976,7 @@
       }
     },
     {
-      "id": 68,
+      "id": 67,
       "type": "row",
       "title": "Danh sách rule và đề xuất AI — lọc bằng các ô phía trên",
       "collapsed": false,
@@ -1058,7 +989,7 @@
       "panels": []
     },
     {
-      "id": 69,
+      "id": 68,
       "type": "table",
       "title": "Rule và đề xuất AI — bấm mã rule xem cảnh báo của rule, bấm trạng thái đề xuất để mở trên console",
       "datasource": {
