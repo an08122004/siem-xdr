@@ -415,8 +415,9 @@ tự chạy bước này mỗi chu kỳ cho đề xuất `pending` do phiên b�
 - **Bật chính thức** (`deploy.promote`, nút *Bật chính thức* trong chi tiết đề xuất): cần chạy bóng ≥ 7 ngày, dưới 5 alert/ngày, báo
   nhầm dưới 30% trên alert `WZH-<id>` của đề xuất từ `shadow_since` (`SOC-OPERATIONS.md` mục 4). Đạt thì bỏ đúng nhóm `shadow` và
   dòng `shadow_since` khỏi XML đã đóng băng (R71) và dựng lại file; trạng thái vẫn `approved`, thêm `promoted_at` / `promoted_by`.
-- **Gỡ** (`deploy.rollback`): dựng lại `ai.xml` không có khối của đề xuất. Giới hạn đã thấy (08/11/2026, mục 9.11): gỡ rule AI
-  **cuối cùng** bị Wazuh từ chối vì file chỉ còn khối `<group>` rỗng.
+- **Gỡ** (`deploy.rollback`): dựng lại `ai.xml` không có khối của đề xuất. Gỡ rule AI **cuối cùng** thì xóa hẳn file `ai.xml` rồi reload, vì
+  Wazuh từ chối `<group>` rỗng (`error: 1`) và file chỉ có chú thích (`Configuration error`); xóa file thì reload thành công và rule
+  biến mất (đo trên manager tạm, Task 26b); reload lỗi thì khôi phục file cũ.
 - **Ngoại lệ** (R73): người bấm *Duyệt* tạo ngoại lệ Wazuh ở trạng thái chờ (`wazuh_exceptions.add`, là người duyệt thứ nhất); người
   thứ hai duyệt ở trang ngoại lệ, khi đó rule level 0 mới vào `rules-dynamic/exceptions.xml`. Gỡ đề xuất gỡ luôn ngoại lệ.
 - Chỉ manager ghi được `rules-dynamic/` (volume `wazuh_dynamic_rules`); rule của repo mount chỉ đọc. Worker chỉ đọc `siem-*`, chỉ

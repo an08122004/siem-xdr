@@ -560,8 +560,8 @@ Kết quả đúng: không có alert LNX-002 và không có lệnh *Kill tiến 
 4. Kiểm wazuh-manager: log có `[siem-setup] ruleset hợp lệ`; `ossec.log` không có `(7612)`, `(7617)`, `(7619)` (rule 108xxx của
    `0966-sigmahq.xml` phải nạp sau 0595 / 0800). Khi bật AI: `docker compose logs wazuh-sandbox` có dòng `[sandbox-runner] chờ job`.
 5. `python tools/e2e_test.py` phải đạt đủ (08/11/2026 trên project thử: 43/43, [Test.md](Test.md) mục 0).
-6. Biết trước: gỡ rule AI **cuối cùng** hoặc ngoại lệ **cuối cùng** trên console bị Wazuh từ chối (file chỉ còn khối `<group>` rỗng,
-   [RULES.md](RULES.md) mục 9.10); file cũ được giữ, hệ thống vẫn chạy.
+6. Gỡ rule AI **cuối cùng** hoặc ngoại lệ **cuối cùng** trên console: console xóa hẳn file `ai.xml` / `exceptions.xml` rồi reload
+   (Wazuh từ chối `<group>` rỗng, [RULES.md](RULES.md) mục 9.10); reload lỗi thì khôi phục file cũ và reload lại.
 
 **Quay lại:** checkout commit cũ, dùng image đã gắn tag ở bước 1, `docker compose up -d --no-build`. Volume `ai_sandbox` và
 container `wazuh-sandbox` không ảnh hưởng gì khi không bật profile `ai`.

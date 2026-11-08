@@ -6,7 +6,7 @@ Nguyên tắc:
   - Ngay trước khi ghi file, KIỂM TRA LẠI với nhãn mới nhất (case thật vừa xác nhận sau khi đề xuất được tạo)
     và bộ mẫu vàng: không đạt thì không triển khai.
   - Triển khai rule mới = dựng lại rules-dynamic/ai.xml từ MỌI đề xuất đã triển khai trong ES (R72), mỗi đề xuất một
-    khối <group>; ghi qua wazuh_rules.write_dynamic (kiểm tra + nạp lại ruleset). Gỡ = dựng lại file không có khối đó.
+    khối <group>; ghi qua wazuh_rules.write_dynamic (kiểm tra + nạp lại ruleset). Gỡ = dựng lại file không có khối đó (gỡ khối cuối thì xóa file).
   - Rule mới vào chế độ CHẠY BÓNG (nhóm shadow, R71): sinh alert để đo nhưng SOAR bỏ qua. Bật chính thức (promote) khi đã
     chạy bóng tối thiểu SHADOW_MIN_DAYS ngày, dưới SHADOW_MAX_ALERTS_PER_DAY alert/ngày và tỉ lệ báo nhầm dưới
     SHADOW_MAX_FP_RATE trên các alert đã có kết luận (SOC-OPERATIONS.md mục 4).
