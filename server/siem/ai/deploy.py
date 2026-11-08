@@ -116,7 +116,7 @@ def render_ai_file(deployed: list[dict[str, Any]]) -> str:
     head = "<!-- Sinh tự động từ đề xuất AI đã duyệt (nguồn sự thật là Elasticsearch). Không sửa tay: dùng nút 'Gỡ' trên console. -->\n"
     blocks = "".join(f'<group name="siem,ai,ai_{p["id"]},">\n{p["wazuh"]["deployed_xml"]}</group>\n'
                      for p in sorted(deployed, key=lambda d: d.get("deployed_at") or ""))
-    return head + (blocks or '<group name="siem,ai,">\n</group>\n')
+    return head + blocks          # rỗng: _publish xóa file (Wazuh từ chối <group> rỗng)
 
 
 def next_ids(deployed: list[dict[str, Any]], n: int) -> list[int]:
@@ -140,7 +140,7 @@ def _deployed(es, skip: str = "", used: bool = False) -> list[dict[str, Any]]:
 
 
 def _publish(deployed: list[dict[str, Any]], api) -> None:
-    _wazuh(lambda: wazuh_rules.write_dynamic(AI_FILE, render_ai_file(deployed), api, root=wazuh_rules.DYNAMIC_DIR))
+    _wazuh(lambda: wazuh_rules.write_dynamic(AI_FILE, render_ai_file(deployed) if deployed else None, api, root=wazuh_rules.DYNAMIC_DIR))
 
 
 def _deploy_new(es, pid: str, p: dict[str, Any], seq: int, term: int, now: str, api) -> None:
