@@ -562,6 +562,10 @@ Kết quả đúng: không có alert LNX-002 và không có lệnh *Kill tiến 
 5. `python tools/e2e_test.py` phải đạt đủ (08/11/2026 trên project thử: 43/43, [Test.md](Test.md) mục 0).
 6. Gỡ rule AI **cuối cùng** hoặc ngoại lệ **cuối cùng** trên console: console xóa hẳn file `ai.xml` / `exceptions.xml` rồi reload
    (Wazuh từ chối `<group>` rỗng, [RULES.md](RULES.md) mục 9.10); reload lỗi thì khôi phục file cũ và reload lại.
+7. Dọn đề xuất AI kiểu cũ (engine YAML) đang chờ duyệt: đề xuất `gap-own:` và ngoại lệ dạng `{rule_id, condition}` không duyệt được
+   nữa (bấm duyệt báo 409 "đề xuất kiểu cũ (engine YAML), hãy từ chối"). Khi bật profile `ai`, chu kỳ AI đầu tiên tự đánh `invalid`
+   các đề xuất này nếu tạo trong 30 ngày gần nhất, lịch sử đề xuất ghi lý do. Đề xuất cũ hơn 30 ngày, hoặc khi không bật AI: bấm
+   **Từ chối** từng đề xuất trên console.
 
 **Quay lại:** checkout commit cũ, dùng image đã gắn tag ở bước 1, `docker compose up -d --no-build`. Volume `ai_sandbox` và
 container `wazuh-sandbox` không ảnh hưởng gì khi không bật profile `ai`.

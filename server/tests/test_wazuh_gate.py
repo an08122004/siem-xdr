@@ -296,3 +296,25 @@ def test_generator_id_changes_with_emitter_version(monkeypatch):
     before = generator_id("m")
     monkeypatch.setattr(wazuh_xml, "EMITTER_VERSION", "2-thu")
     assert generator_id("m") != before
+
+
+def test_stale_recheck_invalidates_legacy_yaml_proposals():
+    """I2: đề xuất pending kiểu engine YAML (gap-own, ngoại lệ {rule_id, condition}) không bao giờ duyệt được nữa:
+    chu kỳ đánh invalid kèm lý do, kể cả khi không có sandbox / dataset. Ngoại lệ kiểu Wazuh (R73) giữ nguyên."""
+    gen = generator_id("fake")
+    own = {"id": "501", "kind": "new_rule", "target": "gap-own:T1059", "status": "pending", "history": [],
+           "proposal": {"id": "AI-501", "title": "t", "severity": "medium", "condition": {"field": "x", "op": "eq", "value": 1}},
+           "llm": {"generator": gen}}
+    old_exc = {"id": "502", "kind": "exception", "target": "exception:AUTH-001", "status": "pending", "history": [],
+               "required_approvals": 2, "proposal": {"rule_id": "AUTH-001", "condition": {"field": "source.ip", "op": "eq",
+                                                                                          "value": "10.0.0.7"}}}
+    new_exc = {"id": "503", "kind": "exception", "target": "exception:WZH-5710", "status": "pending", "history": [],
+               "proposal": {"rule": "WZH-5710", "conditions": [{"field": "user.name", "value": "svc"}]}}
+    history = [own, old_exc, new_exc]
+    es = _DocsES(history)
+    w = AIWorker(es, FakeLLM({}), None, ds_factory=lambda e: FakeDS({}, []), save=None)
+    summary = {"rechecked": [], "errors": []}
+    w._recheck_stale(history, gen, summary, None)
+    assert [es.docs[i]["status"] for i in ("501", "502", "503")] == ["invalid", "invalid", "pending"]
+    assert all("kiểu cũ" in es.docs[i]["history"][-1]["text"] for i in ("501", "502"))
+    assert len(summary["rechecked"]) == 2 and summary["errors"] == []
