@@ -120,3 +120,39 @@ def test_rollback_exception_removes_it(monkeypatch):
 
 def test_prompt_lists_only_mappable_fields():
     assert set(re.findall(r"`([a-z_.]+)`", prompts.exception_fields_text())) == set(EXCEPTION_FIELDS)
+
+
+# ---- I2: đề xuất ngoại lệ kiểu engine YAML cũ ({rule_id, condition}, 2 người duyệt) không làm HTTP 500
+LEGACY = {"kind": "exception", "target": "exception:AUTH-001", "required_approvals": 2,
+          "proposal": {"rule_id": "AUTH-001", "condition": {"all": [{"field": "source.ip", "op": "eq", "value": "10.50.0.7"}]}}}
+
+
+def test_approve_legacy_exception_is_409(monkeypatch):
+    env = Env()
+    monkeypatch.setattr(wazuh_exceptions, "add", lambda *a, **k: pytest.fail("không được gọi Wazuh"))
+    env.pending(**LEGACY, approvals=[{"by": "binh", "at": "t"}])
+    with pytest.raises(deploy.DeployError) as e:
+        deploy.approve(env.es, "0123456789ab", "an", env.api, now="t")
+    assert e.value.code == 409 and "kiểu cũ" in str(e.value) and env.es.doc["status"] == "pending"
+
+
+def test_rollback_legacy_exception_without_id_is_409(monkeypatch):
+    env = Env()
+    monkeypatch.setattr(wazuh_exceptions, "remove", lambda *a, **k: pytest.fail("không được gọi Wazuh"))
+    env.pending(**LEGACY, status="approved")
+    with pytest.raises(deploy.DeployError) as e:
+        deploy.rollback(env.es, "0123456789ab", "an", "lý do", env.api, now="t")
+    assert e.value.code == 409 and "kiểu cũ" in str(e.value) and env.es.doc["status"] == "approved"
+
+
+# ---- M3: ngoại lệ Wazuh đã bị gỡ ở trang ngoại lệ -> gỡ đề xuất vẫn xong, không kẹt `approved`
+def test_rollback_exception_already_removed_in_wazuh(monkeypatch):
+    env = Env()
+
+    def gone(*a, **k):
+        raise wazuh_exceptions.NotFound(110003)
+    monkeypatch.setattr(wazuh_exceptions, "remove", gone)
+    env.pending(kind="exception", status="approved", exception_id=110003)
+    out = deploy.rollback(env.es, "0123456789ab", "an", "lý do", env.api, now="t")
+    assert out["status"] == "rolled_back" and env.es.doc["status"] == "rolled_back"
+    assert "#110003" in env.es.doc["history"][-1]["text"] and "đã gỡ" in env.es.doc["history"][-1]["text"]

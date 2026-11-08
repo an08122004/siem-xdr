@@ -119,7 +119,7 @@ def test_license_header(tmp_path, three_sigma_rules):
 def test_skips_values_wazuh_keeps_as_xml_entities():
     row, text = sigma_rule("rules/g.yml", "Redirect", "  sel:\n    CommandLine|contains: ' > '\n  condition: sel", EVASION)
     cands, skipped = imp.candidates(ITEMS, [row], {row["path"]: text}, CONFIG)
-    assert cands == [] and skipped == {"giá trị có & < > (Wazuh giữ thực thể XML)": 1}
+    assert cands == [] and skipped == {"không dịch được sang Wazuh": 1}         # emit từ chối < > & trên Windows (M1)
 
 
 def test_positive_sample_is_not_shadowed_by_an_earlier_rule_of_the_batch():
@@ -130,3 +130,24 @@ def test_positive_sample_is_not_shadowed_by_an_earlier_rule_of_the_batch():
     picked = imp.pick(cands, items, covered=set(), batch=30)
     assert [c.title for c in picked] == ["Has bbb"]       # "Has aaa" chỉ có mẫu 0, đã bị "Has bbb" (id nhỏ hơn) che: bỏ
     assert picked[0].pos["i"] in (0, 1)
+
+
+def test_stolen_lists_samples_that_lose_a_non_batch_detection():
+    """I1: --measure so lượt không có lô (0966) với lượt có lô; mẫu mất phát hiện ngoài 108xxx = lô cướp alert thật
+    (cùng quy tắc 'không che rule khác' của cổng AI). Mẫu 108xxx mới bắt không tính là cướp."""
+    base = {1: 92023, 2: 105005, 3: 108004, 4: 60103}
+    mine = {1: 108000, 2: 105005, 3: 108004, 5: 108001}
+    assert imp.stolen(base, mine) == {1: (92023, 108000), 4: (60103, None)}
+    assert imp.stolen(base, base) == {}
+
+
+def test_rule_overlapping_a_detected_sample_is_capped_at_level_7(tmp_path):
+    """I1 (đo 08/11/2026): SHQ-018 level 10 cướp 92024 (L14, dưới 92023 L8), SHQ-003 cướp 105013 (L7). Rule lô khớp (cây
+    Python) mẫu Wazuh ĐANG phát hiện thì level tối đa 7: thua rule gốc level >= 8, hòa level 7 thì rule nạp trước thắng."""
+    row, text = sigma_rule("rules/a.yml", "Rundll32 JavaScript", JS, EVASION)          # high -> 10
+    cands, _ = imp.candidates(ITEMS, [row], {row["path"]: text}, CONFIG)
+    assert imp.pick(cands, ITEMS, covered=set(), batch=30)[0].level == 10
+    picked = imp.pick(cands, ITEMS, covered={0}, batch=30)                              # mẫu 0 đã có phát hiện
+    assert picked[0].level == 7
+    imp.write_batch(picked, rules_file=tmp_path / "r.xml", cases_file=tmp_path / "c.yml", first_id=108000, today="2026-11-20")
+    assert ET.fromstring((tmp_path / "r.xml").read_text(encoding="utf-8")).find(".//rule").get("level") == "7"

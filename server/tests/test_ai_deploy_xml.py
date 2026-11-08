@@ -83,7 +83,15 @@ def test_approve_writes_shadow_block(env):
     text = env.text()
     assert f'<group name="siem,ai,ai_{p["id"]},">' in text and 'id="109000"' in text and 'level="10"' in text
     assert "shadow_since=2026-11-20" in text and out["status"] == "approved" and out["wazuh"]["ids"][0] == 109000
-    assert out["wazuh"]["code"] == "AI-000" and out["file"] == "rules-dynamic/ai.xml" and env.api.reloads == 1
+    assert out["wazuh"]["code"] == "AI-001" and out["file"] == "rules-dynamic/ai.xml" and env.api.reloads == 1
+    assert "<description>AI-001 " in text                  # M4: alert ghi đúng mã đề xuất mà console hiện
+
+
+def test_code_falls_back_to_rule_id_when_proposal_id_is_odd(env):
+    p = env.pending()
+    p["proposal"]["id"] = "khong hop le"
+    out = deploy.approve(env.es, p["id"], "an", env.api, now="2026-11-20T08:00:00+00:00")
+    assert out["wazuh"]["code"] == "AI-000" and "<description>AI-000 " in env.text()
 
 
 def test_second_approval_allocates_next_ids(env):

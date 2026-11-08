@@ -238,3 +238,12 @@ def test_wazuh_rule_docs_real_api_shape_and_overwritten_rules():
     assert by_id["WZH-92041"]["description"] == "bản đè" and by_id["WZH-92041"]["file"] == "etc/rules/0999-tuning.xml"
     assert by_id["WZH-5712"]["mitre"]["technique"] == ["T1110"]
     assert by_id["WZH-104095"]["mitre"]["technique"] == [rc.NONE_LIST]          # giá trị giữ chỗ cho bộ lọc Grafana
+
+
+def test_ai_exception_proposal_shows_its_conditions():
+    """M2: ngoại lệ AI mới (R73) lưu `conditions` (danh sách {field, value}), không phải `condition` của engine YAML."""
+    p = {"id": "p-exc2", "kind": "exception", "status": "pending", "target": "exception:WZH-5710", "target_rule_id": "WZH-5710",
+         "title": "Ngoại lệ cho WZH-5710", "created_at": "2026-11-07T00:00:00+00:00", "approvals": [], "required_approvals": 1,
+         "proposal": {"rule": "WZH-5710", "conditions": [{"field": "user.name", "value": "svc_backup"}], "reason": "sao lưu"}}
+    d = by_id(rc.build([p], {}, today="2026-11-07T00:00:00+00:00"))["proposal:p-exc2"]
+    assert d["condition_text"] == "bỏ qua khi user.name = svc_backup" and d["fields"] == ["user.name"]

@@ -34,7 +34,7 @@ Alert trong hệ thống đến từ các nguồn sau (đếm rule trên mã ng�
 |---|---|---|---|
 | Ruleset gốc Wazuh 4.14.8 | khoảng 4,5 nghìn rule; 9 rule được chỉnh bằng `overwrite` ở `0999-tuning.xml` (mục 9.8) | `WZH-<id>` | Alert thật từ level 7 (R65), trừ nhóm `sca` |
 | Rule XML của dự án (`wazuh/manager/rules/`, 9 file) | 88 rule; phủ 41 mã cũ qua nhóm `legacy_<MÃ>` (mục 9.4) | `WZH-100xxx` đến `WZH-107xxx`, mã cũ ở đầu mô tả | Chạy thật (R65) |
-| SigmaHQ lô 1 (`0966-sigmahq.xml`) | 30 rule Windows (mục 2.10) | `WZH-108000` đến `WZH-108029`, mã `SHQ-NNN` | Chạy bóng từ 07/11/2026 |
+| SigmaHQ lô 1 (`0966-sigmahq.xml`) | 30 rule Windows (mục 2.10) | `WZH-108000` đến `WZH-108029`, mã `SHQ-NNN` | Chạy bóng từ 08/11/2026 (sinh lại sau review cuối P4) |
 | Rule do AI đề xuất (`rules-dynamic/ai.xml`) | chưa rule nào được triển khai (06/11/2026: 178 đề xuất, 0 đã triển khai) | `WZH-109xxx`, mã `AI-NNN` | Bóng khi duyệt, bật chính thức trên console (mục 2.9) |
 | Ngoại lệ (`rules-dynamic/exceptions.xml`) | rule level 0, không sinh alert | 110000–110999 | Hai người khác nhau duyệt (mục 2.5) |
 | Phát hiện của nền tảng | RBA-001 (`soar/risk.py`), HLT-* (`soar/health.py`) | `RBA-001`, `HLT-*` | Đang chạy |
@@ -152,10 +152,17 @@ Chi tiết: `AI-README.md` mục 7, 8, 9.11.
 - ghi `wazuh/manager/rules/0966-sigmahq.xml` (id 108000–108999, mã `SHQ-NNN`, nhóm `siem,sigmahq,shadow,`, `<info>` giữ
   `sigmahq_id` và `author`, đầu file chú thích giấy phép) và ca test `tests/cases/0966-sigmahq.yml` (mỗi rule một ca dương, một
   ca âm);
-- bỏ rule Windows có `>`, `<`, `&` (Wazuh giữ thực thể XML trong trường Windows, chưa hỗ trợ, R77).
+- bỏ rule Windows có `>`, `<`, `&` (Wazuh giữ thực thể XML trong trường Windows, chưa hỗ trợ, R77);
+- rule khớp (cây Python) một mẫu mà Wazuh **đang** phát hiện thì level tối đa 7: thua rule level ≥ 8, hòa level 7 thì rule nạp
+  trước thắng, nên không cắt cây con của rule đang bắt mẫu đó (R84);
+- `--measure` chạy hai lượt trên manager tạm, có và không có `0966`, cùng bộ mẫu; mẫu nào mất phát hiện level ≥ 7 ngoài 108xxx
+  (lô "cướp" alert thật) thì thoát mã 1 và liệt kê.
 
 Lô 1 (07/11/2026): 30 rule Windows 108000–108029, 60 ca 0 sai trên manager thật, chạy bóng; không có rule web. Tên file là
 `0966` chứ không phải `0108` như kế hoạch ban đầu (R76). Rule Linux SigmaHQ hoãn: theo R68 rule Linux nhắm decoder `siem-proc`.
+Review cuối P4 (08/11/2026) đo lô cũ: 2 mẫu bị cướp (92024 level 14 thành 108017 SHQ-018; 105013 WIN-013 thành 108002 SHQ-003).
+Lô sinh lại bằng tool với quy tắc level tối đa 7: cùng 30 rule, cùng ca test, 4 rule hạ từ 10 xuống 7 (108001, 108002, 108007,
+108017); đo lại 0 mẫu bị cướp.
 
 ### 2.11 Sau khi rule bắn
 
@@ -412,8 +419,10 @@ thuộc nhóm khớp chung chung (`GENERIC`, R79).
 - Tổng: 16.882/19.315 mẫu tấn công là khoảng trống. 863 mẫu Splunk không có log thô nên không tính (không đo được trên Wazuh).
 - 4 mẫu bình thường có alert phát hiện ở job nền.
 
-**SigmaHQ lô 1** (Task 24, sau Task 19b): trên 17.306 mẫu tấn công Windows + web, 1.556 mẫu đã có phát hiện ngoài SigmaHQ; 30 rule
-SigmaHQ bắt thêm **188 mẫu mới** (cây Python ước 186), không event nào bị bỏ. Lô toàn Windows nên không thêm mẫu CSIC nào.
+**SigmaHQ lô 1** (đo lại ở review cuối P4, 08/11/2026, lượt có và không có `0966`): trên 17.306 mẫu tấn công Windows + web,
+1.558 mẫu có phát hiện khi không có lô; 30 rule SigmaHQ bắt thêm **186 mẫu mới** (cây Python ước 186), 0 mẫu bị lô cướp phát
+hiện, không event nào bị bỏ. Lô toàn Windows nên không thêm mẫu CSIC nào. Số 188 của Task 24 tính "mẫu có alert 108xxx trừ mẫu có
+phát hiện khác" trên cùng ruleset có lô, nên đếm cả 2 mẫu bị lô cướp thành mẫu mới.
 
 Lưu ý khi so với số cũ: `tools/wazuh_coverage.run_wazuh`, `wazuh_noise.py` và `wazuh_rule_test.inject` vẫn dùng vòng gửi cũ, vòng
 này đo được mất âm thầm 15% event ở 50.000 event (R80). Số đo cũ trên tập lớn bằng các công cụ đó có thể thấp hơn thật. Sandbox
@@ -437,7 +446,7 @@ của AI gửi có chờ hàng đợi nên không mất event.
 ## 6. Điểm yếu
 
 - **Độ phủ trên dataset vẫn thấp** (mục 4.6): Wazuh bắt 1.484/15.088 mẫu web, 74/2.218 mẫu Windows, 12/1.146 mẫu Linux dựng lại.
-  SigmaHQ lô 1 chỉ thêm 188 mẫu.
+  SigmaHQ lô 1 chỉ thêm 186 mẫu.
 - **Rule Windows sinh tự động có giới hạn:** chưa khớp được giá trị có `>`, `<`, `&` (R77); regex Windows có `\` trần bị từ chối.
   Rule dự án `0965-windows.xml` dưới 61603 có thể bị rule gom level 0 (92025...) che như ứng viên AI từng bị (R75): **chưa kiểm**.
 - **Rule anh em và cây con:** rule thắng ở tầng cha cắt cả cây con của anh em (mục 9.6); ca ghim chỉ chứng minh đường tới được, không
@@ -521,7 +530,8 @@ python tools/wazuh_rule_test.py --url https://localhost:<cổng> --insecure wazu
 python tools/wazuh_stock_reach.py <thư mục ruleset/rules chép từ manager>
 python tools/wazuh_noise.py --data datasets/processed     # độ ồn trên tập bình thường (manager tạm, cần Docker)
 python tools/wazuh_coverage.py                            # độ phủ trên dataset (manager tạm, cần Docker)
-python tools/sigmahq_import.py --measure                  # mẫu mới chỉ rule SigmaHQ (108xxx) bắt được
+python tools/sigmahq_import.py --measure                  # mẫu mới chỉ SigmaHQ (108xxx) bắt; mã 1 nếu lô cướp phát hiện
+python tools/wazuh_stock_reach.py <...> --min-level 7     # như trên, alert thật theo R65 (level >= 7); CI giữ mặc định 12
 python tools/e2e_test.py                                  # tấn công thật trên stack đang chạy
 ```
 
@@ -750,6 +760,14 @@ Cảnh báo 7605 (`It is not possible to overwrite 'if_group' value in rule '920
   Cả 14 đã có ca ghim (`wazuh/manager/tests/cases/0998-stock-real-alerts.yml`, 17 ca; 99920 và 92602 thử cả rule dự án cùng nhánh). Công cụ `tools/wazuh_stock_reach.py` (đọc `ruleset/rules`, dựng cây `if_sid` / `if_matched_sid` **và `if_group`**, liệt kê hậu duệ gốc là alert thật của từng cha mà rule dự án móc vào) chạy trong job CI `wazuh-rules`. Với mỗi alert thật nó đòi MỘT trong hai và in rule nào có cái nào: (a) ca `rule:` ghim; (b) bảo đảm cấu trúc: mọi rule dự án móc cùng cha thua con trực tiếp của cha đó trên đường tới nó (level thấp hơn, hoặc bằng level và file gốc xếp trước theo tên). Không có cái nào thì CI đỏ; cũng đỏ khi `if_sid` của rule dự án trỏ tới cha gốc không tồn tại hoặc nằm ở file xếp sau.
   **`if_group` (R63):** rule có `<if_group>g</if_group>` là con của MỌI rule mang nhóm `g` (thẻ `<group>` trong rule hoặc `<group name>` bao ngoài), nên lộ ra thêm 72 rule gốc alert thật (sysmon_event1 dưới 61603: 61618-61640, 92016-92081, 91000, 91006, 91007; 92900 / 92910 / 92920 dưới 61612; 40101 / 40112 dưới 5715...) mà công cụ cũ không thấy. Kết quả trên 4.14.8: 93 alert thật dưới cha bị móc; 39 có ca ghim, 52 chỉ nhờ bảo đảm cấu trúc, 2 (40112, 40501) là rule tương quan `if_matched_group` mà harness không tái hiện được (S4) nên công cụ liệt kê tường minh trong `UNPINNABLE`. `if_matched_group` không phải cạnh cây (chỉ tra cứu event cũ).
   **Khoảng trống thật được tìm thấy (R63):** 40101 (hòa level 12 với 101002, 101002 nạp trước) và 15 rule gốc sysmon sâu dưới 61603 (92008-92015, 92024, 92026, 92038, 92040, 92044, 92045, 92071: rule dự án 105005-105007 level 10-12 cao hơn con trực tiếp level 0-8 của 61603) chưa có ca; đã thêm 16 ca ghim ở `0997-stock-if-group.yml`, tất cả báo. Lưu ý: rule dự án vẫn có thể cắt các rule gốc đó khi một event khớp cả hai (chưa thấy trong ca; ca chỉ chứng minh đường tới được).
+  **Ngưỡng R65 (review cuối P4, 08/11/2026):** từ R65 rule gốc level 7–11 cũng là alert thật, nhưng công cụ vẫn mặc định ngưỡng
+  cũ (level ≥ 12, R38). `--min-level 7` xét theo R65: 165 alert thật dưới cha bị móc; 54 có ca ghim, 55 chỉ nhờ bảo đảm cấu trúc, 2
+  `UNPINNABLE`, **54 chưa có cả hai**. Không cái nào do `0966`: số rule gốc có đối thủ ở từng file (một rule có thể có đối thủ ở
+  nhiều file) là `0965-windows.xml` 44, `0271-web.xml` 8, `0845-ti.xml` 7, `0101-auth.xml` 2; theo file gốc: `0580-win-security_rules.xml`
+  39, `0245-web_rules.xml` 7, `0800-sysmon_id_1.xml` 3 (92077–92079), `0095-sshd_rules.xml` 2, `0215-policy_rules.xml` 2,
+  `0999-malicious-ioc-rules.xml` 1. Ba rule gốc
+  có cả `0966` lẫn `0965` làm đối thủ (92023, 92043, 92080) đã có ca ghim ở `0997-stock-if-group.yml`, đều báo. CI giữ ngưỡng 12 vì
+  ghim 54 rule có từ trước không phải phạm vi P4; danh sách ghi cho chủ dự án.
   **Thứ tự nạp (đo R63):** analysisd nạp mọi file rule (gốc lẫn dự án) theo tên chung; rule dự án đặt ở file xếp trước `0095-sshd_rules.xml` bị bỏ vì cha 5715 chưa nạp.
   **99919 thắng 107010 dù level 9 < 10 (R63, đã đo):** 4625 từ 196.251.85.62 (có ở cả `siem-misp-ip` lẫn `malicious-ip`) ra 99919 chứ không ra 107010, kể cả khi danh sách MISP đã nạp (bơm 3 event, danh sách có IP: chỉ 99919 báo). Nguyên nhân: 99919 có `if_sid` 60105, 60122, tức **con trực tiếp của 60105 (level 9)** và là *anh em* của 60122 (level 5);
   107010 treo dưới 60122 (và 60106, 92657). 99919 thắng 60122 ở tầng 60105 nên cả cây con của 60122, trong đó có 107010, bị bỏ. Vậy 107010 và 99919 không cùng cha, "level cao thắng" áp ở tầng 60105 (9 > 5), không phải giữa 107010 và 99919. Cùng cơ chế "thắng ở tầng cha cao hơn, cắt cây con", nhưng KHÁC ngoại lệ Kerberos bên dưới (không có rule IOC gốc nào dính, IP chỉ có trong MISP). Ca `0965-windows.yml` (99919) vì thế vốn đúng, chỉ là 107010 vô tình nhường. R63 thêm `not_match_key` vào 107010 cho nhất quán và để không phụ thuộc cơ chế đó.

@@ -213,7 +213,8 @@ def proposal_docs(proposals: list[dict[str, Any]], rules: dict[str, dict[str, An
         m = v.get("metrics") or {}
         target = rules.get(str(p.get("target_rule_id")), {})
         if kind == "exception":
-            text, fields = "bỏ qua khi " + summarize(body.get("condition")), condition_fields(body.get("condition"))
+            cond = body.get("condition") or body.get("conditions")        # engine YAML cũ / ngoại lệ AI Wazuh (R73)
+            text, fields = "bỏ qua khi " + summarize(cond), condition_fields(cond)
             common = _common(tactic=(target.get("mitre") or {}).get("tactic"), techniques=None, tags=[], fields=fields)
             sev, rtype = target.get("severity", "low"), "exception"
         else:

@@ -991,9 +991,23 @@ không nối mạng, không đụng stack thật.
 **Task 24 Step 4 (SigmaHQ lô 1):**
 - 30 rule Windows 108000–108029, 60 ca 0 sai trên manager tạm; lint 0 lỗi, `ossec.log` sạch, `wazuh_stock_reach.py` 0 lỗi.
 - 188 mẫu tấn công mới chỉ SigmaHQ bắt trên 17.306 mẫu Windows + web (cây Python ước 186), không event bị bỏ. Lô không có rule web.
+  Review cuối sửa thành 186: cách đếm cũ tính cả 2 mẫu bị lô cướp phát hiện (mục "Review cuối" dưới).
 - Rule Windows có `>`, `<`, `&` bị bỏ: Wazuh giữ thực thể XML trong `win.eventdata.*` (108017), Task 19c hoãn (R77).
 
 **Task 26 (kiểm tra cuối, project `p4e2e` cách ly, 08/11/2026):** unit test 660 đạt / 34 bỏ qua; lint 11 file 0 lỗi; E2E 43/43;
 `ai.xml` do `emit` + `render_ai_file` sinh nạp được vào wazuh-manager thật và ra alert bóng `WZH-109001` / `WZH-109003` từ event thật
 của agent; gỡ tới file rỗng bị Wazuh từ chối (`Group 'group' without any rule.`); đã sửa ở Task 26b (xóa file rồi reload). `GET /rules` không liệt kê
 `rules-dynamic/` (R83).
+
+**Review cuối P4 (nhánh `p4/final-fix`, manager tạm `--network none`, 08/11/2026):**
+- `sigmahq_import --measure` chạy hai lượt trên cùng bộ mẫu (17.306 tấn công + 36.671 bình thường, Windows + web, mỗi lượt 14 lần
+  bơm, bỏ 0 event): có và không có `0966`. Lô của Task 24: 2 mẫu mất phát hiện, 92024 (level 14, dưới 92023 level 8) thành 108017 và
+  105013 (WIN-013) thành 108002; không có lô 1.558 mẫu tấn công có phát hiện, có lô 1.556 ngoài SigmaHQ cộng 188 SigmaHQ, mẫu mới thật
+  186.
+- Sửa (R84): rule lô khớp (cây Python) mẫu Wazuh đang phát hiện thì level tối đa 7. Sinh lại bằng tool: cùng 30 rule, cùng 60 ca,
+  108001 / 108002 / 108007 / 108017 hạ 10 → 7. Đo lại: 0 mẫu bị cướp, 1.558 ngoài SigmaHQ, 186 SigmaHQ, 186 mẫu mới.
+- `wazuh_stock_reach --min-level 7` (R65): 165 alert thật dưới cha bị móc; trước sửa 57 lỗi, chạy không có `0966` cũng đúng 57 lỗi đó
+  (không lỗi nào chỉ do `0966`; `0966` là một trong các đối thủ của 92023, 92043, 92080). Thêm 3 ca ghim ở `0997` → 54 lỗi, đều có từ
+  trước (`0965` 44, `0271` 8, `0845` 7, `0101` 2 rule gốc có đối thủ ở file đó). CI giữ ngưỡng 12: 0 lỗi.
+- Ca qua Wazuh thật: mọi ca eventchannel / syscheck của mọi file cộng đủ `0997`, `0998`: 232 ca 0 sai; với `0966` cũ ca 92023 ra
+  108017. Lint 0 lỗi, `ossec.log` sạch. Unit test 687 đạt / 34 bỏ qua.

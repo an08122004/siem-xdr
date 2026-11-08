@@ -91,8 +91,8 @@ def test_user_agent_uses_last_quoted_string():
 
 def test_emit_escapes_hostile_values():
     hostile = 'a<b&"c]]>\\\x00\r\nđ'
-    e = wx.emit({"field": "process.command_line", "op": "contains", "value": hostile},
-                **{**KW, "title": "<script>x</script>\x07"})
+    e = wx.emit({"field": "process.command_line", "op": "contains", "value": hostile},     # linux: windows từ chối < > & (M1)
+                **{**KW, "domain": "linux", "title": "<script>x</script>\x07"})
     r, = rules(e.xml)                                    # parse được = không vỡ XML
     assert [c.tag for c in r].count("field") == 1 and "<script>" not in e.xml and "\x07" not in e.xml
     assert re.compile(r.findtext("field").replace(r"\z", r"\Z")).search("zz" + hostile)
@@ -161,3 +161,14 @@ def test_emitter_version_is_2():
 
 def test_windows_parents_pinned():
     assert wx.PARENTS["windows"]["if_sid"] == "61603,92025,92028,92042,92069"
+
+# ---- M1: Wazuh giữ thực thể XML (&gt; &lt; &amp;) trong win.eventdata.*: giá trị có < > & không khớp được, lá âm thì
+# rule rộng hơn bản đã kiểm định (fail-open) -> từ chối cả hai cực
+@pytest.mark.parametrize("op", ["contains", "not_contains", "neq", "eq", "regex"])
+@pytest.mark.parametrize("ch", ["<", ">", "&"])
+def test_windows_value_with_xml_entity_chars_raises(op, ch):
+    pos = {"field": "process.executable", "op": "endswith", "value": "\cmd.exe"}
+    leaf = {"field": "process.command_line", "op": op, "value": f"x {ch} nul"}
+    with pytest.raises(SigmaError, match="thực thể XML"):
+        wx.emit({"all": [pos, leaf]}, **KW)
+    assert wx.emit({"all": [pos, leaf]}, **{**KW, "domain": "linux"}).ids == [109000]

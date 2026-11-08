@@ -126,6 +126,10 @@ def _map_leaf(leaf: dict, domain: str) -> dict:
     if op not in _OPS:
         raise SigmaError(f"phép so {op} không dịch được sang rule Wazuh")
     w, mode = FIELDS[domain][f]
+    # shortcut: Wazuh giữ thực thể XML (&gt; &lt; &amp;) trong win.eventdata.*, mẫu viết < > & không khớp (lá âm thì rule
+    # rộng hơn bản đã kiểm định): từ chối cả hai cực, tới khi làm 19c (khớp cả ký tự lẫn thực thể)
+    if domain == "windows" and any(c in v for v in _vals(leaf) for c in "<>&"):
+        raise SigmaError(f"giá trị Windows có < > & (Wazuh giữ thực thể XML, chưa khớp được): {_vals(leaf)[0][:80]}")
     out = {**leaf, "op": op, "w": w, "mode": mode, "url": mode == "url", "win": domain == "windows"}
     if mode == "base":                      # tên tiến trình = phần sau dấu `\` cuối của đường dẫn đầy đủ
         if op not in ("eq", "neq", "in", "endswith"):

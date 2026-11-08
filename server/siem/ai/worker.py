@@ -77,6 +77,16 @@ def generator_id(model: str) -> str:
                                    GENERATOR_REVISION, wazuh_xml.EMITTER_VERSION]).encode()).hexdigest()[:10]
 
 
+def legacy_reason(p: dict[str, Any]) -> str:
+    """Đề xuất kiểu engine YAML (xóa ở Task 25) không duyệt được nữa: lý do, hoặc "" nếu không phải kiểu cũ."""
+    if p.get("kind") == "exception":
+        return "" if {"rule", "conditions"} <= set(p.get("proposal") or {}) else \
+            "đề xuất kiểu cũ (engine YAML): ngoại lệ dạng {rule_id, condition}, nay ngoại lệ đi qua trang ngoại lệ Wazuh"
+    if p.get("kind") == "new_rule" and not str(p.get("target", "")).startswith("gap-dataset:"):
+        return f"đề xuất kiểu cũ (engine YAML): nhánh {str(p.get('target', '')).split(':')[0]} đã bỏ"
+    return ""
+
+
 def wazuh_block(domain: str, rd: dict[str, Any], metrics: dict[str, Any]) -> dict[str, Any]:
     """Khối `wazuh` của đề xuất đã qua cổng Wazuh; deploy.approve dịch lại từ proposal.condition, đổi emitter thì 409."""
     return {"emitter": EMITTER_VERSION, "domain": domain, "level": LEVEL[rd["severity"]], "rules": metrics["wazuh_rules"],
@@ -238,21 +248,21 @@ class AIWorker:
         như khi analyst bấm duyệt — để rule chắc chắn không triển khai được không giữ chỗ mãi (target có đề xuất pending
         thì không được đề xuất lại bằng logic mới). Rà soát 11/10: 11/44 đề xuất cũ như vậy. Đề xuất chưa qua cổng Wazuh
         (thiếu khối `wazuh` hoặc bộ dịch đã đổi) thì chạy cổng trên nhóm khoảng trống hiện tại: đạt -> ghi khối `wazuh`
-        (duyệt được), trượt -> invalid. Không tự duyệt / từ chối thay người: đề xuất qua được vẫn chờ analyst."""
-        if not self.golden:
-            return
+        (duyệt được), trượt -> invalid. Không tự duyệt / từ chối thay người: đề xuất qua được vẫn chờ analyst.
+        Đề xuất kiểu engine YAML cũ (gap-own, ngoại lệ {rule_id, condition}) thì đánh invalid luôn (legacy_reason)."""
         groups: dict[str, list] | None = None
         try:
             for p in history:
-                if p.get("status") != "pending" or p.get("kind") != "new_rule" \
-                        or not str(p.get("target", "")).startswith("gap-dataset:"):
+                legacy = legacy_reason(p) if p.get("status") == "pending" else ""
+                if not legacy and (not self.golden or p.get("status") != "pending" or p.get("kind") != "new_rule"):
                     continue
                 old = (p.get("llm") or {}).get("generator") != gen
                 ungated = gate is not None and (p.get("wazuh") or {}).get("emitter") != EMITTER_VERSION
-                if not (old or ungated):
+                if not (legacy or old or ungated):
                     continue
                 try:
-                    problems = recheck_dataset_rule(p["proposal"], Rule.from_dict(p["proposal"]), self.golden) if old else []
+                    problems = [legacy] if legacy else \
+                        recheck_dataset_rule(p["proposal"], Rule.from_dict(p["proposal"]), self.golden) if old else []
                 except Exception as e:  # noqa: BLE001
                     problems = [f"không dựng lại được rule: {e}"]
                 checks, metrics, block = [], {}, None
