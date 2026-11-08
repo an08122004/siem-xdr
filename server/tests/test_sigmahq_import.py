@@ -119,7 +119,7 @@ def test_license_header(tmp_path, three_sigma_rules):
 def test_skips_values_wazuh_keeps_as_xml_entities():
     row, text = sigma_rule("rules/g.yml", "Redirect", "  sel:\n    CommandLine|contains: ' > '\n  condition: sel", EVASION)
     cands, skipped = imp.candidates(ITEMS, [row], {row["path"]: text}, CONFIG)
-    assert cands == [] and skipped == {"giá trị có & < > (Wazuh giữ thực thể XML)": 1}
+    assert cands == [] and skipped == {"không dịch được sang Wazuh": 1}         # emit từ chối < > & trên Windows (M1)
 
 
 def test_positive_sample_is_not_shadowed_by_an_earlier_rule_of_the_batch():

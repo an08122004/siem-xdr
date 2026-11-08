@@ -133,8 +133,8 @@ def candidates(items: list[dict], rows: list[dict], originals: dict[str, str], c
             skipped["mẫu regex quá dài / ReDoS (lint)"] += 1
             continue
         if dom == "windows" and re.search(r"\\x(?:3c|3e|26)", em.xml):
-            # Wazuh giữ nguyên thực thể XML (&gt; &lt; &amp;) trong win.eventdata.*, còn emit viết `>` `<` `&` thành > < &
-            # (đo 07/11/2026: mẫu có `>` không khớp): rule không bắn được trên event thật cho tới khi emit xử lý thực thể
+            # Wazuh giữ nguyên thực thể XML (&gt; &lt; &amp;) trong win.eventdata.*: giá trị có < > & đã bị emit từ chối (M1);
+            # còn regex viết sẵn mã \x3c \x3e \x26 (đo 07/11/2026: mẫu có `>` không khớp) thì loại ở đây
             skipped["giá trị có & < > (Wazuh giữ thực thể XML)"] += 1
             continue
         cond = Condition(tree)
