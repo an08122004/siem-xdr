@@ -31,6 +31,8 @@ _golden: PublicDatasets | None = None
 AI_FILE = "ai.xml"
 AI_FIRST, AI_LAST = 109000, 109999
 _lock = threading.Lock()          # mọi thay đổi ai.xml đi qua khóa: hai người duyệt cùng lúc không làm mất khối của nhau
+_CODE = re.compile(r"[A-Z]{2,4}-\d{3,}")
+LEGACY = "đề xuất kiểu cũ (engine YAML), hãy từ chối"
 
 
 class DeployError(Exception):
@@ -156,7 +158,8 @@ def _deploy_new(es, pid: str, p: dict[str, Any], seq: int, term: int, now: str, 
             raise DeployError(409, f"đề xuất đang ở trạng thái {fresh['status']}, không duyệt được")
         others = _deployed(es, skip=pid)
         ids = next_ids(_deployed(es, skip=pid, used=True), int(w.get("rules") or 1))
-        code = f"AI-{ids[0] % 1000:03d}"
+        # mã đề xuất (AI-154) như console hiện; mã lạ thì theo id rule như trước
+        code = str(prop.get("id")) if _CODE.fullmatch(str(prop.get("id"))) else f"AI-{ids[0] % 1000:03d}"
         try:
             em = emit(prop["condition"], domain=w["domain"], first_id=ids[0], level=int(w["level"]), code=code,
                       title=prop["title"], techniques=(prop.get("mitre") or {}).get("technique") or [],
@@ -175,6 +178,8 @@ def approve(es, pid: str, analyst: str, api, now: str = "") -> dict[str, Any]:
     p, seq, term = _get(es, pid)
     if p["status"] != "pending":
         raise DeployError(409, f"đề xuất đang ở trạng thái {p['status']}, không duyệt được")
+    if p.get("kind") == "exception" and not {"rule", "conditions"} <= set(p.get("proposal") or {}):
+        raise DeployError(409, LEGACY)              # {rule_id, condition} của engine YAML đã xóa (Task 25)
     if any(a["by"].lower() == analyst.lower() for a in p.get("approvals", [])):
         raise DeployError(400, "mỗi analyst chỉ duyệt 1 lần — cần người duyệt khác")
     p["approvals"] = p.get("approvals", []) + [{"by": analyst, "at": now}]
@@ -283,7 +288,15 @@ def rollback(es, pid: str, analyst: str, reason: str, api, now: str = "") -> dic
     done = {"status": "rolled_back", "reject_reason": reason, "updated_at": now}
     note = {"at": now, "by": analyst, "text": f"gỡ: {reason}"}
     if p.get("kind") == "exception":
-        _wazuh(wazuh_exceptions.remove, int(p["exception_id"]), analyst, reason, api)
+        if not p.get("exception_id"):
+            raise DeployError(409, LEGACY)
+        try:
+            _wazuh(wazuh_exceptions.remove, int(p["exception_id"]), analyst, reason, api)
+        except DeployError as e:
+            if e.code != 404:
+                raise
+            # ngoại lệ đã gỡ (hoặc bị từ chối) ở trang ngoại lệ: không còn gì để gỡ, đừng để đề xuất kẹt `approved`
+            note["text"] += f" (ngoại lệ Wazuh #{p['exception_id']} đã gỡ hoặc không còn từ trước)"
         p.update(done)
         p.setdefault("history", []).append(note)
         _save(es, pid, p, seq, term)
