@@ -24,7 +24,7 @@ RELOAD_OK = "Ruleset reload request sent successfully."
 ID_RANGES: dict[str, tuple[int, int]] = {
     "0100-platform.xml": (100000, 100999), "0101-auth.xml": (101000, 101999), "0102-linux.xml": (102000, 102499), "0851-linux-audit.xml": (102500, 102999),
     "0541-network.xml": (103000, 103999), "0271-web.xml": (104000, 104999), "0965-windows.xml": (105000, 105999),
-    "0106-fim.xml": (106000, 106999), "0845-ti.xml": (107000, 107999), "0108-sigmahq.xml": (108000, 108999),
+    "0106-fim.xml": (106000, 106999), "0845-ti.xml": (107000, 107999), "0966-sigmahq.xml": (108000, 108999),
     "rules-dynamic/ai.xml": (109000, 109999), "rules-dynamic/exceptions.xml": (110000, 110999),
 }
 TUNING_FILE = "0999-tuning.xml"
