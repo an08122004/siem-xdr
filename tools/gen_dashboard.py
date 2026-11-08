@@ -147,13 +147,6 @@ def table(title, ds, query, fields, x, y, w=24, h=10, time_field="@timestamp", o
                         "sortBy": [{"displayName": (rename or COLS).get(col, col), "desc": desc}]}}
 
 
-def wrap(field, width=None):
-    """Cột chữ dài (điều kiện, YAML, lý do): xuống dòng thay vì cắt."""
-    props = [{"id": "custom.cellOptions", "value": {"type": "auto", "wrapText": True}}]
-    return {"matcher": {"id": "byName", "options": field},
-            "properties": props + ([{"id": "custom.width", "value": width}] if width else [])}
-
-
 def inspect(field, px=None):
     """Cột chữ dài hiển thị 1 dòng, bấm biểu tượng con mắt để xem đầy đủ."""
     return {"matcher": {"id": "byName", "options": field},
@@ -335,15 +328,16 @@ q_var = {"type": "textbox", "name": "q", "label": "Bộ lọc (Lucene)", "query"
          "current": {"text": "*", "value": "*"}, "options": [{"selected": True, "text": "*", "value": "*"}]}
 
 
-# ------------------------------------------------------------------ Thư viện rule (tra cứu + so sánh với đề xuất AI)
+# ------------------------------------------------------------------ Thư viện rule (tra cứu rule Wazuh + đề xuất AI)
 # Dữ liệu: index siem-rules do manager đồng bộ (server/siem/rules_catalog.py). Danh mục không theo thời gian -> dashboard
 # xem 20 năm; số alert 24 giờ / 7 ngày của từng rule đã tính sẵn trong danh mục.
+# Từ Task 25 (P4) không còn rule YAML: rule AI đã duyệt là rule Wazuh nhóm `ai` (rules-dynamic/ai.xml), ngoại lệ là rule
+# Wazuh nhóm `exception` (rules-dynamic/exceptions.xml); cặp so sánh đề xuất <-> rule YAML (origin comparison) đã bỏ.
 RU = {"type": "elasticsearch", "uid": "siem-rules"}
 CATALOG = "origin:${origin:raw} AND mitre.tactic:$tactic AND tags:$tag AND fields:$field AND (${q:raw})"
-PICKED = "proposal.pick:${proposal:lucene}"
 
 
-def terms_var(name, label, field, query="origin:(rule OR wazuh_rule OR ai_proposal OR exception)", all_=True, size=300):
+def terms_var(name, label, field, query="origin:(wazuh_rule OR ai_proposal)", all_=True, size=300):
     return {"type": "query", "name": name, "label": label, "datasource": RU, "refresh": 1, "sort": 1,
             "query": json.dumps({"find": "terms", "field": field, "query": query, "size": size}, ensure_ascii=False),
             "includeAll": all_, "multi": all_, "allValue": "*" if all_ else None,
@@ -352,33 +346,31 @@ def terms_var(name, label, field, query="origin:(rule OR wazuh_rule OR ai_propos
 
 rules_vars = [
     {"type": "custom", "name": "origin", "label": "Hiển thị",
-     "query": "Tất cả : (rule OR wazuh_rule OR ai_proposal OR exception),Rule YAML của dự án : rule,Rule Wazuh : wazuh_rule,Đề xuất AI : ai_proposal,Ngoại lệ : exception",
-     "current": {"text": "Tất cả", "value": "(rule OR wazuh_rule OR ai_proposal OR exception)"}},
+     "query": "Tất cả : (wazuh_rule OR ai_proposal),Rule Wazuh : wazuh_rule,Đề xuất AI : ai_proposal",
+     "current": {"text": "Tất cả", "value": "(wazuh_rule OR ai_proposal)"}},
     terms_var("tactic", "MITRE tactic", "mitre.tactic"),
     terms_var("tag", "Tag", "tags"),
     terms_var("field", "Trường log", "fields"),
     {"type": "textbox", "name": "q", "label": "Tìm (Lucene)", "query": "*", "current": {"text": "*", "value": "*"},
      "options": [{"selected": True, "text": "*", "value": "*"}]},
-    terms_var("proposal", "Đề xuất cần so sánh", "proposal.pick", query="origin:ai_proposal", all_=False, size=500),
 ]
 CATALOG_COLS = ["origin_label", "rule.id", "rule.name", "severity", "type", "mode_label", "mitre.tactic", "technique_text",
                 "tags_text", "fields_text", "condition_text", "alerts.h24", "alerts.d7", "alerts.fp_rate30", "alerts.last",
-                "playbook", "proposal.status_label", "proposal.test", "proposal.fp", "proposal.alerts_per_day", "file",
+                "proposal.status_label", "proposal.test", "proposal.fp", "proposal.alerts_per_day", "file",
                 "proposal.id"]
-# "Đang chạy" = rule YAML hoặc rule Wazuh có mode:active (tạo alert thật). Khi tắt engine YAML (Task 18) origin:rule về ~0 mà
-# rule Wazuh mới là thứ chạy, nên mọi ô "đang chạy" đếm cả hai origin.
-LIB = "origin:(rule OR wazuh_rule)"
+# "Đang chạy" = rule Wazuh có mode:active (tạo alert thật)
+LIB = "origin:wazuh_rule"
 RUN = f"{LIB} AND mode:active"
 rules_lib = [
-    row("Tổng quan thư viện (rule YAML + rule Wazuh)", 0),
-    stat("Rule đang chạy (YAML + Wazuh, tạo alert thật)", RU, RUN, 0, 1, w=4),
+    row("Tổng quan thư viện rule Wazuh", 0),
+    stat("Rule đang chạy (tạo alert thật)", RU, RUN, 0, 1, w=4),
     stat("Rule chạy bóng (đo thử, không ra alert thật)", RU, f"{LIB} AND mode:shadow", 4, 1, w=4),
     stat("Rule Wazuh không cầu nối (không ra alert)", RU, f"{LIB} AND mode:nobridge", 8, 1, w=4),
     stat("Rule đã tắt", RU, f"{LIB} AND mode:off", 12, 1, w=4),
     stat("Rule Wazuh (tổng, mọi chế độ)", RU, "origin:wazuh_rule", 16, 1, w=4),
     stat("Rule im lặng 7 ngày (đang chạy)", RU, f"{RUN} AND alerts.d7:0", 20, 1, w=4),
-    stat("Rule do AI viết (đã duyệt)", RU, "origin:rule AND source:ai", 0, 5, w=6),
-    stat("Ngoại lệ đang áp dụng", RU, "origin:exception", 6, 5, w=6),
+    stat("Rule do AI viết (đã duyệt, rules-dynamic/ai.xml)", RU, f"{LIB} AND groups:ai", 0, 5, w=6),
+    stat("Ngoại lệ đang áp dụng (rules-dynamic/exceptions.xml)", RU, f"{LIB} AND groups:exception", 6, 5, w=6),
     stat("Đề xuất AI chờ duyệt", RU, "origin:ai_proposal AND proposal.status:pending", 12, 5, w=6),
     # cùng định nghĩa với dòng "không đạt kiểm định" của biểu đồ trạng thái bên dưới (status invalid)
     stat("Đề xuất không đạt kiểm định", RU, "origin:ai_proposal AND proposal.status:invalid", 18, 5, w=6),
@@ -386,13 +378,13 @@ rules_lib = [
     bars("Đề xuất AI theo trạng thái", RU, "origin:ai_proposal", "proposal.status_label", 8, 9, w=8),
     bars("Rule kêu nhiều nhất (7 ngày): mã rule và tên", RU, f"{LIB} AND alerts.d7:>0", "rule.id", 16, 9, w=8,
          metric={"id": "1", "type": "sum", "field": "alerts.d7"}, name_field="rule.name"),
-    row("Danh sách rule, ngoại lệ, đề xuất AI — lọc bằng các ô phía trên", 17),
+    row("Danh sách rule và đề xuất AI — lọc bằng các ô phía trên", 17),
     table("Rule và đề xuất AI — bấm mã rule xem cảnh báo của rule, bấm trạng thái đề xuất để mở trên console",
           RU, CATALOG, CATALOG_COLS, 0, 18, h=16, size=500, sort=("rule.id", False),
           rename={"origin_label": "Nguồn", "rule.id": "Mã", "rule.name": "Tên", "severity": "Mức độ", "type": "Loại",
                   "mitre.tactic": "Tactic", "technique_text": "Kỹ thuật", "tags_text": "Tag", "fields_text": "Trường log",
                   "condition_text": "Điều kiện", "alerts.h24": "Alert 24h", "alerts.d7": "Alert 7 ngày",
-                  "mode_label": "Chế độ", "alerts.fp_rate30": "Báo nhầm 30 ngày", "playbook": "Case playbook",
+                  "mode_label": "Chế độ", "alerts.fp_rate30": "Báo nhầm 30 ngày",
                   "alerts.last": "Alert gần nhất", "proposal.status_label": "Trạng thái đề xuất",
                   "proposal.test": "Bắt mẫu kiểm tra", "proposal.fp": "Báo nhầm", "proposal.alerts_per_day": "Alert/ngày (ước tính)",
                   "file": "File"},
@@ -400,26 +392,6 @@ rules_lib = [
                      inspect("fields_text", 200), hide("proposal.id"),
                      link_to("rule.id", "Xem cảnh báo của rule trên console", '/go/rule/${__data.fields["rule.id"]}'),
                      link_to("proposal.status_label", "Mở đề xuất trên console", '/go/proposal/${__data.fields["proposal.id"]}')]),
-    row("So sánh đề xuất AI với rule hiện có — chọn đề xuất ở ô “Đề xuất cần so sánh”", 34),
-    table("Đề xuất đã chọn", RU, f"origin:ai_proposal AND {PICKED}",
-          ["proposal.kind_label", "rule.id", "rule.name", "proposal.status_label", "proposal.test", "proposal.fp",
-           "proposal.alerts_per_day", "proposal.approvals", "mitre.tactic", "tags_text", "condition_text", "yaml", "proposal.id"],
-          0, 35, h=6, cell_height="lg",
-          rename={"proposal.kind_label": "Loại", "rule.id": "Mã", "rule.name": "Đề xuất", "proposal.status_label": "Trạng thái",
-                  "proposal.test": "Bắt mẫu kiểm tra", "proposal.fp": "Báo nhầm", "proposal.alerts_per_day": "Alert/ngày",
-                  "proposal.approvals": "Lượt duyệt", "mitre.tactic": "Tactic", "tags_text": "Tag",
-                  "condition_text": "Điều kiện AI đề xuất", "yaml": "YAML"},
-          overrides=[wrap("condition_text", 380), inspect("yaml", 160), wrap("rule.name", 240), hide("proposal.id"),
-                     link_to("proposal.status_label", "Mở đề xuất trên console", '/go/proposal/${__data.fields["proposal.id"]}')]),
-    table("Rule hiện có liên quan — điều kiện hai bên đặt cạnh nhau, xếp theo mức liên quan", RU, f"origin:comparison AND {PICKED}",
-          ["score", "rule.id", "rule.name", "reasons_text", "condition_text", "proposal.condition_text", "alerts.d7"],
-          0, 41, h=14, sort=("score", True), cell_height="lg",
-          rename={"score": "Mức liên quan", "rule.id": "Mã", "rule.name": "Rule hiện có", "severity": "Mức độ",
-                  "reasons_text": "Vì sao liên quan", "condition_text": "Điều kiện rule hiện có",
-                  "proposal.condition_text": "Điều kiện AI đề xuất", "alerts.d7": "Alert 7 ngày"},
-          overrides=[wrap("reasons_text", 230), wrap("condition_text", 300), wrap("proposal.condition_text", 300),
-                     inspect("condition_text"), inspect("proposal.condition_text"), inspect("reasons_text"),
-                     width("score", 90), width("rule.id", 90), wrap("rule.name", 170), link_to("rule.id", "Xem cảnh báo của rule trên console", '/go/rule/${__data.fields["rule.id"]}')]),
 ]
 
 # ------------------------------------------------------------------ SOC KPI

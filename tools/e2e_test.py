@@ -295,7 +295,7 @@ check("grafana", "mục Phiên đăng nhập thấy lượt đăng nhập consol
 st, d = admin.grafana("/api/dashboards/uid/siem-investigate")
 check("grafana", "dashboard Điều tra thực thể (biến q) tải được", st == 200 and d["dashboard"]["templating"]["list"][0]["name"] == "q")
 st, d = admin.grafana("/api/dashboards/uid/siem-rules")
-check("grafana", "dashboard Thư viện rule tải được", st == 200 and len(d["dashboard"]["panels"]) == 19)
+check("grafana", "dashboard Thư viện rule tải được", st == 200 and len(d["dashboard"]["panels"]) == 16)
 
 
 def catalog_count(query):

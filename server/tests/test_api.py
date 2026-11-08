@@ -991,7 +991,6 @@ def test_promote_shadow_rule_needs_detection_engineer(env, monkeypatch):
     login(env, "de", pw)
     assert env.post("/api/v1/ai/proposals/AI-077/promote", json={}, headers=H).json() == {"rule_id": "AI-077", "by": "de", "api": True}
     assert env.post("/api/v1/rules/AI-077/promote", json={}, headers=H).status_code in (404, 405)   # route cũ đã bỏ
-    assert env.get("/api/v1/rules/KHONG-CO/shadow").status_code == 404
 
 
 # ------------------------------------------------------------------ xác thực 2 lớp (TOTP)
