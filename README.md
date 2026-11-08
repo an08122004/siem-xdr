@@ -350,7 +350,7 @@ alert bóng (SOAR bỏ qua). Rule gốc level 7–11 là alert thật từ R65 (
 
 **Độ phủ trên Wazuh** (đo 07/11/2026 trên `wazuh-sandbox`, chi tiết ở [RULES.md](RULES.md) mục 4.6): trong 19.315 mẫu tấn công của
 dataset công khai (863 mẫu Splunk không có log thô nên không tính), Wazuh bắt 1.484/15.088 mẫu web (CSIC 2010), 74/2.218 mẫu Windows và 12/1.146 mẫu Linux dựng lại từ
-Atomic Red Team; 16.882 mẫu còn là khoảng trống. SigmaHQ lô 1 bắt thêm 188 mẫu. Đây là chỗ AI và SigmaHQ được giao lấp.
+Atomic Red Team; 16.882 mẫu còn là khoảng trống. SigmaHQ lô 1 bắt thêm 186 mẫu, không cướp phát hiện nào của rule khác. Đây là chỗ AI và SigmaHQ được giao lấp.
 
 **ML (tạm dừng, `ML_ENABLED=false`)**: Isolation Forest theo (IP nguồn, cửa sổ 60 giây). Thử nghiệm cho thấy
 model bắt được tấn công nhưng **báo nhầm khoảng 32%** lưu lượng bình thường, và 100% với các IP chỉ có 1 event.
