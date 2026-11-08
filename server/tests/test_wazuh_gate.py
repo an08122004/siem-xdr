@@ -12,7 +12,7 @@ from siem.ai.sandbox import Hit, SandboxError, SandboxResult
 from siem.ai.wazuh_events import RawEvent, golden_events
 from siem.ai.wazuh_gate import CANDIDATE_BASE, WazuhGate
 from siem.ai.worker import AIWorker, generator_id
-from test_ai import NORMAL_URLS, FakeDS, FakeLLM, web, write_rules
+from test_ai import NORMAL_URLS, FakeDS, FakeLLM, web
 from test_ai_hardening import _DocsES
 
 
@@ -134,7 +134,7 @@ def test_gate_fails_on_load_error(gate_with):
 
 def test_untranslatable_rule_fails_without_sandbox_job(gate_with):
     g = gate_with()
-    checks, m = _check(g, domain="other")                              # rule "gap-own": chưa có rule Wazuh cho lĩnh vực này
+    checks, m = _check(g, domain="other")                              # lĩnh vực "other": chưa dịch được sang Wazuh
     assert [(c.name, c.ok) for c in checks] == [("Wazuh nạp được rule", False)] and g.fake.jobs == []
 
 
@@ -181,11 +181,9 @@ BAK_RULE = ("title: Dò file .bak\nlevel: medium\nlogsource: {category: webserve
 @pytest.fixture
 def worker_with_gate_raising(tmp_path, monkeypatch):
     def make(err):
-        rd = write_rules(tmp_path)
-        monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
         g = _web_golden()
         raw = golden_events(g, g.directory)
-        return AIWorker(None, FakeLLM({"new_rule": BAK_RULE}), g, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []),
+        return AIWorker(None, FakeLLM({"new_rule": BAK_RULE}), g, ds_factory=lambda es: FakeDS({}, []),
                         save=lambda p: None, gate_factory=lambda: WazuhGate(FakeSandbox([err]), raw))
     return make
 
@@ -196,11 +194,9 @@ def test_cycle_records_error_when_sandbox_unavailable(worker_with_gate_raising):
 
 
 def test_cycle_without_sandbox_does_not_treat_every_sample_as_gap(tmp_path, monkeypatch):
-    rd = write_rules(tmp_path)
-    monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
     saved = []
-    s = AIWorker(None, FakeLLM({"new_rule": BAK_RULE}), _web_golden(), rules_dir=rd,
-                 ds_factory=lambda es: FakeDS({}, []), save=saved.append).run_cycle()
+    s = AIWorker(None, FakeLLM({"new_rule": BAK_RULE}), _web_golden(), ds_factory=lambda es: FakeDS({}, []),
+                 save=saved.append).run_cycle()
     assert saved == [] and any("sandbox" in e for e in s["errors"])
 
 
@@ -209,11 +205,9 @@ def test_generator_revision_is_11():
 
 
 def test_new_rule_proposal_carries_wazuh_block(tmp_path, monkeypatch):
-    rd = write_rules(tmp_path)
-    monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
     g = _web_golden()
     raw, sb, saved = golden_events(g, g.directory), ScriptSandbox(), []
-    AIWorker(None, FakeLLM({"new_rule": BAK_RULE}), g, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []),
+    AIWorker(None, FakeLLM({"new_rule": BAK_RULE}), g, ds_factory=lambda es: FakeDS({}, []),
              save=saved.append, gate_factory=lambda: WazuhGate(sb, raw)).run_cycle("an")
     p = saved[0]
     assert p["target"] == "gap-dataset:csic2010:backup-file" and p["status"] == "pending", p["validation"]["checks"]
@@ -226,12 +220,10 @@ def test_new_rule_proposal_carries_wazuh_block(tmp_path, monkeypatch):
 
 
 def test_python_failure_skips_the_sandbox(tmp_path, monkeypatch):
-    rd = write_rules(tmp_path)
-    monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
     g = _web_golden()
     sb, saved = ScriptSandbox(), []
     noisy = BAK_RULE.replace("cs-uri-stem|endswith: '.bak'", "cs-uri-stem|contains: '/'")   # khớp mọi request bình thường
-    AIWorker(None, FakeLLM({"new_rule": noisy}), g, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []),
+    AIWorker(None, FakeLLM({"new_rule": noisy}), g, ds_factory=lambda es: FakeDS({}, []),
              save=saved.append, gate_factory=lambda: WazuhGate(sb, golden_events(g, g.directory))).run_cycle("an")
     assert saved[0]["status"] == "invalid" and "wazuh" not in saved[0] and sb.jobs == [None]
 
@@ -253,7 +245,7 @@ def test_stale_pending_proposals_gated_on_wazuh(tmp_path):
                prop("203", bak, target="gap-dataset:csic2010:sqli"),                    # không còn là khoảng trống
                prop("204", bak) | {"wazuh": {"emitter": wazuh_xml.EMITTER_VERSION}}]   # đã kiểm định: bỏ qua
     es, sb = _DocsES(history), ScriptSandbox()
-    w = AIWorker(es, FakeLLM({}), g, rules_dir=tmp_path, ds_factory=lambda e: FakeDS({}, []), save=None)
+    w = AIWorker(es, FakeLLM({}), g, ds_factory=lambda e: FakeDS({}, []), save=None)
     summary = {"rechecked": [], "errors": []}
     w._recheck_stale(history, gen, summary, WazuhGate(sb, golden_events(g, g.directory)))
     assert [es.docs[i]["status"] for i in ("201", "202", "203", "204")] == ["pending", "invalid", "invalid", "pending"]
@@ -272,7 +264,7 @@ def test_stale_recheck_keeps_proposal_when_sandbox_down(tmp_path):
                       "condition": {"field": "url.path", "op": "endswith", "value": ".bak"}},
          "llm": {"generator": gen}, "history": []}
     es = _DocsES([p])
-    w = AIWorker(es, FakeLLM({}), g, rules_dir=tmp_path, ds_factory=lambda e: FakeDS({}, []), save=None)
+    w = AIWorker(es, FakeLLM({}), g, ds_factory=lambda e: FakeDS({}, []), save=None)
     summary = {"rechecked": [], "errors": []}
     w._recheck_stale([p], gen, summary, WazuhGate(FakeSandbox([SandboxError("hết giờ")]), golden_events(g, g.directory)))
     assert es.docs["301"]["status"] == "pending" and any("sandbox" in e for e in summary["errors"])
@@ -291,7 +283,7 @@ def test_broken_stale_proposal_does_not_stop_the_recheck(tmp_path):
 
     history = [prop("401", "khong-ro"), prop("402", "medium")]
     es = _DocsES(history)
-    w = AIWorker(es, FakeLLM({}), g, rules_dir=tmp_path, ds_factory=lambda e: FakeDS({}, []), save=None)
+    w = AIWorker(es, FakeLLM({}), g, ds_factory=lambda e: FakeDS({}, []), save=None)
     summary = {"rechecked": [], "errors": []}
     w._recheck_stale(history, gen, summary, WazuhGate(ScriptSandbox(), golden_events(g, g.directory)))
     assert es.docs["401"]["status"] == "invalid" and "KeyError" in es.docs["401"]["history"][-1]["text"]

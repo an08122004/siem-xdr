@@ -1,11 +1,10 @@
 """Kiểm định tự động đề xuất của AI — hoàn toàn độc lập với LLM (không tin output của model).
 
-Ngoại lệ (giảm cảnh báo) — rủi ro cao nhất vì có thể "làm mù" SIEM:
-  cấu trúc, trường có thật, toán tử, regex an toàn, đủ hẹp (neo vào thực thể cụ thể),
-  khớp phần lớn báo nhầm, KHÔNG khớp event nào của sự cố thật (case) và của BỘ MẪU VÀNG (dataset),
-  replay dữ liệu thật để ước lượng số alert bị tắt, hiệu năng.
+Ngoại lệ cho rule Wazuh ồn (giảm cảnh báo, R73) — rủi ro cao nhất vì có thể "làm mù" SIEM:
+  ánh xạ được sang Wazuh, mỗi trường một lần, khớp phần lớn báo nhầm, KHÔNG khớp event nào của sự cố thật (case),
+  ước lượng số alert gần đây bị chặn.
 Rule mới:
-  cấu trúc, trường có thật, regex an toàn, ID không trùng, bắt được mẫu nghi vấn ở TẬP KIỂM TRA
+  cấu trúc, trường có thật, regex an toàn, bắt được mẫu nghi vấn ở TẬP KIỂM TRA
   (tách riêng với mẫu đưa cho LLM -> tránh học vẹt), báo nhầm trên tập bình thường, ước lượng số alert/ngày khi
   replay dữ liệu thật (cây Python, R74), hiệu năng; rồi cổng Wazuh (wazuh_gate.py, R66): recall / báo nhầm / che rule
   khác tính trên alert của sandbox Wazuh — chỉ chạy khi mọi check Python đã đạt (mỗi lần mất hàng chục giây).
@@ -14,28 +13,24 @@ from __future__ import annotations
 
 import re
 import time
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote_plus
 
-from ..detection.rules import RuleEngine
-from .condition import Rule, RuleException, _eval, regex_risk
+from ..detection.alerts import event_time
 from ..pipeline.normalize import Doc, get
+from .condition import Rule, regex_risk
 from .atomic import ARTIFACT_RE
-from .golden import PublicDatasets
 from .. import wazuh_fields
-from .prompts import EXC_OPS, EXCEPTION_FIELDS, RULE_OPS
+from .prompts import EXCEPTION_FIELDS, RULE_OPS
 from .wazuh_xml import LEVEL
 
 if TYPE_CHECKING:
     from .wazuh_gate import WazuhGate
 
 FIELD_RE = re.compile(r"^[a-z_@][a-z0-9_.@]*$")
-SPECIFIC_OPS = {"eq", "in", "cidr", "startswith"}
-GENERIC_PREFIXES = ("event.", "message", "log.", "tags")
 _SEGMENT = re.compile(r"[^a-z0-9_.\-~]+")
-SCOPE_FIELDS = {"event.category", "event.module", "event.action", "event.code", "event.dataset", "event.type"}
 COMMAND_FIELDS = {"process.command_line", "process.parent.command_line"}
 MIN_COMMAND_LITERAL = 4      # đoạn chữ ngắn hơn (vd "/c", "-e") khớp quá nhiều dòng lệnh hợp lệ
 _BARE_WORD = re.compile(r"-{0,2}[A-Za-z][A-Za-z0-9_-]*")   # một từ / cmdlet / cờ đứng riêng
@@ -190,28 +185,16 @@ def span_days(events: list[Doc]) -> float:
 
 
 def replay(rule: Rule, events: list[Doc]) -> tuple[int, float]:
-    eng = RuleEngine([rule])
+    """Số alert khi chạy lại event thật bằng cây Python (R74) và số giây đã chạy. Rule AI là `match`, không group_by:
+    như engine YAML cũ, sau mỗi alert bỏ qua `suppress` giây (theo giờ của event)."""
     t0 = time.perf_counter()
-    n = sum(len(eng.process(e)) for e in events)
+    n, until = 0, float("-inf")
+    for e in events:
+        if rule.condition.match(e) and (ts := event_time(e)) >= until:
+            n += 1
+            if rule.suppress:
+                until = ts + rule.suppress
     return n, time.perf_counter() - t0
-
-
-def scope_match(rule: Rule, doc: Doc) -> bool:
-    """Rule có 'xem xét' loại event này không: chỉ đánh giá các mệnh đề phạm vi
-    (event.category/module/action/code...), bỏ qua mệnh đề chi tiết."""
-    def ev(node) -> bool:
-        kind = node[0]
-        if kind == "all":
-            return all(ev(n) for n in node[1])
-        if kind == "any":
-            return any(ev(n) for n in node[1])
-        if kind == "not":
-            return True
-        if node[1] not in SCOPE_FIELDS:
-            return True
-        return _eval(node, doc)
-    conds = [rule.condition] if rule.condition else [c for c, _ in rule.steps]
-    return any(ev(c.spec) for c in conds if c is not None)
 
 
 def _regex_problems(clauses: list[dict[str, Any]]) -> list[str]:
@@ -465,72 +448,6 @@ def describe(doc: Doc) -> str:
 
 
 # ---------------------------------------------------------------- ngoại lệ
-def validate_exception(rule: Rule, exc: dict[str, Any], fp: list[Doc], tp: list[Doc],
-                       golden: PublicDatasets | None, replay_events: list[Doc]) -> Validation:
-    checks: list[Check] = []
-    metrics: dict[str, Any] = {}
-    clauses = leaves_of(exc["condition"])
-
-    bad_fields = [c["field"] for c in clauses if not FIELD_RE.match(c["field"])]
-    bad_ops = [c["op"] for c in clauses if c["op"] not in EXC_OPS]
-    try:
-        ex = RuleException.from_dict(exc)
-        ok = not bad_fields and not bad_ops
-        checks.append(Check("cấu trúc", ok, "hợp lệ" if ok else f"trường sai: {bad_fields} / toán tử không cho phép: {bad_ops}"))
-    except Exception as e:  # noqa: BLE001
-        checks.append(Check("cấu trúc", False, f"không compile được: {e}"))
-        return Validation(False, "cao", checks, metrics)
-
-    missing = missing_fields(exc["condition"], fp)
-    checks.append(Check("trường có thật", not missing, "mọi trường đều có trong mẫu báo nhầm" if not missing
-                        else f"trường không có trong dữ liệu: {missing}"))
-    rx = _regex_problems(clauses)
-    checks.append(Check("regex an toàn", not rx, "ok" if not rx else "; ".join(rx)))
-
-    specific = [c for c in clauses if c["op"] in SPECIFIC_OPS and not c["field"].startswith(GENERIC_PREFIXES)
-                and c["value"] not in ("", "*", [], None)]
-    narrow = bool(specific) and (next(iter(exc["condition"])) == "all" or len(specific) == len(clauses))
-    checks.append(Check("đủ hẹp", narrow, "neo vào thực thể cụ thể: " + ", ".join(c["field"] for c in specific)
-                        if narrow else "ngoại lệ quá rộng: cần ít nhất 1 mệnh đề eq/in/cidr/startswith trên trường "
-                        "thực thể (IP, user, host, process, url...), không chỉ event.*"))
-
-    fp_hit = sum(ex.match(d) for d in fp)
-    metrics["fp_total"], metrics["fp_matched"] = len(fp), fp_hit
-    cover = fp_hit / len(fp) if fp else 0
-    checks.append(Check("khớp báo nhầm", cover >= 0.5, f"khớp {fp_hit}/{len(fp)} alert báo nhầm ({cover:.0%}, cần ≥ 50%)"))
-
-    tp_hit = sum(ex.match(d) for d in tp)
-    metrics["tp_total"], metrics["tp_matched"] = len(tp), tp_hit
-    if tp:
-        checks.append(Check("không tắt sự cố thật", tp_hit == 0,
-                            f"khớp {tp_hit}/{len(tp)} event của case đã xác nhận thật" + (" — LOẠI" if tp_hit else "")))
-    else:
-        checks.append(Check("không tắt sự cố thật", True, "chưa có case thật nào của rule này để đối chứng", blocking=False))
-
-    golden_pos = golden.positives_for(rule) if golden else []
-    g_hit = sum(ex.match(x.doc) for x in golden_pos)
-    metrics["golden_total"], metrics["golden_matched"] = len(golden_pos), g_hit
-    if golden_pos:
-        checks.append(Check("giữ bộ mẫu vàng", g_hit == 0,
-                            f"rule đang bắt {len(golden_pos)} mẫu tấn công của dataset; ngoại lệ làm mất {g_hit}"))
-    else:
-        checks.append(Check("giữ bộ mẫu vàng", True, "dataset không có mẫu tấn công cho rule này", blocking=False))
-
-    before, t_before = replay(rule, replay_events)
-    after, t_after = replay(replace(rule, exceptions=rule.exceptions + [ex]), replay_events)
-    ratio = (before - after) / before if before else 0.0
-    metrics.update(replay_events=len(replay_events), replay_days=round(span_days(replay_events), 2),
-                   alerts_before=before, alerts_after=after, suppressed_ratio=round(ratio, 3))
-    checks.append(Check("replay dữ liệu thật", True,
-                        f"{len(replay_events)} event: {before} alert -> {after} alert (tắt {ratio:.0%})", blocking=False))
-    slow = t_after > 2 * t_before + 0.5
-    checks.append(Check("hiệu năng", not slow, f"{t_before:.2f}s -> {t_after:.2f}s"))
-
-    passed = all(c.ok for c in checks if c.blocking)
-    risk = "cao" if (not tp and not golden_pos) or ratio > 0.8 else "thấp"
-    return Validation(passed, risk, checks, metrics)
-
-
 def validate_exception_wazuh(rule_id: str, conditions: list[dict[str, Any]], fp: list[Doc], tp: list[Doc],
                              recent: list[Doc]) -> Validation:
     """Ngoại lệ cho rule Wazuh (R73): các điều kiện AND, so `==` phân biệt hoa thường như wazuh_fields.literal."""
@@ -564,7 +481,7 @@ def validate_exception_wazuh(rule_id: str, conditions: list[dict[str, Any]], fp:
 
 
 # ---------------------------------------------------------------- rule mới
-def validate_new_rule(rule_dict: dict[str, Any], existing: list[Rule], suspicious_train: list[Doc],
+def validate_new_rule(rule_dict: dict[str, Any], suspicious_train: list[Doc],
                       suspicious_test: list[Doc], normal: list[Doc], replay_events: list[Doc],
                       max_alerts_per_day: float, app_tokens: set[str] | None = None,
                       normal_label: str = "event bình thường", gate: WazuhGate | None = None,
@@ -585,8 +502,6 @@ def validate_new_rule(rule_dict: dict[str, Any], existing: list[Rule], suspiciou
         checks.append(Check("cấu trúc", False, f"không compile được: {e}"))
         return Validation(False, "cao", checks, metrics)
 
-    dup = rule.id in {r.id for r in existing}
-    checks.append(Check("ID không trùng", not dup, rule.id + (" đã tồn tại" if dup else "")))
     missing = missing_fields(rule_dict["condition"], suspicious_train + suspicious_test)
     checks.append(Check("trường có thật", not missing, "ok" if not missing else f"trường không có trong dữ liệu: {missing}"))
     rx = _regex_problems(clauses)

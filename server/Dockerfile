@@ -9,7 +9,6 @@ COPY requirements.txt requirements.lock ./
 RUN pip install -r requirements.txt -c requirements.lock
 
 COPY siem ./siem
-COPY rules ./rules
 COPY config ./config
 
 # Chạy bằng user thường (không root); /data chứa model ML

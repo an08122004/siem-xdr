@@ -32,7 +32,6 @@ from siem.ai.sandbox import Sandbox  # noqa: E402
 from siem.ai.wazuh_events import golden_events  # noqa: E402
 from siem.ai.wazuh_gate import WazuhGate  # noqa: E402
 from siem.ai.worker import AIWorker  # noqa: E402
-from siem.detection.rules import load_rules  # noqa: E402
 
 
 def main() -> None:
@@ -53,7 +52,6 @@ def main() -> None:
     golden = PublicDatasets.load()
     worker = AIWorker(es, llm, golden)
     gate = WazuhGate(Sandbox(), golden_events(golden, golden.directory))     # cần container wazuh-sandbox (profile ai)
-    rules = load_rules(settings.RULES_DIR)
     ds = ESDataSource(es)
     gaps = dict(worker.dataset_gaps(gate))
     for kind in kinds:
@@ -66,7 +64,7 @@ def main() -> None:
             t0 = time.time()
             row = {"model": model, "kind": kind, "run": run}
             try:
-                p = worker.propose_dataset_rule(key, gaps[key], rules, ds, [], gate)
+                p = worker.propose_dataset_rule(key, gaps[key], ds, [], gate)
             except Exception as e:  # noqa: BLE001
                 print(json.dumps({**row, "status": "error", "error": str(e)[:200]}, ensure_ascii=False), flush=True)
                 continue

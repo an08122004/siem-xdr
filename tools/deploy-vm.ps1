@@ -49,9 +49,8 @@ try {
   if ($Demo) { $flags += "--demo" }
   if ($AI) { $flags += "--ai" }
   if ($Update) { $flags += "--update" }
-  # rules/ai, rules/exceptions là rule do analyst duyệt (manager ghi, uid 10001): không ghi đè khi cập nhật.
   # Không dùng dấu nháy kép trong lệnh: PowerShell 5.1 truyền nháy kép lồng vào chương trình ngoài bị sai.
-  $remote = "set -e; tar -xzf siem-xdr-deploy.tgz --exclude=$Dir/server/rules/ai --exclude=$Dir/server/rules/exceptions; " +
+  $remote = "set -e; tar -xzf siem-xdr-deploy.tgz; " +
             "rm -f siem-xdr-deploy.tgz; cd $Dir; sudo ./install.sh --admin-ip `${SSH_CLIENT%% *} $($flags -join ' ')"
   Write-Host "==> Cài trên máy chủ"
   ssh -t -p $Port @SshOption $Target $remote

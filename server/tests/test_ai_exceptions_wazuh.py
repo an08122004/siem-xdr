@@ -93,7 +93,6 @@ class Env:
 def test_approve_exception_creates_pending_wazuh_exception(monkeypatch):
     env, calls = Env(), []
     monkeypatch.setattr(wazuh_exceptions, "add", lambda *a, **k: calls.append((a, k)) or {"id": 110003, "status": "pending"})
-    monkeypatch.setattr(deploy.settings, "RULE_ENGINE_ENABLED", False)           # nhánh ngoại lệ không cần engine YAML
     out = deploy.approve(env.es, env.pending(kind="exception", target="exception:WZH-5710")["id"], "an", env.api, now="t")
     a = calls[0][0]
     assert a[0] == "WZH-5710" and a[3] == "an" and a[4] is env.api and out["exception_id"] == 110003

@@ -7,7 +7,7 @@ pass=0; fail=0
 check() { if eval "$2"; then echo "  ĐẠT: $1"; pass=$((pass+1)); else echo "  HỎNG: $1"; fail=$((fail+1)); fi; }
 
 run() {   # run <tên> <hàm thử>: chạy trong thư mục tạm, subshell riêng
-  local d; d=$(mktemp -d); mkdir -p "$d/secrets" "$d/server/rules" "$d/security" "$d/wazuh/manager/entrypoint" "$d/tools"
+  local d; d=$(mktemp -d); mkdir -p "$d/secrets" "$d/server" "$d/security" "$d/wazuh/manager/entrypoint" "$d/tools"
   touch "$d/docker-compose.yml" "$d/tools/init_secrets.py" "$d/secrets/x" "$d/security/setup.sh" "$d/wazuh/manager/entrypoint/a.sh"
   # giữ set -euo pipefail của install.sh như khi chạy thật: lệnh lỗi làm script dừng thì test cũng thấy
   ( cd "$d" || exit; source "$LIB"; "$2" ) > "$d/out" 2>&1
@@ -65,12 +65,12 @@ t6() { eval "$stubs"; check_system; }
 run "không CRLF thì không báo nhầm" t6
 check "không báo CRLF" '! grep -q "CRLF" <<<"$OUT"'
 
-mkpkg() {   # tarball giả của GitHub (thư mục gốc r-1/); install.sh trong gói in nơi chạy, tham số, rules/ai, config, bản sao
-  mkdir -p pkg/r-1/server/rules/ai pkg/r-1/server/config
+mkpkg() {   # tarball giả của GitHub (thư mục gốc r-1/); install.sh trong gói in nơi chạy, tham số, config, bản sao
+  mkdir -p pkg/r-1/server/config
   cat > pkg/r-1/install.sh <<'EOF'
-cd "$(dirname "$0")"; echo "CHẠY $(basename "$PWD")/install.sh: $*; rules/ai: $(ls server/rules/ai 2>/dev/null); config: $(cat server/config/assets.yml); bak: $(cat server/config.bak-*/assets.yml 2>/dev/null)"
+cd "$(dirname "$0")"; echo "CHẠY $(basename "$PWD")/install.sh: $*; config: $(cat server/config/assets.yml); bak: $(cat server/config.bak-*/assets.yml 2>/dev/null)"
 EOF
-  touch pkg/r-1/docker-compose.yml pkg/r-1/server/rules/ai/ai-tu-github.yml
+  touch pkg/r-1/docker-compose.yml
   printf 'cau-hinh-github' > pkg/r-1/server/config/assets.yml
   tar -czf pkg.tgz -C pkg r-1
   curl() { echo "CURL $*" >> docker.log; echo "CẤU HÌNH: $(cat)" >> docker.log; cat pkg.tgz; }
@@ -80,12 +80,11 @@ t9() { eval "$stubs"; mkpkg; rm docker-compose.yml; GITHUB_TOKEN=tok; ARGV=(--de
 run "máy chỉ có install.sh" t9
 check "tải vào ./siem-xdr, chạy install.sh trong đó cùng tham số" 'grep -q "CHẠY siem-xdr/install.sh: --demo -y;" <<<"$OUT"'
 check "token qua stdin, không nằm trên dòng lệnh" 'grep -q "CẤU HÌNH: header = \"Authorization: Bearer tok\"" <<<"$OUT" && ! grep -q "CURL .*tok" <<<"$OUT"'
-check "không lấy rules/ai từ gói" '! grep -q "ai-tu-github" <<<"$OUT"'
 
-t10() { eval "$stubs"; mkpkg; mkdir -p server/rules/ai server/config; touch server/rules/ai/da-duyet.yml
+t10() { eval "$stubs"; mkpkg; mkdir -p server/config
         printf 'cua-toi' > server/config/assets.yml; FETCH=1; ARGV=(--fetch -y); fetch_source; }
 run "--fetch trên mã nguồn có sẵn" t10
-check "chạy lại với --update, bỏ --fetch, giữ rule AI đã duyệt" 'grep -q "install.sh: -y --update; rules/ai: da-duyet.yml;" <<<"$OUT"'
+check "chạy lại với --update, bỏ --fetch" 'grep -q "install.sh: -y --update; config:" <<<"$OUT"'
 check "server/config đã sửa trên máy được lưu bản sao trước khi tải đè" \
   'grep -q "config: cau-hinh-github; bak: cua-toi$" <<<"$OUT" && grep -q "bản cũ của server/config lưu ở server/config.bak-" <<<"$OUT"'
 

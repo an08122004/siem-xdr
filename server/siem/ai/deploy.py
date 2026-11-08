@@ -1,4 +1,4 @@
-"""Duyệt / từ chối / gỡ đề xuất AI (chạy trong manager — service duy nhất được ghi rules/ai và rules/exceptions).
+"""Duyệt / từ chối / gỡ đề xuất AI (chạy trong manager — service duy nhất ghi rules-dynamic của Wazuh qua wazuh_rules).
 
 Nguyên tắc:
   - Người duyệt là Detection Engineer (quyền rules). Ngoại lệ (làm giảm cảnh báo) cần 2 người KHÁC NHAU duyệt; rule
@@ -17,13 +17,10 @@ import logging
 import re
 import threading
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from .. import settings, wazuh_exceptions, wazuh_rules
-from ..detection.rules import load_rules
-from .condition import Rule, RuleException
-from .dataset import ESDataSource
+from .condition import Rule
 from .golden import PublicDatasets
 from .wazuh_xml import EMITTER_VERSION, emit, unshadow
 from .validate import _app_specific, common_program_only, describe, lab_wrapper, leaves_of, ordinary_hits, weak_values
@@ -67,25 +64,11 @@ def _save(es, pid: str, doc: dict[str, Any], seq: int, term: int) -> None:
         raise DeployError(409, "đề xuất vừa được người khác cập nhật, hãy tải lại") from None
 
 
-def recheck(p: dict[str, Any], es, rules_dir: Path) -> list[str]:
-    """Kiểm tra lại ngay trước khi triển khai. Trả về danh sách lý do KHÔNG được triển khai."""
-    problems = []
-    rules = {r.id: r for r in load_rules(rules_dir)}
-    if p["kind"] == "exception":
-        rule = rules.get(p["target_rule_id"])
-        if not rule:
-            return [f"rule {p['target_rule_id']} không còn tồn tại"]
-        ex = RuleException.from_dict(p["proposal"])
-        ev = ESDataSource(es).evidence().get(rule.id)
-        if ev and (n := sum(ex.match(d) for d in ev.tp)):
-            problems.append(f"ngoại lệ khớp {n} event của case thật (mới xác nhận sau khi AI đề xuất)")
-        if (n := sum(ex.match(x.doc) for x in golden().positives_for(rule))):
-            problems.append(f"ngoại lệ làm mất {n} mẫu tấn công của bộ mẫu vàng")
-    else:
-        rule = Rule.from_dict(p["proposal"])
-        if str(p.get("target", "")).startswith("gap-dataset:"):
-            problems += recheck_dataset_rule(p["proposal"], rule, golden())
-    return problems
+def recheck(p: dict[str, Any]) -> list[str]:
+    """Kiểm tra lại rule mới ngay trước khi triển khai. Trả về danh sách lý do KHÔNG được triển khai. (Đề xuất ngoại lệ
+    không qua đây: người duyệt thứ hai kiểm ở trang ngoại lệ Wazuh, R73.)"""
+    rule = Rule.from_dict(p["proposal"])
+    return recheck_dataset_rule(p["proposal"], rule, golden()) if str(p.get("target", "")).startswith("gap-dataset:") else []
 
 
 def recheck_dataset_rule(rd: dict[str, Any], rule: Rule, g: PublicDatasets) -> list[str]:
@@ -205,7 +188,7 @@ def approve(es, pid: str, analyst: str, api, now: str = "") -> dict[str, Any]:
         p["history"].append({"at": now, "by": "hệ thống",
                              "text": f"đã tạo ngoại lệ Wazuh #{item['id']} (chờ người khác duyệt ở trang ngoại lệ)"})
     elif len(p["approvals"]) >= int(p.get("required_approvals", 1)):
-        problems = recheck(p, es, settings.RULES_DIR)
+        problems = recheck(p)
         if problems:
             p["status"] = "invalid"
             p["history"].append({"at": now, "by": "hệ thống", "text": "kiểm tra lại thất bại: " + "; ".join(problems)})

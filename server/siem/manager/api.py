@@ -66,14 +66,14 @@ async def catalog_loop() -> None:
     """Đồng bộ danh mục rule (Grafana "Thư viện rule") định kỳ; lỗi chỉ ghi log, lần sau thử lại."""
     while True:
         try:
-            await asyncio.to_thread(rules_catalog.sync, es(), settings.RULES_DIR, api=wazuh_rules.WazuhApi.from_settings())
+            await asyncio.to_thread(rules_catalog.sync, es(), api=wazuh_rules.WazuhApi.from_settings())
         except Exception as e:  # noqa: BLE001
             log.warning("đồng bộ danh mục rule lỗi: %s", e)
         await asyncio.sleep(settings.RULES_CATALOG_SECONDS)
 
 
 def compute_kpi() -> dict[str, Any]:
-    doc = kpi.compute(es(), settings.RULES_DIR, settings.CONFIG_DIR)
+    doc = kpi.compute(es(), settings.CONFIG_DIR)
     kpi.save(es(), doc)
     return doc
 
@@ -92,7 +92,7 @@ async def kpi_loop() -> None:
 def refresh_catalog() -> None:
     """Sau khi duyệt / từ chối / gỡ đề xuất: cập nhật danh mục ngay, không chờ chu kỳ."""
     try:
-        rules_catalog.sync(es(), settings.RULES_DIR, api=wazuh_rules.WazuhApi.from_settings())
+        rules_catalog.sync(es(), api=wazuh_rules.WazuhApi.from_settings())
     except Exception as e:  # noqa: BLE001 - danh mục chỉ để tra cứu, không được làm hỏng thao tác duyệt
         log.warning("cập nhật danh mục rule lỗi: %s", e)
 
@@ -786,15 +786,6 @@ def _ai(fn, *args, **kw):
     return res
 
 
-def _rule_modes() -> dict[str, Any]:
-    from ..detection.rules import load_rules
-    try:
-        return {r.id: r for r in load_rules(settings.RULES_DIR)}
-    except Exception as e:  # noqa: BLE001 - thư mục rule lỗi: danh sách đề xuất vẫn phải hiện
-        log.warning("không đọc được rule: %s", e)
-        return {}
-
-
 @app.get("/api/v1/ai/proposals", dependencies=[Depends(current_user)])
 def ai_proposals(status: str | None = None, size: int = 100) -> list[dict[str, Any]]:
     q = {"bool": {"filter": [{"term": {"status": status}}]}} if status else None
@@ -813,17 +804,6 @@ def ai_proposals(status: str | None = None, size: int = 100) -> list[dict[str, A
     return out
 
 
-@app.get("/api/v1/rules/{rule_id}/shadow", dependencies=[Depends(current_user)])
-def rule_shadow(rule_id: str) -> dict[str, Any]:
-    """Số liệu chạy bóng của một rule và các tiêu chí còn thiếu để bật chính thức."""
-    rule = _rule_modes().get(rule_id)
-    if not rule:
-        raise HTTPException(404, "không có rule này")
-    st = ai_deploy.shadow_stats(es(), [rule.id], rule.shadow_since) if rule.mode == "shadow" else None
-    return {"rule_id": rule.id, "mode": rule.mode, "stats": st,
-            "problems": ai_deploy.promotion_problems(st) if st else []}
-
-
 @app.post("/api/v1/ai/proposals/{pid}/approve")
 def ai_approve(pid: str, s: Session = Depends(rules_perm)) -> dict[str, Any]:
     # Detection Engineer duyệt (quyền rules): người xử lý cảnh báo không tự duyệt rule mình dùng. Ngoại lệ cần 2 người
@@ -833,7 +813,7 @@ def ai_approve(pid: str, s: Session = Depends(rules_perm)) -> dict[str, Any]:
 
 @app.post("/api/v1/ai/proposals/{pid}/promote")
 def ai_promote(pid: str, s: Session = Depends(rules_perm)) -> dict[str, Any]:
-    """Bật chính thức rule AI đang chạy bóng (Detection Engineer). Rule viết tay đổi `mode` qua kho rule + CI."""
+    """Bật chính thức rule AI đang chạy bóng (Detection Engineer). Rule dự án viết tay đổi nhóm shadow qua repo + CI."""
     return _ai(ai_deploy.promote, es(), pid, s.username, wazuh_rules.WazuhApi.from_settings(), now=store.now_iso())
 
 

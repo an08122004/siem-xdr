@@ -1,16 +1,13 @@
-"""Dựng alert document chuẩn từ kết quả rule engine / ML."""
+"""Dựng alert document chuẩn từ cảnh báo Wazuh (detection/wazuh.py) / ML."""
 from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .. import priority as prio
 from ..pipeline.normalize import Doc, get
 from ..store import new_id, now_iso
-
-if TYPE_CHECKING:
-    from .rules import Detection
 
 SEVERITY_SCORE = {"low": 1, "medium": 2, "high": 3, "critical": 4}
 
@@ -70,35 +67,6 @@ def _timing(alert: Doc, first: float | None) -> None:
     alert["metrics"] = {"ttd_seconds": prio.seconds_between(ts, alert["@timestamp"])}
 
 
-def from_detection(d: Detection) -> Doc:
-    r = d.rule
-    alert: Doc = {
-        "@timestamp": now_iso(),
-        "alert": {"id": new_id(), "status": "open", "source": "rule"},
-        "rule": {
-            "id": r.id, "name": r.title, "description": r.description, "type": r.type,
-            "severity": r.severity, "tags": r.tags,
-            "mitre": {"tactic": r.mitre.get("tactic"), "technique": r.mitre.get("technique")},
-        },
-        "severity": r.severity,
-        "severity_score": SEVERITY_SCORE[r.severity],
-        "risk_score": _risk(r.severity, d.event),
-        "group": {k.replace(".", "_"): v for k, v in d.group.items()},
-        "count": d.count,
-        "related_events": d.related,
-        "event_time": d.event.get("@timestamp"),
-        "trigger_event": _trigger(d.event),
-    }
-    if r.mode == "shadow":
-        # chạy bóng: lưu để đo, SOAR bỏ qua, console ẩn khỏi danh sách mặc định (rules.py)
-        alert["alert"]["shadow"] = True
-        alert["rule"]["mode"] = "shadow"
-    _copy_entities(d.event, alert)
-    _timing(alert, d.first_time if d.first_time is not None else event_time(d.event))
-    alert["message"] = _message(alert)
-    return alert
-
-
 def from_anomaly(a: Any, severity: str, description: str, features: dict[str, Any]) -> Doc:
     alert: Doc = {
         "@timestamp": now_iso(),
@@ -153,7 +121,7 @@ def from_wazuh(event: Doc, severity: str) -> Doc:
     # (khóa đơn để lọc/nhóm), legacy_ids = đủ danh sách; không có nhóm legacy_* thì không có trường nào.
     if legacy := [g[7:] for g in groups if g.startswith("legacy_") and len(g) > 7]:
         alert["rule"]["legacy_id"], alert["rule"]["legacy_ids"] = legacy[0], legacy
-    if "shadow" in groups:      # như rule YAML chạy bóng: lưu để đo, SOAR bỏ qua (soar/engine.py)
+    if "shadow" in groups:      # chạy bóng: lưu để đo, SOAR bỏ qua (soar/engine.py)
         alert["alert"]["shadow"] = True
         alert["rule"]["mode"] = "shadow"
     _copy_entities(event, alert)

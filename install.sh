@@ -24,7 +24,6 @@ ROOT=$PWD
 ARGV=("$@")
 REPO=an08122004/siem-xdr            # GitHub: nơi tải mã nguồn khi máy chưa có / --fetch (nhánh main)
 PROJECT=siem-xdr                    # tên project Compose (= name: trong docker-compose.yml); .env ghi tên khác: xem pick_project
-APP_UID=10001                       # user "siem" trong image server (server/Dockerfile)
 APP_IMAGE=siem-xdr-server:latest    # image server (= image: trong docker-compose.yml), chỉ build tại chỗ
 WAZUH_VERSION=4.14.7
 MIN_DOCKER=26                       # docker-compose.yml dùng volume subpath (Docker Engine >= 26)
@@ -88,7 +87,7 @@ compose() { docker compose -p "$PROJECT" "$@"; }
 # ------------------------------------------------------------------------------------------------ mã nguồn
 # Máy chỉ có install.sh: tải repo vào ./siem-xdr (đã có thì dùng luôn) rồi chạy install.sh trong đó, cùng tham số.
 # --fetch: tải đè lên mã hiện có rồi chạy lại với --update; secrets/, .env, ca.crt không nằm trong repo nên giữ nguyên.
-# shortcut: file đã xóa trên GitHub vẫn còn trên máy (như tools/deploy-vm.ps1); xóa rule thì xóa tay file trong server/rules.
+# shortcut: file đã xóa trên GitHub vẫn còn trên máy (như tools/deploy-vm.ps1); vô hại khi không service nào đọc tới.
 fetch_source() {
   local dir=$ROOT token=${GITHUB_TOKEN:-} a
   if [ ! -f docker-compose.yml ]; then dir=$ROOT/siem-xdr
@@ -107,10 +106,10 @@ fetch_source() {
       cp -a "$dir/server/config" "$dir/$bak" || die "không lưu được bản cũ của server/config: dừng, chưa tải đè gì"
       ok "bản cũ của server/config lưu ở $bak (so lại: diff -r $bak server/config)"
     fi
-    # token qua stdin (-K -: cấu hình curl) thay vì tham số dòng lệnh: không lộ trong ps. Rule AI đã duyệt + ngoại lệ: không ghi đè
+    # token qua stdin (-K -: cấu hình curl) thay vì tham số dòng lệnh: không lộ trong ps
     { [ -z "$token" ] || printf 'header = "Authorization: Bearer %s"\n' "$token"; } \
       | curl -fsSL -K - "https://api.github.com/repos/$REPO/tarball/main" \
-      | "${as[@]}" tar -xz -C "$dir" --strip-components=1 --exclude='*/server/rules/ai' --exclude='*/server/rules/exceptions' \
+      | "${as[@]}" tar -xz -C "$dir" --strip-components=1 \
       || die "không tải được mã nguồn (lỗi ở trên). Repo private: cần token GitHub đọc được $REPO (GITHUB_TOKEN hoặc nhập khi được hỏi)"
     ok "đã tải vào $dir"
   fi
@@ -241,9 +240,7 @@ configure() {
   chown -R root:root secrets
   chmod 700 secrets && chmod 644 secrets/*          # xem tools/init_secrets.py: container đọc qua bind mount
   ok "bí mật trong secrets/ (chỉ root vào được thư mục)"
-  # manager (uid $APP_UID) ghi rule AI đã duyệt và ngoại lệ vào 2 thư mục này
-  mkdir -p server/rules/ai server/rules/exceptions datasets/processed
-  chown -R "$APP_UID:$APP_UID" server/rules/ai server/rules/exceptions
+  mkdir -p datasets/processed
   # mọi file cấu hình được mount chỉ đọc vào container chạy bằng user khác: phải đọc được với mọi uid
   chmod -R a+rX server wazuh vector grafana security demo tools 2>/dev/null || true
 
