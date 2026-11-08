@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from siem.ai import sigma  # noqa: E402
 from siem.ai.wazuh_events import GENERIC, apache_event, sysmon_event  # noqa: E402
 from siem.ai.wazuh_xml import LEVEL, emit  # noqa: E402
-from siem.detection.rules import Condition, regex_risk  # noqa: E402
+from siem.ai.condition import Condition, regex_risk  # noqa: E402
 from siem.pipeline.normalize import get  # noqa: E402
 from siem.soar.cases import CasePlaybooks  # noqa: E402
 
