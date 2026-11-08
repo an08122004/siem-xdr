@@ -130,3 +130,12 @@ def test_positive_sample_is_not_shadowed_by_an_earlier_rule_of_the_batch():
     picked = imp.pick(cands, items, covered=set(), batch=30)
     assert [c.title for c in picked] == ["Has bbb"]       # "Has aaa" chỉ có mẫu 0, đã bị "Has bbb" (id nhỏ hơn) che: bỏ
     assert picked[0].pos["i"] in (0, 1)
+
+
+def test_stolen_lists_samples_that_lose_a_non_batch_detection():
+    """I1: --measure so lượt không có lô (0966) với lượt có lô; mẫu mất phát hiện ngoài 108xxx = lô cướp alert thật
+    (cùng quy tắc 'không che rule khác' của cổng AI). Mẫu 108xxx mới bắt không tính là cướp."""
+    base = {1: 92023, 2: 105005, 3: 108004, 4: 60103}
+    mine = {1: 108000, 2: 105005, 3: 108004, 5: 108001}
+    assert imp.stolen(base, mine) == {1: (92023, 108000), 4: (60103, None)}
+    assert imp.stolen(base, base) == {}

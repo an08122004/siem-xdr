@@ -2,7 +2,8 @@
 
     python tools/sigmahq_import.py            # chỉ đo: ứng viên, lô chọn được (cần Docker để biết mẫu nào Wazuh đã bắt)
     python tools/sigmahq_import.py --write    # ghi wazuh/manager/rules/0966-sigmahq.xml + ca test 0966-sigmahq.yml
-    python tools/sigmahq_import.py --measure  # chạy ruleset của nhánh trên mẫu tấn công, đếm mẫu MỚI chỉ rule SigmaHQ (108xxx) bắt được
+    python tools/sigmahq_import.py --measure  # chạy ruleset có / không có 0966 trên cùng bộ mẫu: mẫu MỚI chỉ rule SigmaHQ (108xxx)
+                                              # bắt được, và thoát mã 1 nếu mẫu nào mất phát hiện ngoài 108xxx (lô cướp alert thật)
 
 Rule được xét: SigmaHQ `process_creation` Windows và `webserver`, status stable / test, level từ medium. Linux hoãn (R68:
 rule Linux nhắm decoder siem-proc, còn wazuh_coverage dựng mẫu Linux dạng auditd). Rule được nhận khi: biên dịch được
@@ -20,6 +21,7 @@ import ast
 import gzip
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -235,20 +237,19 @@ def write_batch(picked: list[Candidate], *, rules_file: Path, cases_file: Path, 
 
 
 # ---------------------------------------------------------------- đo trên Wazuh
-def wazuh_hits(items: list[dict]) -> tuple[set[int], set[int]]:
-    """Bơm mẫu tấn công vào manager tạm (ruleset của nhánh). Trả (mẫu có Hit rule ngoài dải 108xxx, mẫu có Hit rule 108xxx),
-    Hit = level >= 7 và không thuộc GENERIC."""
+def wazuh_detections(items: list[dict], rules: Path | None = None) -> dict[int, int]:
+    """Bơm `items` vào manager tạm (ruleset `rules`, mặc định của nhánh). Trả {chỉ số mẫu: id rule phát hiện}: alert
+    level >= 7 và không thuộc GENERIC (mỗi event Wazuh ra tối đa một alert)."""
     import wazuh_coverage as cov
     import wazuh_noise as noise
-    atk = [it for it in items if it["class"] == "attack" and it["domain"] in ("windows", "web")]
     saved, cov.CONTAINER = cov.CONTAINER, noise.NAME
     alerts: list[dict] = []
     try:
         with tempfile.TemporaryDirectory() as tmp:
             try:
-                noise.start(Path(tmp))
-                for k in range(0, len(atk), BATCH_EVENTS):
-                    part = atk[k:k + BATCH_EVENTS]
+                noise.start(Path(tmp), rules=rules)
+                for k in range(0, len(items), BATCH_EVENTS):
+                    part = items[k:k + BATCH_EVENTS]
                     alerts += cov.run_wazuh(part)
                     if cov.LAST_SENT != len(part):
                         raise SystemExit(f"bơm hỏng: gửi {cov.LAST_SENT}/{len(part)} event")
@@ -257,9 +258,17 @@ def wazuh_hits(items: list[dict]) -> tuple[set[int], set[int]]:
     finally:
         cov.CONTAINER = saved
     real = [a for a in alerts if int(a["rule"]["level"]) >= MIN_LEVEL and str(a["rule"]["id"]) not in GENERIC]
-    mine = [a for a in real if BASE_ID <= int(a["rule"]["id"]) < BASE_ID + 1000]
-    other = [a for a in real if a not in mine]
-    return set(cov.match_alerts(atk, other)), set(cov.match_alerts(atk, mine))
+    return {i: int(h["id"]) for i, h in cov.match_alerts(items, real).items()}
+
+
+def _mine(rid: int | None) -> bool:
+    return rid is not None and BASE_ID <= rid < BASE_ID + 1000
+
+
+def stolen(base: dict[int, int], mine: dict[int, int]) -> dict[int, tuple[int, int | None]]:
+    """Mẫu mất phát hiện ngoài dải 108xxx khi thêm lô SigmaHQ: {i: (rule khi không có lô, rule khi có lô)}. Cùng quy tắc
+    "không che rule khác" của cổng AI: rule lô thắng rule gốc cùng cha thì cắt cây con, alert thật thành alert bóng."""
+    return {i: (r, mine.get(i)) for i, r in base.items() if not _mine(r) and mine.get(i) != r}
 
 
 def main() -> int:
@@ -270,7 +279,7 @@ def main() -> int:
     ap.add_argument("--config", type=Path, default=ROOT / "server" / "config")
     ap.add_argument("--batch", type=int, default=30, help="số rule tối đa của lô (RULES.md mục 7: 20-30)")
     ap.add_argument("--write", action="store_true", help="ghi lô vào 0966-sigmahq.xml (mặc định chỉ đo)")
-    ap.add_argument("--measure", action="store_true", help="chạy ruleset hiện có trên mẫu tấn công, đếm mẫu mới chỉ rule SigmaHQ bắt")
+    ap.add_argument("--measure", action="store_true", help="so ruleset có / không có 0966: mẫu mới chỉ SigmaHQ bắt; mã 1 nếu lô cướp phát hiện")
     a = ap.parse_args()
     if not a.zip.exists() or not a.datasets.exists():
         print(f"thiếu {a.zip if not a.zip.exists() else a.datasets}: chạy tools/fetch_datasets.py, tools/convert_datasets.py")
@@ -279,10 +288,22 @@ def main() -> int:
     cov.DATA = a.datasets
     items = [it for it in cov.load_items(extra_normal=True) if it["domain"] in ("windows", "web")]
     if a.measure:
-        stock, mine = wazuh_hits(items)
-        atk = sum(it["class"] == "attack" for it in items)
-        print(f"mẫu tấn công {atk}; ngoài SigmaHQ có Hit {len(stock)}; SigmaHQ có Hit {len(mine)}; MỚI chỉ SigmaHQ bắt {len(mine - stock)}")
-        return 0
+        # lượt có lô (ruleset của nhánh) và lượt KHÔNG có lô (bản chép wazuh/manager/rules bỏ 0966), cùng bộ mẫu
+        mine = wazuh_detections(items)
+        with tempfile.TemporaryDirectory() as tmp:
+            rules = Path(tmp) / "rules"
+            shutil.copytree(RULES_FILE.parent, rules)
+            (rules / RULES_FILE.name).unlink()
+            base = wazuh_detections(items, rules)
+        atk = {it["i"] for it in items if it["class"] == "attack"}
+        new = {i for i in atk if _mine(mine.get(i)) and i not in base}
+        lost = stolen(base, mine)
+        print(f"mẫu tấn công {len(atk)}; không có lô: có phát hiện {len(atk & base.keys())}; có lô: ngoài SigmaHQ "
+              f"{sum(1 for i in atk if i in mine and not _mine(mine[i]))}, SigmaHQ {sum(1 for i in atk if _mine(mine.get(i)))}; "
+              f"MỚI chỉ SigmaHQ bắt {len(new)}; mẫu (mọi lớp) bị lô cướp phát hiện {len(lost)}")
+        for (b, m), n in Counter(lost.values()).most_common():
+            print(f"  LỖI {n} mẫu: {b} -> {m if m is not None else 'không còn phát hiện'}")
+        return 1 if lost else 0
     with zipfile.ZipFile(a.zip) as z:
         originals = {n: z.read(n).decode("utf-8") for n in z.namelist() if n.endswith(".yml")}
     with gzip.open(a.datasets / "sigma_rules.jsonl.gz", "rt", encoding="utf-8") as f:
@@ -290,7 +311,8 @@ def main() -> int:
     done = set(_SIGMA_ID.findall(RULES_FILE.read_text(encoding="utf-8"))) if RULES_FILE.exists() else set()
     rows = [r for r in rows if str(r.get("id")) not in done]
     cands, skipped = candidates(items, rows, originals, a.config)
-    stock, _ = wazuh_hits(items)
+    atk = [it for it in items if it["class"] == "attack"]
+    stock = {i for i, r in wazuh_detections(atk).items() if not _mine(r)}
     picked = pick(cands, items, stock, a.batch)
     print(f"Ứng viên: {len(cands)} ({sum(1 for c in cands if c.hits)} bắt thêm được mẫu); đã nhập trước đó: {len(done)}; "
           "bị loại: " + ", ".join(f"{k} {v}" for k, v in skipped.most_common()))
