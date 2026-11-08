@@ -415,8 +415,9 @@ tự chạy bước này mỗi chu kỳ cho đề xuất `pending` do phiên b�
 - **Bật chính thức** (`deploy.promote`, nút *Bật chính thức* trong chi tiết đề xuất): cần chạy bóng ≥ 7 ngày, dưới 5 alert/ngày, báo
   nhầm dưới 30% trên alert `WZH-<id>` của đề xuất từ `shadow_since` (`SOC-OPERATIONS.md` mục 4). Đạt thì bỏ đúng nhóm `shadow` và
   dòng `shadow_since` khỏi XML đã đóng băng (R71) và dựng lại file; trạng thái vẫn `approved`, thêm `promoted_at` / `promoted_by`.
-- **Gỡ** (`deploy.rollback`): dựng lại `ai.xml` không có khối của đề xuất. Giới hạn đã thấy (08/11/2026, mục 9.11): gỡ rule AI
-  **cuối cùng** bị Wazuh từ chối vì file chỉ còn khối `<group>` rỗng.
+- **Gỡ** (`deploy.rollback`): dựng lại `ai.xml` không có khối của đề xuất. Gỡ rule AI **cuối cùng** thì xóa hẳn file `ai.xml` rồi reload, vì
+  Wazuh từ chối `<group>` rỗng (`error: 1`) và file chỉ có chú thích (`Configuration error`); xóa file thì reload thành công và rule
+  biến mất (đo trên manager tạm, Task 26b); reload lỗi thì khôi phục file cũ.
 - **Ngoại lệ** (R73): người bấm *Duyệt* tạo ngoại lệ Wazuh ở trạng thái chờ (`wazuh_exceptions.add`, là người duyệt thứ nhất); người
   thứ hai duyệt ở trang ngoại lệ, khi đó rule level 0 mới vào `rules-dynamic/exceptions.xml`. Gỡ đề xuất gỡ luôn ngoại lệ.
 - Chỉ manager ghi được `rules-dynamic/` (volume `wazuh_dynamic_rules`); rule của repo mount chỉ đọc. Worker chỉ đọc `siem-*`, chỉ
@@ -927,7 +928,7 @@ gom event thành ít job. Bộ dựng log thô ra 29.323 event cho 30.186 mẫu 
 **Thử trên wazuh-manager thật** (project `p4e2e` cách ly, 08/11/2026): `ai.xml` do `emit` + `render_ai_file` sinh (3 đề xuất giả:
 Windows, Linux, web) nạp được qua `write_dynamic`, `ossec.log` không có 7612 / 7617 / 7619. Event thật từ agent `demo-web` (request
 `/zz9probe.bak`, tiến trình có `zz9probe` trong dòng lệnh) ra alert `WZH-109003` (web) và `WZH-109001` (Linux), mức medium, gắn
-`alert.shadow`. Khi trả file về rỗng (gỡ hết), Wazuh từ chối: `Failed to reload ruleset: Group 'group' without any rule.`; chưa sửa.
+`alert.shadow`. Khi trả file về rỗng (gỡ hết), Wazuh từ chối `<group>` rỗng (`Group 'group' without any rule.`); đã sửa (Task 26b): `write_dynamic(name, None, api)` xóa file rồi reload (reload lỗi thì khôi phục file cũ và reload lại).
 
 **SigmaHQ cùng bộ dịch** (Task 24): 30 rule Windows (`0966-sigmahq.xml`) bắt thêm 188 mẫu mới trên 17.306 mẫu tấn công Windows + web
 (cây Python ước 186), 60 ca test 0 sai (`RULES.md` mục 2.10, 4.6).

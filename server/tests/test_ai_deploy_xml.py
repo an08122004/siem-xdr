@@ -135,8 +135,9 @@ def test_rollback_removes_block(env):
     deploy.rollback(env.es, a["id"], "an", "báo nhầm", env.api)
     text = env.text()
     assert f"ai_{a['id']}" not in text and f"ai_{b['id']}" in text and env.es.docs[a["id"]]["status"] == "rolled_back"
-    deploy.rollback(env.es, b["id"], "an", "báo nhầm", env.api)                  # gỡ nốt: file vẫn hợp lệ
-    assert "<rule" not in env.text()
+    n = env.api.reloads
+    deploy.rollback(env.es, b["id"], "an", "báo nhầm", env.api)                  # gỡ nốt: Wazuh từ chối group rỗng -> xóa file
+    assert not (env.dyn / "ai.xml").exists() and env.api.reloads == n + 1 and env.es.docs[b["id"]]["status"] == "rolled_back"
 
 
 def test_concurrent_approvals_keep_both_blocks(env):

@@ -69,7 +69,6 @@ Kế hoạch: [docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md](docs/
 
 Còn mở sau P4 (chi tiết ở [RULES.md](RULES.md) mục 9.10):
 
-- Gỡ rule AI cuối cùng / ngoại lệ cuối cùng bị Wazuh từ chối (khối `<group>` rỗng), thấy khi thử trên project thử 08/11/2026.
 - Thực thể XML (`&gt;`, `&lt;`, `&amp;`) trong trường Windows (Task 19c, R77); rule Linux SigmaHQ (`siem-proc`); bơm lại event thật vào sandbox (R74).
 - Rule dự án `0965-windows.xml` dưới 61603 có thể bị rule gom level 0 che như ứng viên AI (R75): chưa kiểm.
 - `tools/wazuh_coverage.run_wazuh`, `wazuh_noise.py`, `wazuh_rule_test.inject` vẫn dùng vòng gửi có thể mất event trên tập lớn (R80).

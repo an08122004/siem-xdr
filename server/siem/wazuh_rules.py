@@ -125,17 +125,20 @@ def _replace(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
-def write_dynamic(name: str, xml_text: str, api, root: Path = DYNAMIC_DIR) -> None:
-    """Kiểm tra -> ghi file tạm -> đổi tên nguyên tử -> api.reload(). Lỗi thì khôi phục file cũ, nạp lại, raise."""
+def write_dynamic(name: str, xml_text: str | None, api, root: Path = DYNAMIC_DIR) -> None:
+    """xml_text=None: xóa file (Wazuh từ chối <group> rỗng và file chỉ có chú thích; không có file thì nạp được). Kiểm tra -> ghi file tạm -> đổi tên nguyên tử -> api.reload(). Lỗi thì khôi phục file cũ, nạp lại, raise."""
     rng = ID_RANGES.get(f"rules-dynamic/{name}")
     if rng is None:
         raise WazuhRuleError(f"không phải file rule động: {name}")
-    for r in parse(xml_text):
+    for r in parse(xml_text or ""):
         if not rng[0] <= r["id"] <= rng[1]:
             raise WazuhRuleError(f"rule {r['id']} ngoài dải {rng[0]}-{rng[1]} của {name}")
     path = root / name
     old = path.read_text(encoding="utf-8") if path.exists() else None
-    _replace(path, xml_text)
+    if xml_text is None:
+        path.unlink(missing_ok=True)
+    else:
+        _replace(path, xml_text)
     try:
         api.reload()
     except WazuhRuleError as e:

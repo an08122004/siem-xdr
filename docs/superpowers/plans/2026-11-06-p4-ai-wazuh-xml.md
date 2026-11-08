@@ -995,5 +995,5 @@ không nối mạng, không đụng stack thật.
 
 **Task 26 (kiểm tra cuối, project `p4e2e` cách ly, 08/11/2026):** unit test 660 đạt / 34 bỏ qua; lint 11 file 0 lỗi; E2E 43/43;
 `ai.xml` do `emit` + `render_ai_file` sinh nạp được vào wazuh-manager thật và ra alert bóng `WZH-109001` / `WZH-109003` từ event thật
-của agent; gỡ tới file rỗng bị Wazuh từ chối (`Group 'group' without any rule.`), chưa sửa. `GET /rules` không liệt kê
+của agent; gỡ tới file rỗng bị Wazuh từ chối (`Group 'group' without any rule.`); đã sửa ở Task 26b (xóa file rồi reload). `GET /rules` không liệt kê
 `rules-dynamic/` (R83).
