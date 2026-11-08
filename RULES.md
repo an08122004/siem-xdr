@@ -447,8 +447,7 @@ của AI gửi có chờ hàng đợi nên không mất event.
 - **Log không có dạng thô thì không đo được:** 863 mẫu Splunk và EVTX không có log thô nên không tính vào khoảng trống (R79).
 - **Chưa đo trên log thật đủ dài:** độ ồn chưa có ≥ 24 giờ syslog và nhật ký console thật (mục 9.7).
 - **Chưa có rule AI hay rule SigmaHQ nào chạy chính thức.**
-- **Gỡ rule AI cuối cùng hoặc ngoại lệ cuối cùng bị Wazuh từ chối** (thấy khi thử trên project thử 08/11/2026): file chỉ còn khối
-  `<group>` rỗng, reload báo `Group 'group' without any rule.`, `write_dynamic` giữ file cũ. Chưa sửa (mục 9.10).
+- **Gỡ rule AI cuối cùng / ngoại lệ cuối cùng:** đã sửa ở Task 26b (mục 9.10).
 
 ## 7. Kế hoạch bổ sung độ phủ (16/10/2026)
 
@@ -818,9 +817,8 @@ Ba hệ quả cần nói rõ:
 - **Triển khai P4 lên stack thật** (`DEPLOY-VM.md` mục 9): chưa làm, chờ chủ dự án gộp PR. Profile `ai` cần thêm `wazuh-sandbox`.
   Đã thử trên project thử `p4e2e` (08/11/2026): E2E 43/43; `ai.xml` do `emit` + `render_ai_file` sinh nạp được vào wazuh-manager thật,
   event thật từ agent demo-web ra alert bóng `WZH-109001` (Linux) và `WZH-109003` (web).
-- **Gỡ rule AI cuối cùng / ngoại lệ cuối cùng hỏng:** khi không còn khối nào, `render_ai_file` (và `wazuh_exceptions._render`) ghi
-  `<group name="siem,ai,">` rỗng; Wazuh 4.14.8 từ chối khi reload (`Failed to reload ruleset: Group 'group' without any rule.`),
-  `write_dynamic` giữ file cũ, thao tác trên console báo lỗi. Thấy ở project thử 08/11/2026, chưa sửa.
+- **Gỡ rule AI cuối cùng / ngoại lệ cuối cùng (đã sửa, Task 26b):** trước đây khi không còn khối nào, `render_ai_file` (và
+  `wazuh_exceptions._render`) ghi `<group>` rỗng và Wazuh từ chối reload, nên thao tác trên console báo lỗi. Cách đo: đo trên wazuh-manager 4.14.8 tạm: `<group>` rỗng và file chỉ có chú thích đều bị từ chối (reload `error: 1`, lần lượt `Group 'group' without any rule.` và `Configuration error`); xóa file thì reload thành công và rule biến mất. Cách sửa: `write_dynamic(name, None, api)` xóa file rồi reload (reload lỗi thì khôi phục file cũ và reload lại); `render_ai_file` không còn sinh group rỗng.
 - **Thư viện rule không có rule AI / ngoại lệ** (R83): Wazuh API không liệt kê `rules-dynamic/`, danh mục chưa đọc file trực tiếp (R17).
   Dashboard đếm rule AI theo đề xuất đã triển khai.
 - Thực thể XML trong trường Windows (R77, Task 19c) và rule Linux SigmaHQ (`siem-proc`) chưa làm.

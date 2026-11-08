@@ -927,7 +927,7 @@ gom event thành ít job. Bộ dựng log thô ra 29.323 event cho 30.186 mẫu 
 **Thử trên wazuh-manager thật** (project `p4e2e` cách ly, 08/11/2026): `ai.xml` do `emit` + `render_ai_file` sinh (3 đề xuất giả:
 Windows, Linux, web) nạp được qua `write_dynamic`, `ossec.log` không có 7612 / 7617 / 7619. Event thật từ agent `demo-web` (request
 `/zz9probe.bak`, tiến trình có `zz9probe` trong dòng lệnh) ra alert `WZH-109003` (web) và `WZH-109001` (Linux), mức medium, gắn
-`alert.shadow`. Khi trả file về rỗng (gỡ hết), Wazuh từ chối: `Failed to reload ruleset: Group 'group' without any rule.`; chưa sửa.
+`alert.shadow`. Khi trả file về rỗng (gỡ hết), Wazuh từ chối `<group>` rỗng (`Group 'group' without any rule.`); đã sửa (Task 26b): `write_dynamic(name, None, api)` xóa file rồi reload (reload lỗi thì khôi phục file cũ và reload lại).
 
 **SigmaHQ cùng bộ dịch** (Task 24): 30 rule Windows (`0966-sigmahq.xml`) bắt thêm 188 mẫu mới trên 17.306 mẫu tấn công Windows + web
 (cây Python ước 186), 60 ca test 0 sai (`RULES.md` mục 2.10, 4.6).
