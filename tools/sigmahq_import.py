@@ -11,6 +11,8 @@ mà không rớt trường log không ghi, dịch được sang Wazuh XML thành
 kỹ thuật ATT&CK có case playbook riêng, không khớp mẫu bình thường nào. Lô được chọn tham lam theo số mẫu tấn công MỚI
 bắt được: cây Python khớp mẫu chưa có Hit Wazuh `level >= 7` (không tính rule GENERIC). Wazuh là cổng quyết định (R66):
 ca CI `0966-sigmahq.yml` chạy qua Wazuh thật. Mỗi rule một ca dương (mẫu tấn công) và một ca âm (lệnh bình thường gần nhất).
+Rule khớp (cây Python) mẫu Wazuh đang phát hiện thì level tối đa 7, để không thắng rule đang bắt mẫu đó; `--measure` kiểm lại
+trên Wazuh thật (lượt có / không có lô) và đỏ nếu còn mẫu bị cướp.
 
 Cần dataset đã chuyển đổi (tools/fetch_datasets.py, tools/convert_datasets.py) và datasets/raw/sigma_all_rules.zip.
 """
@@ -75,6 +77,7 @@ class Candidate:
     hits: set[int] = field(default_factory=set)      # chỉ số mẫu tấn công chưa Hit Wazuh mà cây Python khớp
     pos: dict[str, Any] | None = None                # mẫu dương / âm của ca test (item của wazuh_coverage.load_items)
     neg: dict[str, Any] | None = None
+    level: int = 0                                   # level Wazuh khi ghi (pick đặt)
 
     @property
     def title(self) -> str:
@@ -168,13 +171,21 @@ def pick(cands: list[Candidate], items: list[dict], covered: set[int], batch: in
         picked.append(best)
         got |= best.hits
         pool.remove(best)
+    done = [it for it in items if it["i"] in covered]
+    for c in picked:
+        cond = Condition(c.tree)
+        # rule khớp mẫu Wazuh ĐANG phát hiện không được thắng rule đang bắt nó (thắng ở tầng cha là cắt cây con, alert thật thành
+        # bóng; đo 08/11/2026: SHQ-018 level 10 cướp 92024, SHQ-003 cướp 105013): level tối đa 7, thua rule >= 8, hòa thì rule nạp trước thắng
+        c.level = LEVEL[c.row["level"]]
+        if any(it["domain"] == c.domain and cond.match(it["doc"]) for it in done):
+            c.level = min(c.level, MIN_LEVEL)
     by_i = {it["i"]: it for it in items}
     conds = [Condition(c.tree) for c in picked]
     kept: list[Candidate] = []
     for k, c in enumerate(picked):
         # Wazuh chọn rule anh em level cao nhất, cùng level thì rule nạp trước (id nhỏ): mẫu dương không được bị rule
         # SigmaHQ khác của lô che, nếu không ca dương báo nhầm id rule kia
-        beat = [conds[m] for m, d in enumerate(picked) if m != k and (LEVEL[d.row["level"]], -m) > (LEVEL[c.row["level"]], -k)
+        beat = [conds[m] for m, d in enumerate(picked) if m != k and (d.level, -m) > (c.level, -k)
                 and d.domain == c.domain]
         own = [i for i in sorted(c.hits) if not any(b.match(by_i[i]["doc"]) for b in beat)]
         if not own:
@@ -219,7 +230,7 @@ def write_batch(picked: list[Candidate], *, rules_file: Path, cases_file: Path, 
     for c in picked:
         if c.sigma_id in have:
             continue
-        em = emit(c.tree, domain=c.domain, first_id=nid, level=LEVEL[c.row["level"]], code=f"{PREFIX}-{nid - first_id + 1:03d}",
+        em = emit(c.tree, domain=c.domain, first_id=nid, level=c.level, code=f"{PREFIX}-{nid - first_id + 1:03d}",
                   title=c.title, techniques=c.techniques, groups=["siem", "sigmahq"], shadow_since=today,
                   info={"sigmahq_id": c.sigma_id, "author": str(c.row.get("author") or "")})
         body += em.xml

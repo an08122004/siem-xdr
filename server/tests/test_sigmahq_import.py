@@ -139,3 +139,15 @@ def test_stolen_lists_samples_that_lose_a_non_batch_detection():
     mine = {1: 108000, 2: 105005, 3: 108004, 5: 108001}
     assert imp.stolen(base, mine) == {1: (92023, 108000), 4: (60103, None)}
     assert imp.stolen(base, base) == {}
+
+
+def test_rule_overlapping_a_detected_sample_is_capped_at_level_7(tmp_path):
+    """I1 (đo 08/11/2026): SHQ-018 level 10 cướp 92024 (L14, dưới 92023 L8), SHQ-003 cướp 105013 (L7). Rule lô khớp (cây
+    Python) mẫu Wazuh ĐANG phát hiện thì level tối đa 7: thua rule gốc level >= 8, hòa level 7 thì rule nạp trước thắng."""
+    row, text = sigma_rule("rules/a.yml", "Rundll32 JavaScript", JS, EVASION)          # high -> 10
+    cands, _ = imp.candidates(ITEMS, [row], {row["path"]: text}, CONFIG)
+    assert imp.pick(cands, ITEMS, covered=set(), batch=30)[0].level == 10
+    picked = imp.pick(cands, ITEMS, covered={0}, batch=30)                              # mẫu 0 đã có phát hiện
+    assert picked[0].level == 7
+    imp.write_batch(picked, rules_file=tmp_path / "r.xml", cases_file=tmp_path / "c.yml", first_id=108000, today="2026-11-20")
+    assert ET.fromstring((tmp_path / "r.xml").read_text(encoding="utf-8")).find(".//rule").get("level") == "7"
