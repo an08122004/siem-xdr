@@ -8,7 +8,7 @@
 - Cây điều kiện Python của `sigma.compile_rule` vẫn là bộ tìm nhanh. Vòng tách / nới / tổng quát hóa vế cần chạy lại hàng trăm lần.
 - Ứng viên cuối được dịch sang XML (`ai/wazuh_xml.emit`) rồi bơm log thô của dataset vào một manager Wazuh cô lập (`wazuh-sandbox`). Ngưỡng tính trên alert Wazuh thật: Wazuh là cổng quyết định.
 - Rule đạt được ghi vào `rules-dynamic/ai.xml` ở chế độ bóng (nhóm `shadow`). Bật chính thức hay gỡ đều dựng lại file từ các đề xuất đã triển khai trong ES.
-- SigmaHQ dùng cùng bộ dịch, ghi `0108-sigmahq.xml` tĩnh và kiểm bằng CI.
+- SigmaHQ dùng cùng bộ dịch, ghi `0966-sigmahq.xml` tĩnh và kiểm bằng CI.
 
 **Tech Stack:** Python 3.12 (pytest), Wazuh manager 4.14.8 (pcre2, analysisd queue socket), Docker Compose (profile `ai`), Elasticsearch 8 (index `ai-rule-proposals`, `siem-alerts`), Ollama `qwen3.5:9b`.
 
@@ -59,7 +59,7 @@
 | 21 | Cổng Wazuh cho rule AI mới + khoảng trống tính trên Wazuh (`ai/wazuh_gate.py`, worker, validate) | 19, 20 |
 | 22 | Duyệt / bật chính thức / gỡ rule AI vào `ai.xml` (gỡ 409) | 19 (giao diện đề xuất ở Interfaces Task 21) |
 | 23 | Ngoại lệ AI cho rule Wazuh ồn → `wazuh_exceptions` | — |
-| 24 | SigmaHQ lô 1 → `0108-sigmahq.xml` + ca CI | 19, 20 |
+| 24 | SigmaHQ lô 1 → `0966-sigmahq.xml` + ca CI | 19, 20 |
 | 25 | Xóa engine YAML | 21–24 |
 | 26 | Tài liệu, phán quyết R66–R74, triển khai thử | 25 |
 
@@ -76,7 +76,7 @@ Các task 21, 22, 23 cùng sửa `worker.py`, `validate.py`, `deploy.py`. Gộp 
 - Python để chạy test: `PY=D:/GSANM/BTL/siem-xdr/server/.venv/Scripts/python`. Chạy từ `server/`: `$PY -m pytest tests/<file> -q`. Bộ đầy đủ: `$PY -m pytest -q` (CI: `working-directory: server`, `python -m pytest -q`).
 - Wazuh manager 4.14.8. Sandbox dùng đúng `image:` của service `wazuh-manager` trong `docker-compose.yml`.
 - Dải id (`server/siem/wazuh_rules.py` `ID_RANGES`):
-  - `0108-sigmahq.xml` 108000–108999;
+  - `0966-sigmahq.xml` 108000–108999;
   - `ai.xml` 109000–109999;
   - `exceptions.xml` 110000–110999.
   - Ứng viên trong sandbox: `CANDIDATE_BASE = 119000`, chỉ tồn tại trong sandbox.
@@ -97,7 +97,7 @@ Các task 21, 22, 23 cùng sửa `worker.py`, `validate.py`, `deploy.py`. Gộp 
 
 1. **Rule mới thắng rule gốc cùng cha và cắt cây con** (kể cả khi đang bóng: bóng chỉ là cờ của cầu nối, Wazuh vẫn chọn rule thắng). Hệ quả là mất alert thật. Mong đợi: cổng chặn.
    - Test `test_gate_blocks_candidate_that_steals_stock_alert` (Task 21).
-   - Ca `0998-stock-real-alerts.yml` vẫn xanh với `0108` (Task 24).
+   - Ca `0998-stock-real-alerts.yml` vẫn xanh với `0966` (Task 24).
 2. **Sandbox hỏng**: manager không lên, canary không ra, job mồ côi, hết thời gian. Mong đợi: `SandboxError`, chu kỳ ghi lỗi, KHÔNG coi là "rule không bắt" hay "mọi mẫu là khoảng trống".
    - Test `test_run_raises_when_canary_missing`, `test_run_times_out_and_cleans_job` (Task 20).
    - Test `test_cycle_records_error_when_sandbox_unavailable` (Task 21).
@@ -778,12 +778,16 @@ git commit -m "feat(ai): đề xuất ngoại lệ cho rule Wazuh ồn qua wazuh
 
 ---
 
-### Task 24: SigmaHQ lô 1 → `0108-sigmahq.xml`
+### Task 24: SigmaHQ lô 1 → `0966-sigmahq.xml`
+
+> **Tên file:** kế hoạch ban đầu ghi `0108-sigmahq.xml`. Khi làm Task 24, Wazuh bỏ mọi rule của file đó (7617 / 7619) vì cha 61603
+> (`0595-win-sysmon_rules.xml`) và các cha gom nhóm 92025 / 92028 / 92042 / 92069 (`0800-sysmon_id_1.xml`) nạp sau theo tên file.
+> File đổi thành `0966-sigmahq.xml`, dải 108000–108999 giữ nguyên (R76). Mọi chỗ `0108` trong kế hoạch này đã sửa theo (Task 26).
 
 **Files:**
 - Create (chép từ WIP `.claude/worktrees/coverage-batch1`, sao lưu ở `D:\GSANM\BTL\backup\coverage-batch1-wip-2026-11-01\`): `tools/sigmahq_import.py`, `server/tests/test_sigmahq_import.py`. CHỈ chép hai file này. Các file sửa khác của WIP (base 544d985) đã cũ, bỏ.
-- Create (do tool sinh): `wazuh/manager/rules/0108-sigmahq.xml`, `wazuh/manager/tests/cases/0108-sigmahq.yml`.
-- Modify: `server/siem/wazuh_rules.py`: chỉ khi `ID_RANGES` chưa có `0108-sigmahq.xml`.
+- Create (do tool sinh): `wazuh/manager/rules/0966-sigmahq.xml`, `wazuh/manager/tests/cases/0966-sigmahq.yml`.
+- Modify: `server/siem/wazuh_rules.py`: chỉ khi `ID_RANGES` chưa có `0966-sigmahq.xml`.
 
 **Interfaces:**
 - Consumes:
@@ -801,11 +805,11 @@ Phạm vi lô 1: SigmaHQ `process_creation` Windows và `webserver`, status stab
 
 ```python
 def test_writes_xml_and_cases(tmp_path, three_sigma_rules):
-    out = sigmahq_import.write_batch(three_sigma_rules, rules_file=tmp_path / "0108-sigmahq.xml",
-                                     cases_file=tmp_path / "0108-sigmahq.yml", first_id=108000, today="2026-11-20")
-    rules = ET.fromstring((tmp_path / "0108-sigmahq.xml").read_text()).findall(".//rule")
+    out = sigmahq_import.write_batch(three_sigma_rules, rules_file=tmp_path / "0966-sigmahq.xml",
+                                     cases_file=tmp_path / "0966-sigmahq.yml", first_id=108000, today="2026-11-20")
+    rules = ET.fromstring((tmp_path / "0966-sigmahq.xml").read_text()).findall(".//rule")
     ids = {int(r.get("id")) for r in rules}
-    cases = yaml.safe_load((tmp_path / "0108-sigmahq.yml").read_text())
+    cases = yaml.safe_load((tmp_path / "0966-sigmahq.yml").read_text())
     assert min(ids) == 108000 and all("shadow" in r.findtext("group") for r in rules)
     assert {c["rule"] for c in cases if "rule" in c} == ids and {c["none"][0] for c in cases if "none" in c} == ids
 
@@ -841,8 +845,8 @@ def test_license_header(tmp_path, three_sigma_rules): ...assert "DRL 1.1" in đ�
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tools/sigmahq_import.py server/tests/test_sigmahq_import.py wazuh/manager/rules/0108-sigmahq.xml wazuh/manager/tests/cases/0108-sigmahq.yml
-git commit -m "feat(rules): nhập lô 1 SigmaHQ (30 rule, chạy bóng) thành 0108-sigmahq.xml (Task 24)"
+git add tools/sigmahq_import.py server/tests/test_sigmahq_import.py wazuh/manager/rules/0966-sigmahq.xml wazuh/manager/tests/cases/0966-sigmahq.yml
+git commit -m "feat(rules): nhập lô 1 SigmaHQ (30 rule, chạy bóng) thành 0966-sigmahq.xml (Task 24)"
 ```
 
 - [ ] **Step 6: Hỏi chủ dự án rồi mới xóa worktree `coverage-batch1`**
@@ -915,7 +919,7 @@ git commit -m "refactor: xóa engine rule YAML, giữ bộ đánh giá điều k
 
 **Files:**
 - Modify:
-  - `RULES.md`: viết lại mục 1–8. Nội dung: cơ chế XML, dải id, quy trình detection-as-code (lint → ca → stock_reach), chạy bóng bằng nhóm `shadow`, bảng `legacy_map`, SigmaHQ `0108`, rule AI `ai.xml`.
+  - `RULES.md`: viết lại mục 1–8. Nội dung: cơ chế XML, dải id, quy trình detection-as-code (lint → ca → stock_reach), chạy bóng bằng nhóm `shadow`, bảng `legacy_map`, SigmaHQ `0966`, rule AI `ai.xml`.
   - `README.md` §3.
   - `SOC-OPERATIONS.md` mục 4: bật chính thức rule AI trên console, tiêu chí 7 ngày / 5 alert / 30%.
   - `AI-README.md`: đầu ra XML, sandbox, cổng Wazuh, kết quả chạy thử của Task 21, mục mới §9.11.
@@ -949,9 +953,47 @@ git commit -m "docs: rule AI và SigmaHQ ra Wazuh XML, sandbox, R66–R74 (Task 
 
 ## Ngoài phạm vi
 
-- **Đổi model AI** (mục tiêu thứ 4 ban đầu). Sau Task 21, `python -m siem.ai.benchmark` chạy được trên cổng Wazuh để so các model ứng viên. Chọn model là việc của chủ dự án.
+- **Đổi model AI** (mục tiêu thứ 4 ban đầu). Sau Task 21, `tools/bench_ai_models.py` chạy qua cổng Wazuh để so các model ứng viên (`ai/benchmark.py` đo rule YAML, đã xóa ở Task 25, R78). Chọn model là việc của chủ dự án.
 - SigmaHQ Linux (`siem-proc`), EVTX mẫu không có log thô, và bơm lại `siem-events` thật vào sandbox (R74).
 
 ## Kết quả đo P4
 
-(Điền khi chạy Task 19 Step 1, Task 20 Step 1, Task 21 Step 5, Task 24 Step 4.)
+Gom ở Task 26 từ báo cáo Task 19 đến 25 (`.superpowers/sdd/2026-11-06-p4-ai-wazuh-xml/`). Wazuh manager 4.14.8, manager tạm / sandbox
+không nối mạng, không đụng stack thật.
+
+**S3 (Task 19, bộ dịch trên Wazuh thật):**
+- Lookahead pcre2 `(?i)^(?=[\s\S]*?abc)(?![\s\S]*?xyz)` trên `commandLine` khớp đúng ("xx abc yy" ra 119010; "abc xyz" và "zzz" không ra).
+- `(?:'|%27)` trong `<url type="pcre2">` khớp cả dạng thô lẫn mã hóa (`/a?id=1'` và `/a?id=1%27` ra 119020, `/a?id=1` không ra).
+- `<protocol>` và `<id>` nhận pcre2: chỉ POST 404 ra 119021.
+- Hai anh em 119000 (level 7) và 119001 (level 10) dưới 61603 cùng khớp một event: alert là 119001 (xác nhận R70).
+
+**Task 19b / 21 (eventchannel và cha Windows):**
+- Eventchannel nhân đôi dấu `\` trong `win.eventdata.*`: một dấu `\` không khớp, hai dấu thì khớp. Bộ dịch viết `\` thành
+  `(?:\x5c){1,2}`, `EMITTER_VERSION` 2.
+- Rule gom level 0 92025 / 92028 / 92042 / 92069 (`0800-sysmon_id_1.xml`) nuốt event Sysmon 1 trước anh em dưới 61603. Cha Windows
+  thành `61603,92025,92028,92042,92069` (R75). Đo lại: reg add, PowerShell chạy script, netsh, cha WmiPrvSE, image thường đều ra ứng
+  viên; `reg save HKLM\SAM` vẫn ra 92026 (level 14), ứng viên level 10 không cướp.
+
+**S4 (Task 20, sandbox):**
+- `wazuh-control restart` tới khi file state cập nhật: 13,4 / 14,2 / 11,1 giây (11–14 giây); job IT 3 event khoảng 36 giây.
+- Header `(sbx-<ident>)`: alert có `agent.name = sbx-<ident>`, `location` chỉ còn đường dẫn; hai dòng giống hệt khác ident ra hai alert riêng.
+- 50.000 event: vòng gửi cũ (không chờ hàng đợi) rơi 7.591/50.000 (15%); thêm chờ khi hàng đợi analysisd > 20%: 50.000 event 73 giây,
+  0 rơi. `golden_events` toàn dataset: 29.323 event cho 30.186 mẫu (apache 25.088, eventchannel 2.889, siem-proc 1.346), dựng 5,8 giây.
+
+**Task 21 Step 5 (chu kỳ thật, project `p4gate`, GPU, `qwen3.5:9b`):**
+- `errors: []`; 5 đề xuất: 2 qua cổng: linux-T1552.001 (bắt 19/19 mẫu kiểm tra, báo nhầm 0/200, che 0) và web `csic2010:backup-file`
+  (bắt 1.190/1.307, báo nhầm 0/10.000, che 0); 3 invalid (windows-T1548.002 do Wazuh: 0/16, 20 mẫu chỉ Python khớp vì lỗi `\`;
+  windows-T1547.001 và linux-T1059.004 do Python).
+- 4 job sandbox: nền 29.323 event 55 giây (đo lại, không có máy ngủ chen giữa), ứng viên 36–50 giây (Linux 36,2, Windows 37,2, web 49,9).
+- Khoảng trống: 16.882/19.315 mẫu tấn công chưa được Wazuh bắt (có log thô: web 13.604/15.088, Windows 2.144/2.218, Linux 1.134/1.146);
+  863 mẫu Splunk không có log thô không tính.
+
+**Task 24 Step 4 (SigmaHQ lô 1):**
+- 30 rule Windows 108000–108029, 60 ca 0 sai trên manager tạm; lint 0 lỗi, `ossec.log` sạch, `wazuh_stock_reach.py` 0 lỗi.
+- 188 mẫu tấn công mới chỉ SigmaHQ bắt trên 17.306 mẫu Windows + web (cây Python ước 186), không event bị bỏ. Lô không có rule web.
+- Rule Windows có `>`, `<`, `&` bị bỏ: Wazuh giữ thực thể XML trong `win.eventdata.*` (108017), Task 19c hoãn (R77).
+
+**Task 26 (kiểm tra cuối, project `p4e2e` cách ly, 08/11/2026):** unit test 660 đạt / 34 bỏ qua; lint 11 file 0 lỗi; E2E 43/43;
+`ai.xml` do `emit` + `render_ai_file` sinh nạp được vào wazuh-manager thật và ra alert bóng `WZH-109001` / `WZH-109003` từ event thật
+của agent; gỡ tới file rỗng bị Wazuh từ chối (`Group 'group' without any rule.`), chưa sửa. `GET /rules` không liệt kê
+`rules-dynamic/` (R83).

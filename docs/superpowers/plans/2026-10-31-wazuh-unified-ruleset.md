@@ -116,7 +116,7 @@ Dải id theo file (lint ở Task 4 đọc bảng này từ `wazuh_rules.ID_RANG
 | `0965-windows.xml` | 105000–105999 |
 | `0106-fim.xml` | 106000–106999 |
 | `0845-ti.xml` | 107000–107999 (đổi tên từ `0107-ti.xml`: phải xếp sau 0840-win_event_channel.xml và 0541-network.xml) |
-| `0108-sigmahq.xml` | 108000–108999 |
+| `0966-sigmahq.xml` (kế hoạch ban đầu ghi `0108`; đổi vì cha 61603 / 92025... ở file gốc 0595 / 0800 phải nạp trước, R76) | 108000–108999 |
 | `rules-dynamic/ai.xml` | 109000–109999 |
 | `rules-dynamic/exceptions.xml` | 110000–110999 |
 | `0190-tuning.xml` | chỉ `overwrite="yes"` trên id < 100000 |
@@ -397,14 +397,16 @@ Mỗi rule mới có nhóm `siem,<lĩnh vực>,shadow,legacy_<mã>,` và `<info 
 
 ---
 
-## P4 — Sau v1.0 (từ 17/11)
+## P4 — Sau v1.0 (từ 17/11): xem [2026-11-06-p4-ai-wazuh-xml.md](2026-11-06-p4-ai-wazuh-xml.md)
+
+> Đã làm 06–08/11/2026 theo kế hoạch riêng ở file trên (Task 19 đến 26). Phác thảo dưới đây giữ làm lịch sử.
 
 **Kế hoạch chi tiết (06/11/2026): `docs/superpowers/plans/2026-11-06-p4-ai-wazuh-xml.md`** — đánh số lại thành Task 19–26 (thêm sandbox và ngoại lệ AI). Phác thảo dưới đây giữ để đối chiếu. Chúng phụ thuộc kết quả P2 (định dạng ca test, `wazuh_fields`).
 
 - **Task 19 — Sigma → XML:** `server/siem/ai/wazuh_xml.py: emit(sigma_rule: dict, rule_id: int) -> str`, dùng cây điều kiện của `sigma.py` và `wazuh_fields`. Mỗi vế OR của DNF thành một rule con cùng mã. `not` → `negate="yes"`. Không ánh xạ được trường → `SigmaError`. Test: 20 rule SigmaHQ process_creation/webserver đã biên dịch được (theo AI-README §9.5) → XML qua lint + logtest khớp ca của chính rule đó.
 - **Task 20 — Kiểm định AI trên Wazuh:** `ai/validate.py` thay `replay` bằng bơm tập train/test/bình thường vào manager tạm (cách `tools/wazuh_coverage.py`), giữ các ngưỡng recall/báo nhầm hiện có. Tăng `GENERATOR_REVISION`.
 - **Task 21 — Triển khai / chạy bóng / gỡ rule AI dạng XML:** `ai/deploy.py` `approve`/`promote`/`rollback` ghi `rules-dynamic/ai.xml` qua `write_dynamic`, dải 109000–109999. `shadow_stats` giữ nguyên (đếm alert theo `rule.id`).
-- **Task 22 — SigmaHQ → XML:** `tools/sigmahq_import.py` (của phiên SigmaHQ, nhánh `feature/coverage-batch1`) xuất `0108-sigmahq.xml` qua `emit`. Lô 1 (30 rule) chạy bóng.
+- **Task 22 — SigmaHQ → XML:** `tools/sigmahq_import.py` (của phiên SigmaHQ, nhánh `feature/coverage-batch1`) xuất `0966-sigmahq.xml` qua `emit` (kế hoạch ban đầu ghi `0108-sigmahq.xml`, đổi tên vì thứ tự nạp, R76). Lô 1 (30 rule) chạy bóng.
 - **Task 23 — Xóa engine YAML:** engine trong `server/siem/detection/rules.py`, `detection/lint.py`, `detection/ruletest.py` + `server/rules/*.yml` + `server/rules/cases/` + `tools/rule_lint.py` + `covered_by`, sửa test liên quan.
 - **Task 24 — Tài liệu:**
   - RULES.md viết lại (cơ chế XML, dải id, quy trình detection-as-code, bảng `legacy_map`)
