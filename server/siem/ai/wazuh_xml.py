@@ -1,6 +1,6 @@
 """Dịch cây điều kiện Sigma (`sigma.compile_rule`) sang rule Wazuh XML (R66-R71).
 
-Ngữ nghĩa giữ như `detection.rules.Condition`: mọi phép so chuỗi không phân biệt hoa thường, `regex` cũng vậy trừ khi
+Ngữ nghĩa giữ như `condition.Condition`: mọi phép so chuỗi không phân biệt hoa thường, `regex` cũng vậy trừ khi
 `case_sensitive: true`, `neq` / `not_contains` là lá âm. Cách dịch:
   - cây -> dạng tuyển chuẩn (DNF); mỗi vế thành một <rule> anh em (R69), tối đa sigma.MAX_TERMS vế;
   - trong một vế, mỗi trường Wazuh có đúng MỘT phần tử pcre2 `(?i)^(?=...)(?!...)`: điều kiện dương là lookahead, phủ định là
@@ -15,7 +15,7 @@ import re
 from typing import NamedTuple
 from xml.sax.saxutils import escape
 
-from ..detection.rules import regex_risk
+from .condition import regex_risk
 from ..wazuh_fields import escape_literal
 from .sigma import MAX_TERMS, SigmaError
 

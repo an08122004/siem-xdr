@@ -1,8 +1,6 @@
 # CI cho kho mã + kho rule (detection-as-code, SOC-OPERATIONS.md mục 4). Mọi thay đổi rule phải qua đây trước khi merge.
-#   test     unit test server (rule engine, SOAR, API, AI, Wazuh...) trên Python 3.12 như image server
-#   rules    kiểm tra kho rule: metadata bắt buộc, ReDoS, ca test dương / âm, playbook riêng, độ phủ ATT&CK ưu tiên;
-#            xuất layer ATT&CK Navigator làm artifact (chạy cả hằng tuần để theo dõi độ phủ)
-#   wazuh-rules  chạy ca test log gốc (wazuh/manager/tests/cases) qua wazuh-manager thật: logtest + bơm hàng đợi
+#   test     unit test server (SOAR, API, AI, cầu nối Wazuh...) trên Python 3.12 như image server
+#   wazuh-rules  lint rule XML + chạy ca test log gốc (wazuh/manager/tests/cases) qua wazuh-manager thật: logtest + bơm hàng đợi
 #   vector   unit test cấu hình Vector (Wazuh -> Kafka)
 #   compose  docker compose config hợp lệ (secret giả, không chạy container)
 name: CI
@@ -12,7 +10,7 @@ on:
     branches: [main, "feature/**"]
   pull_request:
   schedule:
-    - cron: "0 1 * * 1"          # 08:00 thứ Hai giờ Việt Nam: layer ATT&CK hằng tuần
+    - cron: "0 1 * * 1"          # 08:00 thứ Hai giờ Việt Nam: chạy lại hằng tuần
   workflow_dispatch:
 
 permissions:
@@ -32,27 +30,6 @@ jobs:
       - name: Unit test
         working-directory: server
         run: python -m pytest -q
-
-  rules:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: server/requirements.txt
-      - run: pip install -r server/requirements.txt
-      - name: Kiểm tra kho rule
-        run: python tools/rule_lint.py --layer build/attack-layer.json --markdown build/rule-lint.md
-      - name: Báo cáo vào trang tóm tắt của lần chạy
-        if: always()
-        run: cat build/rule-lint.md >> "$GITHUB_STEP_SUMMARY" || true
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: attack-layer
-          path: build/
 
   # Dựng wazuh-manager 4.14.8 đúng như compose (rule, decoder, ossec.conf, entrypoint của repo, secret sinh bằng
   # init_secrets.py) nhưng không cần es-certs / Elasticsearch: chứng chỉ API tự ký bằng openssl, nên chạy test với --insecure.

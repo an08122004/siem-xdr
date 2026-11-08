@@ -1,4 +1,5 @@
-"""Test phần AI hỗ trợ viết rule: ngoại lệ, kiểm định, worker (LLM giả lập), duyệt/gỡ.
+"""Test phần AI hỗ trợ viết rule: kiểm định rule mới, worker (LLM giả lập), duyệt/gỡ (ngoại lệ Wazuh:
+test_ai_exceptions_wazuh.py).
 Không cần Ollama / Elasticsearch."""
 from __future__ import annotations
 
@@ -8,27 +9,14 @@ from pathlib import Path
 import pytest
 
 from siem.ai import deploy
-from siem.ai.dataset import EventGroup, RuleEvidence
+from siem.ai.condition import regex_risk
+from siem.ai.dataset import RuleEvidence
 from siem.ai.golden import Labeled, PublicDatasets
 from siem.ai.llm import LLMResult
-from siem.ai.validate import build_condition, scope_match, validate_exception, validate_new_rule
+from siem.ai.validate import build_condition, validate_new_rule
 from siem.ai.worker import AIWorker
-from siem.detection.rules import Rule, RuleEngine, load_rules, regex_risk, rules_fingerprint
 
 T0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
-
-RULE_LOGIN = {
-    "id": "T-001", "title": "Đăng nhập admin thất bại", "severity": "medium", "type": "match",
-    "condition": {"all": [{"field": "event.category", "op": "eq", "value": "web"},
-                          {"field": "url.path", "op": "eq", "value": "/admin/login"},
-                          {"field": "http.response.status_code", "op": "eq", "value": 401}]},
-}
-RULE_BURST = {
-    "id": "T-002", "title": "Nhiều lỗi 401", "severity": "medium", "type": "threshold",
-    "condition": {"all": [{"field": "event.category", "op": "eq", "value": "web"},
-                          {"field": "http.response.status_code", "op": "eq", "value": 401}]},
-    "threshold": {"count": 3, "window": 60, "group_by": ["source.ip"]},
-}
 
 
 def ev(ip, path="/admin/login", status=401, sec=0, ua="Mozilla/5.0", i=0):
@@ -37,86 +25,9 @@ def ev(ip, path="/admin/login", status=401, sec=0, ua="Mozilla/5.0", i=0):
             "user_agent": {"original": ua}, "agent": {"id": "web-01"}}
 
 
-def write_rules(tmp: Path, rules=(RULE_LOGIN, RULE_BURST)) -> Path:
-    import yaml
-    (tmp / "rules").mkdir(exist_ok=True)
-    (tmp / "rules" / "base.yml").write_text(yaml.safe_dump(list(rules), allow_unicode=True), encoding="utf-8")
-    for d in ("ai", "exceptions"):
-        (tmp / "rules" / d).mkdir(exist_ok=True)
-    return tmp / "rules"
-
-
-# ------------------------------------------------------------------ rule engine: ngoại lệ
-def test_exceptions_loaded_and_applied(tmp_path):
-    rd = write_rules(tmp_path)
-    (rd / "exceptions" / "x.yml").write_text(
-        "- id: EXC-1\n  rule_id: T-002\n  condition: {field: source.ip, op: cidr, value: 10.9.0.0/16}\n"
-        "- id: EXC-2\n  rule_id: KHONG-CO\n  condition: {field: source.ip, op: eq, value: 1.1.1.1}\n", encoding="utf-8")
-    rules = {r.id: r for r in load_rules(rd)}
-    assert [e.id for e in rules["T-002"].exceptions] == ["EXC-1"] and not rules["T-001"].exceptions
-    eng = RuleEngine(list(rules.values()))
-    scanner = [d for i in range(5) for d in eng.process(ev("10.9.1.1", "/x", sec=i))]
-    other = [d for i in range(5) for d in eng.process(ev("10.1.1.1", "/x", sec=i))]
-    assert scanner == [] and [d.rule.id for d in other] == ["T-002"]
-
-
-def test_rules_fingerprint_changes(tmp_path):
-    rd = write_rules(tmp_path)
-    fp1 = rules_fingerprint(rd)
-    (rd / "exceptions" / "new.yml").write_text("[]", encoding="utf-8")
-    assert rules_fingerprint(rd) != fp1
-
-
 def test_regex_guard():
     assert regex_risk("(a+)+$") and regex_risk("x" * 400) and regex_risk("([")
     assert regex_risk(r"^/admin/(login|logout)$") is None
-
-
-def test_scope_match():
-    r = Rule.from_dict(RULE_LOGIN)
-    assert scope_match(r, ev("1.1.1.1", "/khac", 200))          # cùng loại event web -> rule có xem xét
-    assert not scope_match(r, {"event": {"category": "authentication"}})
-
-
-# ------------------------------------------------------------------ kiểm định ngoại lệ
-def _exc(clauses, match="all"):
-    return {"id": "EXC-t", "rule_id": "T-001", "condition": build_condition(match, clauses)}
-
-
-def test_exception_good_passes():
-    rule = Rule.from_dict(RULE_LOGIN)
-    fp = [ev("10.50.0.7", sec=i) for i in range(5)]           # máy giám sát nội bộ, bị báo nhầm
-    tp = [ev("203.0.113.9", sec=i) for i in range(3)]         # case đã xác nhận thật
-    replay_ev = fp + tp
-    v = validate_exception(rule, _exc([{"field": "source.ip", "op": "eq", "value": "10.50.0.7"}]), fp, tp, None, replay_ev)
-    assert v.passed, [c for c in v.checks if not c.ok]
-    assert v.metrics["tp_matched"] == 0 and v.metrics["fp_matched"] == 5 and v.metrics["alerts_after"] < v.metrics["alerts_before"]
-
-
-def test_exception_suppressing_true_positive_is_blocked():
-    rule = Rule.from_dict(RULE_LOGIN)
-    fp = [ev("10.50.0.7")]
-    tp = [ev("10.50.0.8")]
-    v = validate_exception(rule, _exc([{"field": "source.ip", "op": "cidr", "value": "10.50.0.0/24"}]), fp * 3, tp, None, fp + tp)
-    assert not v.passed and any(c.name == "không tắt sự cố thật" and not c.ok for c in v.checks)
-
-
-def test_exception_too_broad_or_fake_field_blocked():
-    rule = Rule.from_dict(RULE_LOGIN)
-    fp = [ev("10.50.0.7")] * 3
-    broad = validate_exception(rule, _exc([{"field": "event.category", "op": "eq", "value": "web"}]), fp, [], None, fp)
-    assert not broad.passed and any(c.name == "đủ hẹp" and not c.ok for c in broad.checks)
-    fake = validate_exception(rule, _exc([{"field": "khong.ton.tai", "op": "eq", "value": "x"}]), fp, [], None, fp)
-    assert not fake.passed and any(c.name == "trường có thật" and not c.ok for c in fake.checks)
-    assert fake.risk == "cao"  # không có case thật / mẫu vàng để đối chứng
-
-
-def test_exception_must_keep_golden_samples():
-    rule = Rule.from_dict(RULE_LOGIN)
-    golden = PublicDatasets(directory=Path("."), attack=[Labeled(ev("198.51.100.1"), {"dataset": "t"})])
-    fp = [ev("198.51.100.1")] * 3
-    v = validate_exception(rule, _exc([{"field": "source.ip", "op": "eq", "value": "198.51.100.1"}]), fp, [], golden, fp)
-    assert not v.passed and any(c.name == "giữ bộ mẫu vàng" and not c.ok for c in v.checks)
 
 
 # ------------------------------------------------------------------ kiểm định rule mới
@@ -127,13 +38,13 @@ def _new(clauses):
 def test_new_rule_validation():
     susp = [ev(f"10.2.0.{i}", "/admin/backup.zip", 200, sec=i) for i in range(10)]
     normal = [ev(f"10.3.0.{i}", "/index.html", 200, sec=i) for i in range(50)]
-    good = validate_new_rule(_new([{"field": "url.path", "op": "endswith", "value": ".zip"}]), [],
+    good = validate_new_rule(_new([{"field": "url.path", "op": "endswith", "value": ".zip"}]),
                              susp[:5], susp[5:], normal, normal, 20)
     assert good.passed and good.metrics["test_recall"] == 1.0 and good.metrics["normal_hits"] == 0
-    noisy = validate_new_rule(_new([{"field": "http.response.status_code", "op": "eq", "value": 200}]), [],
+    noisy = validate_new_rule(_new([{"field": "http.response.status_code", "op": "eq", "value": 200}]),
                               susp[:5], susp[5:], normal, normal, 20)
     assert not noisy.passed and any(c.name == "báo nhầm trên dữ liệu bình thường" and not c.ok for c in noisy.checks)
-    useless = validate_new_rule(_new([{"field": "url.path", "op": "eq", "value": "/khong-co"}]), [],
+    useless = validate_new_rule(_new([{"field": "url.path", "op": "eq", "value": "/khong-co"}]),
                                 susp[:5], susp[5:], normal, normal, 20)
     assert not useless.passed and any(c.name == "bắt mẫu nghi vấn" and not c.ok for c in useless.checks)
 
@@ -168,8 +79,8 @@ class NoWazuh:
 
 
 class FakeDS:
-    def __init__(self, evidence, events, groups=(), history=()):
-        self._e, self._ev, self._g, self._h = evidence, events, list(groups), list(history)
+    def __init__(self, evidence, events, history=()):
+        self._e, self._ev, self._h = evidence, events, list(history)
 
     def evidence(self):
         return self._e
@@ -177,16 +88,11 @@ class FakeDS:
     def replay_events(self):
         return self._ev
 
-    def event_groups(self, min_count):
-        return self._g
-
     def proposals(self, statuses=None, since="", size=500):
         return self._h
 
 
 def test_worker_cycle_creates_validated_proposals(tmp_path, monkeypatch):
-    rd = write_rules(tmp_path)
-    monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
     fp = [ev("10.50.0.7", sec=i) for i in range(4)]
     evidence = {"WZH-5710": RuleEvidence(fp=fp, tp=[ev("203.0.113.9")], fp_alert_ids=["a1", "a2", "a3", "a4"])}
     golden = PublicDatasets(directory=Path("."),
@@ -201,7 +107,7 @@ def test_worker_cycle_creates_validated_proposals(tmp_path, monkeypatch):
                     "    sc-status: 200\n  condition: selection\n```\n",
     })
     saved = []
-    w = AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS(evidence, fp), save=saved.append,
+    w = AIWorker(None, llm, golden, ds_factory=lambda es: FakeDS(evidence, fp), save=saved.append,
                  gate_factory=NoWazuh)
     summary = w.run_cycle("an")
     kinds = {p["kind"]: p for p in saved}
@@ -270,15 +176,13 @@ def test_classify_web_attack_types():
 
 
 def test_dataset_gaps_grouped_by_type_and_app_specific_skipped(tmp_path, monkeypatch):
-    rd = write_rules(tmp_path)
-    monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
     attack = [web(f"/shop/img/logo{i}.gif.bak", i) for i in range(12)] + \
              [web(f"/shop/add.jsp?idA={i}&qty=2", i) for i in range(12)]
     golden = PublicDatasets(directory=Path("."), attack=[Labeled(d, {"dataset": "t"}) for d in attack],
                             normal=[Labeled(web(u, i), {"class": "normal"}) for i, u in enumerate(NORMAL_URLS * 5)])
     llm = FakeLLM({"new_rule": "title: Dò file .bak\nlevel: medium\nlogsource: {category: webserver}\ndetection:\n  sel:\n    cs-uri-stem|endswith: '.bak'\n  condition: sel\n"})
     saved = []
-    w = AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
+    w = AIWorker(None, llm, golden, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
                  gate_factory=NoWazuh)
     summary = w.run_cycle("an")
     assert [p["target"] for p in saved] == ["gap-dataset:t:backup-file"]
@@ -292,10 +196,10 @@ def test_new_rule_tied_to_dataset_app_blocked():
     susp = [web(f"/shop/img/logo{i}.gif.bak", i) for i in range(10)]
     normal = [web(u, i) for i, u in enumerate(NORMAL_URLS * 5)]
     tokens = {"shop", "img", "logo.gif"}
-    tied = validate_new_rule(_new([{"field": "url.path", "op": "startswith", "value": "/shop/img/"}]), [],
+    tied = validate_new_rule(_new([{"field": "url.path", "op": "startswith", "value": "/shop/img/"}]),
                              susp[:5], susp[5:], normal, [], 20, app_tokens=tokens)
     assert not tied.passed and any(c.name == "dùng chung được" and not c.ok for c in tied.checks)
-    generic = validate_new_rule(_new([{"field": "url.path", "op": "regex", "value": r"\.(bak|old)$"}]), [],
+    generic = validate_new_rule(_new([{"field": "url.path", "op": "regex", "value": r"\.(bak|old)$"}]),
                                 susp[:5], susp[5:], normal, [], 20, app_tokens=tokens | {"global"})
     assert generic.passed, generic.checks
 
@@ -303,8 +207,6 @@ def test_new_rule_tied_to_dataset_app_blocked():
 def test_retry_policy_depends_on_generator(tmp_path, monkeypatch):
     """Kiểm định loại -> chỉ chặn thử lại khi cùng model + prompt; người từ chối -> luôn chặn 30 ngày."""
     from siem.ai.worker import generator_id
-    rd = write_rules(tmp_path)
-    monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
     attack = [web(f"/shop/img/logo{i}.gif.bak", i) for i in range(12)]
     golden = PublicDatasets(directory=Path("."), attack=[Labeled(d, {"dataset": "t"}) for d in attack],
                             normal=[Labeled(web(u, i), {"class": "normal"}) for i, u in enumerate(NORMAL_URLS * 5)])
@@ -313,7 +215,7 @@ def test_retry_policy_depends_on_generator(tmp_path, monkeypatch):
 
     def run(history):
         saved = []
-        AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, [], history=history),
+        AIWorker(None, llm, golden, ds_factory=lambda es: FakeDS({}, [], history=history),
                  save=saved.append, gate_factory=NoWazuh).run_cycle("an")
         return [p["target"] for p in saved]
 
@@ -366,8 +268,6 @@ class SeqLLM:
 
 def test_dataset_rule_assembled_from_measured_patterns(tmp_path, monkeypatch):
     """Giữ vế Sigma bắt được tấn công ở tập train mà không khớp request bình thường; lượt sau hỏi riêng biến thể còn sót."""
-    rd = write_rules(tmp_path)
-    monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
     monkeypatch.setattr("siem.ai.worker.settings.AI_KNOWLEDGE_ROUND", False)   # test riêng ở test_ai_endpoint
     attack = [web(f"/shop/img/a{i:02d}.gif.bak", i) for i in range(12)] + \
              [web(f"/shop/img/b{i:02d}.gif.old", i) for i in range(12)]
@@ -384,7 +284,7 @@ def test_dataset_rule_assembled_from_measured_patterns(tmp_path, monkeypatch):
         "    cs-uri-stem|endswith: '.old'\n  condition: selection\n```",
     ])
     saved = []
-    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
+    AIWorker(None, llm, golden, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
              gate_factory=NoWazuh).run_cycle("an")
     p = saved[0]
     assert p["status"] == "pending", p["validation"]["checks"]
@@ -401,7 +301,7 @@ def test_dataset_rule_assembled_from_measured_patterns(tmp_path, monkeypatch):
 def test_new_rule_matching_ordinary_urls_blocked():
     susp = [web(f"/shop/img/{i}/", i) for i in range(10)]
     normal = [web(u, i) for i, u in enumerate(NORMAL_URLS[:3] * 5)]      # tập bình thường không có URL thư mục
-    val = validate_new_rule(_new([{"field": "url.path", "op": "endswith", "value": "/"}]), [],
+    val = validate_new_rule(_new([{"field": "url.path", "op": "endswith", "value": "/"}]),
                             susp[:5], susp[5:], normal, [], 20)
     checks = {c.name: c.ok for c in val.checks}
     assert checks["báo nhầm trên dữ liệu bình thường"] and not checks["không khớp URL thông thường"]
@@ -434,8 +334,6 @@ def test_thinking_turned_off_only_for_models_that_support_it():
 def test_too_long_answer_spoils_one_round_not_the_whole_proposal(tmp_path, monkeypatch):
     """Chạy thật 9/10: một câu trả lời vượt giới hạn token ở lượt kiến thức làm hỏng cả đề xuất SQLi."""
     from siem.ai.llm import LLMTooLong
-    rd = write_rules(tmp_path)
-    monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
     attack = [web(f"/shop/img/a{i:02d}.gif.bak", i) for i in range(12)]
     golden = PublicDatasets(directory=Path("."), attack=[Labeled(d, {"dataset": "t"}) for d in attack],
                             normal=[Labeled(web(u, i), {"class": "normal"}) for i, u in enumerate(NORMAL_URLS * 5)])
@@ -449,7 +347,7 @@ def test_too_long_answer_spoils_one_round_not_the_whole_proposal(tmp_path, monke
 
     llm = LongLLM(["detection:\n  sel:\n    cs-uri-stem|endswith: '.bak'\n  condition: sel\n"])
     saved = []
-    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
+    AIWorker(None, llm, golden, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
              gate_factory=NoWazuh).run_cycle("an")
     assert saved and saved[0]["status"] == "pending", saved
     assert "1024" in " ".join(saved[0]["llm"]["attempts"][1]["rejected"])
@@ -457,8 +355,6 @@ def test_too_long_answer_spoils_one_round_not_the_whole_proposal(tmp_path, monke
 
 def test_web_keeps_no_unverified_sigmahq_atoms(tmp_path, monkeypatch):
     """Chạy thật 9/10: cap=0 bị hiểu là 'mặc định 8' -> rule SQLi mang 30 vế SigmaHQ (CVE) chưa khớp mẫu train nào."""
-    rd = write_rules(tmp_path)
-    monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
     attack = [web(f"/shop/img/a{i:02d}.gif.bak", i) for i in range(12)]
     cve = {"id": "cve-1", "title": "Some CVE probe", "author": "X", "level": "high", "status": "test", "path": "rules/web/x.yml",
            "logsource": {"category": "webserver"}, "tags": ["attack.t1190"],
@@ -469,7 +365,7 @@ def test_web_keeps_no_unverified_sigmahq_atoms(tmp_path, monkeypatch):
     golden._sigma_tokens = [{"vulnerable", "endpoint", "backup", "probing"}]
     llm = SeqLLM(["detection:\n  sel:\n    cs-uri-stem|endswith: '.bak'\n  condition: sel\n"] * 10)
     saved = []
-    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
+    AIWorker(None, llm, golden, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
              gate_factory=NoWazuh).run_cycle("an")
     assert saved[0]["status"] == "pending"
     assert not [a for a in saved[0]["llm"]["atoms"] if a["source"] == "sigmahq"]

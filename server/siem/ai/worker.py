@@ -1,12 +1,11 @@
 """AI worker: mỗi chu kỳ tìm chỗ cần cải thiện rule -> hỏi LLM -> kiểm định -> lưu ĐỀ XUẤT chờ duyệt.
 
-Ba nguồn ứng viên:
-  1. exception   — rule có nhiều alert bị analyst đánh dấu false positive (nhãn thật từ case / console)
+Hai nguồn ứng viên:
+  1. exception   — rule Wazuh có nhiều alert bị analyst đánh dấu false positive (nhãn thật từ case / console)
   2. gap-dataset — mẫu tấn công trong dataset công khai mà Wazuh chưa bắt (alert của sandbox Wazuh, wazuh_gate.py;
                    rule mới cũng phải qua cổng Wazuh mới được chờ duyệt): web gom theo LOẠI tấn công
                    (attack_types.py), endpoint Windows / Linux gom theo KỸ THUẬT ATT&CK (Atomic Red Team);
                    tách tập đưa cho LLM / tập kiểm tra, xếp lượt xen kẽ web / Windows / Linux
-  3. gap-own     — nhóm event thật (module/category/action) chưa có rule nào xem xét
 Worker KHÔNG ghi file rule, KHÔNG có quyền sửa gì ngoài index ai-*.
 """
 from __future__ import annotations
@@ -19,16 +18,15 @@ import uuid
 from collections import Counter, defaultdict
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Callable, TypeVar
 
 import yaml
 
 from .. import settings
-from ..detection.rules import Rule, load_rules, regex_risk
+from .condition import Rule, regex_risk
 from ..pipeline.normalize import Doc, get
 from .attack_types import TYPES
-from .dataset import ESDataSource, EventGroup
+from .dataset import ESDataSource
 from .deploy import recheck_dataset_rule
 from .golden import OS_NAME, PublicDatasets
 from . import sigma, wazuh_xml
@@ -40,8 +38,8 @@ from .sandbox import SandboxError
 from .sigma import SigmaError
 from .wazuh_gate import WazuhGate
 from .wazuh_xml import EMITTER_VERSION, LEVEL
-from .validate import (Check, Validation, _app_specific, build_condition, common_program_only, describe, lab_wrapper,
-                       leaves_of, ordinary_hits, scope_match, validate_exception_wazuh, validate_new_rule, weak_values)
+from .validate import (Check, Validation, _app_specific, common_program_only, describe, lab_wrapper, leaves_of,
+                       ordinary_hits, validate_exception_wazuh, validate_new_rule, weak_values)
 
 log = logging.getLogger("ai.worker")
 OPEN = ["pending", "approved"]
@@ -110,17 +108,6 @@ def diverse(items: list[T], k: int, key: Callable[[T], str] = _path_key) -> list
     return out
 
 
-def rule_yaml(rule: Rule) -> str:
-    """Tìm lại YAML gốc của rule để đưa cho LLM (RAG: đúng rule cần tinh chỉnh)."""
-    path = settings.RULES_DIR / rule.source_file if rule.source_file else None
-    if path and path.exists():
-        text = path.read_text(encoding="utf-8")
-        m = re.search(rf"^- id: {re.escape(rule.id)}\n(?:(?!^- id: ).*\n?)*", text, re.M)
-        if m:
-            return m.group(0)
-    return f"- id: {rule.id}\n  title: {rule.title}\n  type: {rule.type}\n"
-
-
 def _test_id(x) -> str:
     return str(x.label.get("guid") or x.label.get("test") or "")
 
@@ -165,7 +152,7 @@ def split_by_test(items: list, variant: Callable[[Any], str]) -> tuple[list, lis
 
 class AIWorker:
     def __init__(self, es, llm: OllamaClient, golden: PublicDatasets | None,
-                 rules_dir: Path = settings.RULES_DIR, ds_factory: Callable[[Any], ESDataSource] = ESDataSource,
+                 ds_factory: Callable[[Any], ESDataSource] = ESDataSource,
                  save: Callable[[dict], None] | None = None, gate_factory: Callable[[], WazuhGate] | None = None):
         """gate_factory: tạo cổng Wazuh mới cho mỗi chu kỳ (job nền chạy lại mỗi chu kỳ). None = không có sandbox:
         bỏ nhánh khoảng trống (ghi lỗi), KHÔNG coi mọi mẫu là khoảng trống."""
@@ -173,7 +160,6 @@ class AIWorker:
         self.gate_factory = gate_factory
         self.llm = llm
         self.golden = golden
-        self.rules_dir = rules_dir
         self.ds_factory = ds_factory
         self.save = save or self._save_es
 
@@ -182,7 +168,6 @@ class AIWorker:
 
     # ------------------------------------------------------------------
     def run_cycle(self, requested_by: str | None = None) -> dict[str, Any]:
-        rules = load_rules(self.rules_dir)
         ds = self.ds_factory(self.es)
         history = ds.proposals(since="now-30d")
         gen = generator_id(self.llm.model)
@@ -218,7 +203,7 @@ class AIWorker:
             self._try(summary, target, lambda: self.propose_exception(rid, ev, ds, rejected[target]))
             budget -= 1
 
-        # 2) + 3) khoảng trống: kiểm định trên sandbox Wazuh. Sandbox hỏng -> ghi lỗi, bỏ hai nhánh này trong chu kỳ
+        # 2) khoảng trống: kiểm định trên sandbox Wazuh. Sandbox hỏng -> ghi lỗi, bỏ nhánh này trong chu kỳ
         # (Review Focus #2: không coi là "rule không bắt" hay "mọi mẫu là khoảng trống")
         try:
             if budget > 0 and self.golden and self.golden.attack:
@@ -236,20 +221,7 @@ class AIWorker:
                     if target in open_targets or target in recent_closed:
                         continue
                     self._try(summary, target,
-                              lambda: self.propose_dataset_rule(key, missed, rules, ds, rejected[target], gate))
-                    budget -= 1
-
-            # 3) nhóm event thật chưa có rule nào xem xét
-            if budget > 0:
-                for g in ds.event_groups(settings.AI_MIN_GROUP_EVENTS):
-                    if budget <= 0:
-                        break
-                    target = f"gap-own:{g.key_str}"
-                    if target in open_targets or target in recent_closed or not g.samples:
-                        continue
-                    if any(scope_match(r, s) for r in rules for s in g.samples):
-                        continue
-                    self._try(summary, target, lambda: self.propose_own_rule(g, rules, ds, rejected[target], gate))
+                              lambda: self.propose_dataset_rule(key, missed, ds, rejected[target], gate))
                     budget -= 1
         except SandboxError as e:
             summary["errors"].append(f"sandbox Wazuh lỗi, bỏ nhánh khoảng trống của chu kỳ: {e}")
@@ -428,10 +400,9 @@ class AIWorker:
                   for d in sorted(by_domain, key=lambda d: DOMAIN_ORDER.index(d) if d in DOMAIN_ORDER else 9)]
         return [q[i] for i in range(max(map(len, queues), default=0)) for q in queues if i < len(q)]
 
-    def _next_ai_id(self, rules: list[Rule], ds: ESDataSource) -> str:
-        nums = [int(m.group(1)) for rid in [r.id for r in rules] + [
-            (p.get("proposal") or {}).get("id", "") for p in ds.proposals(since="now-3650d", size=1000)]
-            if (m := re.match(r"AI-(\d+)$", str(rid)))]
+    def _next_ai_id(self, ds: ESDataSource) -> str:
+        nums = [int(m.group(1)) for p in ds.proposals(since="now-3650d", size=1000)
+                if (m := re.match(r"AI-(\d+)$", str((p.get("proposal") or {}).get("id", ""))))]
         return f"AI-{max(nums, default=0) + 1:03d}"
 
     # ------------------------------------------------------------------ rule mới (Sigma)
@@ -493,10 +464,10 @@ class AIWorker:
         items = sorted(missed, key=lambda x: str(get(x.doc, "url.original") or get(x.doc, "event.id")))
         return items[0::2], items[1::2]
 
-    def propose_dataset_rule(self, key: str, missed: list, rules: list[Rule], ds: ESDataSource,
-                             rejected: list[str], gate: WazuhGate | None = None) -> dict[str, Any]:
+    def propose_dataset_rule(self, key: str, missed: list, ds: ESDataSource, rejected: list[str],
+                             gate: WazuhGate | None = None) -> dict[str, Any]:
         if missed[0].label.get("technique"):
-            return self.propose_endpoint_rule(key, missed, rules, ds, rejected, gate)
+            return self.propose_endpoint_rule(key, missed, ds, rejected, gate)
         train, test = self._split(key, missed)          # tách tập: LLM chỉ thấy (một phần) tập train
         picked = diverse(train, 8, key=self.golden.variant)   # trải đều theo biến thể, biến thể đông trước
         shown = [x.doc for x in picked]
@@ -532,14 +503,14 @@ class AIWorker:
                                        app_tokens=self.golden.profile.app_tokens(),
                                        variant=self.golden.variant, what=what, community=community) \
             if web else (first, [])
-        return self._finish_new_rule(final, f"gap-dataset:{key}", rules, ds, [x.doc for x in train],
+        return self._finish_new_rule(final, f"gap-dataset:{key}", ds, [x.doc for x in train],
                                      [x.doc for x in test], key, ["dataset-gap", kind], domain,
                                      app_tokens=self.golden.profile.app_tokens(), attempts=attempts,
                                      normal=normal_all if web else None,
                                      normal_label="request bình thường" if web else "event bình thường", gate=gate)
 
-    def propose_endpoint_rule(self, key: str, missed: list, rules: list[Rule], ds: ESDataSource,
-                              rejected: list[str], gate: WazuhGate | None = None) -> dict[str, Any]:
+    def propose_endpoint_rule(self, key: str, missed: list, ds: ESDataSource, rejected: list[str],
+                              gate: WazuhGate | None = None) -> dict[str, Any]:
         """Kỹ thuật ATT&CK trên Windows / Linux chưa rule nào bắt -> rule Sigma process_creation.
         Khác web: tập kiểm tra là các BÀI THỬ LLM chưa thấy (mỗi bài thử sinh tiến trình shell + tiến trình con gần
         trùng dòng lệnh; tách theo event thì tập kiểm tra chứa gần nguyên văn mẫu đã đưa) -> rule phải khái quát
@@ -586,7 +557,7 @@ class AIWorker:
         lab_tokens = g.lab_tokens(platform)              # tên file / giá trị bài thử tự đặt (evilBinary, /tmp/hello)
         final, attempts = self._refine(first, key, platform, train, normals, normal_all, app_tokens=lab_tokens,
                                        variant=variant, what=what, community=community)
-        return self._finish_new_rule(final, f"gap-dataset:{key}", rules, ds, [x.doc for x in train],
+        return self._finish_new_rule(final, f"gap-dataset:{key}", ds, [x.doc for x in train],
                                      [x.doc for x in test], key, ["dataset-gap", "endpoint", platform, kind], platform,
                                      app_tokens=lab_tokens, attempts=attempts, normal=normal_all,
                                      normal_label=f"lệnh {OS_NAME[platform]} bình thường",
@@ -872,18 +843,7 @@ class AIWorker:
         return ({i for i, x in enumerate(train) if compiled.match(x.doc)},
                 [d for d in normal if compiled.match(d)], None)
 
-    def propose_own_rule(self, g: EventGroup, rules: list[Rule], ds: ESDataSource, rejected: list[str],
-                         gate: WazuhGate | None = None) -> dict | None:
-        module = g.key.get("event.module")
-        refs = [sigma.reference(r) for r in self.golden.similar_sigma(g.samples, module)] if self.golden else []
-        ctx = (f"Group of {g.count} real events ({g.key}) observed in the last {settings.AI_REPLAY_DAYS} days "
-               f"that no current rule examines. Use the dotted field names of the samples in the Sigma rule.")
-        res = self._ask_sigma(SIGMA_SYSTEM, sigma_rule_prompt(ctx, "other", [sigma_view(d, "other") for d in g.samples],
-                                                              [], refs, rejected))
-        return self._finish_new_rule(res, f"gap-own:{g.key_str}", rules, ds, g.samples, [], g.key_str,
-                                     ["coverage-gap"], "other", gate=gate)
-
-    def _finish_new_rule(self, res, target: str, rules: list[Rule], ds: ESDataSource, train: list[Doc],
+    def _finish_new_rule(self, res, target: str, ds: ESDataSource, train: list[Doc],
                          test: list[Doc], key: str, tags: list[str], domain: str,
                          app_tokens: set[str] | None = None, attempts: list[dict] | None = None,
                          normal: list[Doc] | None = None, normal_label: str = "event bình thường",
@@ -893,7 +853,7 @@ class AIWorker:
             p = self._base("new_rule", target, res, f"{key}: AI không đề xuất rule")
             p.update(id=pid, status="no_action", required_approvals=0, rationale=str(res.data["no_rule"])[:2000])
             return p
-        rid = self._next_ai_id(rules, ds)
+        rid = self._next_ai_id(ds)
         try:
             if res.data.get("_error"):
                 raise SigmaError(res.data["_error"])
@@ -906,7 +866,7 @@ class AIWorker:
             return p
         if normal is None:
             normal = [x.doc for x in self.golden.normal] if self.golden else []
-        val = validate_new_rule(rd, rules, train, test, normal, ds.replay_events(),
+        val = validate_new_rule(rd, train, test, normal, ds.replay_events(),
                                 settings.AI_MAX_NEW_RULE_ALERTS_PER_DAY, app_tokens=app_tokens,
                                 normal_label=normal_label, gate=gate, domain=domain)
         p = self._base("new_rule", target, res, f"Rule mới {rd['id']} — {rd['title']}")

@@ -102,7 +102,8 @@ def test_yaml_code_alerts_have_no_destructive_playbook_after_cutover(monkeypatch
 
 
 def test_playbooks_have_no_yaml_engine_codes():
-    yaml_codes = {str(d["id"]) for f in (ROOT / "rules").glob("*.yml") for d in yaml.safe_load(f.read_text(encoding="utf-8")) or []}
+    # 41 mã rule YAML cũ (engine đã xóa ở Task 25): bản đối chiếu cuối cùng còn giữ trong wazuh/manager/tests
+    yaml_codes = set(yaml.safe_load((ROOT.parent / "wazuh/manager/tests/legacy_map.yml").read_text(encoding="utf-8")))
     pbs = yaml.safe_load((ROOT / "config" / "playbooks.yml").read_text(encoding="utf-8"))["playbooks"]
     used = {r for p in pbs for r in (p.get("when") or {}).get("rule_ids", [])}
     assert yaml_codes and not (used & yaml_codes) and "WEB-*" not in used

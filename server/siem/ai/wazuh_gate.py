@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from ..detection.rules import Condition
+from .condition import Condition
 from .sandbox import Hit, Sandbox, SandboxError, SandboxResult
 from .sigma import SigmaError
 from .validate import Check

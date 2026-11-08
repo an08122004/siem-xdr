@@ -226,10 +226,6 @@ services:
     volumes:
       - *ca-mount
       - {type: volume, source: certs, target: /certs/manager, read_only: true, volume: {subpath: manager}}
-      # duyệt đề xuất AI: manager CHỈ ghi được 2 thư mục rules/ai và rules/exceptions, rule gốc chỉ đọc
-      - ./server/rules:/app/rules:ro
-      - ./server/rules/ai:/app/rules/ai
-      - ./server/rules/exceptions:/app/rules/exceptions
       - ./server/config:/app/config:ro                # priority.yml (ưu tiên / SLA), threat_profile.yml (độ phủ ATT&CK)
       - ./datasets/processed:/datasets:ro
       - wazuh_dynamic_rules:/app/wazuh-rules          # ai.xml, exceptions.xml của Wazuh (siem/wazuh_rules.py)
@@ -315,7 +311,6 @@ services:
       MISP_API_KEY_FILE: /run/secrets/misp_api_key   # feed IOC từ MISP khi đặt MISP_URL trong .env (pipeline/misp.py)
     secrets: [analyzer_es_password, misp_api_key]
     volumes:
-      - ./server/rules:/app/rules:ro
       - ./server/config:/app/config:ro
       - mldata:/data
       - *ca-mount
@@ -362,7 +357,6 @@ services:
       DATASETS_DIR: /datasets
     secrets: [ai_es_password]
     volumes:
-      - ./server/rules:/app/rules:ro
       - ./server/config:/app/config:ro
       - ./datasets/processed:/datasets:ro
       - ${AI_SANDBOX_PATH:-ai_sandbox}:/sandbox            # thư mục job của wazuh-sandbox (siem/ai/sandbox.py)

@@ -14,7 +14,7 @@ from siem.ai.llm import LLMResult
 from siem.ai.validate import validate_new_rule
 from siem.ai.worker import AIWorker, split_by_test
 from siem.pipeline.normalize import get, normalize
-from test_ai import NORMAL_URLS, FakeDS, NoWazuh, SeqLLM, web, write_rules
+from test_ai import NORMAL_URLS, FakeDS, NoWazuh, SeqLLM, web
 
 
 def _test(name, platforms, executor, command, guid, args=None):
@@ -155,7 +155,7 @@ def test_endpoint_validation_blocks_test_artifacts_ordinary_commands_and_short_v
     normal = ordinary_processes("windows")
 
     def run(clauses):
-        val = validate_new_rule(_rule(clauses), [], win[:6], win[6:], normal, [], 20, app_tokens=set(),
+        val = validate_new_rule(_rule(clauses), win[:6], win[6:], normal, [], 20, app_tokens=set(),
                                 normal_label="lệnh Windows bình thường")
         return val, {c.name: c for c in val.checks}
 
@@ -212,8 +212,6 @@ SHADOW_ANSWER = "detection:\n  sel:\n    CommandLine|contains: '/etc/shadow'\n  
 
 
 def test_endpoint_rule_assembled_from_command_line_patterns(tmp_path, monkeypatch):
-    rd = write_rules(tmp_path)
-    monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
     monkeypatch.setattr("siem.ai.worker.settings.AI_KNOWLEDGE_ROUND", False)   # test riêng ở test_ai_endpoint
     normal = [Labeled(web(u, i), {"class": "normal"}) for i, u in enumerate(NORMAL_URLS * 5)]
     for platform in ("windows", "linux"):
@@ -226,7 +224,7 @@ def test_endpoint_rule_assembled_from_command_line_patterns(tmp_path, monkeypatc
     # Lượt bổ sung dồn vào LSASS (comsvcs trong train) -> vế comsvcs + minidump.
     llm = SeqLLM([FIRST_ANSWER, LSASS_ANSWER, SHADOW_ANSWER] * 3)
     saved = []
-    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
+    AIWorker(None, llm, golden, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
              gate_factory=NoWazuh).run_cycle("an")
     p = next(p for p in saved if p["target"] == "gap-dataset:atomic-red-team:windows-T1003")
     assert p["status"] == "pending", p["validation"]["checks"]
@@ -339,8 +337,6 @@ def test_approval_rechecks_dataset_rule_against_current_baseline(tmp_path, monke
     """Đề xuất tạo trước khi tập lệnh bình thường được bổ sung: lúc duyệt vẫn bị chặn nếu giờ khớp lệnh bình thường."""
     from siem.ai import deploy
     from test_ai import PropES
-    rd = write_rules(tmp_path)
-    monkeypatch.setattr(deploy.settings, "RULES_DIR", rd)
     normal = [Labeled(d, {"dataset": "baseline-endpoint", "class": "normal", "platform": "linux"})
               for d in ordinary_processes("linux")]
     monkeypatch.setattr(deploy, "golden", lambda: PublicDatasets(directory=Path("."), normal=normal))
@@ -389,8 +385,6 @@ KNOWLEDGE = ("```yaml\ntitle: Other LSASS dumpers\nlogsource: {category: process
 def test_sigmahq_candidates_and_knowledge_round_cover_procedures_missing_from_train(tmp_path, monkeypatch):
     """Bài thử reg save và procdump nằm ở tập KIỂM TRA: model lượt đầu chỉ viết comsvcs (có trong train). Rule SigmaHQ
     cùng kỹ thuật (reg save hklm\\sam) và lượt hỏi cách làm khác (procdump) lấp phần đó; rule ghi nguồn SigmaHQ."""
-    rd = write_rules(tmp_path)
-    monkeypatch.setattr("siem.ai.worker.settings.RULES_DIR", rd)
     normal = [Labeled(web(u, i), {"class": "normal"}) for i, u in enumerate(NORMAL_URLS * 5)]
     for platform in ("windows", "linux"):
         normal += [Labeled(d, {"dataset": "baseline-endpoint", "class": "normal", "platform": platform})
@@ -398,7 +392,7 @@ def test_sigmahq_candidates_and_knowledge_round_cover_procedures_missing_from_tr
     golden = PublicDatasets(directory=Path("."), attack=atomic_labeled(), normal=normal, sigma=SIGMAHQ)
     llm = SeqLLM([COMSVCS, KNOWLEDGE] + ["no_rule: không có gì thêm"] * 30)
     saved = []
-    AIWorker(None, llm, golden, rules_dir=rd, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
+    AIWorker(None, llm, golden, ds_factory=lambda es: FakeDS({}, []), save=saved.append,
              gate_factory=NoWazuh).run_cycle("an")
     p = next(p for p in saved if p["target"] == "gap-dataset:atomic-red-team:windows-T1003")
     assert p["status"] == "pending", p["validation"]["checks"]

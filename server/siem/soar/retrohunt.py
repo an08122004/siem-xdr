@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 from .. import priority as prio
 from .. import settings, store
-from ..detection.rules import SEVERITY_SCORE
+from ..detection.alerts import SEVERITY_SCORE
 
 log = logging.getLogger("soar.retrohunt")
 
