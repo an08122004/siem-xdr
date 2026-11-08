@@ -188,7 +188,7 @@ def main():
             check("dashboard Điều tra nhận bộ lọc từ console", 'host.name:"demo-web"' in page.input_value("#tools input[type=search]"))
             shot(page, "06-investigate")
 
-            print("5b. Thư viện rule: tra cứu + so sánh với đề xuất AI")
+            print("5b. Thư viện rule: tra cứu")
             page.goto(f"{BASE}/#/rules")
             frame = page.frame_locator("#frame-rules iframe")
             frame.locator("text=Rule đang chạy").first.wait_for(timeout=120000)
@@ -201,21 +201,8 @@ def main():
             page.goto(f"{BASE}/#/ai")
             page.wait_for_selector("#content p.sub")
             page.click("#tools button:text-is('Tất cả')")
-            page.wait_for_timeout(800)
-            if page.locator("#content tr.row").count():
-                pid = page.locator("#content tr.row").first.get_attribute("data-id")
-                page.locator("#content tr.row").first.click()
-                page.click("text=So sánh với rule hiện có")
-                page.wait_for_url(re.compile(r"#/rules\?proposal="))
-                frame = page.frame_locator("#frame-rules iframe")
-                frame.locator("text=Rule đang chạy").first.wait_for(timeout=60000)
-                page.wait_for_timeout(2000)
-                check("từ đề xuất AI bấm “So sánh” -> Grafana chọn đúng đề xuất đó", frame.locator(f"text={pid}").count() > 0, pid)
-                ok = scroll_frame(page, "#frame-rules iframe", "text=Rule hiện có liên quan", edge=True)
-                check("có bảng rule hiện có liên quan để so sánh", ok)
-                shot(page, "06c-rules-compare")
-            else:
-                check("có đề xuất AI để so sánh", False, "chưa có đề xuất nào")
+            # nút "So sánh với rule hiện có" đã bỏ ở Task 26 (vế rule YAML xóa ở Task 25): chỉ còn mở trang đề xuất
+            check("trang đề xuất AI có bộ lọc “Tất cả”", page.locator("#tools button:text-is('Tất cả')").count() > 0)
 
             print("6. Các trang còn lại")
             for view, sel in (("handover", "#content dl.facts"), ("hunts", "#content table.list, #content .empty"),

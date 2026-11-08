@@ -232,7 +232,7 @@
     <div class="content" id="content"></div>
     <div class="frame" id="frame-overview" hidden><iframe title="Dashboard tổng quan SOC (Grafana)"></iframe></div>
     <div class="frame" id="frame-investigate" hidden><iframe title="Dashboard điều tra thực thể (Grafana)"></iframe></div>
-    <div class="frame" id="frame-rules" hidden><iframe title="Thư viện rule và so sánh với đề xuất AI (Grafana)"></iframe></div>
+    <div class="frame" id="frame-rules" hidden><iframe title="Thư viện rule và đề xuất AI (Grafana)"></iframe></div>
     <div class="frame" id="frame-kpi" hidden><iframe title="KPI của SOC (Grafana)"></iframe></div>
   </main>
 </div>
@@ -783,12 +783,11 @@ function entityQuery(t) {
 VIEWS.rules = {
   title: 'Thư viện rule',
   tools() {
-    return [el('span', { cls: 'sub' }, 'Rule đang chạy, ngoại lệ và đề xuất AI cùng một bảng; chọn đề xuất ở ô “Đề xuất cần so sánh” để đặt cạnh rule liên quan.'),
+    return [el('span', { cls: 'sub' }, 'Rule Wazuh (gốc, dự án, SigmaHQ) và đề xuất AI cùng một bảng; lọc bằng các ô phía trên.'),
       el('a', { cls: 'btn', href: '/grafana/d/siem-rules', target: '_blank', rel: 'noopener' }, 'Mở Grafana đầy đủ (tab mới)')];
   },
   async load() {
-    const pick = route().params.get('proposal');
-    showFrame('rules', grafanaUrl('siem-rules', 'now-20y', pick ? { proposal: pick } : {}, { showVars: true }));
+    showFrame('rules', grafanaUrl('siem-rules', 'now-20y', {}, { showVars: true }));
   },
 };
 
@@ -976,8 +975,6 @@ function aiDetail(p) {
         can('rules') && !(p.shadow.problems || []).length ? confirmButton('Bật chính thức', 'Bật chính thức (SOAR sẽ xử lý alert)?',
           b => run(b, () => api(`/api/v1/ai/proposals/${encodeURIComponent(p.id)}/promote`, { method: 'POST', body: {} }),
             `Đã bật chính thức ${p.wazuh?.code || p.proposal.id}.`).then(() => VIEWS.ai.load())) : null)] : null,
-    p.catalog_pick ? el('div', { cls: 'btns', style: 'margin-top:8px' }, el('a', { cls: 'btn',
-      href: '#/rules?proposal=' + encodeURIComponent(p.catalog_pick) }, 'So sánh với rule hiện có')) : null,
     el('h3', {}, 'Lịch sử'), el('ul', { cls: 'hist' }, (p.history || []).map(h => el('li', {}, h.text, el('span', { cls: 'sub' }, `${h.by}, ${fmt(h.at)}`)))),
     ['pending', 'invalid', 'approved'].includes(p.status) && !can('rules') ? el('p', { cls: 'sub' }, 'Chỉ Detection Engineer (quyền duyệt rule) duyệt, từ chối hay gỡ được đề xuất: người xử lý cảnh báo không tự duyệt rule mình dùng.') : null,
     ['pending', 'invalid', 'approved'].includes(p.status) && can('rules') ? el('div', { style: 'margin-top:12px;display:grid;gap:8px' }, reason, el('div', { cls: 'btns' },

@@ -125,7 +125,8 @@ quan nhân sự / pháp chế, vd đóng băng quyền của người trong nộ
 ## 6. Chọn playbook cho alert từ rule Wazuh XML (nhánh feature/wazuh-unified-ruleset)
 
 Có hai loại playbook, đừng nhầm: *case playbook* (checklist PB-xx ở trên, `case_playbooks.yml`) và *playbook SOAR* (hành động tự động, `playbooks.yml`).
-Bộ rule XML mô tả ở [RULES.md](RULES.md) mục 9; rule XML hiện chạy bóng nên SOAR bỏ qua alert của chúng cho tới Task 18.
+Bộ rule XML mô tả ở [RULES.md](RULES.md) mục 2 và 9. Từ R65 (05/11/2026) rule XML của dự án chạy thật; rule mới (SigmaHQ, AI) chạy bóng
+nên SOAR bỏ qua alert của chúng tới khi bật chính thức. Rule AI (`WZH-109xxx`) chọn case playbook theo kỹ thuật ATT&CK (không có `legacy_id`).
 
 **Chọn case playbook** (`server/siem/soar/cases.py`), theo thứ tự, playbook đầu tiên khớp thắng:
 

@@ -1,6 +1,7 @@
 # CI cho kho mã + kho rule (detection-as-code, SOC-OPERATIONS.md mục 4). Mọi thay đổi rule phải qua đây trước khi merge.
 #   test     unit test server (SOAR, API, AI, cầu nối Wazuh...) trên Python 3.12 như image server
-#   wazuh-rules  lint rule XML + chạy ca test log gốc (wazuh/manager/tests/cases) qua wazuh-manager thật: logtest + bơm hàng đợi
+#   wazuh-rules  lint rule XML + chạy ca test log gốc (wazuh/manager/tests/cases) qua wazuh-manager thật: logtest + bơm hàng đợi;
+#                xuất layer ATT&CK Navigator của rule XML dự án làm artifact (chạy cả hằng tuần để theo dõi độ phủ)
 #   vector   unit test cấu hình Vector (Wazuh -> Kafka)
 #   compose  docker compose config hợp lệ (secret giả, không chạy container)
 name: CI
@@ -46,7 +47,13 @@ jobs:
           cache-dependency-path: server/requirements.txt
       - run: pip install -r server/requirements.txt
       - name: Lint rule XML
-        run: python tools/wazuh_rule_lint.py
+        run: python tools/wazuh_rule_lint.py --layer build/attack-layer.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: attack-layer
+          path: build/attack-layer.json
+          if-no-files-found: ignore
       - name: Dựng wazuh-manager
         run: |
           python3 tools/init_secrets.py
