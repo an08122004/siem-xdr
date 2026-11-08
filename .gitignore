@@ -12,5 +12,5 @@ datasets/processed/
 /ca.crt
 # worktree và cấu hình cục bộ của Claude Code
 .claude/
-# kết quả tools/rule_lint.py (layer ATT&CK, báo cáo markdown)
+# kết quả tools/wazuh_rule_lint.py --layer (layer ATT&CK)
 build/

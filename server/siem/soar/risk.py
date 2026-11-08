@@ -19,7 +19,7 @@ from typing import Any, Iterable
 
 from .. import priority as prio
 from .. import settings, store
-from ..detection.rules import SEVERITY_SCORE
+from ..detection.alerts import SEVERITY_SCORE
 from ..pipeline.normalize import get
 
 log = logging.getLogger("soar.risk")

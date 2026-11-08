@@ -2,12 +2,12 @@
 
   - BỘ MẪU VÀNG (golden positives): event tấn công có nhãn — web (CSIC 2010 anomalous) và ENDPOINT
     (Atomic Red Team: lệnh tấn công Windows / Linux theo kỹ thuật ATT&CK; EVTX-ATTACK-SAMPLES nếu có).
-    Mẫu nào rule đang bắt được thì đề xuất AI (ngoại lệ) KHÔNG được làm mất -> kiểm thử hồi quy.
+    Mẫu Wazuh chưa bắt (sandbox Wazuh, wazuh_gate.py) là khoảng trống giao cho AI viết rule mới.
   - TẬP BÌNH THƯỜNG: request web (CSIC 2010 normal) + lệnh quản trị / hệ thống thông thường của Windows và Linux
     (baseline.py) -> đo báo nhầm của rule mới do AI đề xuất, theo đúng lĩnh vực của rule.
   - KHO SIGMA: tìm rule cộng đồng tương tự làm tài liệu tham khảo (RAG) khi đề xuất rule mới.
 
-Lưu ý: event dataset được chạy OFFLINE qua bộ chuẩn hóa + rule engine, KHÔNG bơm vào index thật
+Lưu ý: event dataset được chạy OFFLINE (bộ chuẩn hóa, cây Python, sandbox Wazuh không mạng), KHÔNG bơm vào index thật
 (tránh lẫn dashboard và tránh SOAR ra lệnh chặn IP có trong dataset).
 """
 from __future__ import annotations
@@ -19,12 +19,11 @@ import math
 import os
 import random
 import re
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..detection.rules import Rule, RuleEngine
 from ..pipeline.enrich import Enricher
 from .attack_types import DATASET_ARTIFACTS, TYPES, WebProfile, inspect_web
 from .baseline import ordinary_processes
@@ -53,8 +52,6 @@ BACKGROUND_MIN_TECHNIQUES = 3
 # chúng là chữ ký hợp lệ; chính tên thư mục ExternalPayloads / AtomicRedTeam đã do ARTIFACT_RE chặn.
 LAB_DIR = re.compile(r"[\\/](?:tmp|temp|shm)[\\/]|%te?mp%|\$env:te?mp|%public%|\$env:public|[\\/]users[\\/]public[\\/]"
                      r"|atomics[\\/]t\d{4}(?:\.\d{3})?[\\/]src[\\/]")
-SOURCE_NAME = {"atomic-red-team": "dựng lại từ Atomic Red Team", "splunk-attack-data": "log ghi thật (Splunk)",
-               "evtx-attack-samples": "EVTX ghi thật"}
 OS_NAME = {"windows": "Windows", "linux": "Linux"}
 
 
@@ -241,111 +238,6 @@ class PublicDatasets:
         """Loại tấn công viết được rule chữ ký dùng chung (không chỉ khớp ứng dụng mẫu của dataset)."""
         return TYPES[kind].transferable if kind in TYPES else True
 
-    # ------------------------------------------------------------ đánh giá theo từng event
-    @staticmethod
-    def event_hit(rule: Rule, doc: Doc) -> bool:
-        """Event có làm rule 'xét tới' không (khớp điều kiện, không bị ngoại lệ). Rule ngưỡng/chuỗi cần
-        nhiều event mới bắn, nên ở mức từng event chỉ xét điều kiện (hoặc bất kỳ bước nào của chuỗi)."""
-        if rule.exceptions and any(ex.match(doc) for ex in rule.exceptions):
-            return False
-        if rule.type == "sequence":
-            return any(cond.match(doc) for cond, _ in rule.steps)
-        return rule.condition.match(doc)
-
-    def positives_for(self, rule: Rule) -> list[Labeled]:
-        """Mẫu tấn công mà rule HIỆN ĐANG bắt được (bộ mẫu vàng của rule)."""
-        return [x for x in self.attack if self.event_hit(rule, x.doc)]
-
-    def normal_hits(self, rule: Rule) -> list[Labeled]:
-        return [x for x in self.normal if self.event_hit(rule, x.doc)]
-
-    # ------------------------------------------------------------ báo cáo độ phủ
-    def evaluate(self, rules: list[Rule]) -> dict[str, Any]:
-        match_rules = [r for r in rules if r.type == "match"]
-        per_rule: dict[str, dict[str, int]] = {}
-        for r in match_rules:
-            per_rule[r.id] = {"attack": len(self.positives_for(r)), "normal": len(self.normal_hits(r))}
-        caught = [any(self.event_hit(r, x.doc) for r in match_rules) for x in self.attack]
-        detected = sum(caught)
-        false_pos = sum(1 for x in self.normal if any(self.event_hit(r, x.doc) for r in match_rules))
-        by_dataset: dict[str, Counter] = defaultdict(Counter)
-        meta: dict[str, dict[str, Any]] = {}
-        tests: dict[str, set[str]] = defaultdict(set)
-        tests_hit: dict[str, set[str]] = defaultdict(set)
-        for x, hit in zip(self.attack, caught):
-            key = self.attack_type(x)
-            by_dataset[key]["total"] += 1
-            by_dataset[key]["detected"] += hit
-            meta.setdefault(key, {"domain": self.domain(x), "name": x.label.get("group_name") or "",
-                                  "technique": x.label.get("technique_base") or ""})
-            if x.label.get("guid"):                         # Atomic Red Team: đếm cả theo bài thử
-                tests[key].add(x.label["guid"])
-                if hit:
-                    tests_hit[key].add(x.label["guid"])
-        domains: dict[str, dict[str, Any]] = {}
-        sources = sorted({str(x.label.get("dataset")) for x in self.attack})
-        for dom in ("web", "windows", "linux"):
-            for src in [None, *sources] if dom != "web" else [None]:
-                idx = [i for i, x in enumerate(self.attack) if self.domain(x) == dom
-                       and (src is None or x.label.get("dataset") == src)]
-                if not idx or (src and len(idx) == len([x for x in self.attack if self.domain(x) == dom])):
-                    continue                       # nguồn duy nhất của lĩnh vực: đã có ở dòng tổng
-                normal = self.normal_for("web") if dom == "web" else self.normal_for("endpoint", dom)
-                fp_docs = [d for d in normal if any(self.event_hit(r, d) for r in match_rules)] if src is None else []
-                groups = {self.attack_type(self.attack[i]) for i in idx}
-                domains[dom if src is None else f"{dom}/{src}"] = {
-                    "domain": dom, "source": src,
-                    "attack": len(idx), "detected": sum(caught[i] for i in idx),
-                    "groups": len(groups),
-                    "groups_detected": len({self.attack_type(self.attack[i]) for i in idx if caught[i]}),
-                    "normal": len(normal), "false_positives": len(fp_docs),
-                    "fp_examples": [{"rules": [r.id for r in match_rules if self.event_hit(r, d)],
-                                     "event": str(get(d, "process.command_line") or get(d, "url.decoded") or "")[:160]}
-                                    for d in fp_docs[:10]],
-                }
-        scenario = self.evaluate_scenarios(match_rules)
-        # EVTX: chạy đầy đủ engine theo từng file (rule ngưỡng / chuỗi cần thứ tự event)
-        files: dict[str, list[Labeled]] = defaultdict(list)
-        for x in self.attack:
-            if x.label.get("file") and x.label.get("dataset") == "evtx-attack-samples":
-                files[x.label["file"]].append(x)
-        file_hits = {}
-        for fname, items in files.items():
-            eng = RuleEngine(rules)
-            fired = {d.rule.id for x in items for d in eng.process(x.doc)}
-            file_hits[fname] = {"tactic": items[0].label.get("tactic"), "rules": sorted(fired)}
-        return {
-            "attack_events": len(self.attack), "normal_events": len(self.normal), "unobservable": self.unobservable,
-            "detected": detected, "false_positives": false_pos,
-            "recall": detected / len(self.attack) if self.attack else None,
-            "fp_rate": false_pos / len(self.normal) if self.normal else None,
-            "precision": detected / (detected + false_pos) if detected + false_pos else None,
-            "per_rule": per_rule, "files": file_hits, "domains": domains, "scenario": scenario,
-            "by_group": {k: {"total": v["total"], "detected": v["detected"], **meta[k],
-                             **({"tests": len(tests[k]), "tests_detected": len(tests_hit[k])} if tests[k] else {})}
-                         for k, v in by_dataset.items()},
-        }
-
-    def evaluate_scenarios(self, match_rules: list[Rule]) -> dict[str, Any]:
-        """Đo theo BỘ: một bộ log (file) tính là bị phát hiện khi rule bắn trên ít nhất một tiến trình của nó."""
-        files: dict[str, list[Labeled]] = defaultdict(list)
-        for x in self.scenarios:
-            files[x.label.get("file", "")].append(x)
-        out: dict[str, Any] = {}
-        for dom in ("windows", "linux"):
-            for src in ("splunk-attack-data", "otrf"):
-                fs = {f: xs for f, xs in files.items() if xs[0].label.get("platform") == dom
-                      and xs[0].label.get("dataset") == src}
-                if not fs:
-                    continue
-                hit = {f: sorted({r.id for x in xs for r in match_rules if self.event_hit(r, x.doc)}) for f, xs in fs.items()}
-                techs = {xs[0].label.get("technique") for xs in fs.values()}
-                techs_hit = {fs[f][0].label.get("technique") for f, h in hit.items() if h}
-                out[f"{dom}/{src}"] = {"files": len(fs), "files_detected": sum(bool(h) for h in hit.values()),
-                                       "events": sum(len(xs) for xs in fs.values()),
-                                       "techniques": len(techs), "techniques_detected": len(techs_hit)}
-        return out
-
     # ------------------------------------------------------------ RAG Sigma
     def sigmahq_for(self, technique: str, platform: str, limit: int = 40) -> list[dict[str, Any]]:
         """Rule SigmaHQ process_creation cùng hệ điều hành gắn đúng kỹ thuật, làm vế ứng viên (worker._refine). Nhóm kỹ
@@ -463,84 +355,3 @@ def _flat(d: Any, prefix: str = "") -> dict[str, Any]:
     else:
         out[prefix[:-1]] = d
     return out
-
-
-def report_markdown(rep: dict[str, Any], rules: list[Rule]) -> str:
-    pct = lambda x: "—" if x is None else f"{x * 100:.1f}%"  # noqa: E731
-    ratio = lambda a, b: pct(a / b if b else None)  # noqa: E731
-    lines = [
-        "# Báo cáo độ phủ rule trên dataset công khai", "",
-        "Sinh bởi `python -m siem.ai.benchmark`. Chỉ tính rule dạng `match` ở mức từng event "
-        "(rule ngưỡng/chuỗi cần nhiều event liên tiếp nên không đánh giá trên request độc lập).", "",
-        "| Lĩnh vực | Mẫu tấn công | Phát hiện | Nhóm có ít nhất 1 mẫu bị bắt | Mẫu bình thường | Báo nhầm |",
-        "|---|---|---|---|---|---|",
-    ]
-    names = {"web": "Web (CSIC 2010)", "windows": "Windows", "linux": "Linux"}
-    for key, d in rep.get("domains", {}).items():
-        dom, src = d.get("domain", key), d.get("source")
-        unit = "loại" if dom == "web" else "kỹ thuật"
-        if src:          # dòng con theo nguồn dữ liệu: tập bình thường dùng chung với dòng tổng
-            name, normal_cell, fp_cell = f"&nbsp;&nbsp;{names.get(dom, dom)}: {SOURCE_NAME.get(src, src)}", "", ""
-        else:
-            name = names.get(dom, dom) if dom == "web" else f"{names.get(dom, dom)} (tổng)"
-            normal_cell = f"{d['normal']:,}"
-            fp_cell = f"{d['false_positives']:,} ({ratio(d['false_positives'], d['normal'])})"
-        lines.append(f"| {name} | {d['attack']:,} | {d['detected']:,} ({ratio(d['detected'], d['attack'])}) | "
-                     f"{d['groups_detected']}/{d['groups']} {unit} | {normal_cell} | {fp_cell} |")
-    lines += [
-        "", f"Ngoài ra {rep['unobservable']:,} mẫu web nằm ngoài tầm nhìn (payload trong body POST/PUT, access log "
-        "không ghi) — không tính. Mẫu endpoint gồm event tiến trình DỰNG LẠI từ lệnh của bài thử Atomic Red Team "
-        "(`siem/ai/atomic.py`) và event tạo tiến trình GHI THẬT khi chạy tấn công (Splunk attack_data, "
-        "`siem/ai/endpoint_logs.py`). Mẫu bình thường endpoint gồm lệnh quản trị tự soạn (`siem/ai/baseline.py`) và hoạt "
-        "động nền ghi thật của máy Splunk Attack Range (chỉ Windows; giữ tiến trình lặp lại ở ≥ 2 kỹ thuật).", "",
-    ]
-    if rep.get("scenario"):
-        lines += ["Đo theo bộ (log ghi thật chỉ biết cả bộ thuộc kỹ thuật nào: Splunk ngoài thư mục `atomic_red_team`, "
-                  "OTRF). Một bộ tính là bị phát hiện khi rule bắn trên ít nhất một tiến trình của bộ:", "",
-                  "| Bộ dữ liệu | Số bộ | Tiến trình | Bộ bị phát hiện | Kỹ thuật có ít nhất 1 bộ bị phát hiện |",
-                  "|---|---|---|---|---|"]
-        for key, d in rep["scenario"].items():
-            dom, src = key.split("/")
-            lines.append(f"| {names.get(dom, dom)}, {'Splunk' if src.startswith('splunk') else 'OTRF'} | {d['files']:,} | "
-                         f"{d['events']:,} | {d['files_detected']:,} ({ratio(d['files_detected'], d['files'])}) | "
-                         f"{d['techniques_detected']}/{d['techniques']} |")
-        lines.append("")
-    fp_ex = [(d.get("domain", dom), e) for dom, d in rep.get("domains", {}).items()
-             if d.get("domain", dom) != "web" for e in d["fp_examples"]]
-    if fp_ex:
-        lines += ["Báo nhầm trên lệnh bình thường endpoint:", ""]
-        lines += [f"- {dom}: `{e['event']}` — {', '.join(e['rules'])}" for dom, e in fp_ex]
-        lines.append("")
-    lines += [
-        "## Web theo loại tấn công", "",
-        "Nhóm do heuristic thô trong `siem/ai/attack_types.py` gán, chỉ để gom ứng viên cho AI. "
-        "Loại *riêng ứng dụng* là bất thường của chính ứng dụng mẫu (tham số lạ, giá trị sai định dạng, "
-        "đường dẫn không tồn tại): không viết được rule chữ ký dùng chung nên không giao cho AI.", "",
-        "| Loại | Tổng | Phát hiện | Tỉ lệ | Giao cho AI viết rule |", "|---|---|---|---|---|",
-    ]
-    web = {k: v for k, v in rep["by_group"].items() if v.get("domain", "web") == "web"}
-    for k, v in sorted(web.items(), key=lambda kv: (not PublicDatasets.transferable(kv[0]), -kv[1]["total"])):
-        name = f"{TYPES[k].label} (`{k}`)" if k in TYPES else k
-        ai = "có" if PublicDatasets.transferable(k) else "không (riêng ứng dụng)"
-        lines.append(f"| {name} | {v.get('total', 0):,} | {v.get('detected', 0):,} | "
-                     f"{pct(v.get('detected', 0) / v['total'] if v.get('total') else None)} | {ai} |")
-    endpoint = {k: v for k, v in rep["by_group"].items() if v.get("domain") in ("windows", "linux") and v.get("tests")}
-    if endpoint:
-        lines += ["", "## Endpoint theo kỹ thuật ATT&CK", "",
-                  "Nhóm = kỹ thuật gốc theo hệ điều hành. AI chỉ nhận nhóm có từ 4 bài thử chưa bị bắt (tách đôi "
-                  "train / kiểm tra theo bài thử).", "",
-                  "| Hệ điều hành | Kỹ thuật | Tên | Bài thử | Bài thử bị bắt | Tiến trình | Phát hiện | Tỉ lệ |",
-                  "|---|---|---|---|---|---|---|---|"]
-        for k, v in sorted(endpoint.items(), key=lambda kv: (kv[1]["domain"], -kv[1]["total"], kv[0])):
-            lines.append(f"| {OS_NAME.get(v['domain'], v['domain'])} | {v['technique']} | {v['name']} | {v['tests']} | "
-                         f"{v['tests_detected']} | {v['total']:,} | {v['detected']:,} | {ratio(v['detected'], v['total'])} |")
-    titles = {r.id: r.title for r in rules}
-    lines += ["", "## Theo rule (chỉ rule có kết quả)", "", "| Rule | Tên | Bắt mẫu tấn công | Báo nhầm mẫu bình thường |", "|---|---|---|---|"]
-    for rid, v in sorted(rep["per_rule"].items(), key=lambda kv: -kv[1]["attack"]):
-        if v["attack"] or v["normal"]:
-            lines.append(f"| {rid} | {titles.get(rid, '')} | {v['attack']:,} | {v['normal']:,} |")
-    if rep["files"]:
-        lines += ["", "## EVTX theo file", "", "| Tactic | File | Rule bắn |", "|---|---|---|"]
-        for f, v in sorted(rep["files"].items(), key=lambda kv: (kv[1]["tactic"] or "", kv[0])):
-            lines.append(f"| {v['tactic']} | {f} | {', '.join(v['rules']) or '—'} |")
-    return "\n".join(lines) + "\n"

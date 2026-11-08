@@ -1,4 +1,4 @@
-"""Đo độ phủ của RULESET GỐC WAZUH trên cùng dataset công khai dùng để đo 40 rule tự viết (datasets/report.md).
+"""Đo độ phủ của RULESET GỐC WAZUH trên dataset công khai (CSIC 2010, Atomic Red Team).
 
 Vì sao không dùng wazuh-logtest: logtest chỉ chạy decoder XML; event Windows (eventchannel) phải qua DecodeWinevt của
 analysisd, nên trong logtest KHÔNG rule Windows nào khớp được (đều cần decoded_as windows_eventchannel). Vì vậy dataset
@@ -224,46 +224,33 @@ def match_alerts(items: list[dict], alerts: list[dict]) -> dict[int, dict]:
     return hits
 
 
-# ---------------------------------------------------------------- so với rule tự viết + báo cáo
-def own_hits(items: list[dict]) -> dict[int, list[str]]:
-    from siem import settings
-    from siem.ai.golden import PublicDatasets
-    from siem.detection.rules import load_rules
-    match = [r for r in load_rules(settings.RULES_DIR) if r.type == "match" and not r.id.startswith("AI-")]
-    return {it["i"]: ids for it in items if (ids := [r.id for r in match if PublicDatasets.event_hit(r, it["doc"])])}
-
-
+# ---------------------------------------------------------------- báo cáo
 def pct(a: int, b: int) -> str:
     return f"{100 * a / b:.1f}%" if b else "—"
 
 
-def report(items: list[dict], hits: dict[int, dict], own: dict[int, list[str]], level: int = 3) -> str:
+def report(items: list[dict], hits: dict[int, dict], level: int = 3) -> str:
     from siem.ai.attack_types import TYPES
     names = {"web": "Web (CSIC 2010)", "windows": "Windows (Atomic Red Team)", "linux": "Linux (Atomic Red Team)"}
     wz = lambda it, lv=level: it["i"] in hits and hits[it["i"]]["level"] >= lv  # noqa: E731
     # "cụ thể": alert từ rule không nằm trong GENERIC — phát hiện theo hành vi
     ws = lambda it: wz(it) and hits[it["i"]]["id"] not in GENERIC  # noqa: E731
-    L = ["# Độ phủ ruleset gốc Wazuh 4.14.7 so với rule tự viết", "",
+    L = ["# Độ phủ ruleset gốc Wazuh 4.14.7", "",
          "Sinh bởi `tools/wazuh_coverage.py`: dataset được bơm vào hàng đợi analysisd của một wazuh-manager tạm (ruleset "
          "gốc, không rule tùy chỉnh), đúng định dạng agent gửi. Một event được tính là Wazuh **bắt** khi alert có level "
          "≥ ngưỡng (Wazuh tự ghi alert từ level 3; rule tấn công web của Wazuh đều ở level 6). Cột **Wazuh cụ thể** bỏ các "
          "rule khớp theo cấu trúc chung chung (bảng cuối), chỉ giữ phát hiện theo hành vi.", "",
          "## Tổng quan", "",
-         "| Lĩnh vực | Mẫu tấn công | Wazuh mọi alert (≥ 3) | Wazuh ≥ 7 | **Wazuh cụ thể** | **Rule tự viết** | "
-         "**Hợp (Wazuh cụ thể + tự viết)** | Báo nhầm Wazuh ≥ 3 / cụ thể | Báo nhầm tự viết |",
-         "|---|---|---|---|---|---|---|---|---|"]
+         "| Lĩnh vực | Mẫu tấn công | Wazuh mọi alert (≥ 3) | Wazuh ≥ 7 | **Wazuh cụ thể** | Báo nhầm Wazuh ≥ 3 / cụ thể |",
+         "|---|---|---|---|---|---|"]
     for dom in ("web", "windows", "linux"):
         atk = [it for it in items if it["domain"] == dom and it["class"] == "attack"]
         nor = [it for it in items if it["domain"] == dom and it["class"] == "normal"]
         cov = {lv: sum(wz(it, lv) for it in atk) for lv in LEVELS}
         spec = sum(ws(it) for it in atk)
-        o = sum(it["i"] in own for it in atk)
-        u = sum(ws(it) or it["i"] in own for it in atk)
         fp3, fps = sum(wz(it, 3) for it in nor), sum(ws(it) for it in nor)
-        fpo = sum(it["i"] in own for it in nor)
         L.append(f"| {names[dom]} | {len(atk):,} | {pct(cov[3], len(atk))} | {pct(cov[7], len(atk))} | "
-                 f"**{pct(spec, len(atk))}** | **{pct(o, len(atk))}** | **{pct(u, len(atk))}** | "
-                 f"{fp3:,}/{len(nor):,} / {fps:,}/{len(nor):,} | {fpo:,}/{len(nor):,} |")
+                 f"**{pct(spec, len(atk))}** | {fp3:,}/{len(nor):,} / {fps:,}/{len(nor):,} |")
     L += ["", "## Rule Wazuh khớp nhiều nhất", "",
           "Cột *bình thường* cho biết rule có thật sự phân biệt được tấn công hay chỉ ghi nhận mọi event cùng loại.", "",
           "| Lĩnh vực | Rule | Level | Mô tả | Mẫu tấn công | Mẫu bình thường | Chung chung? |", "|---|---|---|---|---|---|---|"]
@@ -277,22 +264,20 @@ def report(items: list[dict], hits: dict[int, dict], own: dict[int, list[str]], 
             L.append(f"| {dom} | {rid} | {meta[rid]['level']} | {meta[rid]['description'][:90]} | {n:,} | {c_nor[rid]:,} | "
                      f"{'có' if rid in GENERIC else ''} |")
     L += ["", f"## Web theo loại tấn công (Wazuh level ≥ {level})", "",
-          "| Loại | Mẫu | Wazuh | Tự viết | Hợp | Chỉ Wazuh bắt | Chỉ tự viết bắt | Rule Wazuh khớp |",
-          "|---|---|---|---|---|---|---|---|"]
+          "| Loại | Mẫu | Wazuh | Rule Wazuh khớp |", "|---|---|---|---|"]
     groups: dict[str, list] = defaultdict(list)
     for it in items:
         if it["class"] == "attack":
             groups[it["group"]].append(it)
     for k, xs in sorted(((k, v) for k, v in groups.items() if v[0]["domain"] == "web"), key=lambda kv: -len(kv[1])):
-        w, o = sum(ws(x) for x in xs), sum(x["i"] in own for x in xs)
-        u = sum(ws(x) or x["i"] in own for x in xs)
+        w = sum(ws(x) for x in xs)
         rids = Counter(hits[x["i"]]["id"] for x in xs if ws(x))
-        L.append(f"| {TYPES[k].label if k in TYPES else k} (`{k}`) | {len(xs):,} | {pct(w, len(xs))} | {pct(o, len(xs))} | "
-                 f"{pct(u, len(xs))} | {u - o:,} | {u - w:,} | {', '.join(f'{r} ({n})' for r, n in rids.most_common(3))} |")
+        L.append(f"| {TYPES[k].label if k in TYPES else k} (`{k}`) | {len(xs):,} | {pct(w, len(xs))} | "
+                 f"{', '.join(f'{r} ({n})' for r, n in rids.most_common(3))} |")
     for dom in ("windows", "linux"):
         L += ["", f"## {names[dom]} theo kỹ thuật (Wazuh cụ thể, theo bài thử)", "",
               "Một bài thử được tính là bị bắt khi ít nhất 1 tiến trình của nó bị bắt.", "",
-              "| Kỹ thuật | Tên | Bài thử | Wazuh | Tự viết | Hợp |", "|---|---|---|---|---|---|"]
+              "| Kỹ thuật | Tên | Bài thử | Wazuh |", "|---|---|---|---|"]
         rows = []
         for k, xs in groups.items():
             if xs[0]["domain"] != dom:
@@ -301,18 +286,14 @@ def report(items: list[dict], hits: dict[int, dict], own: dict[int, list[str]], 
             for x in xs:
                 tests[x["test"]].append(x)
             w = sum(any(ws(x) for x in t) for t in tests.values())
-            o = sum(any(x["i"] in own for x in t) for t in tests.values())
-            u = sum(any(ws(x) or x["i"] in own for x in t) for t in tests.values())
-            rows.append((len(tests), k, xs[0]["name"], w, o, u))
-        tot = [sum(r[i] for r in rows) for i in (0, 3, 4, 5)]
-        L.append(f"| **Tổng** | {len(rows)} kỹ thuật | {tot[0]:,} | {pct(tot[1], tot[0])} | {pct(tot[2], tot[0])} | "
-                 f"{pct(tot[3], tot[0])} |")
-        L.append(f"| Kỹ thuật có ≥ 1 bài thử bị bắt | | | {sum(r[3] > 0 for r in rows)} | {sum(r[4] > 0 for r in rows)} | "
-                 f"{sum(r[5] > 0 for r in rows)} |")
-        for n, k, name, w, o, u in sorted(rows, key=lambda r: (-r[0], r[1]))[:40]:
-            L.append(f"| {k.split('-', 1)[1]} | {name} | {n} | {w} | {o} | {u} |")
+            rows.append((len(tests), k, xs[0]["name"], w))
+        tot = [sum(r[i] for r in rows) for i in (0, 3)]
+        L.append(f"| **Tổng** | {len(rows)} kỹ thuật | {tot[0]:,} | {pct(tot[1], tot[0])} |")
+        L.append(f"| Kỹ thuật có ≥ 1 bài thử bị bắt | | | {sum(r[3] > 0 for r in rows)} |")
+        for n, k, name, w in sorted(rows, key=lambda r: (-r[0], r[1]))[:40]:
+            L.append(f"| {k.split('-', 1)[1]} | {name} | {n} | {w} |")
         if len(rows) > 40:
-            L.append(f"| … | {len(rows) - 40} kỹ thuật ít bài thử hơn | | | | |")
+            L.append(f"| … | {len(rows) - 40} kỹ thuật ít bài thử hơn | | |")
     L += ["", "## Báo nhầm của Wazuh cụ thể trên lệnh bình thường endpoint", "",
           "| Lĩnh vực | Rule | Level | Mô tả | Lệnh bình thường bị bắt |", "|---|---|---|---|---|"]
     for it in items:
@@ -329,7 +310,7 @@ def report(items: list[dict], hits: dict[int, dict], own: dict[int, list[str]], 
     L += ["", "## Giới hạn của phép đo", "",
           "- Event Windows là Sysmon EventID 1 dựng lại từ lệnh của bài thử Atomic Red Team: không có hash, OriginalFileName "
           "lấy theo tên file, Description / Company để trống, không có event khác (registry, file, network, PowerShell "
-          "script block) — rule Wazuh dựa trên các trường / event đó không có cơ hội khớp. Rule tự viết cũng chịu cùng giới hạn.",
+          "script block) — rule Wazuh dựa trên các trường / event đó không có cơ hội khớp.",
           "- Linux dùng auditd với key `audit-wazuh-c` (Wazuh hướng dẫn cấu hình để ghi lệnh của root). Hệ thống hiện tại thu "
           "tiến trình Linux bằng script `siem-procs` (định dạng riêng) — ruleset gốc Wazuh không có rule nào cho định dạng đó.",
           "- Tiến trình con trong tập lệnh bình thường Windows có dòng lệnh cha là đường dẫn chương trình (gõ tay), còn tiến "
@@ -347,8 +328,7 @@ def main() -> None:
     alerts = run_wazuh(items)
     hits = match_alerts(items, alerts)
     print(f"{len(alerts):,} alert, khớp được {len(hits):,} event")
-    own = own_hits(items)
-    md = report(items, hits, own)
+    md = report(items, hits)
     out = ROOT / "datasets" / "report_wazuh.md"
     out.write_text(md, encoding="utf-8", newline="\n")
     print(md[:md.find("## Rule Wazuh")])

@@ -220,117 +220,6 @@ def run(cases: list[dict], api) -> list[Failure]:
     return fails
 
 
-# ---------------------------------------------------------------- đối chiếu rule YAML cũ với ruleset gốc (--report)
-HIGH = 7                    # alert thật: level >= 7 (dưới đó rule không thành alert của SOC, chỉ là ứng viên chỉnh level)
-PROJECT_MIN_ID = 100000     # rule của repo (100100/100101...): không phải rule gốc, không tính vào đối chiếu
-LEGACY_DIR = ROOT / "wazuh/manager/tests/legacy"
-LEGACY_MAP = ROOT / "wazuh/manager/tests/legacy_map.yml"
-
-
-def rule_info(api, ids) -> dict[int, tuple[int, list[str], str]]:
-    """{id: (level, groups, mô tả)} từ GET /rules, 100 id một lần. Id API không trả về thì LỖI (không coi như level 0)."""
-    ids, info = sorted(ids), {}
-    for i in range(0, len(ids), 100):
-        part = ",".join(map(str, ids[i:i + 100]))
-        for r in _retry(lambda: api.request("GET", f"/rules?rule_ids={part}&limit=500")).get("data", {}).get("affected_items", []):
-            info[int(r["id"])] = (int(r["level"]), list(r.get("groups") or []), str(r.get("description") or ""))
-    if missing := [i for i in ids if i not in info]:
-        raise RuntimeError(f"Wazuh API không trả thông tin rule {missing}: không thể xác định level")
-    return info
-
-
-# Rule gốc CHUNG: khớp cả lớp sự kiện rộng, không phân biệt điều mà rule cũ bắt. Trúng chỉ các id này thì KHÔNG tính là phủ
-# (decision `convert`), và không gọi là "ứng viên nâng level" (nâng level sẽ báo mọi sự kiện cùng lớp). Mô tả + level lấy từ
-# GET /rules (Wazuh 4.14.8) ngày 31/10/2026; ghi chú trong legacy_map.yml lấy lại mô tả thật từ API mỗi lần chạy.
-GENERIC_IDS: dict[int, str] = {
-    80792: "level 3 'Audit: Command: $(audit.exe).': khớp MỌI lệnh execve do auditd ghi, không nhìn vào lệnh",
-    31106: "level 6 'A web attack returned code 200 (success)': con chung của 31103/31104/31105, không nói loại tấn công",
-    31101: "level 5 'Web server 400 error code.': mọi phản hồi 4xx, không nhìn URL hay payload",
-    86601: "level 3 'Suricata: Alert - $(alert.signature)': khớp MỌI cảnh báo Suricata, không nhìn mức độ/chữ ký",
-    5715: "level 3 'sshd: authentication success.': mọi đăng nhập SSH thành công, không phân biệt user",
-    5760: "level 5 'sshd: authentication failed.': MỘT lần sai mật khẩu SSH, không có ngưỡng brute force",
-    5403: "level 4 'First time user executed sudo.': chỉ lần sudo đầu tiên của user, không nhìn lệnh được chạy",
-    554: "level 5 'File added to the system.': mọi file mới trong thư mục được giám sát",
-    87701: "level 5 'pfSense firewall drop event.': MỘT gói bị chặn, không có ngưỡng",
-    60122: "level 5 'Logon Failure - Unknown user or bad password': MỘT lần 4625, không có ngưỡng",
-    61138: "level 5 'New Windows Service Created': mọi service mới, không nhìn đường dẫn/lệnh",
-}
-
-
-def decide(positives: list[set[int]], negatives: list[set[int]], info: dict, skipped: str = "",
-           branches: list[str] = (), pos_branch: list = ()) -> tuple[str, list[int], str]:
-    """(decision, id rule gốc, ghi chú) cho một rule cũ. `builtin`: MỖI ca dương có ít nhất một rule gốc CỤ THỂ level >= 7
-    (không thuộc nhóm sca, không nằm trong GENERIC_IDS), ca dương phủ MỌI nhánh `branches` của rule cũ (nhãn ở `pos_branch`,
-    song song với `positives`) và không ca âm nào báo rule gốc level >= 7. `approx`: có rule gốc cụ thể báo trên ca dương
-    nhưng chưa đủ (thiếu ca/nhánh, báo nhầm ca âm, hoặc chỉ level < 7). `convert`: không rule cụ thể nào (kể cả chỉ trúng
-    rule chung). Rule level 0 (gom nhóm) và id >= 100000 (rule của repo) bỏ qua."""
-    lv = lambda i: info.get(i, (0, [], ""))[0]                                          # noqa: E731
-    desc = lambda i: f"{i} (level {lv(i)}: {info[i][2]})"                               # noqa: E731
-    stock = lambda ids: {i for i in ids if i < PROJECT_MIN_ID and lv(i) > 0 and "sca" not in info[i][1]}  # noqa: E731
-    specific = lambda ids: stock(ids) - GENERIC_IDS.keys()                              # noqa: E731
-    high = lambda ids: {i for i in specific(ids) if lv(i) >= HIGH}                      # noqa: E731
-    pos_high = [high(p) for p in positives]
-    neg_hit = sorted(set().union(*[{i for i in stock(n) if lv(i) >= HIGH} for n in negatives]))
-    ids = sorted(set().union(*[specific(p) for p in positives]))
-    generic = sorted(set().union(*[stock(p) & GENERIC_IDS.keys() for p in positives]))
-    low = sorted(set(ids) - set().union(*pos_high))
-    proven = [b for b in branches if any(h and b == pb for h, pb in zip(pos_high, pos_branch))]
-    missing = [b for b in branches if b not in proven]
-    notes = []
-    if skipped:
-        notes.append(f"không dựng được log gốc: {skipped}")
-    if positives:
-        notes.append(f"{sum(map(bool, pos_high))}/{len(positives)} ca dương có rule gốc cụ thể level>=7")
-    if branches and missing:
-        notes.append(f"chỉ chứng minh: {', '.join(proven) or 'không nhánh nào'}; thiếu: {', '.join(missing)}")
-    if low:
-        notes.append(f"level<7 (ứng viên nâng level): {[desc(i) for i in low]}")
-    if generic:
-        notes.append("rule chung, không tính phủ: " + "; ".join(f"{desc(i)} [{GENERIC_IDS[i]}]" for i in generic))
-    if neg_hit:
-        notes.append(f"ca âm báo level>=7: {neg_hit}")
-    if positives and all(pos_high) and not neg_hit and not missing:
-        top = sorted(set().union(*pos_high))
-        return "builtin", ids + generic, "; ".join(notes + ["builtin: " + ", ".join(desc(i) for i in top)])
-    if ids:
-        return "approx", ids + generic, "; ".join(notes)
-    if generic:
-        head = "chỉ trúng rule chung " + ", ".join(f"{i} ({info[i][2]})" for i in generic) + ", không chỉnh"
-        return "convert", [], "; ".join([head] + [n for n in notes if not n.startswith("rule chung")])
-    return "convert", [], "; ".join(notes + ([] if positives else ["không có ca dương"]) + ([] if not positives or skipped else ["không rule gốc nào báo"]))
-
-
-def legacy_codes() -> list[str]:
-    """Mã của mọi rule YAML cũ (server/rules/*.yml), theo thứ tự file."""
-    return [r["id"] for f in sorted((ROOT / "server/rules").glob("*.yml")) for r in yaml.safe_load(f.read_text(encoding="utf-8"))]
-
-
-def report(cases: list[dict], api, skipped: dict[str, str], codes: list[str] | None = None,
-           branches: dict[str, list[str]] | None = None) -> dict[str, dict]:
-    """Chạy MỌI ca legacy (các ca eventchannel/syscheck gộp một lần `inject`) và trả {mã: {wazuh, decision, note}}."""
-    codes = codes or legacy_codes()
-    missing = [c for c in codes if c not in skipped and not any(x["legacy"] == c for x in cases)]
-    if missing:
-        raise ValueError(f"thiếu ca và lý do bỏ qua cho: {', '.join(missing)}")
-    got: dict[int, set[int]] = {}
-    batch = [i for i, c in enumerate(cases) if c["log_format"] in INJECT]
-    if batch:
-        for i, ids in zip(batch, inject([cases[i] for i in batch])):
-            got[i] = ids
-    for i, c in enumerate(cases):
-        if i not in got:
-            got[i] = fired(c, api)
-    info = rule_info(api, set().union(*got.values())) if got else {}
-    out = {}
-    for code in codes:
-        idx = [i for i, c in enumerate(cases) if c["legacy"] == code]
-        pos = [i for i in idx if cases[i]["kind"] == "positive"]
-        d, ids, note = decide([got[i] for i in pos], [got[i] for i in idx if cases[i]["kind"] == "negative"], info,
-                              skipped.get(code, ""), (branches or {}).get(code, []), [cases[i].get("branch") for i in pos])
-        out[code] = {"wazuh": ids, "decision": d, "note": note}
-    return out
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("path", nargs="?", default=str(CASES_DIR), help="file hoặc thư mục ca test")
@@ -339,9 +228,6 @@ def main() -> int:
     ap.add_argument("--password-file", default=str(ROOT / "secrets/wazuh_rules_api_password"))
     ap.add_argument("--list-user", default="siem-soar", help="user ghi danh sách CDB cho phần tử list_file (có lists:update / lists:delete)")
     ap.add_argument("--list-password-file", default=str(ROOT / "secrets/wazuh_api_password"))
-    ap.add_argument("--report", action="store_true",
-                    help="đối chiếu ca legacy (mặc định tests/legacy) với ruleset đang chạy, ghi tests/legacy_map.yml")
-    ap.add_argument("--out", default=str(LEGACY_MAP), help="file legacy_map.yml của --report")
     ap.add_argument("--ca", default="", help="CA ký chứng chỉ API")
     ap.add_argument("--insecure", action="store_true", help="không kiểm chứng chỉ API (manager thử, chứng chỉ tự ký)")
     a = ap.parse_args()
@@ -354,19 +240,6 @@ def main() -> int:
         LIST_API = WazuhApi(a.url, a.list_user, lp.read_text(encoding="utf-8").strip(), a.ca)
         if a.insecure:
             LIST_API.ctx.check_hostname, LIST_API.ctx.verify_mode = False, 0
-    if a.report:
-        import cases_to_raw
-        cases = load_cases(LEGACY_DIR if a.path == str(CASES_DIR) else Path(a.path))
-        try:
-            res = report(cases, api, cases_to_raw.build()[1], branches=cases_to_raw.BRANCHES)
-        except InjectionError as e:
-            print(f"LỖI BƠM HÀNG ĐỢI (không phải rule sai): {e}")
-            return 2
-        Path(a.out).write_text("# Đối chiếu rule YAML cũ với ruleset Wazuh gốc, sinh bởi `wazuh_rule_test.py --report`.\n"
-                               + yaml.safe_dump(res, allow_unicode=True, sort_keys=False, width=10**9), encoding="utf-8", newline="\n")
-        for d in ("builtin", "approx", "convert"):
-            print(d, sum(r["decision"] == d for r in res.values()))
-        return 0
     cases = load_cases(Path(a.path))
     try:
         fails = run(cases, api)

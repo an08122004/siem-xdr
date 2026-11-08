@@ -1,0 +1,208 @@
+"""Bộ đánh giá điều kiện bằng Python (cây all / any / not) — AI dùng làm BỘ TÌM nhanh khi ghép / đo vế rule (R66);
+quyết định cuối cùng là alert của sandbox Wazuh (wazuh_gate.py). Chuyển nguyên từ engine YAML cũ (detection/rules.py,
+đã xóa ở Task 25).
+
+Điều kiện (condition) là cây:
+  {all: [...]}, {any: [...]}, {not: {...}},
+  lá: {field: <đường.dẫn>, op: <toán tử>, value: <giá trị>}
+Toán tử: eq, neq, in, contains, not_contains, startswith, endswith, regex,
+         gt, gte, lt, lte, exists, cidr
+So khớp chuỗi mặc định KHÔNG phân biệt hoa/thường.
+"""
+from __future__ import annotations
+
+import ipaddress
+import re
+from dataclasses import dataclass, field
+from typing import Any
+
+from ..detection.alerts import SEVERITY_SCORE
+from ..pipeline.normalize import Doc, get
+
+RULE_MODES = ("active", "shadow")
+
+
+class Condition:
+    def __init__(self, spec: Any):
+        self.spec = self._compile(spec)
+
+    def _compile(self, spec: Any) -> Any:
+        if isinstance(spec, list):
+            return ("all", [self._compile(s) for s in spec])
+        if not isinstance(spec, dict):
+            raise ValueError(f"điều kiện không hợp lệ: {spec!r}")
+        if "all" in spec:
+            return ("all", [self._compile(s) for s in spec["all"]])
+        if "any" in spec:
+            return ("any", [self._compile(s) for s in spec["any"]])
+        if "not" in spec:
+            return ("not", self._compile(spec["not"]))
+        if "field" in spec:
+            op = spec.get("op", "eq")
+            value = spec.get("value")
+            if op == "regex":
+                flags = 0 if spec.get("case_sensitive") else re.IGNORECASE
+                pats = value if isinstance(value, list) else [value]
+                # mọi rule (không chỉ rule AI): regex quay lui theo cấp số nhân thì một event treo được analyzer
+                # (WEB-001 đã mắc, sửa 13/10/2026) -> không nạp rule, lỗi ghi log, các rule khác vẫn chạy
+                for p in pats:
+                    if (why := regex_risk(str(p))):
+                        raise ValueError(f"{why}: {str(p)[:80]}")
+                value = [re.compile(p, flags) for p in pats]
+            elif op == "cidr":
+                nets = value if isinstance(value, list) else [value]
+                value = [ipaddress.ip_network(n, strict=False) for n in nets]
+            elif op in ("in", "contains", "not_contains", "startswith", "endswith", "eq", "neq"):
+                vals = value if isinstance(value, list) else [value]
+                value = [_lower(v) for v in vals]
+            return ("leaf", spec["field"], op, value)
+        raise ValueError(f"điều kiện không hợp lệ: {spec!r}")
+
+    def match(self, doc: Doc) -> bool:
+        return _eval(self.spec, doc)
+
+
+def _lower(v: Any) -> Any:
+    return v.lower() if isinstance(v, str) else v
+
+
+def _eval(node: Any, doc: Doc) -> bool:
+    kind = node[0]
+    if kind == "all":
+        return all(_eval(n, doc) for n in node[1])
+    if kind == "any":
+        return any(_eval(n, doc) for n in node[1])
+    if kind == "not":
+        return not _eval(node[1], doc)
+    _, path, op, value = node
+    actual = get(doc, path)
+    if op == "exists":
+        return (actual is not None) == bool(value if value is not None else True)
+    if actual is None:
+        return op in ("neq", "not_contains")
+    values = actual if isinstance(actual, list) else [actual]
+    return any(_leaf(op, v, value) for v in values)
+
+
+def _leaf(op: str, actual: Any, value: Any) -> bool:
+    a = _lower(actual)
+    if op in ("eq", "in"):
+        return a in value or str(a) in [str(v) for v in value]
+    if op == "neq":
+        return a not in value and str(a) not in [str(v) for v in value]
+    s = str(a)
+    if op == "contains":
+        return any(str(v) in s for v in value)
+    if op == "not_contains":
+        return not any(str(v) in s for v in value)
+    if op == "startswith":
+        return any(s.startswith(str(v)) for v in value)
+    if op == "endswith":
+        return any(s.endswith(str(v)) for v in value)
+    if op == "regex":
+        return any(p.search(str(actual)) for p in value)
+    if op == "cidr":
+        try:
+            ip = ipaddress.ip_address(str(actual))
+        except ValueError:
+            return False
+        return any(ip in n for n in value)
+    try:
+        x, y = float(actual), float(value)
+    except (TypeError, ValueError):
+        return False
+    return {"gt": x > y, "gte": x >= y, "lt": x < y, "lte": x <= y}.get(op, False)
+
+
+@dataclass
+class Rule:
+    id: str
+    title: str
+    severity: str
+    type: str
+    condition: Condition | None
+    description: str = ""
+    mitre: dict[str, Any] = field(default_factory=dict)
+    tags: list[str] = field(default_factory=list)
+    group_by: list[str] = field(default_factory=list)
+    count: int = 1
+    window: int = 60
+    distinct: str | None = None
+    steps: list[tuple[Condition, int]] = field(default_factory=list)
+    within: int = 300
+    suppress: int = 0
+    exceptions: list["RuleException"] = field(default_factory=list)
+    source_file: str = ""
+    mode: str = "active"            # active | shadow (chạy bóng, xem docstring module)
+    shadow_since: str | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Rule":
+        rtype = d.get("type", "match")
+        thr = d.get("threshold") or {}
+        seq = d.get("sequence") or {}
+        r = cls(
+            id=str(d["id"]), title=d["title"], severity=d.get("severity", "medium").lower(),
+            type=rtype, description=d.get("description", ""), mitre=d.get("mitre") or {},
+            tags=d.get("tags") or [],
+            condition=Condition(d["condition"]) if "condition" in d else None,
+            group_by=thr.get("group_by") or seq.get("group_by") or d.get("group_by") or [],
+            count=int(thr.get("count", 1)), window=int(thr.get("window", 60)),
+            distinct=thr.get("distinct"), within=int(seq.get("within", 300)),
+            suppress=int(d.get("suppress", 0 if rtype == "match" else 300)),
+            mode=str(d.get("mode", "active")).lower(),
+            shadow_since=str(d["shadow_since"]) if d.get("shadow_since") else None,
+        )
+        for st in seq.get("steps") or []:
+            r.steps.append((Condition(st["condition"]), int(st.get("count", 1))))
+        for i, ex in enumerate(d.get("exceptions") or []):
+            r.exceptions.append(RuleException.from_dict({"id": f"{r.id}-inline-{i}", **ex, "rule_id": r.id}))
+        if r.severity not in SEVERITY_SCORE:
+            raise ValueError(f"severity không hợp lệ: {r.severity}")
+        if r.mode not in RULE_MODES:
+            raise ValueError(f"mode không hợp lệ: {r.mode} (active | shadow)")
+        if rtype in ("match", "threshold") and r.condition is None:
+            raise ValueError("thiếu condition")
+        if rtype == "sequence" and len(r.steps) < 2:
+            raise ValueError("sequence cần >= 2 bước")
+        return r
+
+
+@dataclass
+class RuleException:
+    """Điều kiện loại trừ gắn vào 1 rule (vd: bỏ qua máy quét lỗ hổng được phép)."""
+    id: str
+    rule_id: str
+    condition: Condition
+    description: str = ""
+    source: str = "manual"          # manual | ai
+    meta: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "RuleException":
+        if not d.get("rule_id") or "condition" not in d:
+            raise ValueError("exception cần rule_id và condition")
+        meta = {k: v for k, v in d.items() if k not in ("id", "rule_id", "condition", "description", "source")}
+        return cls(id=str(d.get("id") or f"{d['rule_id']}-exc"), rule_id=str(d["rule_id"]),
+                   condition=Condition(d["condition"]), description=d.get("description", ""),
+                   source=d.get("source", "manual"), meta=meta)
+
+    def match(self, doc: Doc) -> bool:
+        return self.condition.match(doc)
+
+
+_NESTED_QUANTIFIER = re.compile(r"\((?:[^()\\]|\\.)*[+*](?:[^()\\]|\\.)*\)\s*[+*{]")
+
+
+def regex_risk(pattern: str) -> str | None:
+    """Kiểm tra nhanh regex có nguy cơ backtracking thảm họa (ReDoS) hoặc quá dài.
+    Trả về lý do nếu KHÔNG an toàn, None nếu chấp nhận được."""
+    if len(pattern) > 300:
+        return "regex dài quá 300 ký tự"
+    if _NESTED_QUANTIFIER.search(pattern):
+        return "regex có lượng từ lồng nhau (vd (a+)+), nguy cơ ReDoS"
+    try:
+        re.compile(pattern)
+    except re.error as e:
+        return f"regex không hợp lệ: {e}"
+    return None

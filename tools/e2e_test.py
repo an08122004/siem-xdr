@@ -19,7 +19,6 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
-from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 CTX = ssl.create_default_context()
@@ -308,11 +307,6 @@ def catalog_count(query):
     return int(sum(sum(v for v in f["data"]["values"][1] if v) for f in frames if len(f["data"]["values"]) > 1))
 
 
-n_files = sum(1 for f in Path("server/rules").glob("**/*.y*ml") if not {"exceptions", "cases"} & set(f.parts)
-              for line in f.read_text(encoding="utf-8").splitlines() if line.startswith("- id:"))
-n_rules = catalog_count("origin:rule AND source:(builtin OR ai)")
-check("grafana", "Thư viện rule liệt kê đủ rule trong server/rules (Grafana đọc qua siem-rules)", n_rules == n_files,
-      f"{n_rules}/{n_files} rule")
 n_wzh = catalog_count("origin:wazuh_rule")
 # số id KHÁC NHAU theo Wazuh API: rule gốc bị đè ở 0999-tuning.xml có 2 bản (ruleset/rules và etc/rules), thư viện giữ 1
 wzh_total = manager_py("""
@@ -326,9 +320,6 @@ print(len(ids))
 """).stdout.strip()
 check("grafana", "Thư viện rule liệt kê đủ rule của Wazuh (số id khác nhau theo Wazuh API)",
       wzh_total.isdigit() and n_wzh == int(wzh_total), f"{n_wzh}/{wzh_total} rule Wazuh")
-n_prop, n_cmp = catalog_count("origin:ai_proposal"), catalog_count("origin:comparison")
-check("grafana", "đề xuất AI có trong thư viện, kèm cặp so sánh với rule hiện có", n_prop == 0 or n_cmp > 0,
-      f"{n_prop} đề xuất, {n_cmp} cặp so sánh")
 
 # ----------------------------------------------------------------- 6. hồi quy các lỗi đã sửa 3/10, 11/10
 def count_events(query, want):

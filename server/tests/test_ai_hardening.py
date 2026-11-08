@@ -17,7 +17,7 @@ from siem.ai.deploy import recheck_dataset_rule
 from siem.ai.golden import Labeled, PublicDatasets
 from siem.ai.validate import common_program_only, lab_wrapper
 from siem.ai.worker import AIWorker, generator_id
-from siem.detection.rules import Rule
+from siem.ai.condition import Rule
 from test_ai import FakeDS, SeqLLM
 from test_ai_endpoint import _tech, _test, atomic_labeled
 
@@ -127,7 +127,7 @@ def test_stale_pending_proposals_rechecked_with_current_rules():
                prop("102", ["-path '*/.aws/credentials'"], "rev9"),       # vẫn qua -> vẫn chờ người duyệt
                prop("103", ["systemctl daemon-reload"], gen)]              # cùng generator: không kiểm tra lại
     es = _DocsES(history)
-    w = AIWorker(es, SeqLLM([]), _golden(), rules_dir=Path("."), ds_factory=lambda e: FakeDS({}, []), save=None)
+    w = AIWorker(es, SeqLLM([]), _golden(), ds_factory=lambda e: FakeDS({}, []), save=None)
     summary = {"rechecked": []}
     w._recheck_stale(history, gen, summary)
     assert [p["status"] for p in history] == ["invalid", "pending", "pending"]
@@ -145,7 +145,7 @@ def test_sigmahq_unverified_atoms_capped_by_count_not_only_by_rule(tmp_path):
            "tags": ["attack.t1059.004"],
            "detection": "sel:\n  CommandLine|contains:\n    - 'systemctl daemon-reload'\n" + values + "condition: sel\n"}]
     g = _golden()
-    w = AIWorker(None, SeqLLM([]), g, rules_dir=tmp_path, ds_factory=lambda e: FakeDS({}, []), save=None)
+    w = AIWorker(None, SeqLLM([]), g, ds_factory=lambda e: FakeDS({}, []), save=None)
     train = [x for x in g.attack if x.label["platform"] == "linux"]
 
     def spare_after(atom_cap):

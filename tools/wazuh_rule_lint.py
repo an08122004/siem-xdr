@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "server"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from siem.detection.rules import regex_risk  # noqa: E402
+from siem.ai.condition import regex_risk  # noqa: E402
 from siem.wazuh_rules import ID_RANGES, TUNING_FILE  # noqa: E402
 from wazuh_rule_test import CASES_DIR, load_cases  # noqa: E402
 

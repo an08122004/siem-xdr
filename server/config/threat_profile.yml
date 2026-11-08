@@ -1,6 +1,6 @@
 # Hồ sơ mối đe dọa: kỹ thuật MITRE ATT&CK ưu tiên phát hiện (kế hoạch SOC, mục Detection engineering).
-# Độ phủ ATT&CK (KPI) = % kỹ thuật dưới đây có ít nhất một rule ĐANG CHẠY CHÍNH THỨC (không chạy bóng) đã qua kiểm thử
-# (có ca test dương và âm đạt trong server/rules/cases). Kỹ thuật con (T1110.001) tính cho kỹ thuật gốc (T1110).
+# Độ phủ ATT&CK (KPI) = % kỹ thuật dưới đây có ít nhất một rule Wazuh ĐANG BẬT và ra alert (không chạy bóng, R49).
+# Kỹ thuật con (T1110.001) tính cho kỹ thuật gốc (T1110).
 # Cập nhật hằng quý theo bản tin mối đe dọa của CTI (nhóm ransomware / APT nhắm vào ngành và khu vực).
 # Đích: >= 50% cuối giai đoạn 2, >= 70% cuối giai đoạn 4.
 name: Hồ sơ khởi đầu (tổ chức cỡ vừa, web public, Active Directory)
