@@ -202,7 +202,8 @@ def regex_risk(pattern: str) -> str | None:
     if _NESTED_QUANTIFIER.search(pattern):
         return "regex có lượng từ lồng nhau (vd (a+)+), nguy cơ ReDoS"
     try:
-        re.compile(pattern)
+        # \z là PCRE2 hợp lệ (emit dùng) nhưng Python < 3.14 chỉ có \Z: đổi để kiểm cú pháp không lệch theo bản Python
+        re.compile(re.sub(r"(?<!\\)((?:\\\\)*)\\z", r"\1\\Z", pattern))
     except re.error as e:
         return f"regex không hợp lệ: {e}"
     return None

@@ -97,7 +97,7 @@ def test_copy_alerts_detects_rotation(runner, tmp_path, monkeypatch):
     alerts.write_text('{"rule": {"id": "1"}}\n', encoding="utf-8")
     monkeypatch.setattr(runner, "ALERTS", alerts)
     ino = os.stat(alerts).st_ino
-    alerts.unlink()                     # analysisd qua ngày: alerts.json là file (inode) mới
+    alerts.rename(tmp_path / "ossec-alerts-01.json")   # analysisd qua ngày: file cũ vẫn còn (đổi tên) nên inode không bị tái dùng
     alerts.write_text("", encoding="utf-8")
     assert os.stat(alerts).st_ino != ino
     with pytest.raises(RuntimeError, match="xoay vòng"):
