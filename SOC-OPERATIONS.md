@@ -185,6 +185,8 @@ Trạng thái từng nguồn nằm ở index `siem-sources`, hiện trên dashbo
 `SNAPSHOT_SCHEDULE` = `0 30 18 * * ?` theo giờ UTC (01:30 giờ Việt Nam), giữ `SNAPSHOT_RETENTION_DAYS` (30) ngày. Snapshot
 gồm cả alert, case, lệnh phản ứng và tài khoản console. Trong lab, repository là volume `essnapshots` trên cùng máy. Khi triển
 khai thật phải gắn thư mục này vào ổ / NAS / object storage khác máy, vì để chung ổ thì mất máy là mất cả dữ liệu lẫn bản sao lưu.
+SLM chỉ chạy khi Elasticsearch đang chạy lúc 01:30: trên máy lab đã thấy Docker Desktop tắt hằng đêm khoảng 23:40 nên snapshot tự động không chạy
+(06/11 repository chỉ có 2 snapshot); khi đó chụp tay bằng `python tools/es_snapshot.py now` trước mỗi lần nâng cấp.
 
 ```bash
 python tools/es_snapshot.py status     # chính sách, lần chạy gần nhất, danh sách snapshot

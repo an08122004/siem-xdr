@@ -22,10 +22,13 @@ VERIFY = ["siem-cases", "siem-alerts", "console-users"]      # index nhỏ, quan
 
 
 def es(method: str, path: str, body: dict | None = None) -> dict:
+    # chỉ gửi thân khi có: ES 8 từ chối thân (kể cả `{}`) ở GET và POST _execute ("does not support having a body")
+    data = "" if body is None else " --data-binary @-"
     cmd = ["docker", "compose", "exec", "-T", "elasticsearch", "sh", "-c",
            'curl -s --cacert config/certs/ca/ca.crt -u "elastic:$(cat config/certs/bootstrap/elastic_password)" '
-           f'-H "Content-Type: application/json" -X {method} "https://localhost:9200{path}" --data-binary @-']
-    r = subprocess.run(cmd, input=json.dumps(body or {}), capture_output=True, text=True, encoding="utf-8")
+           f'-H "Content-Type: application/json" -X {method} "https://localhost:9200{path}"{data}']
+    r = subprocess.run(cmd, input="" if body is None else json.dumps(body), capture_output=True, text=True,
+                       encoding="utf-8")
     if r.returncode != 0:
         sys.exit(f"lệnh docker compose lỗi ({r.returncode}): {r.stderr.strip()[:500]}")
     try:

@@ -544,10 +544,11 @@ Nhánh `feature/wazuh-unified-ruleset` chuyển phát hiện từ engine YAML (�
 `wazuh-analysisd`: ruleset gốc Wazuh 4.14.8 cộng rule XML riêng của dự án. Kế hoạch: [docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md](docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md).
 Sổ quyết định (R1–R83, phát hiện chính): [docs/wazuh-ruleset-decisions.md](docs/wazuh-ruleset-decisions.md).
 
-### 9.1 Trạng thái (05/11/2026)
+### 9.1 Trạng thái (06/11/2026)
 
-- Task 0 đến 17 của kế hoạch đã xong trên nhánh. CI (5 job) xanh ở commit `0e6e0bb`: 603 unit test đạt trên Linux, 556 ca test log gốc
-  chạy qua một wazuh-manager thật, 0 sai, 0 rule gốc là alert thật chưa ghim, lint 10 file 0 lỗi (1 cảnh báo: `lsass.exe` chép nguyên từ rule gốc).
+- Task 0 đến 18 của kế hoạch đã xong. **Đã triển khai lên stack thật 05–06/11/2026** (main `597cd5d` = PR #13, sửa nóng #14 thư viện rule gọi đúng `WazuhApi`, #15 đọc `mitre` dạng list của API và gộp rule gốc bị đè). E2E trên stack thật **45/45** (06/11): đăng nhập 13/13, SQLi → chặn IP 6/6, command injection → kill 3/3, webshell → FIM → case 3/3, Grafana 16/16 (thư viện 4600/4600 rule Wazuh), hồi quy 4/4.
+  CI (5 job) xanh ở `397a774`: 663 unit test trên Linux, 597 ca log gốc qua wazuh-manager thật 0 sai, `ossec.log` không lỗi nạp rule,
+  93 alert thật của rule gốc dưới cha bị móc đều có ca ghim hoặc bảo đảm cấu trúc, lint 10 file 0 lỗi (1 cảnh báo: `lsass.exe` chép nguyên từ rule gốc).
 - **Đã chuyển (R65, 05/11/2026): chủ dự án quyết định chuyển hẳn.** Engine YAML tắt (`RULE_ENGINE_ENABLED=false`, mặc định); mọi rule XML
   riêng bỏ nhóm `shadow` và là alert thật (trừ `0845-ti.xml`, bỏ chạy bóng cùng đợt khi phần TI domain/hash được gộp); rule gốc Wazuh level 7 đến 11
   ngoài nhóm cũ cũng là alert thật (`WAZUH_STOCK_SHADOW=false`, mặc định). Chạy bóng vẫn dùng được cho rule mới sau này (SOC-OPERATIONS mục 4).
@@ -557,7 +558,8 @@ Sổ quyết định (R1–R83, phát hiện chính): [docs/wazuh-ruleset-decisi
   (dư địa đo ở Task 2 là ≤ 1 alert / 100 event bình thường), mỗi alert mở case; playbook phá hủy vẫn chỉ theo id đã duyệt (R60) nên rủi ro là ngập case, không phải chặn nhầm. Quay lui nhanh: `WAZUH_STOCK_SHADOW=true`.
 - Playbook SOAR theo mã YAML (AUTH-/WEB-/LNX-/WIN-/TI-001) đã xóa; chỉ còn playbook theo `WZH-<id>` (bản XML tương ứng), RBA / HLT / retrohunt giữ qua playbook chung. Đề xuất AI và ngoại lệ YAML bị chặn khi engine tắt (409) tới Task 19 đến 22 (đã gỡ ở P4).
   Độ phủ ATT&CK chỉ tính từ rule Wazuh.
-- Bốn việc cần stack thật còn hoãn: báo cáo song song `build/parity.md` (Task 13), kiểm thư viện rule và số kỳ vọng E2E mục Thư viện rule (Task 14), thử ngoại lệ Wazuh trên manager thật (Task 16), và đo lại độ ồn trên ≥ 24 giờ syslog + nhật ký console thật (số đo hiện tại chưa có hai nguồn này).
+- Việc kiểm trên stack thật: thư viện rule và số kỳ vọng E2E (Task 14) **đã đạt** trên stack thật 06/11/2026 (4600/4600). Báo cáo song song `build/parity.md` (Task 13)
+  **không còn làm được** (engine YAML tắt ở R65, xóa ở Task 25). Còn hoãn: thử ngoại lệ Wazuh trên manager thật (Task 16) và đo lại độ ồn trên ≥ 24 giờ syslog + nhật ký console thật (số đo hiện tại chưa có hai nguồn này).
 - Danh sách việc triển khai: mục *Task 18* của kế hoạch.
 - **P4 (06–08/11/2026, kế hoạch [2026-11-06-p4-ai-wazuh-xml.md](docs/superpowers/plans/2026-11-06-p4-ai-wazuh-xml.md)):** rule AI ra
   `rules-dynamic/ai.xml`, kiểm định trên `wazuh-sandbox`; ngoại lệ AI qua luồng ngoại lệ Wazuh; SigmaHQ lô 1 là `0966-sigmahq.xml`;
