@@ -23,11 +23,15 @@ def to_wazuh(ecs_field: str, decoder: str | None) -> str:
     return _MAP[ecs_field]
 
 
+def escape_literal(value: str) -> str:
+    """Phần trong của mẫu pcre2 khớp đúng `value` (chưa neo)."""
+    return "".join(c if _SAFE.match(c) else r"\." if c == "." else f"\\x{ord(c):02x}" if ord(c) < 128 else c
+                   for c in value)
+
+
 def literal(value: str) -> str:
     """Mẫu pcre2 khớp đúng `value`, neo hai đầu (`\\z`, không phải `$` vì `$` còn khớp trước dấu xuống dòng cuối)."""
-    out = "".join(c if _SAFE.match(c) else r"\." if c == "." else f"\\x{ord(c):02x}" if ord(c) < 128 else c
-                  for c in value)
-    return f"^{out}\\z"
+    return f"^{escape_literal(value)}\\z"
 
 
 def _condition(c: dict) -> str:

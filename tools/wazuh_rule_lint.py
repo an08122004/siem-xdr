@@ -2,7 +2,7 @@
 
     python tools/wazuh_rule_lint.py
     python tools/wazuh_rule_lint.py --layer build/attack-layer.json   # kèm layer cho MITRE ATT&CK Navigator
-    (--layer: CHỈ rule XML dự án đang bật; khác KPI độ phủ, vốn tính cả rule YAML và rule gốc Wazuh có ra alert)
+    (--layer: CHỈ rule XML dự án trong repo đang bật; khác KPI độ phủ, vốn tính mọi rule Wazuh có ra alert: rule gốc, rule dự án, rule AI)
 
 Kiểm thêm (R63, sửa R65): rule có nhóm `shadow` phải có `shadow_since=` (sau cổng cut-over rule mới được phép vào chạy bóng, SOC-OPERATIONS §4); if_sid/if_matched_sid trỏ rule dự án phải trỏ về rule được định nghĩa trước.
 Mỗi dòng: `file:rule_id: thông điệp`; cảnh báo có tiền tố `WARNING: `. Thoát mã 1 khi có LỖI, cảnh báo thì mã 0.
@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "server"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from siem.detection.rules import regex_risk  # noqa: E402
+from siem.ai.condition import regex_risk  # noqa: E402
 from siem.wazuh_rules import ID_RANGES, TUNING_FILE  # noqa: E402
 from wazuh_rule_test import CASES_DIR, load_cases  # noqa: E402
 

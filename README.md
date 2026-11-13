@@ -17,8 +17,8 @@ Docker. Quy trình vận hành: **[SOC-OPERATIONS.md](SOC-OPERATIONS.md)**. Lộ
  │ Wazuh agent 4.14.7│ ─────────────▶ │ wazuh-manager │ alerts.json ─▶│ wazuh-forwarder │──▶│ Kafka (KRaft)   │──▶│ Analyzer   │──▶│ Elasticsearch│──▶│ Grafana │
  │ log, FIM, SCA,    │ 1515 enroll    │ (trạm thu,    │               │ (Vector)        │   │ siem.raw        │   │ normalize  │   │ events/alerts│   └─────────┘
  │ rootcheck, kiểm kê│ ◀── active ────│ ruleset Wazuh)│               └─────────────────┘   │ siem.alerts     │   │ enrich (TI)│   └──────────────┘
- └───────────────────┘    response    └───────▲───────┘                                     │                 │   │ rules + ML │
- ┌───────────────────┐   syslog 514   ┌───────┼───────┐                                     │                 │   │ + cảnh báo │
+ └───────────────────┘    response    └───────▲───────┘                                     │                 │   │ cầu nối    │
+ ┌───────────────────┐   syslog 514   ┌───────┼───────┐                                     │                 │   │ cảnh báo   │
  │ Firewall/Suricata │ ─────────────▶ │ Syslog│ 514   │                                     │                 │◀──│   Wazuh    │
  └───────────────────┘                └───────┼───────┘                                     └───────┬─────────┘   └────────────┘
                                               │ Wazuh API (55000, nội bộ)                           ▼
@@ -28,7 +28,7 @@ Docker. Quy trình vận hành: **[SOC-OPERATIONS.md](SOC-OPERATIONS.md)**. Lộ
                                                                                           └──────────────┘
                                                                                           ┌──────────────┐  chỉ đọc siem-*, ghi đề xuất vào ai-*
                                                                                           │ AI worker    │◀──▶ Ollama (LLM nội bộ)
-                                                                                          │ (chỉ đề xuất)│  analyst duyệt trên console ─▶ Manager ghi rules/ai, rules/exceptions
+                                                                                          │ (chỉ đề xuất)│  analyst duyệt trên console ─▶ Manager ghi rules-dynamic/ai.xml, exceptions.xml (Wazuh)
                                                                                           └──────────────┘
 ```
 
@@ -42,11 +42,11 @@ Docker. Quy trình vận hành: **[SOC-OPERATIONS.md](SOC-OPERATIONS.md)**. Lộ
 | Syslog (UDP/TCP 514) | Cổng syslog của **wazuh-manager** (chỉ nhận từ `SYSLOG_ALLOWED_IPS`), đi cùng đường `archives.json` | `wazuh/manager/` |
 | Message bus | Kafka 7.7 (Confluent) chế độ **KRaft**, không dùng ZooKeeper | `docker-compose.yml` |
 | Chuẩn hóa log (ECS rút gọn) + làm giàu | Python | `server/siem/pipeline/` |
-| Phân tích dựa trên luật | Rule engine YAML (match / threshold / sequence) + cảnh báo chọn lọc từ ruleset Wazuh | `server/siem/detection/`, `server/rules/` |
+| Phân tích dựa trên luật | `wazuh-analysisd`: ruleset gốc Wazuh 4.14.8 + rule XML của dự án, SigmaHQ, rule AI; cầu nối đổi cảnh báo thành alert | `wazuh/manager/rules/`, `server/siem/detection/wazuh.py` |
 | Phân tích dựa trên ML (**tạm dừng**) | Isolation Forest (scikit-learn) | `server/siem/detection/ml.py` |
 | SOAR + quản lý case | Playbook tự động + case playbook NIST, phản ứng qua Wazuh active response | `server/siem/soar/`, `server/config/playbooks.yml`, `server/config/case_playbooks.yml` |
 | Vận hành SOC | 6 vai trò theo năng lực, ưu tiên P1–P4 + SLA, kết luận bắt buộc, rule chạy bóng + CI kho rule, risk-based alerting, giám sát sức khỏe HLT-*, sao lưu SLM, KPI, MISP + dò ngược IOC, threat hunting, giao ca, MFA | [SOC-OPERATIONS.md](SOC-OPERATIONS.md), `server/siem/manager/`, `server/siem/soar/`, `.github/workflows/ci.yml` |
-| AI hỗ trợ viết rule (chỉ đề xuất) và hỗ trợ analyst | Ollama (`qwen3.5:9b`) + kiểm định tự động + duyệt trên console; tóm tắt alert / case, giải thích lệnh, nháp báo cáo | `server/siem/ai/`, `tools/fetch_datasets.py`, `tools/convert_datasets.py` |
+| AI hỗ trợ viết rule (chỉ đề xuất) và hỗ trợ analyst | Ollama (`qwen3.5:9b`) + kiểm định trên wazuh-manager cô lập (`wazuh-sandbox`) + duyệt trên console; tóm tắt alert / case, giải thích lệnh, nháp báo cáo | `server/siem/ai/`, `wazuh/sandbox/`, `tools/fetch_datasets.py`, `tools/convert_datasets.py` |
 | Bảo mật nội bộ | TLS (CA nội bộ), RBAC Elasticsearch + Wazuh API, Docker secrets + keystore | `security/setup.sh`, `tools/init_secrets.py`, `wazuh/manager/entrypoint/` |
 | Lưu trữ | Elasticsearch 8 (xpack security bật) | |
 | Trực quan hóa | Grafana 11 (4 dashboard provision sẵn: Tổng quan SOC, Điều tra thực thể, Thư viện rule, SOC KPI; nhúng trong console, cùng tài khoản) | `grafana/`, `tools/gen_dashboard.py` |
@@ -74,7 +74,7 @@ vẫn là phần tự xây của SIEM/XDR. Không dùng Wazuh indexer, dashboard
 |---|---|
 | `wazuh/manager/ossec.conf` | Cấu hình manager: ghi mọi event ra `archives.json` (`logall_json`), enroll bắt buộc mật khẩu, tắt module giám sát chính container manager, tắt vulnerability detection (từ 4.8 cần Wazuh indexer) |
 | `wazuh/manager/agent.conf` | Cấu hình chung đẩy xuống mọi agent: Windows đọc Sysmon / PowerShell / Defender, FIM thư mục Startup và khóa Run; Linux đọc log Apache, FIM `/var/www`, `/etc/ssh`, cron |
-| `wazuh/manager/rules/0100-platform.xml` | Rule Wazuh riêng: file mới / bị sửa trong thư mục web lên level 10 (có thể là webshell, T1505.003) |
+| `wazuh/manager/rules/` | Rule Wazuh XML của dự án (mục 3, [RULES.md](RULES.md)); vd `0100-platform.xml`: file mới / bị sửa trong thư mục web lên level 10 (có thể là webshell, T1505.003) |
 | `wazuh/manager/entrypoint/` | Chạy mỗi lần manager khởi động: mật khẩu enroll lấy từ Docker secret, chứng chỉ Wazuh API do CA nội bộ ký, user API `siem-soar` quyền tối thiểu, khóa 2 user mặc định `wazuh` / `wazuh-wui`, tắt filebeat |
 | `vector/wazuh.yaml` | Đưa `archives.json` (mọi event) và `alerts.json` (cảnh báo ruleset Wazuh) vào Kafka `siem.raw` |
 | `wazuh/agent/linux/siem-xdr`, `wazuh/agent/windows/siem-xdr.cmd` + `.ps1` | Script phản ứng trên agent |
@@ -151,7 +151,8 @@ Kết quả được ghi vào `active-responses.log`, agent gửi dòng đó v�
   FIM quét định kỳ, rule AGENT-001/002 và FIM-001..003) giữ ở tag `archive/agent-go-hardening`. Nhánh này đã hòa `main`
   bằng merge kiểu *ours* (14/10/2026): không lấy lại mã agent Go, vì mọi phần đã có thay thế phía Wazuh (enroll bằng mật
   khẩu authd + khóa riêng từng agent, FIM thời gian thực, kill theo PID đối chiếu tên). Riêng rule FIM-001 (file / khóa
-  registry dùng để duy trì truy cập) được viết lại cho event FIM của Wazuh: `server/rules/fim.yml`, [RULES.md](RULES.md).
+  registry dùng để duy trì truy cập) được viết lại cho event FIM của Wazuh, nay là rule XML 106001–106003
+  (`wazuh/manager/rules/0106-fim.xml`, [RULES.md](RULES.md) mục 9.4).
 
 ## 2. Backend
 
@@ -198,7 +199,7 @@ Trang đăng nhập bắt đặt mật khẩu mới ngay, sau đó vào tab *Tà
 | Cảnh báo | Lọc theo trạng thái, mức độ, thời gian, tìm IP / máy / rule (phím `/`). Bấm dòng mở ngăn chi tiết: thực thể, MITRE, xử lý (xác nhận / đóng / báo nhầm kèm ghi chú, có lịch sử), phản ứng (chặn IP, kill PID, cô lập máy; bấm 2 lần để xác nhận), SOAR đã làm, case liên quan, sự kiện gốc |
 | Case | Checklist theo playbook, giao việc, đổi trạng thái (đóng phải có kết luận), cảnh báo trong case bấm được |
 | Điều tra | Dashboard Grafana *Điều tra thực thể* lọc theo IP / máy / tài khoản / truy vấn Lucene; gợi ý sẵn thực thể từ cảnh báo đang mở. Nút "Điều tra ..." trên cảnh báo, case, agent mở thẳng trang này |
-| Thư viện rule | Dashboard Grafana *Thư viện rule*: mọi rule đang chạy, ngoại lệ và đề xuất AI trong cùng một bảng, cùng các cột (mã, tên, mức độ, MITRE, tag, trường log, điều kiện tóm tắt, số alert 24 giờ / 7 ngày); lọc theo nguồn, tactic, tag, trường log, từ khóa. Phần *So sánh*: chọn một đề xuất AI để thấy các rule hiện có liên quan, lý do liên quan và **điều kiện hai bên đặt cạnh nhau**. Bấm mã rule xem cảnh báo của rule đó |
+| Thư viện rule | Dashboard Grafana *Thư viện rule*: rule Wazuh (gốc, dự án, SigmaHQ; Wazuh API không liệt kê `rules-dynamic/` nên rule AI và ngoại lệ chưa có, R83) và đề xuất AI trong cùng một bảng, cùng các cột (mã, tên, mức độ, chế độ, MITRE, tag, số alert 24 giờ / 7 ngày); lọc theo nguồn, tactic, tag, trường log, từ khóa. Bấm mã rule xem cảnh báo của rule đó. Phần *So sánh đề xuất với rule YAML* đã bỏ ở Task 26 (R78) |
 | Giao ca | Biên bản giao ca tự lập: alert mở theo ưu tiên, case quá hạn SLA, lệnh chặn sắp hết hạn, bước SOAR chờ duyệt, sự cố nền tảng, sự cố lớn; lưu bản đã giao ([SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 10) |
 | Threat hunting | Nhật ký hunt theo PEAK: giả thuyết gắn ATT&CK, truy vấn, kết luận, rule mới, dữ liệu còn thiếu; 5 giả thuyết mở đầu |
 | KPI | MTTD / MTTA / MTTC, đạt SLA, báo nhầm, tải analyst, độ phủ ATT&CK, sức khỏe nguồn log, hunting; tô màu theo đích (mục 7) |
@@ -324,40 +325,39 @@ Ghi chú cấu hình (khi đó): `topic` trong `vector.yaml` phải ghi thẳng 
 
 ## 3. Phát hiện
 
-Tài liệu đầy đủ về hệ thống rule (cơ chế, danh sách 41 rule, độ phủ, điểm mạnh / yếu): [`RULES.md`](RULES.md).
+Tài liệu đầy đủ về hệ thống rule (cơ chế, dải id, quy trình detection-as-code, độ phủ, điểm mạnh / yếu): [`RULES.md`](RULES.md).
+Sổ quyết định: [docs/wazuh-ruleset-decisions.md](docs/wazuh-ruleset-decisions.md).
 
-**Luật** (`server/rules/*.yml`, 41 luật: 40 chạy chính thức, FIM-001 chạy bóng; có gắn MITRE ATT&CK):
+**Luật = rule Wazuh XML.** Từ 05/11/2026 (R65) mọi phát hiện bằng luật chạy trong `wazuh-analysisd` của `wazuh-manager`; engine
+YAML cũ của analyzer (`server/rules/*.yml`) đã bị xóa ở Task 25 (P4, 08/11/2026). Bộ rule gồm:
 
-| Nhóm | Luật |
-|---|---|
-| Web | SQLi, XSS, path traversal/LFI, command injection/Log4Shell, scanner UA, dirbusting, brute-force form, webshell, HTTP flood |
-| Xác thực | SSH brute-force, brute-force **rồi thành công** (sequence), password spraying (distinct user), root login, tạo user, sudo shell |
-| Windows | 4625 brute-force, xóa audit log, tạo user, thêm vào Administrators, PowerShell `-enc`, download cradle/AMSI bypass, Mimikatz/LSASS dump, Office sinh shell, service lạ, xóa shadow copy, Defender, LOLBins, schtasks |
-| Linux | reverse shell, web server sinh shell, `curl \| sh`, crypto miner, trinh sát, persistence |
-| Mạng | port scan (distinct port), firewall deny hàng loạt, dịch vụ nhạy cảm lộ ra Internet, Suricata severity cao, SMB lateral, Threat Intel IOC |
-| Toàn vẹn file | file / khóa registry dùng để duy trì truy cập: Startup, Run, cron, systemd, PAM, sudoers, authorized_keys (FIM-001, trên event FIM của Wazuh) |
+| Phần | Ở đâu | Ghi chú |
+|---|---|---|
+| Ruleset gốc Wazuh 4.14.8 | trong image | khoảng 4,5 nghìn rule; 9 rule chỉnh bằng `overwrite` ở `0999-tuning.xml` |
+| Rule XML của dự án | `wazuh/manager/rules/` (9 file, 88 rule) | phủ 41 mã cũ (`WEB-001`, `LNX-002`...) qua nhóm `legacy_<MÃ>`, có gắn MITRE ATT&CK |
+| SigmaHQ lô 1 | `wazuh/manager/rules/0966-sigmahq.xml` | 30 rule Windows, giấy phép DRL 1.1, chạy bóng |
+| Rule AI đã duyệt | `rules-dynamic/ai.xml` (volume `wazuh_dynamic_rules`) | console ghi khi duyệt đề xuất AI, chạy bóng tới khi bật chính thức |
+| Ngoại lệ | `rules-dynamic/exceptions.xml` | rule level 0, hai người khác nhau duyệt |
 
-Cú pháp luật:
-```yaml
-- id: AUTH-001
-  title: Brute-force đăng nhập
-  severity: high                          # low|medium|high|critical
-  mitre: {tactic: Credential Access, technique: [T1110.001]}
-  type: threshold                         # match | threshold | sequence
-  condition:
-    all:
-      - {field: event.category, op: eq, value: authentication}
-      - {field: event.outcome,  op: eq, value: failure}
-  threshold: {count: 5, window: 60, group_by: [source.ip]}   # distinct: <field> để đếm giá trị khác nhau
-```
-Toán tử: `eq, neq, in, contains, not_contains, startswith, endswith, regex, gt, gte, lt, lte, exists, cidr`.
+Rule viết tay đi qua CI `wazuh-rules`: lint, ca test log gốc chạy qua wazuh-manager thật, quét `ossec.log`, kiểm rule gốc còn
+tới được (`tools/wazuh_stock_reach.py`). Rule mới chạy bóng (nhóm `shadow`) trước khi bật chính thức
+([SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 4).
+
+**Cầu nối cảnh báo Wazuh** (`server/siem/detection/wazuh.py`): chuyển mọi cảnh báo level ≥ 7 trong `alerts.json` thành alert
+`rule.id = WZH-<id rule Wazuh>`, `alert.source = wazuh`, trừ nhóm `sca` (kết quả SCA / CIS là đánh giá cấu hình, không phải sự cố;
+xem trong event `event.module: sca`). Level ánh xạ sang severity: 7–9 medium, 10–11 high, ≥ 12 critical. Rule có nhóm `shadow` ra
+alert bóng (SOAR bỏ qua). Rule gốc level 7–11 là alert thật từ R65 (`WAZUH_STOCK_SHADOW=false`).
+
+**Độ phủ trên Wazuh** (đo 07/11/2026 trên `wazuh-sandbox`, chi tiết ở [RULES.md](RULES.md) mục 4.6): trong 19.315 mẫu tấn công của
+dataset công khai (863 mẫu Splunk không có log thô nên không tính), Wazuh bắt 1.484/15.088 mẫu web (CSIC 2010), 74/2.218 mẫu Windows và 12/1.146 mẫu Linux dựng lại từ
+Atomic Red Team; 16.882 mẫu còn là khoảng trống. SigmaHQ lô 1 bắt thêm 186 mẫu, không cướp phát hiện nào của rule khác. Đây là chỗ AI và SigmaHQ được giao lấp.
 
 **ML (tạm dừng, `ML_ENABLED=false`)**: Isolation Forest theo (IP nguồn, cửa sổ 60 giây). Thử nghiệm cho thấy
 model bắt được tấn công nhưng **báo nhầm khoảng 32%** lưu lượng bình thường, và 100% với các IP chỉ có 1 event.
 Nguyên nhân chính: baseline tổng hợp và một model chung cho mọi nguồn. Code được giữ lại trong `server/siem/detection/ml.py`.
 Trước khi bật lại cần: giai đoạn học trên dữ liệu thật, tách model theo nguồn, hiệu chỉnh ngưỡng, chống lặp alert.
 
-**Cảnh báo từ ruleset Wazuh** (`server/siem/detection/wazuh.py`): rule của SIEM/XDR chạy trên MỌI event lấy từ
+**Lịch sử: cảnh báo từ ruleset Wazuh khi còn engine YAML (trước R65)**: rule của SIEM/XDR chạy trên MỌI event lấy từ
 `archives.json`. Ruleset Wazuh (hơn 3.000 rule) phần lớn trùng việc với rule tự viết (web, SSH, đăng nhập Windows...), nên
 không chuyển hết thành alert thật để tránh mỗi sự cố thành 2 alert. Cầu nối chuyển mọi cảnh báo level ≥ 7 trong `alerts.json` (mọi nhóm, trừ `sca`) để đo,
 nhưng rule gốc ngoài các nhóm `syscheck`, `rootcheck`, `vulnerability-detector`, `virustotal`, `yara` (`WAZUH_ALERT_ACTIVE_GROUPS`)
@@ -366,9 +366,7 @@ và dưới level 12 chỉ là alert BÓNG (SOAR bỏ qua) khi `WAZUH_STOCK_SHAD
 và đó là đánh giá cấu hình, không phải sự cố. Xem SCA trong event `event.module: sca`.
 Rule Wazuh riêng đặt ở `wazuh/manager/rules/0100-platform.xml` (ID từ 100000).
 
-**Bộ rule Wazuh XML thống nhất (đã chuyển, R65, 05/11/2026).** Nhánh `feature/wazuh-unified-ruleset` chuyển các rule YAML sang rule XML của Wazuh (10 file ở `wazuh/manager/rules/`, 556 ca test log gốc chạy qua Wazuh thật trong CI). Theo quyết định của chủ dự án (R65), engine YAML đã tắt (`RULE_ENGINE_ENABLED=false`), rule XML bỏ chế độ bóng (bỏ qua tiêu chí 7 ngày) và rule gốc Wazuh level 7 đến 11 cũng là alert thật (`WAZUH_STOCK_SHADOW=false`); rủi ro và cách quay lui ở RULES.md 9.1. Đoạn "Cảnh báo từ ruleset Wazuh" ngay trên mô tả hành vi trước R65; mục 3 sẽ viết lại ở Task 24. Xem [RULES.md mục 9](RULES.md#9-bộ-rule-wazuh-xml-thống-nhất-đã-chuyển-sang-wazuh-r65).
-
-**Độ phủ của ruleset gốc Wazuh so với rule tự viết** (đo 6/10/2026, `tools/wazuh_coverage.py`, chi tiết ở
+**Lịch sử: độ phủ của ruleset gốc Wazuh so với rule YAML tự viết** (đo 6/10/2026, `tools/wazuh_coverage.py`, chi tiết ở
 `datasets/report_wazuh.md`). Cùng dataset với báo cáo độ phủ trong `AI-README.md` (mục 9.1), đưa vào analysisd của một wazuh-manager **tạm**
 (không nối mạng, không chung volume) đúng định dạng agent gửi: access log Apache, Sysmon EventID 1 dạng XML eventchannel,
 auditd (key `audit-wazuh-c`). Không dùng `wazuh-logtest`: bản 4.14 không chạy bộ giải mã eventchannel nên mọi rule Windows
@@ -524,11 +522,13 @@ Toàn bộ pipeline, dữ liệu, cách kiểm định, kết quả chạy thử
 
 - AI **chỉ đề xuất**: ngoại lệ cho rule hay báo nhầm, rule mới cho mẫu tấn công chưa rule nào bắt. Mọi đề xuất qua kiểm định tự
   động rồi chờ người duyệt trên tab *Đề xuất AI* của console. LLM chạy nội bộ bằng Ollama, log không rời khỏi máy.
-- Model không được huấn luyện lại. Rule mới được viết bằng **Sigma**, hệ thống biên dịch sang rule engine, ghép vế qua nhiều lượt
-  hỏi và kiểm định trên dữ liệu model chưa thấy (CSIC 2010, Atomic Red Team, log ghi thật của Splunk attack_data và OTRF).
-  File rule AI lưu cả rule Sigma lẫn bản đã biên dịch.
+- Model không được huấn luyện lại. Rule mới được viết bằng **Sigma**, ghép vế qua nhiều lượt hỏi trên cây điều kiện Python, rồi
+  dịch sang **rule Wazuh XML** và kiểm định trên `wazuh-sandbox` (wazuh-manager cô lập, profile `ai`, không mạng): bắt ≥ 30% tập
+  kiểm tra model chưa thấy, báo nhầm ≤ 0,1%, không che alert thật của rule khác. Duyệt thì rule vào `rules-dynamic/ai.xml` ở chế độ
+  bóng; bật chính thức trên console khi đạt tiêu chí chạy bóng.
 - Kết quả chạy thử: web có rule đạt kiểm định cho 4/6 loại tấn công; endpoint chỉ đạt ở vài kỹ thuật có công cụ đặc trưng (vd dò
-  tài khoản domain). Trong 4 model đã so sánh, `qwen3.5:9b` cho kết quả tốt nhất.
+  tài khoản domain). Trong 4 model đã so sánh, `qwen3.5:9b` cho kết quả tốt nhất. Chu kỳ đầu qua cổng Wazuh (07/11/2026): 5 đề
+  xuất, 2 đạt (dò file sao lưu web, Linux T1552.001), 0 báo nhầm, 0 che rule khác (`AI-README.md` mục 9.11).
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai up -d   # bật AI trên GPU NVIDIA
@@ -539,8 +539,8 @@ docker compose exec ai-worker python -m siem.ai --once                          
 
 ```bash
 cd server && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt pytest httpx
-.venv/Scripts/python -m pytest -q      # 241 test (14/10/2026): parser, rule + ca test dương / âm + lint kho rule, ML, SOAR (gia hạn chặn, gỡ chặn, gom case, thông báo, giới hạn kill), ưu tiên / SLA, RBA, giám sát sức khỏe, KPI, TI (MISP, hạn IOC, dò ngược), case playbook, API + đăng nhập + MFA + quyền theo vai trò + task cần duyệt, threat hunting / giao ca / AI hỗ trợ, Grafana proxy, AI (web + endpoint, log thật, Sigma), Wazuh (kể cả chống giả mạo telemetry), thư viện rule, công cụ đổi tên project
-cd .. && python tools/rule_lint.py      # kho rule: metadata, ReDoS, ca test, độ phủ ATT&CK (CI chạy cả hai lệnh trên)
+.venv/Scripts/python -m pytest -q      # 660 đạt, 34 bỏ qua (08/11/2026): parser, cầu nối Wazuh (kể cả chống giả mạo telemetry), ML, SOAR, ưu tiên / SLA, RBA, giám sát sức khỏe, KPI, TI, case playbook, API + đăng nhập + MFA + quyền theo vai trò, Grafana proxy, thư viện rule, AI (Sigma, bộ dịch Wazuh XML, sandbox, cổng Wazuh, duyệt / bật / gỡ ai.xml)
+cd .. && python tools/wazuh_rule_lint.py   # rule XML: dải id, mã, mitre, pcre2, ca dương / âm (CI job wazuh-rules còn chạy ca log gốc qua Wazuh thật)
 cd .. && docker run --rm -v ./vector:/etc/vector:ro timberio/vector:0.58.0-alpine test /etc/vector/wazuh.yaml /etc/vector/wazuh-tests.yaml
 ```
 **Kiểm thử end-to-end trên stack đang chạy** (cần `--profile demo`): `python tools/e2e_test.py`. Script không dùng tài
@@ -549,13 +549,13 @@ chặn IP qua Wazuh → gỡ chặn; command injection → LNX-002 → kill cả
 phiên console (kể cả analyst không đánh dấu được task cần Trưởng nhóm IR duyệt trong case webshell); Grafana sau manager (cổng 3000 đóng, giả header vô tác dụng, Viewer không sửa được dashboard, Sign out trong
 Grafana thoát luôn phiên console) và hồi quy các lỗi đã sửa (10 request trong cùng giây phải thành đủ 10 event; PID 1 của
 demo-web không phải httpd; request có User-Agent giả dòng `siem-proc:` / `siem-xdr:` vẫn là request web, không sinh LNX-002
-hay lệnh kill). Mọi thứ nó tạo ra đều được dọn sau khi chạy. Kèm kiểm tra dashboard *Thư viện rule* đọc đủ rule và cặp so sánh. Lần chạy 11/10/2026: 44/44 đạt, khoảng 100 giây.
+hay lệnh kill). Mọi thứ nó tạo ra đều được dọn sau khi chạy. Kèm kiểm tra dashboard *Thư viện rule* liệt kê đủ rule của Wazuh. Lần chạy 08/11/2026 (mã P4, project thử cách ly): 43/43 đạt, 115 giây ([Test.md](Test.md) mục 0).
 
 **Kiểm thử giao diện bằng trình duyệt thật** (Microsoft Edge có sẵn trên Windows, không tải thêm trình duyệt):
 `pip install playwright` rồi `python tools/ui_test.py [thư-mục-ảnh]`. Script tự tạo quản trị viên tạm `ui-admin`, đăng nhập qua
 liên kết sâu, đi qua mọi trang, mở chi tiết cảnh báo / case, bấm liên kết trong dashboard Grafana nhúng, thử form chặn IP với IP
 sai, kiểm tra màn hình điện thoại 390px không tràn ngang, đăng xuất, và báo mọi lỗi JavaScript; ảnh chụp từng trang để soát
-giao diện; ở *Thư viện rule* kiểm tra bảng danh mục và luồng "So sánh với rule hiện có" chọn đúng đề xuất. Lần chạy 11/10/2026: 25/25 đạt. Lần chạy đầu tìm ra 4 lỗi giao diện, đã sửa: lỗi cú pháp JavaScript, ngăn chi tiết mở
+giao diện; ở *Thư viện rule* kiểm tra bảng danh mục (luồng "So sánh với rule hiện có" đã bỏ ở Task 26). Lần chạy 11/10/2026: 25/25 đạt (chưa chạy lại sau P4). Lần chạy đầu tìm ra 4 lỗi giao diện, đã sửa: lỗi cú pháp JavaScript, ngăn chi tiết mở
 lại khi chuyển trang nhanh, đăng xuất báo nhầm "phiên hết hạn", biểu đồ IP mất nhãn khi chỉ có 1 IP.
 Lần chạy đầu tìm ra 2 lỗi, đã sửa: SOAR tin bản ghi chặn cũ, và SOAR thiếu quyền refresh index khi đánh dấu lệnh chặn đã gỡ.
 

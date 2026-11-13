@@ -105,7 +105,7 @@ common:
           Cần sửa playbook / rule / ngưỡng nào? Mỗi việc cải thiện ghi người làm và hạn hoàn thành (CISA 10i-10r).
       - title: "Đưa IOC và cách phát hiện mới vào hệ thống"
         detail: |-
-          IOC vào config/intel (tự nạp lại). Hành vi chưa có rule bắt: viết rule trong server/rules hoặc để AI đề xuất (tab Đề xuất AI). Báo nhầm lặp lại: đề xuất ngoại lệ thay vì tắt rule (CISA 10b-10c).
+          IOC vào config/intel (tự nạp lại). Hành vi chưa có rule bắt: viết rule Wazuh XML trong wazuh/manager/rules (qua CI) hoặc để AI đề xuất (tab Đề xuất AI). Báo nhầm lặp lại: đề xuất ngoại lệ thay vì tắt rule (CISA 10b-10c).
           
 playbooks:
   - id: PB-07

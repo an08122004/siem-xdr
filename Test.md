@@ -1,8 +1,39 @@
 # Kết quả kiểm thử toàn bộ siem-xdr
 
-Hai đợt: **05/11/2026** (nhánh `feature/wazuh-unified-ruleset`, mục 0) và **15/10/2026** (phần còn lại của tài liệu, giữ làm lịch sử).
+Ba đợt: **08/11/2026** (mã P4, mục 0.1), **05/11/2026** (nhánh `feature/wazuh-unified-ruleset`, mục 0.2) và **15/10/2026** (phần còn lại
+của tài liệu, giữ làm lịch sử).
 
-## 0. Kiểm thử bộ rule Wazuh XML (05/11/2026)
+## 0. Kiểm thử bộ rule Wazuh XML
+
+### 0.1 Mã P4: rule AI và SigmaHQ ra Wazuh XML, xóa engine YAML (08/11/2026)
+
+Mã được kiểm thử: nhánh `p4/t26` (nhánh tích hợp `feature/p4-ai-xml` @ `572bef0` = Task 19 đến 25 cộng 19b, thêm phần sửa của Task 26).
+Kế hoạch: [2026-11-06-p4-ai-wazuh-xml.md](docs/superpowers/plans/2026-11-06-p4-ai-wazuh-xml.md). Chưa chạy trên CI GitHub (chưa push),
+chưa triển khai lên stack thật.
+
+| Hạng mục | Kết quả |
+|---|---|
+| Unit test (`pytest`, máy dev Windows) | **660 đạt, 34 bỏ qua**, 1 cảnh báo (bỏ qua: 31 test `install.sh` cần bash Linux, 3 test tích hợp cần `wazuh-sandbox` thật) |
+| Lint rule XML (`tools/wazuh_rule_lint.py --layer build/attack-layer.json`) | **11 file, 0 lỗi**, 1 cảnh báo (`0999-tuning.xml`, có từ trước); layer ATT&CK ghi được |
+| **E2E** (`tools/e2e_test.py`) trên project Compose thử cách ly `p4e2e`, profile `demo` | **43/43 đạt** ở cả hai lần chạy (109 giây trước khi đổi ô dashboard, 115 giây trên mã cuối): console 13/13, SQLi → chặn IP 6/6, command injection → kill 3/3, webshell → FIM → case 3/3, Grafana 14/14 (thư viện rule 4.630/4.630 rule Wazuh), hồi quy 4/4 |
+| Rule AI trên wazuh-manager thật (project `p4e2e`) | `ai.xml` do `emit` + `render_ai_file` sinh nạp được (reload không lỗi, `ossec.log` không có 7612 / 7617 / 7619); event thật từ agent `demo-web` ra alert bóng `WZH-109001` (Linux) và `WZH-109003` (web). **Lỗi tìm thấy rồi đã sửa (Task 26b):** gỡ hết khối thì Wazuh từ chối file `<group>` rỗng (`Group 'group' without any rule.`); nay xóa file rồi reload, RULES.md mục 9.10 |
+| Ca test log gốc qua Wazuh thật (Task 24, manager tạm trên máy dev) | `0966-sigmahq` 60 ca 0 sai; `0998-stock-real-alerts` 17/0, `0997-stock-if-group` 16/0, `0001` 2/0, `0100` 9/0, `0101` 67/0, `0102` 86/0, `0106` 22/0, `0845` 69/0, `0965-windows` 66/0; ossec.log sạch; `wazuh_stock_reach.py` 0 lỗi. **Chưa xác nhận** (máy ngủ làm treo): `0541-network`, `0271-web`, `0999-tuning` |
+| Review cuối P4 (nhánh `p4/final-fix`, 08/11/2026, manager tạm trên máy dev) | Unit test **687 đạt, 34 bỏ qua**; lint 11 file 0 lỗi (1 cảnh báo cũ); `ossec.log` không có 7612 / 7617 / 7619; `wazuh_stock_reach.py` ngưỡng 12 (CI): 0 lỗi; ngưỡng 7 (R65): 54 lỗi, đều có từ trước `0966` (RULES.md 9.6). Ca qua Wazuh thật: mọi ca eventchannel / syscheck của mọi file (đường duy nhất tới rule 108xxx) cộng đủ `0997`, `0998`: **232 ca, 0 sai** (gồm `0966-sigmahq` 60, `0997-stock-if-group` 19 với 3 ca ghim mới 92023 / 92043 / 92080, `0998` 16, `0965-windows` 65); đối chứng: với `0966` cũ ca 92023 ra 108017 (sai). Ca logtest (syslog / json / apache) không chạy lại: khoảng 4 giây một lời gọi trên máy dev, và không ca nào chạm được rule 108xxx. `sigmahq_import --measure` (lượt có / không có `0966`): lô cũ cướp 2 mẫu, lô sinh lại 0 mẫu, 186 mẫu mới |
+| Sandbox Wazuh, test tích hợp (Task 20, `test_sandbox_it.py`) | 3/3 đạt trên `wazuh-sandbox` thật |
+| Chu kỳ AI qua cổng Wazuh (Task 21, project `p4gate`, GPU) | `errors: []`, 5 đề xuất, 2 đạt cổng; chi tiết [AI-README.md](AI-README.md) mục 9.11 |
+
+Số bước E2E: `tools/e2e_test.py` có 45 lời gọi `check` sau Task 25 (bỏ 2 bước dựa vào rule YAML: "thư viện liệt kê đủ rule trong
+`server/rules`" và "đề xuất AI có cặp so sánh"); một lần chạy đủ có **43** check vì vài check nằm trong nhánh rẽ (vd chỉ một trong
+hai câu "mở case mới" / "gom vào case đang mở"). Task 26 đổi số panel kỳ vọng của dashboard *Thư viện rule* từ 19 xuống 16 (bỏ phần so
+sánh đề xuất với rule YAML).
+
+Cách chạy E2E cách ly (stack thật `siem-xdr` vẫn chạy song song, không bị đụng): file override ngoài git đổi mạng `soc` thành
+`p4e2e-soc`, subnet `grafana-auth` sang `10.250.31.0/28` (IP manager / Grafana và `GF_AUTH_PROXY_WHITELIST` theo đó), đổi cổng host
+(console 18000, web demo 18081, Wazuh 11514 / 11515 / 10514, kafka-ui 18088, bỏ cổng Elasticsearch), image server tên
+`p4e2e-server`; bí mật mới bằng `tools/init_secrets.py`, `.env` chép từ `.env.example`; chạy bản sao `e2e_test.py` đổi cổng
+`8000` → `18000`, `8081` → `18081` với `COMPOSE_PROJECT_NAME=p4e2e` và `COMPOSE_FILE` trỏ cả hai file; xong thì `down -v` và xóa image thử.
+
+### 0.2 Bộ rule Wazuh XML thống nhất (05/11/2026)
 
 Mã được kiểm thử: nhánh `feature/wazuh-unified-ruleset` @ `0e6e0bb` (Task 0 đến 17, ghim alert thật, sửa dashboard của [kế hoạch](docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md)). Chạy trên CI GitHub Actions (Ubuntu 24.04, Python 3.12). Mô tả bộ rule: [RULES.md](RULES.md) mục 9.
 
@@ -11,7 +42,7 @@ Mã được kiểm thử: nhánh `feature/wazuh-unified-ruleset` @ `0e6e0bb` (T
 | Unit test (`pytest`, job `test`) | **603 đạt** trên CI Linux, 1 cảnh báo |
 | Ca test log gốc qua wazuh-manager thật (job `wazuh-rules`) | **556 ca, 0 sai**; bước `tools/wazuh_stock_reach.py`: 0 rule gốc là alert thật chưa ghim |
 | Lint rule XML (`tools/wazuh_rule_lint.py`) | **10 file, 0 lỗi**, 1 cảnh báo (`lsass.exe` chép nguyên từ rule gốc) |
-| Các job còn lại (`rules`, `vector`, `compose`) | xanh |
+| Các job còn lại (`rules`, `vector`, `compose`) | xanh (job `rules` đã xóa ở Task 25 cùng engine YAML) |
 | Độ ồn trên tập bình thường (`tools/wazuh_noise.py`) | Windows 0,596 / 100 event (cổng ≤ 1, đạt; trước tuning 1,341), web 0 / 36.000, Linux 2,0 / 100 (toàn bộ là 102505, giữ bóng) |
 | Độ phủ dataset Windows | Sửa 92041 làm mất 221 khớp chung chung, xem RULES.md mục 9.8 |
 
@@ -25,9 +56,11 @@ Ca test theo file (`wazuh/manager/tests/cases/`): `0100-platform`, `0101-auth` (
 | `tools/wazuh_rule_lint.py` | Dải id, mã đầu mô tả, mitre, nhóm `siem`, ca dương / âm, `pcre2`, cấm `ignore`, quy tắc `overwrite` | CI mỗi lần push |
 | `tools/wazuh_noise.py` | Độ ồn trên tập bình thường | máy dev, project Compose riêng |
 | `tools/wazuh_coverage.py` | Độ phủ trên dataset và hàm bơm event | máy dev |
-| `tools/parity_report.py` | Đối chiếu alert YAML với XML | **chưa chạy thật** |
+| `tools/parity_report.py` | Đối chiếu alert YAML với XML | **chưa chạy thật**; hết dùng từ Task 25 (không còn alert YAML) |
+| `tools/sigmahq_import.py` | Nhập lô SigmaHQ thành `0966-sigmahq.xml` + ca test; `--measure` đếm mẫu mới | máy dev (Task 24) |
+| `server/tests/test_sandbox_it.py` | Test tích hợp `wazuh-sandbox` (cần `SANDBOX_IT_DIR`) | máy dev, project Compose riêng |
 
-**Chưa kiểm (cần triển khai nhánh lên stack thật, chờ cổng Task 18):** báo cáo song song `build/parity.md` sau E2E và 24 giờ log lab; E2E 44/44 với SOAR theo playbook mới và số kỳ vọng mục Thư viện rule; ngoại lệ Wazuh trên manager thật (ngoại lệ level 0 so với rule anh em, che cây con, `pcre2` trên `<url>`); đo lại độ ồn trên ≥ 24 giờ syslog và nhật ký console; chạy trên máy Linux thật và SELinux (`:z`); agent OPNsense đọc `eve.json` (chưa cài, nên rule Suricata XML chưa có dữ liệu thật).
+**Chưa kiểm (05/11, cần triển khai nhánh lên stack thật, chờ cổng Task 18):** báo cáo song song `build/parity.md` sau E2E và 24 giờ log lab (hết dùng từ Task 25); E2E với SOAR theo playbook mới và số kỳ vọng mục Thư viện rule (đã chạy 08/11 trên project thử: 43/43, mục 0.1); ngoại lệ Wazuh trên manager thật (ngoại lệ level 0 so với rule anh em, che cây con, `pcre2` trên `<url>`); đo lại độ ồn trên ≥ 24 giờ syslog và nhật ký console; chạy trên máy Linux thật và SELinux (`:z`); agent OPNsense đọc `eve.json` (chưa cài, nên rule Suricata XML chưa có dữ liệu thật).
 
 **Đính chính:** mục 1 bên dưới (15/10) ghi dashboard Grafana sinh lại "khớp 100%". Từ 05/11 câu đó lại đúng: cả 4 dashboard được sinh lại bằng `tools/gen_dashboard.py` và test `server/tests/test_kpi.py` bắt JSON đã commit phải khớp đầu ra của generator (trước đó `soc-kpi.json` lệch, chỉ khác id panel).
 

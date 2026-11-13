@@ -1,27 +1,22 @@
-"""Danh mục rule cho tra cứu và so sánh (index siem-rules, Grafana dashboard "Thư viện rule").
+"""Danh mục rule cho tra cứu (index siem-rules, Grafana dashboard "Thư viện rule").
 
-Mỗi bản ghi có cùng bộ trường (mã, tên, mức độ, MITRE, tag, trường log dùng trong điều kiện, điều kiện tóm tắt, YAML), nên
-rule đang chạy và đề xuất AI đặt cạnh nhau so sánh được trực tiếp. Bốn loại bản ghi (trường `origin`):
+Mỗi bản ghi có cùng bộ trường (mã, tên, mức độ, MITRE, tag, trường log, điều kiện tóm tắt), nên rule Wazuh và đề xuất AI
+lọc được chung. Các loại bản ghi (trường `origin`):
 
-  rule          rule đang chạy (server/rules/**, kể cả rule AI đã duyệt trong rules/ai), kèm số alert 24 giờ / 7 ngày /
-                90 ngày, số báo nhầm 30 ngày, chế độ (chạy bóng / chính thức), metadata và kết quả ca test (detection/lint.py)
-  exception     ngoại lệ đang áp dụng (rules/exceptions)
-  detector      phát hiện có sẵn của nền tảng, không viết bằng YAML: RBA-001 (soar/risk.py), HLT-* (soar/health.py)
-  coverage      kỹ thuật ATT&CK ưu tiên (config/threat_profile.yml): có / chưa có rule chạy chính thức đã kiểm thử
+  wazuh_rule    mỗi rule trong Wazuh (rule gốc + rule dự án, kể cả rules-dynamic/), kèm số alert 24 giờ / 7 ngày / 90 ngày,
+                số báo nhầm 30 ngày, chế độ (chính thức / chạy bóng / không tạo alert / đã tắt)
+  detector      phát hiện có sẵn của nền tảng, không phải rule Wazuh: RBA-001 (soar/risk.py), HLT-* (soar/health.py)
+  coverage      kỹ thuật ATT&CK ưu tiên (config/threat_profile.yml): có / chưa có rule Wazuh đang bật và ra alert (R49)
   ai_proposal   đề xuất của AI (ai-rule-proposals) mọi trạng thái, kèm số liệu kiểm định
-  comparison    cặp (đề xuất AI, rule hiện có liên quan) kèm lý do và điểm: cùng kỹ thuật MITRE, cùng tag tấn công, cùng
-                trường log, cùng tactic, hoặc chính rule mà ngoại lệ nhắm tới — để người duyệt thấy đề xuất có trùng / bổ sung
-                cho rule nào, đặt điều kiện hai bên cạnh nhau
 
 Manager đồng bộ định kỳ (RULES_CATALOG_SECONDS) và ngay sau khi duyệt / từ chối / gỡ đề xuất. Danh mục chỉ để đọc;
-nguồn sự thật vẫn là file YAML và index ai-rule-proposals.
+nguồn sự thật là Wazuh API và index ai-rule-proposals.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
-import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,7 +25,7 @@ from typing import Any, Iterable
 import yaml
 
 from . import settings
-from .detection.rules import EXCEPTIONS_DIR, SEVERITY_SCORE, SKIP_DIRS
+from .detection.alerts import SEVERITY_SCORE
 
 log = logging.getLogger("rules_catalog")
 
@@ -41,19 +36,6 @@ OP_LABEL = {"eq": "=", "neq": "≠", "in": "thuộc", "contains": "chứa", "not
 STATUS_LABEL = {"pending": "chờ duyệt", "approved": "đã triển khai", "invalid": "không đạt kiểm định",
                 "rejected": "đã từ chối", "rolled_back": "đã gỡ", "no_action": "không cần làm gì"}
 KIND_LABEL = {"new_rule": "Rule mới", "exception": "Ngoại lệ"}
-GENERIC_TAGS = {"ai-generated", "dataset-gap"}                       # không nói gì về loại tấn công
-BROAD_TAGS = {"web", "linux", "windows", "network", "auth", "authentication", "wazuh"}
-DOMAIN_TAGS = {"web", "linux", "windows", "network"}
-MAX_RELATED = 8
-# loại tấn công AI phân loại (ai/attack_types.py) -> tag tương ứng của rule viết tay (từ vựng hai bên khác nhau)
-ATTACK_TAGS = {"sqli": {"sqli"}, "xss": {"xss"}, "path-traversal": {"lfi", "traversal"},
-               "cmd-injection": {"rce", "cmdi"}, "sensitive-path": {"dirbusting", "scanner", "recon"},
-               "backup-file": {"dirbusting", "scanner"}, "encoding-evasion": {"evasion"}, "crlf": {"crlf"},
-               "ssi": {"ssi", "rce"}, "oversized": {"dos", "overflow"}}
-# so khớp nội dung mẫu: bỏ trường mô tả loại event (giống nhau ở mọi rule cùng nhóm) và từ quá chung
-GENERIC_FIELDS = {"event.category", "event.outcome", "event.action", "event.module", "event.type", "event.dataset"}
-STOP_TOKENS = {"and", "or", "not", "the", "all", "http", "https", "www", "com", "html", "htm", "php", "asp", "aspx", "jsp",
-               "index", "get", "post", "null", "true", "false", "select_"}
 
 
 # ------------------------------------------------------------------ tóm tắt điều kiện
@@ -105,26 +87,6 @@ def condition_fields(spec: Any, out: set[str] | None = None) -> set[str]:
     return out
 
 
-def pattern_tokens(spec: Any, out: set[str] | None = None) -> set[str]:
-    """Từ khóa trong giá trị điều kiện (vd union, select, _vti_bin): hai rule cùng bắt các chuỗi này là dấu hiệu trùng."""
-    out = set() if out is None else out
-    if isinstance(spec, list):
-        for s in spec:
-            pattern_tokens(s, out)
-    elif isinstance(spec, dict):
-        for key in ("all", "any"):
-            if key in spec:
-                pattern_tokens(spec[key], out)
-        if "not" in spec:
-            pattern_tokens(spec["not"], out)
-        if "field" in spec and spec["field"] not in GENERIC_FIELDS:
-            for v in spec.get("value") if isinstance(spec.get("value"), list) else [spec.get("value")]:
-                for tok in re.split(r"[^a-z0-9_]+", str(v).lower()):
-                    if len(tok) >= 3 and not tok.isdigit() and tok not in STOP_TOKENS:
-                        out.add(tok)
-    return out
-
-
 def rule_text(d: dict[str, Any]) -> tuple[str, set[str]]:
     """Điều kiện tóm tắt + mọi trường log rule dùng (cả group_by / distinct / các bước sequence)."""
     rtype = d.get("type", "match")
@@ -152,22 +114,6 @@ def rule_text(d: dict[str, Any]) -> tuple[str, set[str]]:
     return text, fields
 
 
-def _iso(ts: float) -> str:
-    return datetime.fromtimestamp(ts, timezone.utc).isoformat()
-
-
-def _yaml_docs(path: Path) -> list[dict[str, Any]]:
-    docs = yaml.safe_load(path.read_text(encoding="utf-8")) or []
-    return [d for d in (docs if isinstance(docs, list) else [docs]) if isinstance(d, dict)]
-
-
-def _dump(d: dict[str, Any]) -> str:
-    if d.get("sigma"):                     # rule AI: rule Sigma nhiều dòng hiển thị dạng khối, không phải chuỗi thoát \n
-        from .ai.sigma import dump
-        return dump([d])
-    return yaml.safe_dump([d], allow_unicode=True, sort_keys=False, width=110)
-
-
 def _common(*, tactic: Any, techniques: Any, tags: Iterable[str], fields: Iterable[str]) -> dict[str, Any]:
     tech = [str(t) for t in (techniques if isinstance(techniques, list) else [techniques] if techniques else [])]
     return {"mitre": {"tactic": str(tactic) if tactic else NONE_TACTIC, "technique": tech or [NONE_LIST]},
@@ -175,63 +121,10 @@ def _common(*, tactic: Any, techniques: Any, tags: Iterable[str], fields: Iterab
 
 
 # ------------------------------------------------------------------ dựng bản ghi
-MODE_LABEL = {"active": "chính thức", "shadow": "chạy bóng", "nobridge": "không tạo alert",
-              "off": "đã tắt (engine YAML)"}
+MODE_LABEL = {"active": "chính thức", "shadow": "chạy bóng", "nobridge": "không tạo alert", "off": "đã tắt"}
 
 
-def _text(v: Any) -> str:
-    if isinstance(v, dict):
-        return ", ".join(f"{k}: {x}" for k, x in v.items())
-    if isinstance(v, list):
-        return "; ".join(str(x) for x in v)
-    return str(v or "")
-
-
-def rule_docs(rules_dir: Path, alert_stats: dict[str, dict[str, Any]], report=None) -> list[dict[str, Any]]:
-    docs = []
-    for path in sorted(rules_dir.glob("**/*.y*ml")):
-        rel = path.relative_to(rules_dir)
-        if set(SKIP_DIRS) & set(rel.parts):
-            continue
-        try:
-            items = _yaml_docs(path)
-        except Exception as e:  # noqa: BLE001 - file lỗi: analyzer cũng bỏ qua, danh mục ghi rõ
-            log.warning("không đọc được %s: %s", path, e)
-            continue
-        ai = rel.parts[0] == "ai"
-        for d in items:
-            if d.get("enabled", True) is False or "id" not in d:
-                continue
-            text, fields = rule_text(d)
-            mitre = d.get("mitre") or {}
-            st = alert_stats.get(str(d["id"]), {})
-            sev = str(d.get("severity", "medium")).lower()
-            info = report.rules.get(str(d["id"])) if report else None
-            mode = str(d.get("mode", "active")).lower() if settings.RULE_ENGINE_ENABLED else "off"   # R65: engine YAML tắt
-            closed30, fp30 = st.get("closed30", 0), st.get("fp30", 0)
-            docs.append({
-                "_id": f"rule:{d['id']}", "origin": "rule", "origin_label": "Rule AI (đã duyệt)" if ai else "Rule sẵn có",
-                "source": "ai" if ai else "builtin", "updated_at": _iso(path.stat().st_mtime),
-                "rule": {"id": str(d["id"]), "name": d.get("title", "")}, "description": d.get("description", ""),
-                "severity": sev, "severity_score": SEVERITY_SCORE.get(sev, 0), "type": d.get("type", "match"),
-                **_common(tactic=mitre.get("tactic"), techniques=mitre.get("technique"), tags=d.get("tags") or [], fields=fields),
-                "condition_text": text, "patterns": sorted(_rule_tokens(d)), "yaml": _dump(d),
-                "file": str(rel).replace("\\", "/"),
-                "ai_proposal_id": d.get("ai_proposal_id"),
-                "alerts": {"h24": st.get("h24", 0), "d7": st.get("d7", 0), "d90": st.get("d90", 0), "last": st.get("last"),
-                           "closed30": closed30, "fp30": fp30,
-                           "fp_rate30": round(fp30 / closed30, 3) if closed30 else None},
-                "mode": mode, "mode_label": MODE_LABEL.get(mode, mode), "shadow_since": d.get("shadow_since"),
-                "owner": d.get("owner"), "logsource_text": _text(d.get("logsource")),
-                "falsepositives_text": _text(d.get("falsepositives")),
-                "tests": {"positive": info.positive, "negative": info.negative, "failed": info.failed,
-                          "tested": info.tested} if info else None,
-                "playbook": info.playbook if info else None,
-            })
-    return docs
-
-
-# Phát hiện có sẵn của nền tảng (không phải YAML trong server/rules): để Thư viện rule tra cứu được mã alert RBA / HLT
+# Phát hiện có sẵn của nền tảng (không phải rule Wazuh): để Thư viện rule tra cứu được mã alert RBA / HLT
 DETECTORS = [
     ("RBA-001", "Rủi ro tích lũy vượt ngưỡng trên máy / tài khoản", "high", "soar/risk.py",
      "Tổng risk_score các alert của cùng máy / tài khoản trong RBA_WINDOW_HOURS giờ >= RBA_THRESHOLD, từ >= RBA_MIN_RULES rule khác nhau"),
@@ -264,32 +157,36 @@ def detector_docs(alert_stats: dict[str, dict[str, Any]], now: str) -> list[dict
     return out
 
 
+def load_profile(config_dir: Path | None) -> dict[str, Any]:
+    """config/threat_profile.yml: kỹ thuật ATT&CK ưu tiên phát hiện; không có file thì rỗng."""
+    path = config_dir / "threat_profile.yml" if config_dir else None
+    if not path or not path.exists():
+        return {}
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
 def attack_coverage(docs: list[dict[str, Any]], profile: dict[str, Any]) -> list[dict[str, Any]]:
-    """Độ phủ kỹ thuật ưu tiên từ bản ghi thư viện (R49): kỹ thuật được phủ khi có ÍT NHẤT MỘT rule thật sự bật, từ rule
-    YAML / AI (chính thức, đã kiểm thử nếu có số liệu) HOẶC rule Wazuh (không chạy bóng, không tắt). `sources` cho biết
-    nguồn nào phủ: yaml / wazuh / both. Kỹ thuật con (T1110.001) tính cho kỹ thuật gốc (T1110). Danh sách mã rule cắt 10."""
-    from .detection.lint import covers
+    """Độ phủ kỹ thuật ưu tiên từ bản ghi thư viện (R49): kỹ thuật được phủ khi có ÍT NHẤT MỘT rule Wazuh thật sự bật (ra
+    alert qua cầu nối, không chạy bóng, không tắt). Kỹ thuật con (T1110.001) tính cho kỹ thuật gốc (T1110). Danh sách mã
+    rule cắt 10; `sources` = "wazuh" khi phủ, rỗng khi chưa."""
     out = []
     for t in profile.get("techniques") or []:
         tid = str(t["id"])
-        on: dict[str, list[str]] = {"yaml": [], "wazuh": []}
+        on: list[str] = []
         shadow: list[str] = []
         for d in docs:
-            if d.get("origin") not in ("rule", "wazuh_rule") or not covers(tid, (d.get("mitre") or {}).get("technique") or []):
+            techs = (d.get("mitre") or {}).get("technique") or []
+            if d.get("origin") != "wazuh_rule" or not any(x == tid or x.startswith(tid + ".") for x in techs):
                 continue
             rid, mode = d["rule"]["id"], d.get("mode")
-            if d.get("origin") == "wazuh_rule" and d.get("bridged") is not True and mode != "off":
+            if d.get("bridged") is not True and mode != "off":
                 continue                                    # bật nhưng không ra alert (cầu nối loại): không tính phủ
             if d.get("shadow") is True or mode == "shadow":
                 shadow.append(rid)
-            elif mode == "off" or str(d.get("status", "enabled")).lower() != "enabled":
-                continue
-            elif d.get("origin") == "wazuh_rule" or (d.get("tests") or {}).get("tested", True):
-                on["wazuh" if d.get("source") == "wazuh" else "yaml"].append(rid)
-        have = [k for k in ("yaml", "wazuh") if on[k]]
-        ids = on["yaml"] + on["wazuh"]
-        out.append({"id": tid, "name": t.get("name", ""), "why": t.get("why", ""), "covered": bool(ids), "rules": ids[:10],
-                    "rules_n": len(ids), "shadow": shadow[:10], "sources": "both" if len(have) == 2 else "".join(have)})
+            elif mode != "off" and str(d.get("status", "enabled")).lower() == "enabled":
+                on.append(rid)
+        out.append({"id": tid, "name": t.get("name", ""), "why": t.get("why", ""), "covered": bool(on), "rules": on[:10],
+                    "rules_n": len(on), "shadow": shadow[:10], "sources": "wazuh" if on else ""})
     return out
 
 
@@ -299,32 +196,6 @@ def coverage_docs(coverage: list[dict[str, Any]], now: str) -> list[dict[str, An
              "covered_text": "có" if c["covered"] else "CHƯA CÓ",
              "rules_text": ", ".join(c["rules"]) + (f" (+{c['rules_n'] - len(c['rules'])})" if c["rules_n"] > len(c["rules"]) else "")
              or "—", "shadow_text": ", ".join(c["shadow"]) or "", "sources": c["sources"] or "none"} for c in coverage]
-
-
-def exception_docs(rules_dir: Path, rules: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    docs = []
-    for path in sorted((rules_dir / EXCEPTIONS_DIR).glob("*.y*ml")):
-        try:
-            items = _yaml_docs(path)
-        except Exception as e:  # noqa: BLE001
-            log.warning("không đọc được %s: %s", path, e)
-            continue
-        for d in items:
-            if d.get("enabled", True) is False or not d.get("rule_id"):
-                continue
-            target = rules.get(str(d["rule_id"]), {})
-            docs.append({
-                "_id": f"exception:{d.get('id') or path.stem}", "origin": "exception", "origin_label": "Ngoại lệ",
-                "source": d.get("source", "manual"), "updated_at": _iso(path.stat().st_mtime),
-                "rule": {"id": str(d["rule_id"]), "name": (target.get("rule") or {}).get("name", "")},
-                "description": d.get("description", ""), "severity": target.get("severity", "low"),
-                "severity_score": target.get("severity_score", 0), "type": "exception",
-                **_common(tactic=(target.get("mitre") or {}).get("tactic"), techniques=None, tags=[],
-                          fields=condition_fields(d.get("condition"))),
-                "condition_text": "bỏ qua khi " + summarize(d.get("condition")), "yaml": _dump(d),
-                "file": f"{EXCEPTIONS_DIR}/{path.name}", "ai_proposal_id": d.get("proposal_id"),
-            })
-    return docs
 
 
 def pick(p: dict[str, Any]) -> str:
@@ -342,7 +213,8 @@ def proposal_docs(proposals: list[dict[str, Any]], rules: dict[str, dict[str, An
         m = v.get("metrics") or {}
         target = rules.get(str(p.get("target_rule_id")), {})
         if kind == "exception":
-            text, fields = "bỏ qua khi " + summarize(body.get("condition")), condition_fields(body.get("condition"))
+            cond = body.get("condition") or body.get("conditions")        # engine YAML cũ / ngoại lệ AI Wazuh (R73)
+            text, fields = "bỏ qua khi " + summarize(cond), condition_fields(cond)
             common = _common(tactic=(target.get("mitre") or {}).get("tactic"), techniques=None, tags=[], fields=fields)
             sev, rtype = target.get("severity", "low"), "exception"
         else:
@@ -351,7 +223,6 @@ def proposal_docs(proposals: list[dict[str, Any]], rules: dict[str, dict[str, An
             attack = str(p.get("target") or "").rsplit(":", 1)[-1]
             common = _common(tactic=mitre.get("tactic"), techniques=mitre.get("technique"),
                              tags=[*(body.get("tags") or []), *([attack] if attack else [])], fields=fields)
-            common["attack"] = {"key": attack, "tags": sorted(ATTACK_TAGS.get(attack, {attack} if attack else set()))}
             sev, rtype = str(body.get("severity", "medium")).lower(), body.get("type", "match")
         test = f"{m['test_detected']}/{m['test_total']}" if "test_total" in m else None
         fp = f"{m['normal_hits']}/{m['normal_total']}" if "normal_total" in m else \
@@ -362,7 +233,7 @@ def proposal_docs(proposals: list[dict[str, Any]], rules: dict[str, dict[str, An
             "updated_at": p.get("updated_at") or p.get("created_at"),
             "rule": {"id": str(p.get("target_rule_id") or ""), "name": title}, "description": body.get("description", ""),
             "severity": sev, "severity_score": SEVERITY_SCORE.get(sev, 0), "type": rtype, **common,
-            "condition_text": text, "patterns": sorted(_rule_tokens(body)), "yaml": p.get("yaml") or "",
+            "condition_text": text, "yaml": p.get("yaml") or "",
             "proposal": {
                 "id": p["id"], "kind": kind, "kind_label": KIND_LABEL.get(kind, kind), "status": status,
                 "status_label": STATUS_LABEL.get(status, status), "pick": pick(p | {"title": title}),
@@ -375,97 +246,12 @@ def proposal_docs(proposals: list[dict[str, Any]], rules: dict[str, dict[str, An
     return docs
 
 
-def _rule_tokens(d: dict[str, Any]) -> set[str]:
-    out = pattern_tokens(d.get("condition"))
-    for st in (d.get("sequence") or {}).get("steps") or []:
-        pattern_tokens(st.get("condition"), out)
-    return out
-
-
-def _domains(doc: dict[str, Any]) -> set[str]:
-    """Lĩnh vực của rule: theo tag, hoặc suy ra từ trường log (đề xuất AI thường không gắn tag web dù xét URL)."""
-    out = set(doc["tags"]) & DOMAIN_TAGS
-    for f in doc["fields"]:
-        if f.startswith(("url.", "http.")):
-            out.add("web")
-        elif f.startswith(("winlog.", "registry.")):
-            out.add("windows")
-    return out
-
-
-def _weight(df: int, rare: float, common: float, limit: int = 2) -> float:
-    """Đặc điểm càng ít rule có thì càng nói lên sự liên quan (T1190 có ở gần hết rule web -> gần như không tính)."""
-    return rare if df <= limit else common
-
-
-def related(proposal: dict[str, Any], rule: dict[str, Any], df: dict[tuple[str, str], int]) -> tuple[float, list[str]]:
-    """Mức liên quan giữa 1 đề xuất và 1 rule đang chạy, kèm lý do (để người duyệt biết vì sao đặt cạnh nhau).
-    df: số rule đang chạy có từng đặc điểm (kỹ thuật, tag, trường, tactic, từ khóa mẫu)."""
-    why: list[tuple[float, str]] = []       # (điểm, lý do)
-
-    def add(points: float, reason: str, kind: str = "", value: str = "") -> None:
-        why.append((points, reason + (" (nhiều rule cùng có)" if df.get((kind, value), 0) > 2 and points < 1 else "")))
-    if proposal["rule"]["id"] and proposal["rule"]["id"] == rule["rule"]["id"]:
-        add(10, "ngoại lệ áp dụng cho chính rule này" if proposal["type"] == "exception" else "trùng mã rule")
-    attack = set((proposal.get("attack") or {}).get("tags") or []) & set(rule["tags"])
-    pd, rd = _domains(proposal), _domains(rule)
-    if pd and rd and not pd & rd:
-        attack = set()             # "recon" của rule Linux không phải dò quét web: khác lĩnh vực thì không tính loại tấn công
-    for t in sorted(attack):
-        add(4, f"cùng loại tấn công {t}", "tag", t)
-    tokens = sorted(set(proposal.get("patterns") or []) & set(rule.get("patterns") or []),
-                    key=lambda t: df.get(("pattern", t), 0))
-    if tokens:
-        add(sum(_weight(df.get(("pattern", t), 0), 1.5, 0.3) for t in tokens[:6]),
-            "cùng bắt chuỗi " + ", ".join(tokens[:6]) + (f" (+{len(tokens) - 6})" if len(tokens) > 6 else ""))
-    for t in sorted((set(proposal["mitre"]["technique"]) & set(rule["mitre"]["technique"])) - {NONE_LIST}):
-        add(_weight(df.get(("technique", t), 0), 3, 0.5), f"cùng kỹ thuật MITRE {t}", "technique", t)
-    for t in sorted((set(proposal["tags"]) & set(rule["tags"])) - {NONE_LIST} - GENERIC_TAGS - attack):
-        add(0.25 if t in BROAD_TAGS else _weight(df.get(("tag", t), 0), 2, 0.5), f"cùng tag {t}", "tag", t)
-    tactic = rule["mitre"]["tactic"]
-    if tactic != NONE_TACTIC and proposal["mitre"]["tactic"] == tactic:
-        add(_weight(df.get(("tactic", tactic), 0), 1, 0.3), f"cùng tactic {tactic}", "tactic", tactic)
-    for f in sorted((set(proposal["fields"]) & set(rule["fields"])) - {NONE_LIST}):
-        add(_weight(df.get(("field", f), 0), 1, 0.3, limit=3), f"cùng xét trường {f}", "field", f)
-    why.sort(key=lambda x: -x[0])                # lý do mạnh nhất đứng đầu
-    return round(sum(pt for pt, _ in why), 2), why
-
-
-def reasons_text(why: list[tuple[float, str]]) -> str:
-    """Ô "Vì sao liên quan" của Grafana chỉ hiện ~2 dòng: ghi lý do mạnh, gộp lý do yếu (đủ danh sách ở trường reasons)."""
-    strong = [t for pt, t in why if pt >= 1] or [t for _, t in why[:1]]
-    weak = len(why) - len(strong)
-    return "; ".join(strong) + (f"; +{weak} điểm chung yếu" if weak else "")
-
-
-def comparison_docs(proposals: list[dict[str, Any]], rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    df: dict[tuple[str, str], int] = {}
-    for r in rules:
-        feats = {("technique", t) for t in r["mitre"]["technique"]} | {("tag", t) for t in r["tags"]} |                 {("field", f) for f in r["fields"]} | {("tactic", r["mitre"]["tactic"])} | {("pattern", t) for t in r.get("patterns") or []}
-        for k in feats:
-            df[k] = df.get(k, 0) + 1
-    docs = []
-    for p in proposals:
-        scored = sorted(((related(p, r, df), r) for r in rules), key=lambda x: -x[0][0])
-        for (score, why), r in [x for x in scored if x[0][0] >= 2][:MAX_RELATED]:
-            docs.append({
-                "_id": f"cmp:{p['proposal']['id']}:{r['rule']['id']}", "origin": "comparison", "origin_label": "So sánh",
-                "updated_at": p["updated_at"], "score": score, "reasons": [t for _, t in why],
-                "reasons_text": reasons_text(why),
-                "proposal": {k: p["proposal"][k] for k in ("id", "pick", "kind_label", "status_label")}
-                | {"name": p["rule"]["name"], "condition_text": p["condition_text"], "severity": p["severity"]},
-                "rule": r["rule"], "severity": r["severity"], "source": r["source"], "file": r["file"],
-                "condition_text": r["condition_text"], "alerts": r["alerts"],
-            })
-    return docs
-
-
 # ------------------------------------------------------------------ rule của Wazuh (GET /rules)
 WAZUH_PAGE = 500
 
 
 def wazuh_rule_docs(api, alert_stats: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    """Mỗi rule trong Wazuh (rule gốc ~4,5 nghìn + rule dự án, kể cả rules-dynamic/) thành một bản ghi cùng dạng rule YAML.
+    """Mỗi rule trong Wazuh (rule gốc ~4,5 nghìn + rule dự án, kể cả rules-dynamic/) thành một bản ghi của thư viện.
     `shadow` khớp đúng cách cầu nối cấp alert (detection/wazuh.py): nhóm `shadow` hoặc rule gốc is_shadow_stock, để thư viện
     không bao giờ ghi "chính thức" cho rule chỉ ra alert chạy bóng. Lỗi API thì raise (người gọi giữ danh mục cũ)."""
     from .detection.wazuh import _is_local, is_shadow_stock, severity_for, should_bridge
@@ -494,7 +280,7 @@ def wazuh_rule_docs(api, alert_stats: dict[str, dict[str, Any]]) -> list[dict[st
                 "severity": sev, "severity_score": SEVERITY_SCORE.get(sev, 0), "type": "wazuh", "level": level,
                 **_common(tactic=tactic, techniques=ids, tags=["wazuh", *groups], fields=[]),
                 "groups": groups, **({"legacy_id": legacy[0][7:]} if legacy else {}),     # như alert: không có thì bỏ khóa
-                "condition_text": "", "patterns": [], "yaml": "",
+                "condition_text": "", "yaml": "",
                 "file": f"{r.get('relative_dirname', '')}/{r.get('filename', '')}".strip("/"),
                 "status": r.get("status", "enabled"), "shadow": shadow, "bridged": bridged,
                 "alerts": {"h24": st.get("h24", 0), "d7": st.get("d7", 0), "d90": st.get("d90", 0), "last": st.get("last"),
@@ -536,24 +322,6 @@ def alert_stats(es) -> dict[str, dict[str, Any]]:
             for b in res["aggregations"]["r"]["buckets"]}
 
 
-_lint_cache: tuple[Any, Any] | None = None
-
-
-def lint_report(rules_dir: Path, config_dir: Path | None):
-    """Kết quả lint kho rule (metadata, ca test, độ phủ); chỉ tính lại khi file rule đổi."""
-    global _lint_cache
-    from .detection.lint import lint
-    from .detection.rules import rules_fingerprint
-    fp = rules_fingerprint(rules_dir)
-    if _lint_cache is None or _lint_cache[0] != fp:
-        try:
-            _lint_cache = (fp, lint(rules_dir, config_dir))
-        except Exception as e:  # noqa: BLE001 - lint lỗi không được làm hỏng danh mục
-            log.warning("lint kho rule lỗi: %s", e)
-            return None
-    return _lint_cache[1]
-
-
 def load_proposals(es) -> list[dict[str, Any]]:
     try:
         res = es.search(index=settings.IDX_AI_PROPOSALS, size=1000, query={"match_all": {}},
@@ -564,15 +332,15 @@ def load_proposals(es) -> list[dict[str, Any]]:
     return [h["_source"] | {"id": h["_source"].get("id") or h["_id"]} for h in res["hits"]["hits"]]
 
 
-def build(rules_dir: Path, proposals: list[dict[str, Any]], stats: dict[str, dict[str, Any]],
-          report=None, wazuh: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
-    rules = rule_docs(rules_dir, stats, report)
-    by_id = {r["rule"]["id"]: r for r in rules}
-    props = proposal_docs(proposals, by_id)
-    now = max((r["updated_at"] for r in rules), default=_iso(0))
-    cov = attack_coverage(rules + list(wazuh or []), report.profile) if report else []
-    docs = rules + exception_docs(rules_dir, by_id) + props + comparison_docs(props, rules) + \
-        detector_docs(stats, now) + coverage_docs(cov, now) + [{**w, "updated_at": now} for w in wazuh or []]
+def build(proposals: list[dict[str, Any]], stats: dict[str, dict[str, Any]], profile: dict[str, Any] | None = None,
+          wazuh: list[dict[str, Any]] | None = None, today: str | None = None) -> list[dict[str, Any]]:
+    wazuh = list(wazuh or [])
+    props = proposal_docs(proposals, {w["rule"]["id"]: w for w in wazuh})     # ngoại lệ AI nhắm rule WZH-<id>
+    # mốc ngày (UTC) thay cho mtime file YAML cũ: ổn định trong ngày để chữ ký không đổi mỗi chu kỳ, và nằm trong khung
+    # 20 năm của dashboard (mốc 1970 thì bản ghi biến mất khỏi Grafana); mỗi ngày ghi lại toàn bộ danh mục một lần
+    now = today or datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00+00:00")
+    cov = attack_coverage(wazuh, profile) if profile else []
+    docs = props + detector_docs(stats, now) + coverage_docs(cov, now) + [{**w, "updated_at": now} for w in wazuh]
     for d in docs:
         d["@timestamp"] = d["updated_at"]
         # bản chuỗi của các trường danh sách để bảng Grafana hiển thị gọn (danh sách vẫn giữ để lọc)
@@ -588,7 +356,7 @@ _last_sig: str | None = None
 _doc_sigs: dict[str, str] = {}      # chữ ký từng bản ghi đã ghi: chỉ gửi bản ghi đổi (~4,5 nghìn rule Wazuh, mỗi chu kỳ ít đổi)
 
 
-def sync(es, rules_dir: Path = settings.RULES_DIR, force: bool = False, api=None) -> int:
+def sync(es, force: bool = False, api=None) -> int:
     """Ghi danh mục vào siem-rules, xóa bản ghi không còn (rule bị xóa / gỡ). Không đổi gì thì không ghi.
     Có `api` (Wazuh) thì thêm rule Wazuh; API lỗi thì ghi log và GIỮ bản ghi Wazuh cũ (không xóa nhầm cả chỉ mục).
     Trả về số bản ghi đã ghi (0 nếu bỏ qua)."""
@@ -600,7 +368,7 @@ def sync(es, rules_dir: Path = settings.RULES_DIR, force: bool = False, api=None
                 wazuh, keep_wazuh = wazuh_rule_docs(api, stats), False
             except Exception as e:  # noqa: BLE001
                 log.warning("không đọc được rule từ Wazuh API, giữ danh mục Wazuh cũ: %s", e)
-        docs = build(rules_dir, load_proposals(es), stats, lint_report(rules_dir, settings.CONFIG_DIR), wazuh)
+        docs = build(load_proposals(es), stats, load_profile(settings.CONFIG_DIR), wazuh)
         sig = hashlib.sha1(json.dumps(docs, sort_keys=True, default=str).encode()).hexdigest()
         if sig == _last_sig and not force:
             return 0

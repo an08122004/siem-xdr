@@ -53,24 +53,25 @@ Doc *Kế hoạch xây dựng hệ thống SOC chuyên nghiệp*.
 | Nhiều phiên Claude cùng sửa repo | Mỗi việc một nhánh / worktree riêng, gộp qua PR, báo trước file sẽ sửa |
 | Trễ tiến độ | Kiểm tra mốc mỗi cuối tuần; trễ thì cắt theo thứ tự: lô SigmaHQ, luồng AI trên stack thật, Suricata |
 
-## 6. Kế hoạch thống nhất rule trên Wazuh (cập nhật 05/11/2026)
+## 6. Kế hoạch thống nhất rule trên Wazuh (cập nhật 08/11/2026)
 
-Kế hoạch: [docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md](docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md). Mô tả bộ rule: [RULES.md](RULES.md) mục 9. Sổ quyết định: [docs/wazuh-ruleset-decisions.md](docs/wazuh-ruleset-decisions.md).
+Kế hoạch: [docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md](docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md) (Task 0 đến 18) và
+[docs/superpowers/plans/2026-11-06-p4-ai-wazuh-xml.md](docs/superpowers/plans/2026-11-06-p4-ai-wazuh-xml.md) (P4, Task 19 đến 26). Mô tả bộ rule:
+[RULES.md](RULES.md) mục 2 và 9. Sổ quyết định: [docs/wazuh-ruleset-decisions.md](docs/wazuh-ruleset-decisions.md) (R1–R83).
 
 | Phần | Trạng thái |
 |---|---|
-| Task 0 đến 17 (P0 đến P3: thử kỹ thuật, nền tảng, 10 file rule XML chạy bóng, tuning, báo cáo song song, thư viện rule, SOAR theo nhóm, ngoại lệ, KPI) | **Xong trên nhánh `feature/wazuh-unified-ruleset`**; CI xanh (603 unit test, 556 ca log gốc qua Wazuh thật). Bốn bước cần stack thật còn hoãn (parity, E2E, ngoại lệ thật, đo độ ồn syslog + console) |
-| Task 18, cổng chuyển (tắt engine YAML) | **Chờ người dùng quyết**: chưa triển khai nhánh lên stack thật, chưa tắt engine YAML. Nếu không đạt, giữ YAML bật + XML bóng cho demo 10/11 và chuyển sau 16/11 |
-| Task 19 đến 24 (P4: Sigma → XML, kiểm định AI trên Wazuh, triển khai rule AI dạng XML, SigmaHQ → XML, xóa engine YAML, viết lại tài liệu) | Sau 17/11, **chưa lập kế hoạch chi tiết** |
-| Đổi mô hình AI | Chưa bắt đầu |
+| Task 0 đến 17 (P0 đến P3: thử kỹ thuật, nền tảng, 10 file rule XML, tuning, báo cáo song song, thư viện rule, SOAR theo nhóm, ngoại lệ, KPI) | **Xong**, đã gộp `main`; CI xanh (603 unit test, 556 ca log gốc qua Wazuh thật lúc đó) |
+| Task 18, cổng chuyển | **Đã chuyển hẳn (R65, 05/11/2026)**: engine YAML tắt, rule XML và rule gốc level 7–11 là alert thật, bỏ tiêu chí 7 ngày cho đợt chuyển; `main` 597cd5d chạy trên stack thật |
+| P4, Task 19 đến 26 (Sigma → XML, sandbox Wazuh, cổng Wazuh cho rule AI, duyệt vào `ai.xml`, ngoại lệ AI, SigmaHQ lô 1 `0966-sigmahq.xml`, xóa engine YAML, tài liệu) | **Xong trên nhánh tích hợp `feature/p4-ai-xml`**, chưa gộp `main`, chưa triển khai lên stack thật. Unit test 660 đạt / 34 bỏ qua; lint 11 file 0 lỗi; E2E 43/43 trên project thử cách ly (08/11/2026). Triển khai: `DEPLOY-VM.md` mục 9.1, chỉ khi chủ dự án gộp PR và yêu cầu |
+| Đổi mô hình AI | Chưa bắt đầu; `tools/bench_ai_models.py` chạy qua cổng Wazuh để so model ứng viên, chọn model là việc của chủ dự án |
 | Lab (mạng 4 vùng, agent OPNsense, Ubuntu / Web-01) | Chưa dựng; rule Suricata XML cần agent OPNsense đọc `eve.json` |
 
-Checklist Task 18 (tóm tắt, bản đầy đủ trong kế hoạch):
+Còn mở sau P4 (chi tiết ở [RULES.md](RULES.md) mục 9.10):
 
-- Điều kiện đo: mọi mã `convert` có `only_yaml` = 0 trên ca test và 24 giờ log lab; độ ồn ≤ 1 alert / 100 event bình thường; E2E 44/44 với SOAR theo playbook mới.
-- Người dùng quyết: TI-001 domain và hash chỉ có ở analyzer (Wazuh mới phủ IP).
-- Đo lại 102505 (LNX-005) với dữ liệu giãn theo thời gian thật trước khi bật.
-- Rule AI: pipeline AI vẫn ghi rule YAML vào `server/rules/ai`; tắt engine YAML thì rule AI không chạy, nên phải đổi đích sang `rules-dynamic/ai.xml` (dải 109000) trước, hoặc giữ engine cho rule AI.
-- SOAR: hành động phá hủy chỉ theo id đã duyệt (sshd 5712, 5720, 5763; web 31152; 104095; bản XML của mã YAML từng chặn); thêm IP proxy, relay, NAT nội bộ vào `SOAR_WHITELIST` trước khi bật.
-- Bỏ nhóm `shadow` ở các file 0101 đến 0106 và 0845 (trừ rule có `shadow_since` dưới 7 ngày); `RULE_ENGINE_ENABLED=false`; xóa playbook theo mã YAML.
-
+- Thực thể XML (`&gt;`, `&lt;`, `&amp;`) trong trường Windows (Task 19c, R77); rule Linux SigmaHQ (`siem-proc`); bơm lại event thật vào sandbox (R74).
+- Rule dự án `0965-windows.xml` dưới 61603 có thể bị rule gom level 0 che như ứng viên AI (R75): chưa kiểm.
+- `tools/wazuh_coverage.run_wazuh`, `wazuh_noise.py`, `wazuh_rule_test.inject` vẫn dùng vòng gửi có thể mất event trên tập lớn (R80).
+- Ca CI `0541-network`, `0271-web`, `0999-tuning` chưa xác nhận lại trên máy dev sau Task 24 (máy ngủ làm treo); CI GitHub phải xanh trước khi gộp.
+- Đo lại độ ồn trên ≥ 24 giờ syslog và nhật ký console thật; đo lại 102505 (LNX-005) với dữ liệu giãn theo thời gian thật.
+- SOAR: thêm IP proxy, relay, NAT nội bộ vào `SOAR_WHITELIST` trước khi dùng chặn IP theo rule gốc.

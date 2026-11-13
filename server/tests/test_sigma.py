@@ -6,7 +6,7 @@ import pytest
 from siem.ai import sigma
 from siem.ai.sigma import SigmaError
 from siem.ai.validate import missing_fields, weak_values
-from siem.detection.rules import Rule
+from siem.ai.condition import Rule
 
 
 def proc(cmd: str, image: str, parent: str = "C:\\Windows\\explorer.exe") -> dict:

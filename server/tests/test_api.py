@@ -981,15 +981,16 @@ def test_grafana_folder_permissions_set_once():
 
 def test_promote_shadow_rule_needs_detection_engineer(env, monkeypatch):
     from siem.manager import api
-    monkeypatch.setattr(api.ai_deploy, "promote", lambda es, rid, who, *a, **kw: {"rule_id": rid, "by": who})
+    monkeypatch.setattr(api.ai_deploy, "promote", lambda es, pid, who, *a, **kw: {"rule_id": pid, "by": who, "api": bool(a)})
+    monkeypatch.setattr(api.wazuh_rules.WazuhApi, "from_settings", classmethod(lambda cls: cls("https://x", "u", "p")))
     monkeypatch.setattr(api, "refresh_catalog", lambda: None)
     pw = activate(env, "an", "analyst")
     login(env, "an", pw)
-    assert env.post("/api/v1/rules/AI-077/promote", json={}, headers=H).status_code == 403
+    assert env.post("/api/v1/ai/proposals/AI-077/promote", json={}, headers=H).status_code == 403
     pw = activate(env, "de", "detection")
     login(env, "de", pw)
-    assert env.post("/api/v1/rules/AI-077/promote", json={}, headers=H).json() == {"rule_id": "AI-077", "by": "de"}
-    assert env.get("/api/v1/rules/KHONG-CO/shadow").status_code == 404
+    assert env.post("/api/v1/ai/proposals/AI-077/promote", json={}, headers=H).json() == {"rule_id": "AI-077", "by": "de", "api": True}
+    assert env.post("/api/v1/rules/AI-077/promote", json={}, headers=H).status_code in (404, 405)   # route cũ đã bỏ
 
 
 # ------------------------------------------------------------------ xác thực 2 lớp (TOTP)
@@ -1227,8 +1228,27 @@ def test_refresh_catalog_passes_a_wazuh_api(monkeypatch):
     from siem import wazuh_rules
     from siem.manager import api
     seen = {}
-    monkeypatch.setattr(api.rules_catalog, "sync", lambda es, rules_dir, api=None: seen.setdefault("api", api))
+    monkeypatch.setattr(api.rules_catalog, "sync", lambda es, api=None: seen.setdefault("api", api))
     monkeypatch.setattr(api, "es", lambda: object())
     monkeypatch.setattr(wazuh_rules.WazuhApi, "from_settings", classmethod(lambda cls: "wazuh-api"))
     api.refresh_catalog()
     assert seen["api"] == "wazuh-api"
+
+
+def test_ai_routes_no_longer_409(env, monkeypatch, tmp_path):
+    """Duyệt đề xuất rule mới qua route thật: ghi ai.xml chạy bóng, không còn 409 'engine YAML đã tắt'."""
+    from siem import wazuh_rules
+    from siem.ai import deploy
+    from siem.manager import api
+    from test_ai_deploy_xml import Env, FakeApi
+    e = Env(tmp_path, monkeypatch)
+    p = e.pending()
+    monkeypatch.setitem(api._state, "es", e.es)
+    monkeypatch.setattr(wazuh_rules.WazuhApi, "from_settings", classmethod(lambda cls: FakeApi()))
+    monkeypatch.setattr(api, "refresh_catalog", lambda: None)
+    pw = activate(env, "de", "detection")
+    login(env, "de", pw)
+    r = env.post(f"/api/v1/ai/proposals/{p['id']}/approve", json={}, headers=H)
+    assert r.status_code == 200 and r.json()["status"] == "approved" and r.json()["wazuh"]["ids"][0] == 109000
+    assert "shadow_since=" in (tmp_path / "ai.xml").read_text(encoding="utf-8")
+    assert env.post(f"/api/v1/ai/proposals/{p['id']}/rollback", json={"reason": "thử gỡ"}, headers=H).status_code == 200

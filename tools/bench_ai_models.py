@@ -1,6 +1,6 @@
 """So sánh model LLM trên cùng pipeline đề xuất rule gap-dataset (KHÔNG lưu đề xuất, không đổi cấu hình).
 
-Chạy trong container ai-worker (cần Elasticsearch + Ollama trong mạng docker):
+Chạy trong container ai-worker (cần Elasticsearch + Ollama trong mạng docker, và container wazuh-sandbox):
 
     docker compose exec ollama ollama pull qwen3:8b
     docker compose cp tools/bench_ai_models.py ai-worker:/tmp/bench.py
@@ -28,8 +28,10 @@ from siem import settings, store  # noqa: E402
 from siem.ai.dataset import ESDataSource  # noqa: E402
 from siem.ai.golden import PublicDatasets  # noqa: E402
 from siem.ai.llm import OllamaClient  # noqa: E402
+from siem.ai.sandbox import Sandbox  # noqa: E402
+from siem.ai.wazuh_events import golden_events  # noqa: E402
+from siem.ai.wazuh_gate import WazuhGate  # noqa: E402
 from siem.ai.worker import AIWorker  # noqa: E402
-from siem.detection.rules import load_rules  # noqa: E402
 
 
 def main() -> None:
@@ -47,10 +49,11 @@ def main() -> None:
         return counted
 
     llm.chat_json, llm.chat_text = counting(llm.chat_json), counting(llm.chat_text)
-    worker = AIWorker(es, llm, PublicDatasets.load())
-    rules = load_rules(settings.RULES_DIR)
+    golden = PublicDatasets.load()
+    worker = AIWorker(es, llm, golden)
+    gate = WazuhGate(Sandbox(), golden_events(golden, golden.directory))     # cần container wazuh-sandbox (profile ai)
     ds = ESDataSource(es)
-    gaps = dict(worker.dataset_gaps(rules))
+    gaps = dict(worker.dataset_gaps(gate))
     for kind in kinds:
         key = kind if ":" in kind else f"csic2010:{kind}"
         if key not in gaps:
@@ -61,7 +64,7 @@ def main() -> None:
             t0 = time.time()
             row = {"model": model, "kind": kind, "run": run}
             try:
-                p = worker.propose_dataset_rule(key, gaps[key], rules, ds, [])
+                p = worker.propose_dataset_rule(key, gaps[key], ds, [], gate)
             except Exception as e:  # noqa: BLE001
                 print(json.dumps({**row, "status": "error", "error": str(e)[:200]}, ensure_ascii=False), flush=True)
                 continue

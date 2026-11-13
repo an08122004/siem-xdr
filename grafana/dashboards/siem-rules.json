@@ -20,7 +20,7 @@
     {
       "id": 54,
       "type": "row",
-      "title": "Tổng quan thư viện (rule YAML + rule Wazuh)",
+      "title": "Tổng quan thư viện rule Wazuh",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -33,7 +33,7 @@
     {
       "id": 55,
       "type": "stat",
-      "title": "Rule đang chạy (YAML + Wazuh, tạo alert thật)",
+      "title": "Rule đang chạy (tạo alert thật)",
       "datasource": {
         "type": "elasticsearch",
         "uid": "siem-rules"
@@ -51,7 +51,7 @@
             "type": "elasticsearch",
             "uid": "siem-rules"
           },
-          "query": "origin:(rule OR wazuh_rule) AND mode:active",
+          "query": "origin:wazuh_rule AND mode:active",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -120,7 +120,7 @@
             "type": "elasticsearch",
             "uid": "siem-rules"
           },
-          "query": "origin:(rule OR wazuh_rule) AND mode:shadow",
+          "query": "origin:wazuh_rule AND mode:shadow",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -189,7 +189,7 @@
             "type": "elasticsearch",
             "uid": "siem-rules"
           },
-          "query": "origin:(rule OR wazuh_rule) AND mode:nobridge",
+          "query": "origin:wazuh_rule AND mode:nobridge",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -258,7 +258,7 @@
             "type": "elasticsearch",
             "uid": "siem-rules"
           },
-          "query": "origin:(rule OR wazuh_rule) AND mode:off",
+          "query": "origin:wazuh_rule AND mode:off",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -396,7 +396,7 @@
             "type": "elasticsearch",
             "uid": "siem-rules"
           },
-          "query": "origin:(rule OR wazuh_rule) AND mode:active AND alerts.d7:0",
+          "query": "origin:wazuh_rule AND mode:active AND alerts.d7:0",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -447,7 +447,7 @@
     {
       "id": 61,
       "type": "stat",
-      "title": "Rule do AI viết (đã duyệt)",
+      "title": "Đề xuất AI đã triển khai (rules-dynamic/ai.xml)",
       "datasource": {
         "type": "elasticsearch",
         "uid": "siem-rules"
@@ -455,7 +455,7 @@
       "gridPos": {
         "x": 0,
         "y": 5,
-        "w": 6,
+        "w": 8,
         "h": 4
       },
       "targets": [
@@ -465,7 +465,7 @@
             "type": "elasticsearch",
             "uid": "siem-rules"
           },
-          "query": "origin:rule AND source:ai",
+          "query": "origin:ai_proposal AND proposal.status:approved",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -516,84 +516,15 @@
     {
       "id": 62,
       "type": "stat",
-      "title": "Ngoại lệ đang áp dụng",
-      "datasource": {
-        "type": "elasticsearch",
-        "uid": "siem-rules"
-      },
-      "gridPos": {
-        "x": 6,
-        "y": 5,
-        "w": 6,
-        "h": 4
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "elasticsearch",
-            "uid": "siem-rules"
-          },
-          "query": "origin:exception",
-          "alias": "",
-          "timeField": "@timestamp",
-          "metrics": [
-            {
-              "id": "1",
-              "type": "count"
-            }
-          ],
-          "bucketAggs": [
-            {
-              "id": "2",
-              "type": "date_histogram",
-              "field": "@timestamp",
-              "settings": {
-                "interval": "auto",
-                "min_doc_count": "0"
-              }
-            }
-          ]
-        }
-      ],
-      "maxDataPoints": 30,
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "sum"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "none",
-        "graphMode": "area",
-        "textMode": "value",
-        "justifyMode": "auto"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "#6b7280"
-          },
-          "unit": "short",
-          "decimals": 0
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 63,
-      "type": "stat",
       "title": "Đề xuất AI chờ duyệt",
       "datasource": {
         "type": "elasticsearch",
         "uid": "siem-rules"
       },
       "gridPos": {
-        "x": 12,
+        "x": 8,
         "y": 5,
-        "w": 6,
+        "w": 8,
         "h": 4
       },
       "targets": [
@@ -652,7 +583,7 @@
       }
     },
     {
-      "id": 64,
+      "id": 63,
       "type": "stat",
       "title": "Đề xuất không đạt kiểm định",
       "datasource": {
@@ -660,9 +591,9 @@
         "uid": "siem-rules"
       },
       "gridPos": {
-        "x": 18,
+        "x": 16,
         "y": 5,
-        "w": 6,
+        "w": 8,
         "h": 4
       },
       "targets": [
@@ -721,7 +652,7 @@
       }
     },
     {
-      "id": 65,
+      "id": 64,
       "type": "table",
       "title": "Rule đang chạy theo MITRE tactic",
       "datasource": {
@@ -741,7 +672,7 @@
             "type": "elasticsearch",
             "uid": "siem-rules"
           },
-          "query": "origin:(rule OR wazuh_rule) AND mode:active",
+          "query": "origin:wazuh_rule AND mode:active",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -825,7 +756,7 @@
       }
     },
     {
-      "id": 66,
+      "id": 65,
       "type": "table",
       "title": "Đề xuất AI theo trạng thái",
       "datasource": {
@@ -929,7 +860,7 @@
       }
     },
     {
-      "id": 67,
+      "id": 66,
       "type": "table",
       "title": "Rule kêu nhiều nhất (7 ngày): mã rule và tên",
       "datasource": {
@@ -949,7 +880,7 @@
             "type": "elasticsearch",
             "uid": "siem-rules"
           },
-          "query": "origin:(rule OR wazuh_rule) AND alerts.d7:>0",
+          "query": "origin:wazuh_rule AND alerts.d7:>0",
           "alias": "",
           "timeField": "@timestamp",
           "metrics": [
@@ -1045,9 +976,9 @@
       }
     },
     {
-      "id": 68,
+      "id": 67,
       "type": "row",
-      "title": "Danh sách rule, ngoại lệ, đề xuất AI — lọc bằng các ô phía trên",
+      "title": "Danh sách rule và đề xuất AI — lọc bằng các ô phía trên",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -1058,7 +989,7 @@
       "panels": []
     },
     {
-      "id": 69,
+      "id": 68,
       "type": "table",
       "title": "Rule và đề xuất AI — bấm mã rule xem cảnh báo của rule, bấm trạng thái đề xuất để mở trên console",
       "datasource": {
@@ -1114,7 +1045,6 @@
                 "alerts.d7",
                 "alerts.fp_rate30",
                 "alerts.last",
-                "playbook",
                 "proposal.status_label",
                 "proposal.test",
                 "proposal.fp",
@@ -1144,13 +1074,12 @@
               "alerts.d7": 12,
               "alerts.fp_rate30": 13,
               "alerts.last": 14,
-              "playbook": 15,
-              "proposal.status_label": 16,
-              "proposal.test": 17,
-              "proposal.fp": 18,
-              "proposal.alerts_per_day": 19,
-              "file": 20,
-              "proposal.id": 21
+              "proposal.status_label": 15,
+              "proposal.test": 16,
+              "proposal.fp": 17,
+              "proposal.alerts_per_day": 18,
+              "file": 19,
+              "proposal.id": 20
             },
             "renameByName": {
               "origin_label": "Nguồn",
@@ -1167,7 +1096,6 @@
               "alerts.d7": "Alert 7 ngày",
               "mode_label": "Chế độ",
               "alerts.fp_rate30": "Báo nhầm 30 ngày",
-              "playbook": "Case playbook",
               "alerts.last": "Alert gần nhất",
               "proposal.status_label": "Trạng thái đề xuất",
               "proposal.test": "Bắt mẫu kiểm tra",
@@ -1350,559 +1278,6 @@
           }
         ]
       }
-    },
-    {
-      "id": 70,
-      "type": "row",
-      "title": "So sánh đề xuất AI với rule hiện có — chọn đề xuất ở ô “Đề xuất cần so sánh”",
-      "collapsed": false,
-      "gridPos": {
-        "x": 0,
-        "y": 34,
-        "w": 24,
-        "h": 1
-      },
-      "panels": []
-    },
-    {
-      "id": 71,
-      "type": "table",
-      "title": "Đề xuất đã chọn",
-      "datasource": {
-        "type": "elasticsearch",
-        "uid": "siem-rules"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 35,
-        "w": 24,
-        "h": 6
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "elasticsearch",
-            "uid": "siem-rules"
-          },
-          "query": "origin:ai_proposal AND proposal.pick:${proposal:lucene}",
-          "alias": "",
-          "timeField": "@timestamp",
-          "metrics": [
-            {
-              "id": "1",
-              "type": "raw_data",
-              "settings": {
-                "size": "200"
-              }
-            }
-          ],
-          "bucketAggs": []
-        }
-      ],
-      "transformations": [
-        {
-          "id": "filterFieldsByName",
-          "options": {
-            "include": {
-              "names": [
-                "proposal.kind_label",
-                "rule.id",
-                "rule.name",
-                "proposal.status_label",
-                "proposal.test",
-                "proposal.fp",
-                "proposal.alerts_per_day",
-                "proposal.approvals",
-                "mitre.tactic",
-                "tags_text",
-                "condition_text",
-                "yaml",
-                "proposal.id"
-              ]
-            }
-          }
-        },
-        {
-          "id": "organize",
-          "options": {
-            "indexByName": {
-              "proposal.kind_label": 0,
-              "rule.id": 1,
-              "rule.name": 2,
-              "proposal.status_label": 3,
-              "proposal.test": 4,
-              "proposal.fp": 5,
-              "proposal.alerts_per_day": 6,
-              "proposal.approvals": 7,
-              "mitre.tactic": 8,
-              "tags_text": 9,
-              "condition_text": 10,
-              "yaml": 11,
-              "proposal.id": 12
-            },
-            "renameByName": {
-              "proposal.kind_label": "Loại",
-              "rule.id": "Mã",
-              "rule.name": "Đề xuất",
-              "proposal.status_label": "Trạng thái",
-              "proposal.test": "Bắt mẫu kiểm tra",
-              "proposal.fp": "Báo nhầm",
-              "proposal.alerts_per_day": "Alert/ngày",
-              "proposal.approvals": "Lượt duyệt",
-              "mitre.tactic": "Tactic",
-              "tags_text": "Tag",
-              "condition_text": "Điều kiện AI đề xuất",
-              "yaml": "YAML"
-            }
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "filterable": true,
-            "minWidth": 90
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "severity"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-text"
-                }
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "critical": {
-                        "text": "■ Nghiêm trọng",
-                        "color": "#ea5a5d",
-                        "index": 0
-                      },
-                      "high": {
-                        "text": "■ Cao",
-                        "color": "#e7793a",
-                        "index": 1
-                      },
-                      "medium": {
-                        "text": "■ Trung bình",
-                        "color": "#e0b93b",
-                        "index": 2
-                      },
-                      "low": {
-                        "text": "■ Thấp",
-                        "color": "#4f9dde",
-                        "index": 3
-                      }
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "condition_text"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "auto",
-                  "wrapText": true
-                }
-              },
-              {
-                "id": "custom.width",
-                "value": 380
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "yaml"
-            },
-            "properties": [
-              {
-                "id": "custom.inspect",
-                "value": true
-              },
-              {
-                "id": "custom.width",
-                "value": 160
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "rule.name"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "auto",
-                  "wrapText": true
-                }
-              },
-              {
-                "id": "custom.width",
-                "value": 240
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "proposal.id"
-            },
-            "properties": [
-              {
-                "id": "custom.hidden",
-                "value": true
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "proposal.status_label"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Mở đề xuất trên console",
-                    "url": "/go/proposal/${__data.fields[\"proposal.id\"]}",
-                    "targetBlank": true
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "showHeader": true,
-        "cellHeight": "lg",
-        "sortBy": [
-          {
-            "displayName": "Loại",
-            "desc": true
-          }
-        ]
-      }
-    },
-    {
-      "id": 72,
-      "type": "table",
-      "title": "Rule hiện có liên quan — điều kiện hai bên đặt cạnh nhau, xếp theo mức liên quan",
-      "datasource": {
-        "type": "elasticsearch",
-        "uid": "siem-rules"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 41,
-        "w": 24,
-        "h": 14
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "elasticsearch",
-            "uid": "siem-rules"
-          },
-          "query": "origin:comparison AND proposal.pick:${proposal:lucene}",
-          "alias": "",
-          "timeField": "@timestamp",
-          "metrics": [
-            {
-              "id": "1",
-              "type": "raw_data",
-              "settings": {
-                "size": "200"
-              }
-            }
-          ],
-          "bucketAggs": []
-        }
-      ],
-      "transformations": [
-        {
-          "id": "filterFieldsByName",
-          "options": {
-            "include": {
-              "names": [
-                "score",
-                "rule.id",
-                "rule.name",
-                "reasons_text",
-                "condition_text",
-                "proposal.condition_text",
-                "alerts.d7"
-              ]
-            }
-          }
-        },
-        {
-          "id": "organize",
-          "options": {
-            "indexByName": {
-              "score": 0,
-              "rule.id": 1,
-              "rule.name": 2,
-              "reasons_text": 3,
-              "condition_text": 4,
-              "proposal.condition_text": 5,
-              "alerts.d7": 6
-            },
-            "renameByName": {
-              "score": "Mức liên quan",
-              "rule.id": "Mã",
-              "rule.name": "Rule hiện có",
-              "severity": "Mức độ",
-              "reasons_text": "Vì sao liên quan",
-              "condition_text": "Điều kiện rule hiện có",
-              "proposal.condition_text": "Điều kiện AI đề xuất",
-              "alerts.d7": "Alert 7 ngày"
-            }
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "filterable": true,
-            "minWidth": 90
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "severity"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-text"
-                }
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "critical": {
-                        "text": "■ Nghiêm trọng",
-                        "color": "#ea5a5d",
-                        "index": 0
-                      },
-                      "high": {
-                        "text": "■ Cao",
-                        "color": "#e7793a",
-                        "index": 1
-                      },
-                      "medium": {
-                        "text": "■ Trung bình",
-                        "color": "#e0b93b",
-                        "index": 2
-                      },
-                      "low": {
-                        "text": "■ Thấp",
-                        "color": "#4f9dde",
-                        "index": 3
-                      }
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "reasons_text"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "auto",
-                  "wrapText": true
-                }
-              },
-              {
-                "id": "custom.width",
-                "value": 230
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "condition_text"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "auto",
-                  "wrapText": true
-                }
-              },
-              {
-                "id": "custom.width",
-                "value": 300
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "proposal.condition_text"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "auto",
-                  "wrapText": true
-                }
-              },
-              {
-                "id": "custom.width",
-                "value": 300
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "condition_text"
-            },
-            "properties": [
-              {
-                "id": "custom.inspect",
-                "value": true
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "proposal.condition_text"
-            },
-            "properties": [
-              {
-                "id": "custom.inspect",
-                "value": true
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "reasons_text"
-            },
-            "properties": [
-              {
-                "id": "custom.inspect",
-                "value": true
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "score"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "rule.id"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "rule.name"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "auto",
-                  "wrapText": true
-                }
-              },
-              {
-                "id": "custom.width",
-                "value": 170
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "rule.id"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Xem cảnh báo của rule trên console",
-                    "url": "/go/rule/${__data.fields[\"rule.id\"]}",
-                    "targetBlank": true
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "showHeader": true,
-        "cellHeight": "lg",
-        "sortBy": [
-          {
-            "displayName": "Mức liên quan",
-            "desc": true
-          }
-        ]
-      }
     }
   ],
   "templating": {
@@ -1911,10 +1286,10 @@
         "type": "custom",
         "name": "origin",
         "label": "Hiển thị",
-        "query": "Tất cả : (rule OR wazuh_rule OR ai_proposal OR exception),Rule YAML của dự án : rule,Rule Wazuh : wazuh_rule,Đề xuất AI : ai_proposal,Ngoại lệ : exception",
+        "query": "Tất cả : (wazuh_rule OR ai_proposal),Rule Wazuh : wazuh_rule,Đề xuất AI : ai_proposal",
         "current": {
           "text": "Tất cả",
-          "value": "(rule OR wazuh_rule OR ai_proposal OR exception)"
+          "value": "(wazuh_rule OR ai_proposal)"
         }
       },
       {
@@ -1927,7 +1302,7 @@
         },
         "refresh": 1,
         "sort": 1,
-        "query": "{\"find\": \"terms\", \"field\": \"mitre.tactic\", \"query\": \"origin:(rule OR wazuh_rule OR ai_proposal OR exception)\", \"size\": 300}",
+        "query": "{\"find\": \"terms\", \"field\": \"mitre.tactic\", \"query\": \"origin:(wazuh_rule OR ai_proposal)\", \"size\": 300}",
         "includeAll": true,
         "multi": true,
         "allValue": "*",
@@ -1946,7 +1321,7 @@
         },
         "refresh": 1,
         "sort": 1,
-        "query": "{\"find\": \"terms\", \"field\": \"tags\", \"query\": \"origin:(rule OR wazuh_rule OR ai_proposal OR exception)\", \"size\": 300}",
+        "query": "{\"find\": \"terms\", \"field\": \"tags\", \"query\": \"origin:(wazuh_rule OR ai_proposal)\", \"size\": 300}",
         "includeAll": true,
         "multi": true,
         "allValue": "*",
@@ -1965,7 +1340,7 @@
         },
         "refresh": 1,
         "sort": 1,
-        "query": "{\"find\": \"terms\", \"field\": \"fields\", \"query\": \"origin:(rule OR wazuh_rule OR ai_proposal OR exception)\", \"size\": 300}",
+        "query": "{\"find\": \"terms\", \"field\": \"fields\", \"query\": \"origin:(wazuh_rule OR ai_proposal)\", \"size\": 300}",
         "includeAll": true,
         "multi": true,
         "allValue": "*",
@@ -1990,22 +1365,6 @@
             "value": "*"
           }
         ]
-      },
-      {
-        "type": "query",
-        "name": "proposal",
-        "label": "Đề xuất cần so sánh",
-        "datasource": {
-          "type": "elasticsearch",
-          "uid": "siem-rules"
-        },
-        "refresh": 1,
-        "sort": 1,
-        "query": "{\"find\": \"terms\", \"field\": \"proposal.pick\", \"query\": \"origin:ai_proposal\", \"size\": 500}",
-        "includeAll": false,
-        "multi": false,
-        "allValue": null,
-        "current": {}
       }
     ]
   },

@@ -130,6 +130,15 @@ def test_ids_stable_never_reused_removed_kept_as_history(tmp_path):
     assert [i["status"] for i in wazuh_exceptions.items(tmp_path)] == ["removed", "active", "pending"]
 
 
+def test_removing_last_exception_deletes_file(tmp_path):
+    api = FakeApi()
+    e = mk(tmp_path, api=api)
+    wazuh_exceptions.approve(e["id"], "de2", api, tmp_path)
+    assert xml(tmp_path)
+    wazuh_exceptions.remove(e["id"], "de3", "hết cần", api, tmp_path)
+    assert not (tmp_path / "exceptions.xml").exists()          # group rỗng bị Wazuh từ chối: xóa file
+
+
 def test_duplicate_rejected_but_allowed_after_removal(tmp_path):
     api = FakeApi()
     mk(tmp_path, api=api)

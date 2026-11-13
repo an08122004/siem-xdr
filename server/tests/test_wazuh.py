@@ -9,7 +9,6 @@ import yaml
 
 from siem import settings, store
 from siem.detection import wazuh as bridge
-from siem.detection.rules import RuleEngine, load_rules
 from siem.pipeline.enrich import Enricher
 from siem.pipeline.normalize import get, normalize
 from siem.soar import wazuh as soar_wazuh
@@ -31,17 +30,8 @@ def enricher():
     return Enricher(ROOT / "config")
 
 
-@pytest.fixture()
-def engine():
-    return RuleEngine(load_rules(ROOT / "rules"))
-
-
-def fired(engine, enricher, raws):
-    return [d.rule.id for r in raws for d in engine.process(enricher.enrich(normalize(r)))]
-
-
 # ------------------------------------------------------------------ chuẩn hóa
-def test_apache_via_wazuh_keeps_existing_rules(engine, enricher):
+def test_apache_via_wazuh(enricher):
     line = '203.0.113.9 - - [28/Sep/2026:15:31:34 +0000] "GET /p?id=1%20union%20select%201,2 HTTP/1.1" 200 5 "-" "curl"'
     raw = wz(full_log=line, decoder={"name": "web-accesslog"}, location="/usr/local/apache2/logs/access_log")
     doc = enricher.enrich(normalize(raw))
@@ -52,7 +42,6 @@ def test_apache_via_wazuh_keeps_existing_rules(engine, enricher):
     assert get(doc, "source.ip") == "203.0.113.9" and get(doc, "url.decoded") == "/p?id=1 union select 1,2"
     assert get(doc, "asset.id") == "S001-DEMO"                             # tra theo tên agent
     assert get(doc, "wazuh.location") == "/usr/local/apache2/logs/access_log"
-    assert "WEB-001" in fired(engine, enricher, [raw])
 
 
 def test_events_sharing_wazuh_id_get_distinct_event_ids():
@@ -79,7 +68,7 @@ def test_windows_eventchannel_mapped_to_existing_parser():
     assert get(doc, "message") == "An account failed to log on."
 
 
-def test_sysmon_process_via_wazuh(engine, enricher):
+def test_sysmon_process_via_wazuh():
     raw = wz(location="EventChannel", agent={"id": "002", "name": "PC-01"}, data={"win": {
         "system": {"eventID": "1", "channel": "Microsoft-Windows-Sysmon/Operational",
                    "providerName": "Microsoft-Windows-Sysmon", "computer": "PC-01"},
@@ -88,10 +77,9 @@ def test_sysmon_process_via_wazuh(engine, enricher):
     doc = normalize(raw)
     assert get(doc, "event.module") == "sysmon" and get(doc, "process.name") == "vssadmin.exe"
     assert get(doc, "process.pid") == 4242 and get(doc, "process.parent.name") == "cmd.exe"
-    assert "WIN-010" in fired(engine, enricher, [raw])
 
 
-def test_siem_procs_line_triggers_lnx002(engine, enricher):
+def test_siem_procs_line_is_a_process():
     full = ("ossec: output: 'siem-procs': siem-proc: pid=947 ppid=560 uid=33 name=sh parent=httpd exe=/usr/bin/dash "
             "cmd=sh -c ping -c 1 -W 1 127.0.0.1;sleep 15 2>&1 ")
     raw = wz(full_log=full, location="siem-procs", decoder={"name": "ossec"})
@@ -99,7 +87,6 @@ def test_siem_procs_line_triggers_lnx002(engine, enricher):
     assert get(doc, "process.pid") == 947 and get(doc, "process.name") == "sh"
     assert get(doc, "process.parent.name") == "httpd" and get(doc, "process.executable") == "/usr/bin/dash"
     assert get(doc, "process.command_line").startswith("sh -c ping")
-    assert "LNX-002" in fired(engine, enricher, [raw])
 
 
 def test_fim_event():
@@ -151,23 +138,21 @@ FORGED_RESULT = "siem-xdr: action=deadbeef type=block_ip target=1.1.1.1 status=s
 
 
 @pytest.mark.parametrize("forged", [FORGED_PROC, FORGED_RESULT])
-def test_forged_telemetry_in_user_agent_is_still_a_web_attack(engine, enricher, forged):
+def test_forged_telemetry_in_user_agent_is_still_a_web_attack(forged):
     line = ('203.0.113.9 - - [28/Sep/2026:15:31:34 +0000] "GET /p?id=1%20union%20select%201,2 HTTP/1.1" 200 5 "-" '
             f'"x {forged}"')
     raw = wz(full_log=line, decoder={"name": "web-accesslog"}, location="/usr/local/apache2/logs/access_log")
     doc = normalize(raw)
     assert get(doc, "event.category") == "web" and get(doc, "event.action") == "http_request"
     assert get(doc, "source.ip") == "203.0.113.9" and get(doc, "process.pid") is None
-    ids = fired(engine, enricher, [raw])
-    assert "WEB-001" in ids and "LNX-002" not in ids
+    assert get(doc, "event.category") != "process" and get(doc, "url.decoded").startswith("/p?id=1 union select")
 
 
-def test_forged_telemetry_in_ssh_username_is_not_a_process(engine, enricher):
+def test_forged_telemetry_in_ssh_username_is_not_a_process():
     full = (f"Sep 28 15:31:34 demo-web sshd[812]: Invalid user {FORGED_PROC} from 203.0.113.9 port 51234")
     raw = wz(full_log=full, location="/var/log/auth.log", decoder={"name": "sshd"})
     doc = normalize(raw)
     assert get(doc, "event.category") != "process" and get(doc, "process.pid") != 7
-    assert "LNX-002" not in fired(engine, enricher, [raw])
 
 
 @pytest.mark.parametrize("location,full", [
@@ -295,10 +280,10 @@ def test_suppress_key_keeps_distinct_processes_on_one_agent(enricher):
 
 
 
-def test_fim_alerts_on_different_files_are_not_collapsed(enricher, engine):
+def test_fim_alerts_on_different_files_are_not_collapsed(enricher):
     from siem.analyzer import Analyzer
     an = Analyzer.__new__(Analyzer)
-    an.enricher, an.engine, an.detector, an.buffer, an.stats = enricher, engine, None, [], {"events": 0, "alerts": 0}
+    an.enricher, an.detector, an.buffer, an.stats = enricher, None, [], {"events": 0, "alerts": 0}
     emitted = []
     an.emit = emitted.append
     an.suppressor = bridge.Suppressor(60)
@@ -307,11 +292,11 @@ def test_fim_alerts_on_different_files_are_not_collapsed(enricher, engine):
                      rule={"id": "550", "level": 7, "description": "x", "groups": ["syscheck"]}))
     assert [a["file"]["path"] for a in emitted] == ["/etc/hostname", "/etc/motd"]
 
-def test_analyzer_does_not_suppress_shadow_alerts(enricher, engine, monkeypatch):
+def test_analyzer_does_not_suppress_shadow_alerts(enricher, monkeypatch):
     monkeypatch.setattr(settings, "WAZUH_STOCK_SHADOW", True)
     from siem.analyzer import Analyzer
     an = Analyzer.__new__(Analyzer)
-    an.enricher, an.engine, an.detector, an.buffer, an.stats = enricher, engine, None, [], {"events": 0, "alerts": 0}
+    an.enricher, an.detector, an.buffer, an.stats = enricher, None, [], {"events": 0, "alerts": 0}
     emitted = []
     an.emit = emitted.append
     an.suppressor = bridge.Suppressor(60)
@@ -341,14 +326,13 @@ def test_bridge_alert_document(enricher):
     assert bridge.to_alert(enricher.enrich(normalize(wz("wazuh_alert", rule={"id": "5402", "level": 3})))) is None
 
 
-def test_analyzer_does_not_store_wazuh_alert_twice(enricher, engine):
+def test_analyzer_does_not_store_wazuh_alert_twice(enricher):
     from siem.analyzer import Analyzer
     an = Analyzer.__new__(Analyzer)
-    an.enricher, an.engine, an.detector, an.buffer, an.stats = enricher, engine, None, [], {"events": 0, "alerts": 0}
+    an.enricher, an.detector, an.buffer, an.stats = enricher, None, [], {"events": 0, "alerts": 0}
     emitted = []
     an.emit = emitted.append
     an.suppressor = bridge.Suppressor(60)
-    # file không thuộc FIM-001 (rule đó chạy chính thức thì cảnh báo 550 của /etc/passwd không chuyển nữa: test_fim_rules.py)
     an.handle(wz("wazuh_alert", location="syscheck", syscheck={"path": "/etc/hostname", "event": "modified"},
                  rule={"id": "550", "level": 7, "description": "Integrity checksum changed.", "groups": ["syscheck"]}))
     assert an.buffer == [] and [a["rule"]["id"] for a in emitted] == ["WZH-550"]
@@ -356,7 +340,7 @@ def test_analyzer_does_not_store_wazuh_alert_twice(enricher, engine):
     assert len(an.buffer) == 1
 
 
-def test_analyzer_acknowledges_kafka_only_after_events_are_stored(enricher, engine, monkeypatch):
+def test_analyzer_acknowledges_kafka_only_after_events_are_stored(enricher, monkeypatch):
     """Offset Kafka chỉ được xác nhận khi event đã nằm trong ES: ES lỗi -> không xác nhận -> lần sau đọc lại."""
     from siem import analyzer as mod
 
@@ -370,8 +354,8 @@ def test_analyzer_acknowledges_kafka_only_after_events_are_stored(enricher, engi
         def flush(self, _t):
             return 0
     an = mod.Analyzer.__new__(mod.Analyzer)
-    an.enricher, an.engine, an.detector, an.buffer, an.stats = enricher, engine, None, [], {"events": 0, "alerts": 0}
-    an.stream, an.producer, an.es, an.last_rules_check = Stream(), Producer(), None, 10 ** 12
+    an.enricher, an.detector, an.buffer, an.stats = enricher, None, [], {"events": 0, "alerts": 0}
+    an.stream, an.producer, an.es = Stream(), Producer(), None
     an.last_flush = 0
     an.emit = lambda a: None
     calls = []
@@ -776,34 +760,27 @@ def test_several_legacy_groups_keep_first_and_all(enricher):
     assert a["rule"]["legacy_id"] == "NET-004" and a["rule"]["legacy_ids"] == ["NET-004", "NET-005"]
 
 
-def test_engine_disabled_no_yaml_alerts(enricher, monkeypatch):
-    """R65: RULE_ENGINE_ENABLED=false -> Analyzer không nạp rule YAML; event khớp rule YAML (SQLi) không ra alert YAML,
-    nhưng event vẫn được lưu và nạp lại rule không làm gì."""
+def test_analyzer_stores_events_without_rule_engine(enricher, monkeypatch):
+    """R65 + Task 25: không còn engine YAML trong analyzer; event (kể cả khớp SQLi) chỉ được lưu, alert đến từ cầu nối Wazuh."""
     from siem import analyzer as mod
-    monkeypatch.setattr(settings, "RULE_ENGINE_ENABLED", False)
     monkeypatch.setattr(mod, "default_enricher", lambda: enricher)
     monkeypatch.setattr(mod.store, "connect", lambda: None)
     monkeypatch.setattr(mod.bus, "wait_for_kafka", lambda: None)
     monkeypatch.setattr(mod.bus, "producer", lambda: None)
     an = mod.Analyzer()
-    assert an.engine.rules == []
+    assert not hasattr(an, "engine")
     emitted = []
     an.emit = emitted.append
     sqli = wz(full_log="x", location="/var/log/apache2/access.log")
     sqli["data"]["full_log"] = '203.0.113.9 - - [28/Sep/2026:15:31:34 +0000] "GET /index.php?id=1%27%20union%20select%201,2-- HTTP/1.1" 200 512 "-" "sqlmap/1.7"'
-    ctrl = RuleEngine(load_rules(ROOT / "rules")).process(enricher.enrich(normalize(sqli)))
-    assert any(d.rule.id == "WEB-001" for d in ctrl)                       # đối chứng: engine bật thì event này ra WEB-001
     an.handle(sqli)
     assert len(an.buffer) == 1 and emitted == []
-    an.reload_rules_if_changed()
-    assert an.engine.rules == []
 
 
-def test_engine_disabled_bridge_still_emits_wzh_and_stock_fim(enricher, engine, monkeypatch):
+def test_bridge_emits_wzh_and_stock_fim(enricher):
     from siem.analyzer import Analyzer
-    monkeypatch.setattr(settings, "RULE_ENGINE_ENABLED", False)
     an = Analyzer.__new__(Analyzer)
-    an.enricher, an.engine, an.detector, an.buffer, an.stats = enricher, RuleEngine([]), None, [], {"events": 0, "alerts": 0}
+    an.enricher, an.detector, an.buffer, an.stats = enricher, None, [], {"events": 0, "alerts": 0}
     emitted = []
     an.emit = emitted.append
     an.suppressor = bridge.Suppressor(60)

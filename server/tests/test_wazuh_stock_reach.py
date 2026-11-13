@@ -84,3 +84,12 @@ def test_parent_errors_missing_and_misordered():
     out = reach.parent_errors(STOCK, proj)
     assert any("999" in e and "không có" in e for e in out) and any("101" in e and "chưa nạp" in e for e in out)
     assert reach.parent_errors(STOCK, project(5)) == []
+
+
+def test_min_level_r65_counts_level_7_to_11_as_real():
+    """R65: rule gốc level 7-11 cũng là alert thật (WAZUH_ALERT_MIN_LEVEL = 7); --min-level 7 xét cả chúng."""
+    assert not reach.is_real(STOCK[105]) and reach.is_real(STOCK[105], 7) and not reach.is_real(STOCK[101], 7)
+    hook = project(10, parent=100)                 # dự án L10 móc 100: thắng 105 (L8) cùng cha
+    assert 105 not in reach.unpinned(STOCK, hook, set())
+    assert reach.unpinned(STOCK, hook, set(), min_level=7)[105] == {100}
+    assert 105 not in reach.unpinned(STOCK, hook, {105}, min_level=7)

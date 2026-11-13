@@ -24,7 +24,7 @@ RELOAD_OK = "Ruleset reload request sent successfully."
 ID_RANGES: dict[str, tuple[int, int]] = {
     "0100-platform.xml": (100000, 100999), "0101-auth.xml": (101000, 101999), "0102-linux.xml": (102000, 102499), "0851-linux-audit.xml": (102500, 102999),
     "0541-network.xml": (103000, 103999), "0271-web.xml": (104000, 104999), "0965-windows.xml": (105000, 105999),
-    "0106-fim.xml": (106000, 106999), "0845-ti.xml": (107000, 107999), "0108-sigmahq.xml": (108000, 108999),
+    "0106-fim.xml": (106000, 106999), "0845-ti.xml": (107000, 107999), "0966-sigmahq.xml": (108000, 108999),
     "rules-dynamic/ai.xml": (109000, 109999), "rules-dynamic/exceptions.xml": (110000, 110999),
 }
 TUNING_FILE = "0999-tuning.xml"
@@ -125,17 +125,20 @@ def _replace(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
-def write_dynamic(name: str, xml_text: str, api, root: Path = DYNAMIC_DIR) -> None:
-    """Kiểm tra -> ghi file tạm -> đổi tên nguyên tử -> api.reload(). Lỗi thì khôi phục file cũ, nạp lại, raise."""
+def write_dynamic(name: str, xml_text: str | None, api, root: Path = DYNAMIC_DIR) -> None:
+    """xml_text=None: xóa file (Wazuh từ chối <group> rỗng và file chỉ có chú thích; không có file thì nạp được). Kiểm tra -> ghi file tạm -> đổi tên nguyên tử -> api.reload(). Lỗi thì khôi phục file cũ, nạp lại, raise."""
     rng = ID_RANGES.get(f"rules-dynamic/{name}")
     if rng is None:
         raise WazuhRuleError(f"không phải file rule động: {name}")
-    for r in parse(xml_text):
+    for r in parse(xml_text or ""):
         if not rng[0] <= r["id"] <= rng[1]:
             raise WazuhRuleError(f"rule {r['id']} ngoài dải {rng[0]}-{rng[1]} của {name}")
     path = root / name
     old = path.read_text(encoding="utf-8") if path.exists() else None
-    _replace(path, xml_text)
+    if xml_text is None:
+        path.unlink(missing_ok=True)
+    else:
+        _replace(path, xml_text)
     try:
         api.reload()
     except WazuhRuleError as e:

@@ -39,14 +39,15 @@ SETUP = ("#!/bin/bash\nprintf '#!/bin/sh\\nexec sleep infinity\\n' > /etc/servic
          + "".join(f"install -m 0660 -o wazuh -g wazuh /entrypoint-scripts/{n} /var/ossec/etc/lists/{n}\n" for n in MISP_LISTS))   # ossec.conf có <localfile> console: giữ ossec.log sạch cảnh báo logcollector
 
 
-def start(tmp: Path, lists: dict[str, str] | None = None) -> None:
-    """lists: {tên: nội dung} của danh sách siem-misp-* (ossec.conf khai báo chúng; thiếu file thì rule dùng nó bị bỏ). Tên thiếu = dòng giữ chỗ của entrypoint."""
+def start(tmp: Path, lists: dict[str, str] | None = None, rules: Path | None = None) -> None:
+    """lists: {tên: nội dung} của danh sách siem-misp-* (ossec.conf khai báo chúng; thiếu file thì rule dùng nó bị bỏ). Tên thiếu = dòng giữ chỗ của entrypoint.
+    rules: thư mục rule dự án thay cho wazuh/manager/rules (vd bản chép bỏ một file)."""
     (tmp / "10-setup.sh").write_text(SETUP, encoding="utf-8", newline="\n")
     for n, placeholder in MISP_LISTS.items():
         (tmp / n).write_text((lists or {}).get(n, placeholder), encoding="utf-8", newline="\n")
     cov.docker("run", "-d", "--rm", "--name", NAME, "--network", "none",
                "-v", f"{tmp}:/entrypoint-scripts:ro",
-               "-v", f"{ROOT / 'wazuh/manager/rules'}:/var/ossec/etc/rules:ro",
+               "-v", f"{rules or ROOT / 'wazuh/manager/rules'}:/var/ossec/etc/rules:ro",
                "-v", f"{ROOT / 'wazuh/manager/decoders'}:/var/ossec/etc/decoders:ro",
                "-v", f"{ROOT / 'wazuh/manager/ossec.conf'}:/wazuh-config-mount/etc/ossec.conf:ro", IMAGE)
     for _ in range(60):
