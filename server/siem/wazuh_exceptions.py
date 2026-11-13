@@ -73,7 +73,7 @@ def used(root: Path | None = None) -> int:
 def _render(reg: dict, api, root: Path) -> None:
     xml = "\n".join(exception_rule(i["parent"], i["conditions"], i["id"], i["reason"])
                     for i in reg["items"] if i["status"] == "active")
-    wazuh_rules.write_dynamic(FILE, f'<group name="siem,exception,">\n{xml}\n</group>\n', api, root)
+    wazuh_rules.write_dynamic(FILE, f'<group name="siem,exception,">\n{xml}\n</group>\n' if xml else None, api, root)
 
 
 def _check_parent(api, pid: int) -> None:

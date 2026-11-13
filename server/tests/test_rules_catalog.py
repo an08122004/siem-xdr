@@ -1,62 +1,12 @@
-"""Test danh mục rule (siem-rules) cho dashboard "Thư viện rule": đọc rule / ngoại lệ / đề xuất AI, tóm tắt điều kiện,
-ghép đề xuất với rule hiện có liên quan, đồng bộ vào Elasticsearch (giả lập)."""
+"""Test danh mục rule (siem-rules) cho dashboard "Thư viện rule": rule Wazuh, đề xuất AI, phát hiện nền tảng, độ phủ
+ATT&CK, tóm tắt điều kiện, đồng bộ vào Elasticsearch (giả lập)."""
 from __future__ import annotations
 
-import textwrap
-
-import pytest
+from pathlib import Path
 
 from siem import rules_catalog as rc
 
-
-@pytest.fixture()
-def rules_dir(tmp_path):
-    (tmp_path / "ai").mkdir()
-    (tmp_path / "exceptions").mkdir()
-    (tmp_path / "web.yml").write_text(textwrap.dedent("""
-        - id: WEB-001
-          title: Tấn công SQL Injection
-          severity: high
-          mitre: {tactic: Initial Access, technique: [T1190]}
-          tags: [web, sqli]
-          type: match
-          condition:
-            all:
-              - {field: event.category, op: eq, value: web}
-              - {field: url.decoded, op: regex, value: ["union\\\\s+select", "'\\\\s*or\\\\s*1=1"]}
-        - id: WEB-099
-          title: Rule đã tắt
-          enabled: false
-          condition: {field: url.path, op: eq, value: /x}
-        """), encoding="utf-8")
-    (tmp_path / "auth.yml").write_text(textwrap.dedent("""
-        - id: AUTH-001
-          title: Brute-force đăng nhập
-          severity: medium
-          mitre: {tactic: Credential Access, technique: [T1110]}
-          tags: [auth, bruteforce]
-          type: threshold
-          condition:
-            - {field: event.category, op: eq, value: authentication}
-            - {field: event.outcome, op: eq, value: failure}
-          threshold: {group_by: [source.ip], count: 5, window: 60, distinct: user.name}
-        """), encoding="utf-8")
-    (tmp_path / "ai" / "AI-021.yml").write_text(textwrap.dedent("""
-        - id: AI-021
-          title: Dò thư mục nhạy cảm
-          severity: medium
-          tags: [ai-generated, web, sensitive-path]
-          condition: {any: [{field: url.path, op: startswith, value: [/_vti_bin, /cfide, /msadc, /iisadmpwd, /scripts]}]}
-          ai_proposal_id: p-old
-        """), encoding="utf-8")
-    (tmp_path / "exceptions" / "EXC-1.yml").write_text(textwrap.dedent("""
-        - id: EXC-1
-          rule_id: AUTH-001
-          description: máy quét được phép
-          condition: {all: [{field: source.ip, op: eq, value: 10.0.0.5}]}
-          source: manual
-        """), encoding="utf-8")
-    return tmp_path
+CONFIG = Path(__file__).resolve().parent.parent / "config"
 
 
 PROPOSALS = [
@@ -91,22 +41,8 @@ def test_condition_summary_and_fields():
     assert fields == {"event.action", "host.name"}
 
 
-def test_rules_exceptions_and_proposals(rules_dir):
-    docs = by_id(rc.build(rules_dir, PROPOSALS, {"WEB-001": {"h24": 3, "d7": 10, "last": "2026-10-03T10:00:00Z"}}))
-    web = docs["rule:WEB-001"]
-    assert web["origin"] == "rule" and web["source"] == "builtin" and web["file"] == "web.yml"
-    assert {k: web["alerts"][k] for k in ("h24", "d7", "last")} == {"h24": 3, "d7": 10, "last": "2026-10-03T10:00:00Z"}
-    assert web["alerts"]["fp_rate30"] is None and web["mode"] == "active" and web["mode_label"] == "chính thức"
-    assert web["mitre"] == {"tactic": "Initial Access", "technique": ["T1190"]} and "event.category" in web["fields"]
-    assert "rule:WEB-099" not in docs                                           # rule tắt không nằm trong danh mục
-    auth = docs["rule:AUTH-001"]
-    assert auth["condition_text"].endswith("— đếm ≥5 trong 60 giây, user.name khác nhau, theo source.ip")
-    assert {"source.ip", "user.name"} <= set(auth["fields"]) and auth["alerts"]["d7"] == 0
-    ai = docs["rule:AI-021"]
-    assert ai["source"] == "ai" and ai["origin_label"] == "Rule AI (đã duyệt)" and ai["ai_proposal_id"] == "p-old"
-    assert ai["mitre"]["tactic"] == rc.NONE_TACTIC and ai["mitre"]["technique"] == [rc.NONE_LIST]   # chỗ trống vẫn lọc được
-    exc = docs["exception:EXC-1"]
-    assert exc["rule"] == {"id": "AUTH-001", "name": "Brute-force đăng nhập"} and exc["condition_text"] == "bỏ qua khi source.ip = 10.0.0.5"
+def test_proposals_detectors_and_timestamps():
+    docs = by_id(rc.build(PROPOSALS, {}, today="2026-11-07T00:00:00+00:00"))
     p = docs["proposal:p-sqli"]
     assert p["origin"] == "ai_proposal" and p["proposal"]["test"] == "177/196" and p["proposal"]["fp"] == "0/10000"
     assert p["proposal"]["pick"] == "Rule mới AI-022 — SQLi không dấu nháy (chờ duyệt, p-sqli)"
@@ -114,53 +50,34 @@ def test_rules_exceptions_and_proposals(rules_dir):
     pe = docs["proposal:p-exc"]
     assert pe["type"] == "exception" and pe["proposal"]["approvals"] == "1/2" and pe["proposal"]["fp"] == "5/5 báo nhầm khớp"
     assert all(d["@timestamp"] == d["updated_at"] for d in docs.values())
+    assert docs["detector:RBA-001"]["@timestamp"] == "2026-11-07T00:00:00+00:00"
+    assert not {d["origin"] for d in docs.values()} & {"rule", "exception", "comparison"}     # engine YAML đã xóa
+    # mặc định: mốc ngày hiện tại (dashboard xem 20 năm: mốc 1970 thì bản ghi biến mất khỏi Grafana)
+    assert rc.build([], {})[0]["@timestamp"] > "2026"
 
 
-def test_proposals_are_paired_with_related_rules(rules_dir):
-    docs = by_id(rc.build(rules_dir, PROPOSALS, {}))
-    sqli = [d for d in docs.values() if d["origin"] == "comparison" and d["proposal"]["id"] == "p-sqli"]
-    assert sqli[0]["rule"]["id"] == "WEB-001"                                    # liên quan nhất xếp đầu
-    assert {"cùng loại tấn công sqli", "cùng xét trường url.decoded", "cùng tactic Initial Access"} <= set(sqli[0]["reasons"])
-    assert sqli[0]["proposal"]["condition_text"] == "url.decoded chứa [and 1=1, or 1=1]"     # 2 điều kiện cạnh nhau
-    assert "cùng tag ai-generated" not in sqli[0]["reasons_text"]               # tag chung chung không tính
-    assert "AUTH-001" not in {d["rule"]["id"] for d in sqli}                     # không liên quan -> không ghép
-    exc = docs["cmp:p-exc:AUTH-001"]
-    assert exc["reasons"][0] == "ngoại lệ áp dụng cho chính rule này" and exc["score"] >= 10
-
-
-def test_common_traits_weigh_little_and_shared_patterns_count():
-    """T1190 / url.decoded có ở mọi rule web: không đủ để coi là liên quan. Cùng loại tấn công (từ vựng AI ánh xạ sang
-    tag viết tay) và cùng chuỗi mẫu thì có."""
-    def rule(rid, tags, values, field="url.decoded"):
-        return {"rule": {"id": rid, "name": rid}, "type": "match", "tags": tags, "fields": [field],
-                "mitre": {"tactic": "Initial Access", "technique": ["T1190"]}, "patterns": sorted(rc.pattern_tokens(
-                    {"field": field, "op": "contains", "value": values})), "severity": "high", "source": "builtin",
-                "file": "web.yml", "condition_text": "", "alerts": {}}
-    rules = [rule("WEB-001", ["web", "sqli"], ["union select"]), rule("WEB-003", ["web", "lfi"], ["../", "/etc/passwd"]),
-             rule("WEB-005", ["web", "scanner"], ["nikto", "sqlmap"]), rule("WEB-006", ["web", "dirbusting"], ["/_vti_bin", "/.git"]),
-             rule("LNX-005", ["linux", "recon"], ["whoami", "uname"], field="process.command_line")]
-    prop = {"rule": {"id": "AI-030", "name": "dò đường dẫn"}, "type": "match", "tags": ["sensitive-path"],   # AI không gắn tag web
-            "attack": {"key": "sensitive-path", "tags": sorted(rc.ATTACK_TAGS["sensitive-path"])}, "fields": ["url.decoded"],
-            "mitre": {"tactic": "Initial Access", "technique": ["T1190"]}, "updated_at": "x", "condition_text": "",
-            "severity": "medium", "patterns": sorted(rc.pattern_tokens({"field": "url.path", "op": "startswith", "value": ["/_vti_bin", "/cfide"]})),
-            "proposal": {"id": "p", "pick": "p", "kind_label": "Rule mới", "status_label": "chờ duyệt"}}
-    docs = {d["rule"]["id"]: d for d in rc.comparison_docs([prop], rules)}
-    assert "WEB-001" not in docs and "WEB-003" not in docs            # chỉ chung T1190 / url.decoded / tactic -> không ghép
-    assert "LNX-005" not in docs                                     # "recon" trên Linux khác lĩnh vực dò quét web
-    assert "cùng loại tấn công dirbusting" in docs["WEB-006"]["reasons"] and "cùng bắt chuỗi _vti_bin" in docs["WEB-006"]["reasons"]
-    assert docs["WEB-006"]["score"] > docs["WEB-005"]["score"]       # WEB-006 vừa cùng loại vừa cùng chuỗi mẫu
-    assert any("nhiều rule cùng có" in r for r in docs["WEB-006"]["reasons"])   # đặc điểm phổ biến được ghi rõ là yếu
-    assert rc.pattern_tokens({"all": [{"field": "event.category", "op": "eq", "value": "web"},
-                                      {"field": "url.decoded", "op": "regex", "value": "union(\\s|/\\*)+select"}]}) == {"union", "select"}
+def test_catalog_detectors_and_coverage_from_wazuh_rules():
+    """Phát hiện nền tảng (RBA, HLT) có bản ghi; độ phủ kỹ thuật ưu tiên tính từ rule Wazuh đang bật (R49)."""
+    wazuh = [{"_id": "rule:WZH-60204", "origin": "wazuh_rule", "source": "wazuh", "rule": {"id": "WZH-60204", "name": "x"},
+              "mitre": {"tactic": rc.NONE_TACTIC, "technique": ["T1110.001"]}, "tags": ["wazuh"], "fields": [rc.NONE_LIST],
+              "mode": "active", "bridged": True, "shadow": False, "status": "enabled"}]
+    docs = by_id(rc.build([], {"HLT-001": {"h24": 1, "d7": 4, "d90": 9}}, rc.load_profile(CONFIG), wazuh))
+    assert {d["rule"]["id"] for d in docs.values() if d["origin"] == "detector"} >= {"RBA-001", "HLT-001", "HLT-006"}
+    assert docs["detector:HLT-001"]["alerts"]["d90"] == 9
+    cov = {d["technique"]: d for d in docs.values() if d["origin"] == "coverage"}
+    assert len(cov) == 12 and cov["T1486"]["covered_text"] == "CHƯA CÓ"
+    assert cov["T1110"]["rules_text"] == "WZH-60204" and cov["T1110"]["sources"] == "wazuh"
+    assert docs["rule:WZH-60204"]["technique_text"] == "T1110.001"
+    assert rc.load_profile(None) == {} and rc.load_profile(Path("khong-co")) == {}
 
 
 class FakeES:
     def __init__(self):
-        self.bulks, self.deleted = [], []
+        self.bulks, self.deleted, self.props = [], [], list(PROPOSALS)
 
     def search(self, index, **kw):
         if index == "ai-rule-proposals":
-            return {"hits": {"hits": [{"_id": p["id"], "_source": p} for p in PROPOSALS]}}
+            return {"hits": {"hits": [{"_id": p["id"], "_source": p} for p in self.props]}}
         raise ConnectionError("chưa có alert")                                   # danh mục vẫn dựng được
 
     fail_ids: set = frozenset()
@@ -176,37 +93,18 @@ class FakeES:
         self.deleted.append(query)
 
 
-def test_sync_writes_once_and_removes_stale(rules_dir, monkeypatch):
+def test_sync_writes_once_and_removes_stale(monkeypatch):
     monkeypatch.setattr(rc, "_last_sig", None)
     monkeypatch.setattr(rc, "_doc_sigs", {})
     es = FakeES()
-    n = rc.sync(es, rules_dir)
+    n = rc.sync(es)
     ids = [op["index"]["_id"] for op in es.bulks[0] if "index" in op]
-    assert n == len(ids) and "rule:WEB-001" in ids and "proposal:p-sqli" in ids
-    assert es.deleted[0] == {"bool": {"must_not": [{"ids": {"values": ids}}, {"term": {"origin": "wazuh_rule"}}]}}   # rule bị xóa / gỡ -> bản ghi cũ bị xóa
-    assert rc.sync(es, rules_dir) == 0 and len(es.bulks) == 1                     # không đổi gì -> không ghi lại
-    (rules_dir / "ai" / "AI-021.yml").unlink()                                    # gỡ rule AI
-    rc.sync(es, rules_dir)
-    assert "rule:AI-021" not in es.deleted[-1]["bool"]["must_not"][0]["ids"]["values"]   # chỉ xóa, không bản ghi nào đổi để gửi lại
-
-
-def test_catalog_metadata_false_positive_rate_detectors_and_coverage():
-    """Danh mục thật (server/rules + lint): rule có metadata, ca test, playbook, tỉ lệ báo nhầm 30 ngày; có bản ghi cho
-    phát hiện nền tảng (RBA, HLT) và độ phủ kỹ thuật ưu tiên."""
-    from siem.detection.lint import lint
-    from pathlib import Path
-    root = Path(__file__).resolve().parent.parent
-    rep = lint(root / "rules", root / "config")
-    docs = by_id(rc.build(root / "rules", [], {"WEB-004": {"h24": 1, "d7": 4, "d90": 9, "closed30": 8, "fp30": 2}}, rep))
-    web = docs["rule:WEB-004"]
-    assert web["owner"] == "detection-engineering" and "webserver" in web["logsource_text"]
-    assert web["tests"] == {"positive": 2, "negative": 1, "failed": 0, "tested": True} and web["playbook"] == "PB-02"
-    assert web["alerts"]["fp_rate30"] == 0.25 and web["alerts"]["d90"] == 9 and "pentest" in web["falsepositives_text"]
-    assert {d["rule"]["id"] for d in docs.values() if d["origin"] == "detector"} >= {"RBA-001", "HLT-001", "HLT-006"}
-    cov = {d["technique"]: d for d in docs.values() if d["origin"] == "coverage"}
-    assert len(cov) == 12 and cov["T1486"]["covered_text"] == "CHƯA CÓ" and "WIN-007" in cov["T1003"]["rules_text"]
-    # bản ghi mới không làm lệch đếm "rule đang chạy" (e2e so số rule YAML với origin:rule)
-    assert sum(d["origin"] == "rule" for d in docs.values()) == len(rep.rules)
+    assert n == len(ids) and "proposal:p-exc" in ids and "proposal:p-sqli" in ids
+    assert es.deleted[0] == {"bool": {"must_not": [{"ids": {"values": ids}}, {"term": {"origin": "wazuh_rule"}}]}}   # bản ghi không còn -> bị xóa
+    assert rc.sync(es) == 0 and len(es.bulks) == 1                                # không đổi gì -> không ghi lại
+    es.props = PROPOSALS[:1]                                                      # đề xuất biến mất khỏi ai-rule-proposals
+    rc.sync(es)
+    assert "proposal:p-exc" not in es.deleted[-1]["bool"]["must_not"][0]["ids"]["values"]   # chỉ xóa, không bản ghi nào đổi để gửi lại
 
 
 class FakeWazuh:
@@ -251,49 +149,49 @@ def test_wazuh_stock_docs_follow_shadow_setting(monkeypatch):
     assert doc["shadow"] is True and doc["mode"] == "shadow"
 
 
-def test_sync_includes_wazuh_and_keeps_old_on_api_error(rules_dir, monkeypatch):
+def test_sync_includes_wazuh_and_keeps_old_on_api_error(monkeypatch):
     monkeypatch.setattr(rc, "_last_sig", None)
     monkeypatch.setattr(rc, "_doc_sigs", {})
     es = FakeES()
-    rc.sync(es, rules_dir, api=FakeWazuh())
+    rc.sync(es, api=FakeWazuh())
     ids = [op["index"]["_id"] for op in es.bulks[0] if "index" in op]
-    assert "rule:WZH-5710" in ids and "rule:WEB-001" in ids
-    rc.sync(es, rules_dir, api=FakeWazuh(fail=True), force=True)               # API tắt: vẫn ghi phần còn lại, không xóa rule Wazuh
+    assert "rule:WZH-5710" in ids and "proposal:p-sqli" in ids
+    rc.sync(es, api=FakeWazuh(fail=True), force=True)                          # API tắt: vẫn ghi phần còn lại, không xóa rule Wazuh
     ids2 = [op["index"]["_id"] for op in es.bulks[1] if "index" in op]
-    assert "rule:WZH-5710" not in ids2 and "rule:WEB-001" in ids2
+    assert "rule:WZH-5710" not in ids2 and "proposal:p-sqli" in ids2
     assert {"term": {"origin": "wazuh_rule"}} in es.deleted[1]["bool"]["must_not"]
-    rc.sync(es, rules_dir, force=True)                                            # không truyền api: cũng không xóa rule Wazuh
+    rc.sync(es, force=True)                                                       # không truyền api: cũng không xóa rule Wazuh
     assert {"term": {"origin": "wazuh_rule"}} in es.deleted[2]["bool"]["must_not"]
-    rc.sync(es, rules_dir, api=FakeWazuh(), force=True)                           # lấy thành công: được dọn bản ghi Wazuh thừa
+    rc.sync(es, api=FakeWazuh(), force=True)                                      # lấy thành công: được dọn bản ghi Wazuh thừa
     assert es.deleted[3]["bool"]["must_not"] == [{"ids": {"values": [op["index"]["_id"] for op in es.bulks[3] if "index" in op]}}]
 
 
-def test_doc_signatures_only_for_stored_docs_and_pruned(rules_dir, monkeypatch):
+def test_doc_signatures_only_for_stored_docs_and_pruned(monkeypatch):
     monkeypatch.setattr(rc, "_last_sig", None)
     monkeypatch.setattr(rc, "_doc_sigs", {})
     es = FakeES()
-    es.fail_ids = {"rule:WEB-001"}
-    rc.sync(es, rules_dir)
+    es.fail_ids = {"proposal:p-sqli"}
+    rc.sync(es)
     sent = lambda n: [op["index"]["_id"] for op in es.bulks[n] if "index" in op]
-    assert "rule:WEB-001" not in rc._doc_sigs and "rule:AUTH-001" in rc._doc_sigs      # bản ghi lỗi không có chữ ký
+    assert "proposal:p-sqli" not in rc._doc_sigs and "proposal:p-exc" in rc._doc_sigs  # bản ghi lỗi không có chữ ký
     es.fail_ids = set()
-    rc.sync(es, rules_dir)
-    assert sent(1) == ["rule:WEB-001"]                                                 # chỉ gửi lại bản ghi lỗi
-    (rules_dir / "auth.yml").rename(rules_dir / "auth.bak")                            # gỡ rule rồi trả lại y nguyên
-    rc.sync(es, rules_dir)
-    assert "rule:AUTH-001" not in rc._doc_sigs
-    (rules_dir / "auth.bak").rename(rules_dir / "auth.yml")
-    rc.sync(es, rules_dir)
-    assert "rule:AUTH-001" in sent(3)                                                  # xuất hiện lại -> gửi lại
+    rc.sync(es)
+    assert sent(1) == ["proposal:p-sqli"]                                              # chỉ gửi lại bản ghi lỗi
+    es.props = PROPOSALS[:1]                                                           # bỏ đề xuất rồi trả lại y nguyên
+    rc.sync(es)
+    assert "proposal:p-exc" not in rc._doc_sigs
+    es.props = list(PROPOSALS)
+    rc.sync(es)
+    assert len(es.bulks) == 3 and sent(2) == ["proposal:p-exc"]                       # xuất hiện lại -> gửi lại (chỉ nó)
 
 
-def test_doc_signatures_keep_wazuh_when_api_fails(rules_dir, monkeypatch):
+def test_doc_signatures_keep_wazuh_when_api_fails(monkeypatch):
     monkeypatch.setattr(rc, "_last_sig", None)
     monkeypatch.setattr(rc, "_doc_sigs", {})
     es = FakeES()
-    rc.sync(es, rules_dir, api=FakeWazuh())
+    rc.sync(es, api=FakeWazuh())
     assert "rule:WZH-5710" in rc._doc_sigs
-    rc.sync(es, rules_dir, api=FakeWazuh(fail=True))
+    rc.sync(es, api=FakeWazuh(fail=True))
     assert "rule:WZH-5710" in rc._doc_sigs                                             # API lỗi: không cắt chữ ký rule Wazuh
 
 
@@ -314,13 +212,6 @@ def test_wazuh_rule_docs_not_bridged_never_counts_as_running():
     assert docs["WZH-101100"]["bridged"] is True and docs["WZH-101100"]["mode"] in ("active", "shadow")
     only_bad = [docs[r] for r in ("WZH-550", "WZH-19007", "WZH-101099")]
     assert not attack_coverage(only_bad, {"techniques": [{"id": "T1110"}]})[0]["covered"]
-
-
-def test_yaml_rule_docs_are_off_when_engine_disabled(rules_dir, monkeypatch):
-    """R65: engine YAML tắt -> thư viện ghi mode off, nhãn "đã tắt (engine YAML)"."""
-    monkeypatch.setattr(rc.settings, "RULE_ENGINE_ENABLED", False)
-    docs = rc.rule_docs(rules_dir, {})
-    assert docs and all(d["mode"] == "off" and d["mode_label"] == "đã tắt (engine YAML)" for d in docs)
 
 
 def test_wazuh_rule_docs_real_api_shape_and_overwritten_rules():
@@ -347,3 +238,12 @@ def test_wazuh_rule_docs_real_api_shape_and_overwritten_rules():
     assert by_id["WZH-92041"]["description"] == "bản đè" and by_id["WZH-92041"]["file"] == "etc/rules/0999-tuning.xml"
     assert by_id["WZH-5712"]["mitre"]["technique"] == ["T1110"]
     assert by_id["WZH-104095"]["mitre"]["technique"] == [rc.NONE_LIST]          # giá trị giữ chỗ cho bộ lọc Grafana
+
+
+def test_ai_exception_proposal_shows_its_conditions():
+    """M2: ngoại lệ AI mới (R73) lưu `conditions` (danh sách {field, value}), không phải `condition` của engine YAML."""
+    p = {"id": "p-exc2", "kind": "exception", "status": "pending", "target": "exception:WZH-5710", "target_rule_id": "WZH-5710",
+         "title": "Ngoại lệ cho WZH-5710", "created_at": "2026-11-07T00:00:00+00:00", "approvals": [], "required_approvals": 1,
+         "proposal": {"rule": "WZH-5710", "conditions": [{"field": "user.name", "value": "svc_backup"}], "reason": "sao lưu"}}
+    d = by_id(rc.build([p], {}, today="2026-11-07T00:00:00+00:00"))["proposal:p-exc2"]
+    assert d["condition_text"] == "bỏ qua khi user.name = svc_backup" and d["fields"] == ["user.name"]

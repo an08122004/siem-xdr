@@ -4,7 +4,13 @@ Tài liệu này mô tả toàn bộ phần AI của SIEM/XDR (`server/siem/ai/`
 định ra sao, kết quả đo các model, và vì sao tỉ lệ đạt còn thấp. Mọi thay đổi về pipeline AI và kết quả thử nghiệm ghi vào
 file này; `README.md` chỉ giữ phần tóm tắt.
 
-> **Lưu ý (05/11/2026):** đầu ra của pipeline AI hiện vẫn là rule YAML ghi vào `server/rules/ai`, nên chỉ chạy trên engine YAML. Nhánh `feature/wazuh-unified-ruleset` sẽ tắt engine YAML ở Task 18 (chưa được duyệt); trước đó phải đổi đích sang `rules-dynamic/ai.xml` (dải id 109000 đến 109999), hoặc giữ engine cho rule AI. Xem checklist Task 18 trong [kế hoạch](docs/superpowers/plans/2026-10-31-wazuh-unified-ruleset.md) và [RULES.md](RULES.md) mục 9.10. Phần chuyển đầu ra sang XML (Task 19 đến 21) chưa được lập kế hoạch chi tiết.
+> **Cập nhật P4 (06–08/11/2026).** Đầu ra của pipeline là **rule Wazuh XML**: đề xuất đạt được dịch sang XML (`ai/wazuh_xml.py`),
+> kiểm định trên `wazuh-sandbox` (một wazuh-manager cô lập, cùng image, không mạng) và khi duyệt được ghi vào `rules-dynamic/ai.xml`
+> ở chế độ bóng (dải id 109000–109999). Khoảng trống phát hiện tính trên alert Wazuh thật. Ngoại lệ AI thành ngoại lệ Wazuh. Engine
+> YAML (`server/rules/`) đã xóa ở Task 25. Mục 7, 8 mô tả luồng mới; kết quả chạy thử ở **mục 9.11**; quyết định R66–R83 ở
+> [docs/wazuh-ruleset-decisions.md](docs/wazuh-ruleset-decisions.md) mục 10; kế hoạch:
+> [2026-11-06-p4-ai-wazuh-xml.md](docs/superpowers/plans/2026-11-06-p4-ai-wazuh-xml.md). Số đo ở mục 9.1–9.10 và 10 là của thời
+> engine YAML, giữ làm lịch sử.
 
 **Lưu ý về chữ "huấn luyện".** Hệ thống **không huấn luyện hay fine-tune** model nào. Model chạy nguyên trọng số công bố qua
 Ollama. Cái được gọi là "huấn luyện" ở đây là một quy trình *học trong ngữ cảnh*: chọn mẫu tấn công và mẫu bình thường, đưa
@@ -13,8 +19,9 @@ dữ liệu model chưa từng thấy. Thứ duy nhất được "nhớ" qua cá
 lần sau.
 
 **Định dạng rule.** Từ 7/10/2026, model viết rule mới bằng **Sigma** (YAML), định dạng rule phát hiện mở mà model đã gặp hàng
-nghìn lần qua SigmaHQ; hệ thống biên dịch rule Sigma sang rule engine của SIEM để đo và chạy (mục 5, 6). Đề xuất ngoại lệ vẫn
-dùng JSON schema và DSL của SIEM.
+nghìn lần qua SigmaHQ; hệ thống biên dịch rule Sigma sang cây điều kiện Python (`siem.ai.condition`) để đo nhanh khi ghép vế
+(mục 5, 6), rồi dịch sang rule Wazuh XML để kiểm định trên Wazuh thật và triển khai (mục 7, 8). Đề xuất ngoại lệ dùng JSON schema:
+điều kiện là các trường ECS ánh xạ được sang trường Wazuh.
 
 ## Mục lục
 
@@ -25,7 +32,7 @@ dùng JSON schema và DSL của SIEM.
 5. [Prompt và gọi model](#5-prompt-và-gọi-model)
 6. [Ghép vế qua nhiều lượt](#6-ghép-vế-qua-nhiều-lượt)
 7. [Kiểm định tự động](#7-kiểm-định-tự-động)
-8. [Duyệt, triển khai, so sánh với rule hiện có](#8-duyệt-triển-khai-so-sánh-với-rule-hiện-có)
+8. [Duyệt, triển khai, bật chính thức, gỡ](#8-duyệt-triển-khai-bật-chính-thức-gỡ)
 9. [Đo lường và lịch sử chạy thử](#9-đo-lường-và-lịch-sử-chạy-thử)
 10. [Đánh giá các model và vì sao tỉ lệ đạt thấp](#10-đánh-giá-các-model-và-vì-sao-tỉ-lệ-đạt-thấp)
 11. [Hướng cải thiện](#11-hướng-cải-thiện)
@@ -36,13 +43,15 @@ dùng JSON schema và DSL của SIEM.
 
 ## 1. AI làm gì và không làm gì
 
-AI là trợ lý cho người viết rule phát hiện. Phát hiện vẫn do rule engine chạy trên từng event; AI giúp bộ rule tốt dần lên.
+AI là trợ lý cho người viết rule phát hiện. Phát hiện do `wazuh-analysisd` chạy trên từng event; AI giúp bộ rule tốt dần lên.
 
 | Bài toán | Dấu hiệu | AI đề xuất |
 |---|---|---|
-| Giảm nhiễu | Rule có ≥ 3 alert bị analyst đánh dấu báo nhầm trong 30 ngày | Ngoại lệ hẹp cho rule đó |
-| Lấp lỗ hổng phát hiện | Mẫu tấn công trong dataset công khai mà chưa rule nào bắt | Rule mới cho loại tấn công / kỹ thuật ATT&CK đó |
-| Phủ loại log mới | Nhóm event thật chưa rule nào xem xét | Rule mới, hoặc kết luận "không cần rule" |
+| Giảm nhiễu | Rule Wazuh (`WZH-<id>`) có ≥ 3 alert bị analyst đánh dấu báo nhầm trong 30 ngày | Ngoại lệ hẹp cho rule đó (ngoại lệ Wazuh, mục 8) |
+| Lấp lỗ hổng phát hiện | Mẫu tấn công trong dataset công khai mà Wazuh chưa bắt (đo trên `wazuh-sandbox`) | Rule mới cho loại tấn công / kỹ thuật ATT&CK đó |
+
+Nguồn thứ ba cũ (`gap-own`: nhóm event thật chưa rule nào xem xét) đã bỏ ở Task 25: nó dựa vào engine YAML và không có log thô
+nên luôn trượt cổng Wazuh (R78).
 
 Phần LLM làm khá hẹp: nhìn vài mẫu tấn công, vài mẫu bình thường, rồi viết ra chữ ký chung. Mọi bước khác do code tất định và
 con người làm. Ngoài phạm vi, có chủ đích: AI không tự triển khai rule (một rule tệ có thể làm ngập alert, một ngoại lệ tệ có thể
@@ -57,40 +66,46 @@ LLM chạy nội bộ bằng Ollama, không publish cổng; log không rời kh�
 flowchart LR
     subgraph SRC[Nguồn ứng viên]
       A1[exception<br/>alert báo nhầm]
-      A2[gap-dataset<br/>mẫu tấn công chưa bị bắt]
-      A3[gap-own<br/>event thật chưa có rule]
+      A2[gap-dataset<br/>mẫu tấn công Wazuh chưa bắt]
     end
     SRC --> P[Chuẩn bị<br/>gom nhóm, tách train / kiểm tra,<br/>mẫu bình thường, rule SigmaHQ tham khảo]
     P -->|prompt| L[LLM qua Ollama]
-    L -->|rule Sigma YAML| C[Biên dịch Sigma<br/>sang rule engine, tách vế]
+    L -->|rule Sigma YAML| C[Biên dịch Sigma<br/>sang cây điều kiện Python, tách vế]
     C --> R[Ghép vế<br/>đo từng vế trên train<br/>và tập bình thường]
     R -->|biến thể còn sót,<br/>vế bị loại kèm lý do| L
     R -->|rule Sigma = OR các vế giữ lại| V[Kiểm định độc lập<br/>tập kiểm tra, báo nhầm,<br/>replay 7 ngày, an toàn]
     P -.->|tập kiểm tra, model không thấy| V
-    V -->|đạt| Q[Đề xuất chờ duyệt<br/>console]
+    V -->|đạt| W[Cổng Wazuh<br/>dịch sang XML, bơm log thô<br/>vào wazuh-sandbox]
     V -->|loại| X[invalid, lưu lý do]
+    W -->|loại| X
+    W -->|đạt| Q[Đề xuất chờ duyệt<br/>console]
     Q -->|người duyệt| K[Kiểm tra lại với dữ liệu mới nhất]
-    K -->|đạt| D[Ghi server/rules/ai/AI-xxx.yml]
+    K -->|đạt| D[Ghi khối vào rules-dynamic/ai.xml<br/>chạy bóng, reload Wazuh]
+    D -->|đạt tiêu chí bóng| U[Bật chính thức]
 ```
 
 | File | Vai trò |
 |---|---|
 | `server/siem/ai/__main__.py` | Vòng lặp worker: chờ lịch (60 phút) hoặc yêu cầu từ console, gọi một chu kỳ |
 | `server/siem/ai/worker.py` | Chọn ứng viên, gom nhóm, tách tập, gọi LLM, ghép vế, lưu đề xuất |
-| `server/siem/ai/sigma.py` | Đọc rule Sigma của model, biên dịch sang rule engine, tách / ghép vế, xuất YAML Sigma |
+| `server/siem/ai/sigma.py` | Đọc rule Sigma của model, biên dịch sang cây điều kiện, tách / ghép vế, xuất YAML Sigma |
+| `server/siem/ai/condition.py` | Bộ đánh giá cây điều kiện (`Condition`, `regex_risk`), chuyển từ engine YAML cũ (Task 25) |
+| `server/siem/ai/wazuh_xml.py` | Dịch cây điều kiện sang rule Wazuh XML (`emit`, `unshadow`, `EMITTER_VERSION`) |
+| `server/siem/ai/wazuh_events.py` | Dựng log thô từ dataset: Sysmon eventchannel, dòng `siem-proc`, access log Apache |
+| `server/siem/ai/sandbox.py`, `wazuh/sandbox/runner.py` | Giao job cho `wazuh-sandbox` qua thư mục trên volume `ai_sandbox`; runner trong sandbox nạp rule, bơm event, trả alert |
+| `server/siem/ai/wazuh_gate.py` | Cổng Wazuh: khoảng trống, recall, báo nhầm, "che rule khác" tính trên alert Wazuh |
 | `server/siem/ai/prompts.py` | System prompt (Sigma cho rule mới, JSON schema cho ngoại lệ), cách đưa dữ liệu vào prompt |
 | `server/siem/ai/llm.py` | Client Ollama: văn bản (Sigma) hoặc structured output (ngoại lệ), tắt chế độ suy nghĩ, giới hạn token |
 | `server/siem/ai/validate.py` | Kiểm định độc lập (không tin model) |
-| `server/siem/ai/golden.py` | Nạp dataset, bộ mẫu vàng, tập bình thường, RAG Sigma, báo cáo độ phủ |
+| `server/siem/ai/golden.py` | Nạp dataset, bộ mẫu vàng, tập bình thường, RAG Sigma |
 | `server/siem/ai/attack_types.py` | Phân loại tấn công web để gom nhóm |
 | `server/siem/ai/atomic.py` | Dựng event tiến trình từ bài thử Atomic Red Team |
 | `server/siem/ai/endpoint_logs.py` | Đọc và gắn nhãn log endpoint ghi thật (Splunk, OTRF) |
 | `server/siem/ai/baseline.py` | Lệnh bình thường tự soạn cho Windows / Linux |
 | `server/siem/ai/dataset.py` | Đọc dữ liệu thật của SIEM từ Elasticsearch (chỉ đọc) |
-| `server/siem/ai/deploy.py` | Duyệt, kiểm tra lại, triển khai, gỡ |
-| `server/siem/ai/benchmark.py` | Báo cáo độ phủ rule trên dataset (`datasets/report.md`) |
+| `server/siem/ai/deploy.py` | Duyệt, kiểm tra lại, ghi `ai.xml`, bật chính thức, gỡ; ngoại lệ qua `wazuh_exceptions` |
 | `tools/fetch_datasets.py`, `tools/convert_datasets.py` | Tải và chuyển đổi dataset |
-| `tools/bench_ai_models.py` | So sánh model trên cùng pipeline, không lưu đề xuất |
+| `tools/bench_ai_models.py` | So sánh model trên cùng pipeline (qua cổng Wazuh, cần `wazuh-sandbox`), không lưu đề xuất |
 
 ## 3. Dữ liệu
 
@@ -103,7 +118,6 @@ flowchart LR
 | Alert analyst đánh dấu báo nhầm, alert thuộc case đóng dạng báo nhầm (30 ngày) | Mẫu âm khi đề xuất ngoại lệ |
 | Alert thuộc case xác nhận là sự cố thật, kèm event liên quan | Ngoại lệ không được khớp event nào trong số này |
 | Event 7 ngày gần nhất (tối đa 200.000) | Chỉ để kiểm định: replay rule mới ra bao nhiêu alert/ngày. Không đưa vào prompt |
-| Nhóm event (module / category / action, ≥ 20 event) chưa rule nào xem xét | Nguồn `gap-own` |
 
 Nhãn đúng / sai do analyst gắn qua quy trình case; AI không tự gắn nhãn. Lab có rất ít event thật, nên gần như mọi đề xuất đến
 từ dataset công khai.
@@ -124,7 +138,8 @@ ghi SHA-256 từng file trong `datasets/raw/<bộ>/manifest.json`.
 | SigmaHQ (DRL 1.1) | 3.302 rule cộng đồng | Tài liệu tham khảo trong prompt (RAG) |
 | EVTX-ATTACK-SAMPLES (tùy chọn) | Windows event theo tactic | Chưa dùng (cần `python-evtx`, antivirus có thể chặn) |
 
-Dataset chỉ chạy offline qua bộ chuẩn hóa và rule engine, không bơm vào index thật, để không lẫn vào dashboard và không làm SOAR
+Dataset chỉ chạy offline: qua bộ chuẩn hóa và cây điều kiện Python, và dạng log thô bơm vào `wazuh-sandbox` (không mạng, alert
+không đi đâu). Không bơm vào index thật hay wazuh-manager thật, để không lẫn vào dashboard và không làm SOAR
 chặn các IP có trong dataset. Windows Defender chặn 5 file chứa mẫu mã độc (3 của Splunk, 2 của OTRF); các file này được ghi vào
 manifest là không đọc được và không bị vượt qua.
 
@@ -183,6 +198,9 @@ lẻ giữa chữ (tên riêng như `D'estats`, hoặc dataset chèn nháy ngẫ
 không báo nhầm tên người hay địa chỉ hợp lệ. Mỗi mẫu có thêm biến thể (kiểu con trong cùng loại, vd SQLi `tautology-quoted` /
 `quote-breakout`, hay thư mục bị dò `/_vti_bin/`) và payload (đoạn làm request bị nghi vấn). Chuỗi giữ chỗ `INJECTED_PARAM` của
 CSIC bị bỏ khỏi payload, và rule chứa nó bị kiểm định loại.
+
+Bảng dưới đếm trên rule YAML cũ (lịch sử). Từ Task 21 khoảng trống tính trên alert Wazuh của job nền (mục 9.11): mẫu có alert level ≥ 7
+của rule không thuộc nhóm khớp chung chung là "đã bắt"; mẫu không có log thô không tính là khoảng trống.
 
 | Loại | Mẫu rule hiện tại chưa bắt | Giao cho AI |
 |---|---|---|
@@ -340,11 +358,12 @@ Lý do thiết kế như vậy (rút ra khi chạy thử với `qwen2.5-coder:7b
 
 ## 7. Kiểm định tự động
 
-(`validate.py`, không tin output của model.)
+(`validate.py`, không tin output của model. Cột *Ngoại lệ* của bảng là kiểm định ngoại lệ YAML cũ, giữ làm lịch sử; ngoại lệ cho rule
+Wazuh hiện nay: đoạn **Ngoại lệ** dưới bảng.)
 
 | | Ngoại lệ (rủi ro cao) | Rule mới |
 |---|---|---|
-| Chung | Compile được, trường có thật, toán tử được phép, regex không có nguy cơ ReDoS, không chậm engine | Rule Sigma đọc và biên dịch được (tập con ở mục 5); như bên trái, thêm ID không trùng. Trường có thật: nhánh OR chỉ tính là thiếu khi mọi lựa chọn đều thiếu |
+| Chung | Compile được, trường có thật, toán tử được phép, regex không có nguy cơ ReDoS, không chậm engine | Rule Sigma đọc và biên dịch được (tập con ở mục 5); như bên trái. Trường có thật: nhánh OR chỉ tính là thiếu khi mọi lựa chọn đều thiếu |
 | Độ chính xác | Neo vào thực thể cụ thể (IP, user, host, process, URL); khớp ≥ 50% alert báo nhầm | Bắt ≥ 30% **tập kiểm tra** model không thấy |
 | An toàn | Không khớp event nào của case thật; không làm mất mẫu tấn công nào rule đang bắt | Báo nhầm ≤ 0,1% trên tập bình thường cùng lĩnh vực (endpoint thực tế là 0); rule web không khớp 38 URL của website bình thường; replay 7 ngày ≤ 20 alert/ngày; severity chỉ `low` / `medium` |
 | Dùng chung được | | Không chứa đường dẫn / tên file của ứng dụng mẫu (`tienda1`, `anadir.jsp`) hay dấu vết môi trường thử (`C:\AtomicRedTeam`, `ExternalPayloads`, file đặt theo mã kỹ thuật, user `art`, tên kỹ thuật Stratus). Từ 11/10: tên file bài thử tự đặt trong thư mục tạm / Public / mã nguồn bài thử, lấy từ giá trị mặc định của tham số (`/tmp/evilBinary`, `hello.c`), và lớp bọc `& {` của Invoke-AtomicTest |
@@ -355,33 +374,67 @@ Hai bước sửa trước khi kiểm định (không làm rule rộng thêm): r
 `\` trước chữ cái được hiểu là dấu `\` của đường dẫn; regex vẫn lỗi (vd bị cắt, lệch ngoặc) thì giữ nguyên để kiểm định báo sai
 cấu trúc.
 
-**Kiểm tra lại lúc duyệt** (`deploy.py`): ngoại lệ được đối chiếu với case thật mới nhất và bộ mẫu vàng; rule học từ dataset được
+**Cổng Wazuh** (`wazuh_gate.py`, từ 07/11/2026, R66, R79). Chỉ chạy khi mọi check chặn bên Python ở trên đã đạt. Mỗi chu kỳ có một
+job nền (mọi log thô của bộ mẫu vàng, không ứng viên) để biết mẫu nào Wazuh đã bắt; mỗi ứng viên một job gồm mọi log thô cùng định
+dạng với lĩnh vực của rule. Ứng viên được dịch sang XML với id từ 119000 (chỉ tồn tại trong sandbox), level theo mức độ (`low` 5,
+`medium` 7, R70).
+
+| Check | Chặn | Đạt khi |
+|---|---|---|
+| Wazuh nạp được rule | có | dịch được sang XML và analysisd nạp không lỗi (không 7612 / 7617 / 7619) |
+| có log thô | có | mọi mẫu kiểm tra / bình thường dựng được log thô (Sysmon eventchannel, `siem-proc`, Apache) |
+| bắt mẫu nghi vấn (Wazuh) | có | ≥ 30% tập kiểm tra có alert của ứng viên |
+| báo nhầm (Wazuh) | có | ≤ 0,1% mẫu bình thường có alert của ứng viên |
+| không che rule khác | có | không mẫu nào có phát hiện ở job nền mà mất ở job ứng viên (ứng viên thắng rule gốc cùng cha thì cắt cả cây con) |
+| khớp Python | không | chỉ ghi số mẫu Python và Wazuh lệch nhau (thường do trường vắng mặt kết hợp phủ định) |
+
+Sandbox hỏng (manager không lên, thiếu canary, bỏ event, hết giờ) là `SandboxError`: chu kỳ ghi lỗi và bỏ nhánh khoảng trống, không
+bao giờ coi là "rule không bắt" hay "mọi mẫu là khoảng trống". Số alert/ngày khi replay log thật 7 ngày vẫn ước lượng bằng cây Python
+(`replay_estimate: python`, R74), vì Wazuh không xử lý lại event cũ. Đề xuất đạt mang khối `wazuh` (phiên bản bộ dịch, lĩnh vực,
+level, số rule, thời điểm kiểm định).
+
+**Ngoại lệ** (`validate_exception_wazuh`, R73): ánh xạ được sang trường Wazuh, mỗi trường một lần, khớp ≥ 50% alert báo nhầm, không
+khớp event nào của case đã xác nhận thật (chặn); ước lượng số alert gần đây bị chặn (không chặn). Điều kiện so chính xác, phân biệt
+hoa thường.
+
+**Kiểm tra lại lúc duyệt** (`deploy.py`): rule học từ dataset được
 đối chiếu lại với tập bình thường và các kiểm tra "dùng chung được" / "đủ đặc trưng" *hiện tại*. Kiểm định được nâng cấp sau thì
-đề xuất cũ đang chờ vẫn bị chặn. Từ 11/10 worker còn tự chạy bước này mỗi chu kỳ cho đề xuất `pending` do phiên bản cũ sinh ra:
-trượt thì chuyển `invalid` kèm lý do (để không giữ chỗ target), qua thì vẫn chờ người duyệt.
+đề xuất cũ đang chờ vẫn bị chặn; khối `wazuh` do phiên bản bộ dịch khác sinh thì duyệt trả 409 "kiểm định lại". Từ 11/10 worker còn
+tự chạy bước này mỗi chu kỳ cho đề xuất `pending` do phiên bản cũ sinh ra (từ Task 21: qua cả cổng Wazuh): trượt thì chuyển
+`invalid` kèm lý do (để không giữ chỗ target), qua thì vẫn chờ người duyệt; sandbox hỏng thì đề xuất giữ nguyên.
 
-## 8. Duyệt, triển khai, so sánh với rule hiện có
+## 8. Duyệt, triển khai, bật chính thức, gỡ
 
-- Rule mới cần 1 analyst duyệt; ngoại lệ cần 2 analyst khác nhau.
-- Triển khai là ghi 1 file riêng (`server/rules/ai/AI-xxx.yml` hoặc `server/rules/exceptions/<id>.yml`); analyzer tự nạp lại.
-  Nút *Gỡ* xóa đúng file đó. Từ chối và gỡ bắt buộc ghi lý do.
-- Manager là service duy nhất ghi được 2 thư mục này; rule gốc mount chỉ đọc. Worker chỉ đọc `siem-*`, chỉ ghi `ai-*`.
-- File rule AI gồm `condition` (bản đã biên dịch mà analyzer chạy) và `sigma` (rule Sigma chuẩn hóa: id, `status: experimental`,
-  tác giả, ngày, tag `attack.*`, `level` chỉ `low` / `medium`), dùng lại được ở SIEM khác hỗ trợ Sigma. Console hiển thị rule
-  Sigma trước, bản biên dịch sau.
-- **So sánh với rule hiện có** (*Thư viện rule*, hoặc nút trong chi tiết đề xuất): manager dựng danh mục `siem-rules`
-  (`server/siem/rules_catalog.py`) gồm rule đang chạy, ngoại lệ, đề xuất AI và các cặp *(đề xuất, rule liên quan)*. Mức liên quan
-  cộng điểm theo: rule ngoại lệ nhắm tới; cùng loại tấn công (ánh xạ sang tag viết tay, chỉ tính khi cùng lĩnh vực); cùng chuỗi
-  mẫu; cùng kỹ thuật MITRE, tag, tactic, trường log; đặc điểm càng phổ biến càng ít điểm (T1190 có ở gần hết rule web nên gần
-  như không tính). Ví dụ thật: đề xuất "dò tài nguyên mặc định" được đặt cạnh WEB-005 (công cụ quét) và WEB-006 (dò thư mục); đề
-  xuất SSI injection cạnh WEB-004 (command injection, cùng bắt `cmd`) và WEB-008 (webshell, cùng bắt `exec`, `cmd`). Danh mục chỉ
-  để đọc; nguồn sự thật vẫn là file YAML và index `ai-rule-proposals`.
+- Rule mới cần 1 người có quyền `rules` (Detection Engineer) duyệt. Từ chối và gỡ bắt buộc ghi lý do.
+- **Duyệt rule mới** (`deploy.approve`): kiểm tra lại (mục 7), rồi trong một khóa: đọc lại đề xuất, cấp id kế tiếp trong
+  109000–109999 (id đã cấp không bao giờ dùng lại, kể cả của đề xuất đã gỡ, R81), dịch cây điều kiện sang XML với nhóm
+  `siem,ai,shadow` và `shadow_since` = ngày duyệt, dựng lại toàn bộ `rules-dynamic/ai.xml` từ các đề xuất đã triển khai trong ES
+  (mỗi đề xuất một khối `<group name="siem,ai,ai_<id>,">`, R72), ghi qua `wazuh_rules.write_dynamic` (kiểm cú pháp, đổi tên nguyên
+  tử, reload, lỗi thì khôi phục file cũ). Sau đó lưu `wazuh.ids`, `wazuh.deployed_xml` (XML đóng băng lúc duyệt), mã `AI-NNN`. Lỗi
+  trước khi lưu thì đề xuất vẫn chờ duyệt. Rule AI là rule Wazuh nên alert có mã `WZH-109xxx`.
+- **Bật chính thức** (`deploy.promote`, nút *Bật chính thức* trong chi tiết đề xuất): cần chạy bóng ≥ 7 ngày, dưới 5 alert/ngày, báo
+  nhầm dưới 30% trên alert `WZH-<id>` của đề xuất từ `shadow_since` (`SOC-OPERATIONS.md` mục 4). Đạt thì bỏ đúng nhóm `shadow` và
+  dòng `shadow_since` khỏi XML đã đóng băng (R71) và dựng lại file; trạng thái vẫn `approved`, thêm `promoted_at` / `promoted_by`.
+- **Gỡ** (`deploy.rollback`): dựng lại `ai.xml` không có khối của đề xuất. Gỡ rule AI **cuối cùng** thì xóa hẳn file `ai.xml` rồi reload, vì
+  Wazuh từ chối `<group>` rỗng (`error: 1`) và file chỉ có chú thích (`Configuration error`); xóa file thì reload thành công và rule
+  biến mất (đo trên manager tạm, Task 26b); reload lỗi thì khôi phục file cũ.
+- **Ngoại lệ** (R73): người bấm *Duyệt* tạo ngoại lệ Wazuh ở trạng thái chờ (`wazuh_exceptions.add`, là người duyệt thứ nhất); người
+  thứ hai duyệt ở trang ngoại lệ, khi đó rule level 0 mới vào `rules-dynamic/exceptions.xml`. Gỡ đề xuất gỡ luôn ngoại lệ.
+- Chỉ manager ghi được `rules-dynamic/` (volume `wazuh_dynamic_rules`); rule của repo mount chỉ đọc. Worker chỉ đọc `siem-*`, chỉ
+  ghi `ai-*` và thư mục job của sandbox; worker không có docker socket.
+- Đề xuất lưu rule Sigma chuẩn hóa (id, `status: experimental`, tác giả, ngày, tag `attack.*`, `level` chỉ `low` / `medium`), cây
+  điều kiện đã biên dịch và khối `wazuh`; console hiển thị rule Sigma trước.
+- *Thư viện rule*: đề xuất là bản ghi `ai_proposal` (đếm rule AI đã triển khai theo đề xuất `approved`). Rule trong `ai.xml` chưa có
+  bản ghi `wazuh_rule` riêng vì Wazuh API không liệt kê `rules-dynamic/` (R83). Phần so sánh đề xuất với
+  rule YAML (cặp *(đề xuất, rule liên quan)*, nút *So sánh với rule hiện có*) đã bỏ ở Task 25–26: vế "rule hiện có" là rule YAML,
+  và rule Wazuh không có tag / chuỗi mẫu để ghép cặp (R78).
 
 ## 9. Đo lường và lịch sử chạy thử
 
-### 9.1 Độ phủ của rule viết tay
+### 9.1 Độ phủ của rule viết tay (lịch sử, rule YAML)
 
-`cd server && .venv/Scripts/python -m siem.ai.benchmark --write ../datasets/report.md` (chi tiết trong `datasets/report.md`):
+Đo ngày 12/10/2026 bằng `python -m siem.ai.benchmark` (đã xóa ở Task 25 cùng engine YAML; chi tiết trong `datasets/report.md`).
+Độ phủ trên Wazuh sau P4: mục 9.11.
 
 | Lĩnh vực | Mẫu tấn công | Rule viết tay bắt được | Kỹ thuật / loại có ít nhất 1 mẫu bị bắt | Báo nhầm |
 |---|---|---|---|---|
@@ -406,7 +459,7 @@ trượt thì chuyển `invalid` kèm lý do (để không giữ chỗ target), 
   tên miền / repo, không bỏ cả `raw.githubusercontent.com`); vẫn bắt đủ 8/8.
 
 Đổi lại: kẻ tấn công chép đúng chuỗi tham số của Ansible hoặc tải từ đúng các URL trong danh sách sẽ lọt; danh sách cần chỉnh theo
-công cụ tổ chức thật sự dùng (chú thích trong `server/rules/*.yml`).
+công cụ tổ chức thật sự dùng (khi đó chú thích trong `server/rules/*.yml`; nay trong rule XML tương ứng của `wazuh/manager/rules/`).
 
 ### 9.2 Chạy thử với web (27/9/2026, `qwen2.5-coder:7b`)
 
@@ -827,6 +880,60 @@ mục tạm. Trước đó chưa có rule AI nào được triển khai thật n
   giờ).
 - Tập bình thường vẫn do người soạn. Cần log tiến trình thật của lab (mục 11).
 
+### 9.11 Chạy thử qua cổng Wazuh (07–08/11/2026, `qwen3.5:9b`, P4)
+
+**Môi trường.** Project Compose thử `p4gate` cách ly với stack thật (mạng riêng, bí mật mới, Elasticsearch mới tinh không có event
+thật nên chỉ chạy nhánh khoảng trống dataset), GPU Quadro RTX 4000, một chu kỳ `python -m siem.ai --once`, image dựng từ mã Task 21
+(trước Task 19b).
+
+**Kết quả chu kỳ:** `errors: []`; 5 đề xuất: 2 chờ duyệt có khối `wazuh`, 3 bị loại. Bỏ qua `csic2010:unknown-param` (3.565 mẫu) và
+`csic2010:invalid-value` (2.693 mẫu) vì riêng ứng dụng.
+
+| Đề xuất | Trạng thái | Cây Python | Wazuh |
+|---|---|---|---|
+| linux-T1552.001 (12 rule) | chờ duyệt, level 7 | đạt | bắt 19/19 mẫu kiểm tra (100%), báo nhầm 0/200, che 0, Python và Wazuh không lệch trên 247 mẫu |
+| csic2010:backup-file (6 rule) | chờ duyệt, level 7 | đạt | bắt 1.190/1.307 (91%), báo nhầm 0/10.000, che 0, không lệch trên 12.615 mẫu |
+| windows-T1548.002 (13 rule) | loại **do Wazuh** | bắt 7/16 (44%), báo nhầm 0/671 | bắt 0/16, báo nhầm 1/671 (0,15%), che 0; 20 mẫu chỉ Python khớp |
+| windows-T1547.001 | loại do Python (bắt 2/13 = 15%), không gọi sandbox | | |
+| linux-T1059.004 | loại do Python (bắt 0/8), không gọi sandbox | | |
+
+**Job sandbox** (không job nào bỏ event, canary đều có):
+
+| Job | Event | Thời gian |
+|---|---|---|
+| Nền (mọi log thô) | 29.323 | 55 giây (đo lại; trong chu kỳ máy Windows ngủ hai lần, mỗi lần khoảng 3 giờ) |
+| Ứng viên Windows | 2.889 | 37,2 giây |
+| Ứng viên Linux | 1.346 | 36,2 giây |
+| Ứng viên web | 25.088 | 49,9 giây |
+
+**Khoảng trống trên Wazuh** (job nền): 16.882/19.315 mẫu tấn công là khoảng trống. Web CSIC: Wazuh bắt 1.484/15.088; Windows Atomic:
+74/2.218; Linux Atomic: 12/1.146. 863 mẫu Splunk không có log thô nên không tính. 4 mẫu bình thường có alert phát hiện. 174 nhóm đủ
+mẫu để giao cho AI.
+
+**Hai lỗi bộ dịch tìm ra nhờ cổng** (cổng chặn đúng, đã sửa ở Task 19b, `EMITTER_VERSION` 2):
+1. Eventchannel nhân đôi dấu `\` trong `win.eventdata.*`: mẫu một dấu `\` không khớp, nên mọi giá trị Windows có `\` bên trong không
+   bao giờ khớp (nguyên nhân của 20 mẫu "chỉ Python khớp" ở T1548.002). Sửa: `\` thành `(?:\x5c){1,2}`.
+2. Event `reg.exe` không tới ứng viên nào: rule gốc 92025 (level 0, `if_group sysmon_event1`) nuốt event trước anh em dưới 61603.
+   Sửa: rule Windows treo dưới `61603,92025,92028,92042,92069` (R75); đo lại 5 loại image đều tới ứng viên, 92026 (level 14) vẫn
+   thắng ứng viên level 10.
+
+Chu kỳ chưa chạy lại sau Task 19b. `generator_id` gồm phiên bản bộ dịch nên các mục tiêu Windows bị loại oan được thử lại ngay ở chu
+kỳ kế tiếp, không bị chặn 30 ngày (R81).
+
+**Sandbox** (đo S4, Task 20): `wazuh-control restart` 11–14 giây; mỗi job tối thiểu khoảng 36 giây kể cả khi chỉ 1 event, nên cổng
+gom event thành ít job. Bộ dựng log thô ra 29.323 event cho 30.186 mẫu (apache 25.088, eventchannel 2.889, `siem-proc` 1.346) trong
+5,8 giây. 50.000 event mất 73 giây, 0 rơi; vòng gửi cũ không chờ hàng đợi làm rơi âm thầm 7.591/50.000 (15%), nên sandbox gửi có chờ
+(R80).
+
+**Thử trên wazuh-manager thật** (project `p4e2e` cách ly, 08/11/2026): `ai.xml` do `emit` + `render_ai_file` sinh (3 đề xuất giả:
+Windows, Linux, web) nạp được qua `write_dynamic`, `ossec.log` không có 7612 / 7617 / 7619. Event thật từ agent `demo-web` (request
+`/zz9probe.bak`, tiến trình có `zz9probe` trong dòng lệnh) ra alert `WZH-109003` (web) và `WZH-109001` (Linux), mức medium, gắn
+`alert.shadow`. Khi trả file về rỗng (gỡ hết), Wazuh từ chối `<group>` rỗng (`Group 'group' without any rule.`); đã sửa (Task 26b): `write_dynamic(name, None, api)` xóa file rồi reload (reload lỗi thì khôi phục file cũ và reload lại).
+
+**SigmaHQ cùng bộ dịch** (Task 24, sinh lại ở review cuối): 30 rule Windows (`0966-sigmahq.xml`) bắt thêm 186 mẫu mới trên 17.306
+mẫu tấn công Windows + web (cây Python ước 186), 0 mẫu bị lô cướp phát hiện của rule khác (đo có / không có lô), 60 ca test 0 sai
+(`RULES.md` mục 2.10, 4.6).
+
 ## 10. Đánh giá các model và vì sao tỉ lệ đạt thấp
 
 ### 10.1 Từng model
@@ -937,9 +1044,8 @@ python tools/fetch_datasets.py                           # dataset nhỏ (CSIC, 
 python tools/fetch_datasets.py splunk otrf               # log endpoint ghi thật, khoảng 5,4 GB, chỉ tải khi gọi tên
 server/.venv/Scripts/python tools/convert_datasets.py    # chuyển sang datasets/processed (riêng log thật: ... real);
                                                          # chạy lại sau 11/10 để atomic.jsonl.gz có lab_values
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai up -d   # GPU NVIDIA (bỏ file gpu để chạy CPU)
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai up -d   # ollama, ai-worker, wazuh-sandbox; GPU NVIDIA (bỏ file gpu để chạy CPU)
 docker compose exec ai-worker python -m siem.ai --once   # chạy đúng 1 chu kỳ
-cd server && .venv/Scripts/python -m siem.ai.benchmark --write ../datasets/report.md   # độ phủ rule trên dataset
 docker compose cp tools/bench_ai_models.py ai-worker:/tmp/bench.py
 docker compose exec -w /app ai-worker python /tmp/bench.py qwen3.5:9b 1 sqli splunk-attack-data:windows-T1548.002
 ```
@@ -959,8 +1065,10 @@ Khi đã dùng GPU thì mọi lệnh `up` sau đó đều phải kèm `-f docker
 | `AI_REPLAY_DAYS` | 7 | Replay log thật N ngày khi kiểm định |
 | `AI_REPLAY_MAX_EVENTS` | 200.000 | Số event replay tối đa |
 | `AI_MIN_FALSE_POSITIVES` | 3 | Rule có ≥ N báo nhầm mới đề xuất ngoại lệ |
-| `AI_MIN_GROUP_EVENTS` | 20 | Nhóm event thật cần ≥ N event |
 | `AI_MAX_NEW_RULE_ALERTS_PER_DAY` | 20 | Rule mới sinh quá N alert/ngày khi replay thì bị loại |
+| `AI_SANDBOX_DIR` | `/sandbox` | Thư mục job của `wazuh-sandbox` trong container ai-worker |
+| `AI_SANDBOX_TIMEOUT` | 900 | Giây chờ một job sandbox; quá hạn là `SandboxError` |
+| `AI_SANDBOX_PATH` (compose) | volume `ai_sandbox` | Đổi sang thư mục host khi cần xem job (chỉ dùng khi thử) |
 | `OLLAMA_MODELS_DIR` | volume `ollama` | Nơi lưu model (mỗi model 5–7 GB) |
 
 ## 13. Nhật ký thay đổi pipeline
@@ -977,6 +1085,7 @@ Khi đã dùng GPU thì mọi lệnh `up` sau đó đều phải kèm `-f docker
 | 8/10 | Nới vế không khớp mẫu nào (bỏ filter, `\|all` thành OR, tách `all of`); tổng quát hóa vế đạt khi vẫn sạch; vế phải có chữ ký; sửa YAML (dấu hai chấm, khóa lặp) và condition hỏng; chặn đuôi file đứng riêng (`GENERATOR_REVISION` 8) | Lần chạy thử Sigma đầu: SQLi 22% vì `\|all` dùng sai, T1087.002 0% vì AdFind gắn với đối số train, 5/40 câu trả lời sai cú pháp, `.inf` đứng riêng qua kiểm định |
 | 9/10 | Vế ứng viên SigmaHQ (ghi nguồn DRL), lượt kiến thức, tập bình thường endpoint ×3 (nền ghi thật + hoạt động của con người), thêm URL thường gặp, `LLMTooLong` không làm hỏng cả đề xuất (`GENERATOR_REVISION` 9) | Mục 9.7–9.8: mục tiêu "khớp train" không thưởng kiến thức; tập bình thường nhỏ để rule rộng lọt |
 | 10/10 | Model mặc định `qwen2.5-coder:7b` → `qwen3.5:9b`; tạo lại container `ai-worker`, `manager` với code Sigma (`GENERATOR_REVISION` 9) | Tốt nhất trong 4 model ở cả DSL lẫn Sigma (mục 9.4, 9.6, 9.9, 10) |
+| 06–08/11 | **P4: đầu ra Wazuh XML.** Bộ dịch cây điều kiện → XML (`wazuh_xml.py`, `EMITTER_VERSION` 1, rồi 2 sau Task 19b: dấu `\` Windows, cha gom nhóm R75); sandbox `wazuh-sandbox` + log thô từ dataset; cổng Wazuh, khoảng trống tính trên alert Wazuh (`GENERATOR_REVISION` 11, `generator_id` gồm `EMITTER_VERSION`); duyệt / bật chính thức / gỡ vào `rules-dynamic/ai.xml`; ngoại lệ AI cho rule Wazuh qua `wazuh_exceptions`; bỏ `gap-own`, cặp so sánh, `benchmark.py` (Task 25) | Engine YAML tắt từ R65 làm chết cả hai nhánh của worker; chỉ alert Wazuh mới là thật (R66) |
 | 11/10 | Chặn vế chỉ có tên chương trình phổ biến, tên file bài thử tự đặt (`lab_values` của Atomic), lớp bọc `& {`; tập bình thường thêm lệnh quản trị (Windows 671, Linux 200); trần 12 vế SigmaHQ; kiểm tra lại đề xuất `pending` của generator cũ mỗi chu kỳ; thử lại khi Ollama khởi động lại (`GENERATOR_REVISION` 10) | Rà soát chạy thật (mục 9.10): AI-157 `/usr/bin/su`, AI-154 `/tmp/evilBinary`, AI-155 `systemctl daemon-reload`, AI-153 44 vế, 11/44 đề xuất cũ giữ chỗ |
 
 ## 14. Nghiên cứu: phương án dùng AI tự động sinh bộ rule (14/10/2026)
@@ -1213,6 +1322,10 @@ tương ứng làm "đáp án", chạy 3 lần mỗi cấu hình (mục 9.9 cho 
 - [Autograph: Toward Automated, Distributed Worm Signature Detection](https://static.usenix.org/events/sec04/tech/kim.html) — USENIX Security 2004
 
 ## 15. Kế hoạch phát triển AI sinh rule (16/10/2026)
+
+> **Cập nhật 08/11/2026 (P4):** đầu ra đã là Wazuh XML và kiểm định trên `wazuh-sandbox` (mục 7, 8, 9.11). Các chỗ bảng dưới nhắc
+> `rules/cases`, `ai/benchmark.py`, `detection/ruletest.py` thuộc engine YAML đã xóa ở Task 25; việc tương ứng nay làm trên
+> `wazuh/manager/tests/cases` và sandbox Wazuh.
 
 Kế hoạch này chi tiết hóa lộ trình 14.7 thành việc cụ thể. Nguyên tắc không đổi (mục 1, 14.5): AI chỉ đề xuất, code kiểm mọi thứ,
 người duyệt, rule mới chạy bóng ≥ 7 ngày rồi mới bật. Phần nhập rule SigmaHQ làm chung với kế hoạch độ phủ (`RULES.md` mục 7,

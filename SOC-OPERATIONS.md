@@ -10,7 +10,7 @@ mục 4"), nên khi thêm mục mới thì đặt ở cuối, không đánh số
 | 1 | Vai trò, phân quyền, xác thực 2 lớp | `server/siem/manager/auth.py` |
 | 2 | Mức ưu tiên P1–P4 và SLA | `server/config/priority.yml`, `server/siem/priority.py` |
 | 3 | Kết luận bắt buộc khi đóng | `server/siem/manager/api.py` (`VERDICTS`) |
-| 4 | Detection-as-code, chạy bóng, risk-based alerting | `server/siem/detection/lint.py`, `ruletest.py`, `server/siem/soar/risk.py` |
+| 4 | Detection-as-code, chạy bóng, risk-based alerting | `tools/wazuh_rule_lint.py`, `tools/wazuh_rule_test.py`, `server/siem/ai/deploy.py`, `server/siem/wazuh_exceptions.py`, `server/siem/soar/risk.py` |
 | 5 | Giám sát sức khỏe nền tảng, sao lưu và khôi phục | `server/siem/soar/health.py`, `tools/es_snapshot.py` |
 | 6 | Sự cố lớn và hạn thông báo 72 giờ | `server/siem/manager/api.py` (`case_incident`) |
 | 7 | KPI | `server/siem/manager/kpi.py`, dashboard *SOC KPI* |
@@ -98,51 +98,63 @@ và không có căn cứ bật chính thức rule chạy bóng.
 
 - Chọn *Báo nhầm* thì trạng thái thành `false_positive`. AI worker lấy nhãn báo nhầm theo trạng thái này để đề xuất ngoại lệ.
 - Đóng case thì mặc định đóng luôn các alert còn mở trong case, với cùng kết luận.
-- Hoạt động hợp lệ lặp lại (vd quét lỗ hổng định kỳ) thì xin ngoại lệ thay vì đóng tay mãi: Detection Engineer thêm vào
-  `server/rules/exceptions/`, hoặc duyệt đề xuất ngoại lệ của AI. Với rule Wazuh XML thì dùng luồng ngoại lệ Wazuh ở mục 4.
+- Hoạt động hợp lệ lặp lại (vd quét lỗ hổng định kỳ) thì xin ngoại lệ thay vì đóng tay mãi: Detection Engineer tạo ngoại lệ
+  Wazuh (mục 4), hoặc duyệt đề xuất ngoại lệ của AI (cũng thành ngoại lệ Wazuh chờ người thứ hai duyệt).
 
 ## 4. Detection-as-code, chạy bóng, risk-based alerting
 
-**Kho rule là mã nguồn.** Rule viết tay nằm ở `server/rules/*.yml`, ca test ở `server/rules/cases/`, ngoại lệ ở
-`server/rules/exceptions/`, rule AI đã duyệt ở `server/rules/ai/`. Mọi thay đổi đi qua pull request; CI
-(`.github/workflows/ci.yml`) chạy pytest và `tools/rule_lint.py`, lỗi thì chặn merge. Lint kiểm tra:
+**Kho rule là mã nguồn.** Phát hiện bằng luật chạy trong `wazuh-analysisd` (engine YAML cũ đã xóa ở Task 25, 08/11/2026). Rule
+viết tay của dự án nằm ở `wazuh/manager/rules/*.xml`, ca test log gốc ở `wazuh/manager/tests/cases/` (mỗi file rule một file ca
+cùng tên); rule SigmaHQ (`0966-sigmahq.xml`) do `tools/sigmahq_import.py` sinh; rule AI đã duyệt và ngoại lệ nằm trong
+`rules-dynamic/` (volume `wazuh_dynamic_rules`, chỉ console ghi). Mọi thay đổi trong repo đi qua pull request; CI
+(`.github/workflows/ci.yml`) chạy pytest và job `wazuh-rules`, lỗi thì chặn merge. Job `wazuh-rules`:
 
-- Metadata bắt buộc: `id`, `title`, `severity`, `mitre` (tactic + technique hợp lệ), `tags`, `logsource`, `owner`, `falsepositives`.
-- Rule biên dịch được, `mode` hợp lệ, id không trùng, regex không có nguy cơ ReDoS.
-- Mỗi rule viết tay có ít nhất 1 ca test **dương** (phải bắn) và 1 ca **âm** (gần giống nhưng hợp lệ, không được bắn), mọi ca đạt.
-- Mỗi rule có case playbook riêng (không rơi về PB-00), ngoại lệ trỏ tới rule có thật.
+- `tools/wazuh_rule_lint.py`: id trong dải của file, mã rule đầu `<description>`, có `<mitre>`, nhóm `siem`, `type="pcre2"`, không
+  `ignore`, regex không có nguy cơ ReDoS, mỗi rule có ít nhất 1 ca **dương** (phải bắn) và 1 ca **âm** (gần giống nhưng hợp lệ),
+  rule có nhóm `shadow` phải có `shadow_since`, cha là rule dự án thì phải nạp trước. Xuất layer MITRE ATT&CK Navigator
+  (`--layer build/attack-layer.json`), lưu làm artifact `attack-layer` của mỗi lần chạy, kể cả lần chạy hằng tuần.
+- Dựng `wazuh/wazuh-manager:4.14.8` với rule của repo; `ossec.log` không được có 7612 / 7617 / 7619 hay ERROR của analysisd.
+- `tools/wazuh_stock_reach.py`: mọi alert thật của rule gốc dưới rule cha mà rule dự án móc vào phải có ca ghim hoặc bảo đảm cấu trúc.
+- `tools/wazuh_rule_test.py`: mọi ca test qua wazuh-manager thật.
 
-Hiện trạng ngày 14/10/2026: 41 rule (FIM-001 chạy bóng từ 14/10), 89 ca test đạt, 0 lỗi. Độ phủ kỹ thuật ưu tiên trong
-`server/config/threat_profile.yml` là 83,3%: 10/12 kỹ thuật có rule chạy chính thức đã kiểm thử. T1547 (Boot or Logon Autostart
-Execution) đã có FIM-001 đang chạy bóng, tính vào độ phủ khi được bật chính thức (sớm nhất 21/10); T1486 (Data Encrypted for
-Impact) chưa có rule. Layer cho MITRE ATT&CK Navigator: `python tools/rule_lint.py --layer build/attack-layer.json`.
+Độ phủ kỹ thuật ưu tiên (`server/config/threat_profile.yml`) tính trên rule Wazuh không bóng trong thư viện rule (KPI mục 7).
+Chi tiết viết và kiểm thử rule: [RULES.md](RULES.md) mục 2.12 và 9.5.
 
 **Quy trình đưa một rule vào chạy:**
 
-1. Viết rule (`mode: shadow`) kèm ca test dương / âm, chạy `python tools/rule_lint.py` trên máy.
-2. Mở pull request; CI đạt và một người khác review thì merge. Khi mã mới lên máy chủ (`git pull`, hoặc
-   `tools/deploy-vm.ps1 -Update`), analyzer thấy file rule đổi và tự nạp lại; nạp lỗi thì giữ bộ rule cũ.
+1. Rule viết tay: viết rule XML có nhóm `shadow` và `<info type="text">shadow_since=YYYY-MM-DD</info>`, kèm ca dương / âm; chạy lint
+   và cả thư mục ca trên manager thử (project Compose riêng). Rule SigmaHQ: `tools/sigmahq_import.py --write` sinh sẵn ở chế độ bóng.
+   Rule AI: AI worker đề xuất, rule đã qua cổng Wazuh sandbox (`AI-README.md` mục 7).
+2. Rule trong repo: mở pull request; CI đạt và một người khác review thì merge; cập nhật mã trên máy chủ rồi reload Wazuh (không
+   cần build lại image). Rule AI: Detection Engineer bấm *Duyệt* ở trang *Đề xuất AI*; console kiểm định lại rồi ghi khối XML vào
+   `rules-dynamic/ai.xml` ở chế độ bóng và reload, nạp lỗi thì đề xuất vẫn chờ duyệt.
 3. Rule **chạy bóng**: vẫn sinh alert (gắn `alert.shadow`) để đo số alert và tỉ lệ báo nhầm, nhưng SOAR bỏ qua (không thông
    báo, không mở case, không phản ứng), console ẩn khỏi danh sách mặc định, KPI không tính.
 4. Bật chính thức khi đạt cả ba tiêu chí: chạy bóng ít nhất `SHADOW_MIN_DAYS` (7) ngày, dưới `SHADOW_MAX_ALERTS_PER_DAY` (5)
-   alert/ngày, tỉ lệ báo nhầm dưới `SHADOW_MAX_FP_RATE` (30%) trên các alert đã có kết luận. Rule AI: Detection Engineer bấm
-   *Bật chính thức* ở trang *Đề xuất AI*; nút chỉ hiện khi đã đạt, API kiểm tra lại. Rule viết tay: commit đổi
-   `mode: active`, đi qua CI như bước 2.
-5. Rà soát hằng quý theo cột báo nhầm trong *Thư viện rule*: rule báo nhầm nhiều thì sửa điều kiện, thêm ngoại lệ hoặc hạ mức.
+   alert/ngày, tỉ lệ báo nhầm dưới `SHADOW_MAX_FP_RATE` (30%) trên các alert đã có kết luận.
+   - **Rule AI:** Detection Engineer bấm *Bật chính thức* trong chi tiết đề xuất ở trang *Đề xuất AI* (`POST
+     /api/v1/ai/proposals/{id}/promote`). Nút chỉ hiện khi đã đạt; API tính lại số alert / báo nhầm của các id `WZH-109xxx` của đề
+     xuất từ `shadow_since` và từ chối (409) nếu chưa đạt. Bật chính thức bỏ đúng nhóm `shadow` và dòng `shadow_since` khỏi khối XML
+     đã duyệt (R71), dựng lại `ai.xml` và reload. Nút *Xem alert chạy bóng* mở danh sách alert bóng của rule.
+   - **Rule trong repo (viết tay, SigmaHQ):** commit bỏ nhóm `shadow` và dòng `shadow_since`, đi qua CI như bước 2.
+   - **Gỡ rule AI:** nút *Gỡ rule* (bắt buộc ghi lý do) dựng lại `ai.xml` không có khối đó; id đã cấp không dùng lại (R81).
+     Giới hạn đã thấy 08/11/2026: gỡ rule AI **cuối cùng** bị Wazuh từ chối vì file chỉ còn khối `<group>` rỗng ([RULES.md](RULES.md) mục 9.10).
+5. Rà soát hằng quý theo cột báo nhầm trong *Thư viện rule*: rule báo nhầm nhiều thì sửa điều kiện, thêm ngoại lệ hoặc hạ level
+   (rule gốc: `overwrite` ở `0999-tuning.xml`).
 
-**Rule Wazuh XML: chạy bóng, ngoại lệ (nhánh `feature/wazuh-unified-ruleset`).** Phát hiện đang chuyển từ engine YAML sang rule XML của
-Wazuh (mô tả: [RULES.md](RULES.md) mục 9). Từ 05/11/2026 (R65) engine YAML tắt và rule XML là alert thật; các quy trình trên (mode YAML, nút *Bật chính thức* cho rule AI) chỉ áp dụng khi bật lại `RULE_ENGINE_ENABLED`. **Đợt chuyển này bỏ tiêu chí 7 ngày chạy bóng theo quyết định của chủ dự án** (R65): rule XML hiện có vào chạy thật mà chưa đủ 7 ngày đo; từ nay rule MỚI vẫn đi qua chạy bóng đủ tiêu chí ở bước 4. Phần dưới là cái khác đi với rule XML.
+**Lịch sử.** Đợt chuyển sang rule XML (R65, 05/11/2026) **bỏ tiêu chí 7 ngày chạy bóng** theo quyết định của chủ dự án: rule XML
+có sẵn của dự án vào chạy thật mà chưa đủ 7 ngày đo. Từ đó rule MỚI đi qua chạy bóng đủ tiêu chí ở bước 4.
 
-- *Chạy bóng bằng nhóm.* Rule XML riêng có nhóm `shadow` và `<info type="text">shadow_since=YYYY-MM-DD</info>`; cầu nối đặt `alert.shadow`, SOAR bỏ qua như rule YAML bóng. Hiện 78 rule mang `shadow_since` (31/10 đến 04/11/2026).
-- *Bật chính thức.* Cùng tiêu chí bước 4 ở trên (≥ `SHADOW_MIN_DAYS` ngày, dưới `SHADOW_MAX_ALERTS_PER_DAY` alert/ngày, báo nhầm dưới `SHADOW_MAX_FP_RATE`). Không có nút trên console: commit bỏ nhóm `shadow` khỏi rule, qua CI (`tools/wazuh_rule_lint.py` và các ca test log gốc qua Wazuh thật), rồi reload; Wazuh nạp ngay, không khởi động lại. Ở Task 18 nhóm `shadow` của các file 0101 đến 0106 và 0845 được bỏ hàng loạt, trừ rule có `shadow_since` dưới 7 ngày. Sau Task 18 mục này thay mục 4 hiện tại.
-- *Ngoại lệ Wazuh.* Ngoại lệ là rule con **level 0** của rule cần làm yên, luôn có điều kiện trường (không điều kiện thì API trả 400, vì rule level 0 chỉ có `if_sid` sẽ nuốt cả họ rule).
+**Ngoại lệ Wazuh.** Ngoại lệ là rule con **level 0** của rule cần làm yên, luôn có điều kiện trường (không điều kiện thì API trả 400, vì rule level 0 chỉ có `if_sid` sẽ nuốt cả họ rule).
   1. Người có quyền `rules` gọi `POST /api/v1/exceptions` với rule cha (vd `WZH-31103`), điều kiện (trường ECS như `source.ip`, được đổi sang trường Wazuh) và lý do (≥ 3 ký tự). Console kiểm rule cha có trong Wazuh qua API (API chết thì 503, từ chối). Ngoại lệ ở trạng thái `pending`, **chưa** vào XML; người tạo là người duyệt thứ nhất.
   2. Một người **khác** có quyền `rules` gọi `POST /api/v1/exceptions/{id}/approve`. Đủ hai người thì ngoại lệ thành `active`: console sinh rule level 0 vào `rules-dynamic/exceptions.xml`, id từ **110000 đến 110999** (1.000 id, cảnh báo từ 900), kiểm cú pháp rồi reload. Nạp lỗi thì file cũ được giữ và ngoại lệ thành `failed`.
   3. Id đã cấp **không bao giờ dùng lại** (kể cả ngoại lệ đã gỡ hoặc lỗi). Sổ cái `exceptions.json` nằm cạnh file XML và được ghi trước khi đụng XML.
-  4. Gỡ bằng `DELETE /api/v1/exceptions/{id}?reason=...` (cần lý do): một người đủ vì bật lại phát hiện là hướng an toàn. Mục chuyển sang `removed` và **giữ làm lịch sử**; rule rời khỏi XML.
+  4. Gỡ bằng `DELETE /api/v1/exceptions/{id}?reason=...` (cần lý do): một người đủ vì bật lại phát hiện là hướng an toàn. Mục chuyển sang `removed` và **giữ làm lịch sử**; rule rời khỏi XML. Gỡ ngoại lệ **cuối cùng** gặp cùng giới hạn khối `<group>` rỗng như rule AI.
   5. Mọi thao tác POST / DELETE ghi vào nhật ký hoạt động (`exception_added`, `exception_approved`, `exception_removed`).
+  6. **Đề xuất ngoại lệ của AI** (R73): AI đề xuất cho rule Wazuh có ≥ `AI_MIN_FALSE_POSITIVES` (3) alert bị đánh dấu báo nhầm. Người
+     bấm *Duyệt* ở trang *Đề xuất AI* tạo ngoại lệ `pending` (là người duyệt thứ nhất); người thứ hai duyệt ở trang ngoại lệ như bước 2.
 
-  Ngoại lệ YAML (`server/rules/exceptions/`, ngoại lệ AI) không còn tác dụng khi engine YAML tắt (R65). Chưa kiểm trên manager thật: ngoại lệ con level 0 có thắng rule anh em (vd 31106 khi mã 200), có che cây con của rule cha không, `pcre2` trên `<url>`/`<dstuser>` (ghi trong kế hoạch, mục Task 16).
+  Chưa kiểm trên manager thật: ngoại lệ con level 0 có thắng rule anh em (vd 31106 khi mã 200), có che cây con của rule cha không, `pcre2` trên `<url>`/`<dstuser>` (ghi trong kế hoạch, mục Task 16).
 
 **Risk-based alerting (RBA-001).** SOAR cộng `risk_score` của từng alert (severity × mức quan trọng tài sản) vào máy
 (`host.name`) và tài khoản (`user.name`) liên quan, trong cửa sổ `RBA_WINDOW_HOURS` (24) giờ. Khi tổng điểm ≥ `RBA_THRESHOLD`

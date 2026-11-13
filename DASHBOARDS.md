@@ -9,7 +9,7 @@ Console SOC nhúng 4 dashboard bằng iframe (`server/siem/manager/static/consol
 |---|---|---|
 | `siem-overview` | Tổng quan | Nhìn nhanh tình hình: alert, case, log, đăng nhập, phản ứng |
 | `siem-investigate` | Điều tra | Mọi thứ liên quan một thực thể (IP, máy, tài khoản) |
-| `siem-rules` | Thư viện rule | Rule, ngoại lệ, đề xuất AI, so sánh đề xuất với rule hiện có |
+| `siem-rules` | Thư viện rule | Rule Wazuh (gốc, dự án, SigmaHQ) và đề xuất AI |
 | `soc-kpi` | KPI | Chỉ số vận hành SOC so với đích |
 
 ## 1. Cơ chế: một panel Grafana trở thành truy vấn Elasticsearch như thế nào
@@ -190,53 +190,47 @@ docker exec siem-xdr-elasticsearch-1 curl -sk -u "grafana:$MATKHAU" \
 
 ## 4. Dashboard "Thư viện rule" (`siem-rules`)
 
-- **Dùng để**: tra rule đang chạy (YAML và Wazuh), ngoại lệ, đề xuất AI; so sánh một đề xuất với rule hiện có. Khoảng thời gian `now-20y` (ẩn trên console) vì `@timestamp` của bản ghi thư viện là ngày sửa file / ngày đề xuất, không phải thời điểm xảy ra sự kiện.
+- **Dùng để**: tra rule Wazuh đang chạy (rule gốc, rule dự án, SigmaHQ) và đề xuất AI. Khoảng thời gian `now-20y` (ẩn trên console) vì `@timestamp` của bản ghi thư viện là mốc đồng bộ (đầu ngày UTC, R82) / ngày đề xuất, không phải thời điểm xảy ra sự kiện.
 - **Ai dùng**: Detection Engineer, người duyệt đề xuất AI.
-- Dữ liệu do `server/siem/rules_catalog.py` ghi vào index `siem-rules` mỗi `RULES_CATALOG_SECONDS` (60 giây) khi có thay đổi. Mỗi bản ghi có `origin`: `rule` (rule YAML / AI đã duyệt), `wazuh_rule` (rule Wazuh, nhánh hợp nhất rule), `ai_proposal`, `exception`, `comparison` (cặp đề xuất - rule), `detector` (RBA / HLT), `coverage` (độ phủ ATT&CK).
-- Rule Wazuh (`origin:wazuh_rule`) có `source:wazuh`, `mode` (`active`, `shadow`, `nobridge` = không bao giờ ra alert, `off` = đã tắt), `shadow` (true / false), `bridged` (có qua cầu nối sinh alert không). Mã rule `WZH-<id Wazuh>`.
-- **Sáu biến**:
+- Dữ liệu do `server/siem/rules_catalog.py` ghi vào index `siem-rules` mỗi `RULES_CATALOG_SECONDS` (60 giây) khi có thay đổi. Mỗi bản ghi có `origin`: `wazuh_rule` (mọi rule Wazuh, kể cả `rules-dynamic/`), `ai_proposal`, `detector` (RBA / HLT), `coverage` (độ phủ ATT&CK). Từ Task 25–26 (P4) không còn `rule` (rule YAML), `exception` (ngoại lệ YAML) và `comparison` (cặp đề xuất - rule YAML, R78). Bản ghi `wazuh_rule` lấy từ Wazuh API (`GET /rules`), mà API không liệt kê `rules-dynamic/` (đo lại 08/11/2026): rule AI đã duyệt (`ai.xml`) và ngoại lệ (`exceptions.xml`) **chưa có** trong danh mục (R83).
+- Rule Wazuh (`origin:wazuh_rule`) có `source:wazuh`, `groups`, `file`, `mode` (`active`, `shadow`, `nobridge` = không bao giờ ra alert, `off` = đã tắt), `shadow` (true / false), `bridged` (có qua cầu nối sinh alert không). Mã rule `WZH-<id Wazuh>`.
+- **Năm biến**:
 
 | Biến | Loại | Nghĩa |
 |---|---|---|
-| `origin` | chọn một | Loại bản ghi; mặc định "Tất cả" = `(rule OR wazuh_rule OR ai_proposal OR exception)`; "Rule YAML của dự án" = `rule` |
+| `origin` | chọn một | Loại bản ghi; mặc định "Tất cả" = `(wazuh_rule OR ai_proposal)`; "Rule Wazuh" = `wazuh_rule`; "Đề xuất AI" = `ai_proposal` |
 | `tactic` | nhiều giá trị | Lọc theo `mitre.tactic`; lấy từ `terms` của index, tối đa 300 giá trị |
 | `tag` | nhiều giá trị | Lọc theo `tags`; tối đa 300 giá trị |
 | `field` | nhiều giá trị | Lọc theo trường log rule xét (`fields`) |
-| `q` | ô nhập | Lucene tự do, mặc định `*` |
-| `proposal` | chọn một | Đề xuất cần so sánh (giá trị là nhãn `proposal.pick`); console điền sẵn khi mở từ trang đề xuất |
+| `q` | ô nhập | Lucene tự do, mặc định `*`; vd `groups:sigmahq`, `legacy_id:"WEB-001"`, `rule.id:"WZH-104001"` |
 
 - "Tất cả" của `tactic`, `tag`, `field` là `*`, tức điều kiện `mitre.tactic:* AND tags:* AND fields:*` đòi bản ghi **có** cả ba trường. Chạy được vì thư viện ghi giá trị giữ chỗ (`(chưa gắn)`, `—`) khi rule không có tactic / tag / trường.
 
-**Hàng: Tổng quan thư viện (rule YAML + rule Wazuh)**
+**Hàng: Tổng quan thư viện rule Wazuh**
 
 | Panel | Hiển thị | Index | Query | Metric và bucket | Cách đọc, lưu ý |
 |---|---|---|---|---|---|
-| Rule đang chạy (YAML + Wazuh, tạo alert thật) | Số rule đang tạo alert thật. | siem-rules | `origin:(rule OR wazuh_rule) AND mode:active` | count / date_histogram theo thời gian | Gồm cả hai nguồn nên vẫn đúng khi tắt engine YAML (Task 18). Không gồm rule chạy bóng. |
-| Rule chạy bóng (đo thử, không ra alert thật) | Số rule đang đo thử. | siem-rules | `origin:(rule OR wazuh_rule) AND mode:shadow` | count / date_histogram theo thời gian | Rule bóng ra alert gắn `alert.shadow`, SOAR bỏ qua. |
-| Rule Wazuh không cầu nối (không ra alert) | Số rule Wazuh không bao giờ ra alert. | siem-rules | `origin:(rule OR wazuh_rule) AND mode:nobridge` | count / date_histogram theo thời gian | Rule Wazuh không đi qua cầu nối sinh alert. |
-| Rule đã tắt | Số rule tắt. | siem-rules | `origin:(rule OR wazuh_rule) AND mode:off` | count / date_histogram theo thời gian | — |
+| Rule đang chạy (tạo alert thật) | Số rule đang tạo alert thật. | siem-rules | `origin:wazuh_rule AND mode:active` | count / date_histogram theo thời gian | Không gồm rule chạy bóng. |
+| Rule chạy bóng (đo thử, không ra alert thật) | Số rule đang đo thử. | siem-rules | `origin:wazuh_rule AND mode:shadow` | count / date_histogram theo thời gian | Rule bóng ra alert gắn `alert.shadow`, SOAR bỏ qua. Gồm SigmaHQ lô 1; rule AI bóng không có trong danh mục (R83). |
+| Rule Wazuh không cầu nối (không ra alert) | Số rule Wazuh không bao giờ ra alert. | siem-rules | `origin:wazuh_rule AND mode:nobridge` | count / date_histogram theo thời gian | Rule Wazuh không đi qua cầu nối sinh alert. |
+| Rule đã tắt | Số rule tắt. | siem-rules | `origin:wazuh_rule AND mode:off` | count / date_histogram theo thời gian | — |
 | Rule Wazuh (tổng, mọi chế độ) | Số rule Wazuh trong thư viện. | siem-rules | `origin:wazuh_rule` | count / date_histogram theo thời gian | Gồm cả `nobridge`, `off`, `shadow`: đây là tổng kho rule Wazuh, không phải số rule đang chạy. |
-| Rule im lặng 7 ngày (đang chạy) | Số rule đang chạy không sinh alert nào trong 7 ngày. | siem-rules | `origin:(rule OR wazuh_rule) AND mode:active AND alerts.d7:0` | count / date_histogram theo thời gian | Rule im lặng có thể là rule chết hoặc chỉ là chưa gặp tấn công. Rule tắt / bóng / không cầu nối không tính. |
-| Rule do AI viết (đã duyệt) | Số rule YAML do AI viết đã được duyệt (`source:ai`). | siem-rules | `origin:rule AND source:ai` | count / date_histogram theo thời gian | Chỉ rule YAML. |
-| Ngoại lệ đang áp dụng | Số ngoại lệ đang áp dụng. | siem-rules | `origin:exception` | count / date_histogram theo thời gian | — |
+| Rule im lặng 7 ngày (đang chạy) | Số rule đang chạy không sinh alert nào trong 7 ngày. | siem-rules | `origin:wazuh_rule AND mode:active AND alerts.d7:0` | count / date_histogram theo thời gian | Rule im lặng có thể là rule chết hoặc chỉ là chưa gặp tấn công. Rule tắt / bóng / không cầu nối không tính. |
+| Đề xuất AI đã triển khai (rules-dynamic/ai.xml) | Số đề xuất AI đang có khối trong `ai.xml` (bóng lẫn chính thức). | siem-rules | `origin:ai_proposal AND proposal.status:approved` | count / date_histogram theo thời gian | Đếm đề xuất, không đếm rule: mỗi vế của một đề xuất là một rule Wazuh. Thay ô "Rule do AI viết" (`origin:rule`, rule YAML); không đếm từ `wazuh_rule` vì API không liệt kê `rules-dynamic/` (R83). Ô "Ngoại lệ đang áp dụng" đã bỏ vì cùng lý do; xem ngoại lệ ở trang *Ngoại lệ* của console. |
 | Đề xuất AI chờ duyệt | Số đề xuất AI còn chờ duyệt. | siem-rules | `origin:ai_proposal AND proposal.status:pending` | count / date_histogram theo thời gian | — |
-| Đề xuất không đạt kiểm định | Số đề xuất có trạng thái `invalid`. | siem-rules | `origin:ai_proposal AND proposal.status:invalid` | count / date_histogram theo thời gian | Cùng định nghĩa với dòng "không đạt kiểm định" của biểu đồ trạng thái bên dưới. Gồm cả đề xuất đã vượt kiểm định nhưng sau đó thành không hợp lệ (vd rule đích đã đổi). |
-| Rule đang chạy theo MITRE tactic | Số rule đang chạy theo tactic MITRE. | siem-rules | `origin:(rule OR wazuh_rule) AND mode:active` | count / terms `mitre.tactic` top 10 | Top 10. Gồm cả rule Wazuh. |
+| Đề xuất không đạt kiểm định | Số đề xuất có trạng thái `invalid`. | siem-rules | `origin:ai_proposal AND proposal.status:invalid` | count / date_histogram theo thời gian | Cùng định nghĩa với dòng "không đạt kiểm định" của biểu đồ trạng thái bên dưới. Gồm cả đề xuất đã vượt kiểm định nhưng sau đó thành không hợp lệ (vd kiểm lại trên cổng Wazuh). |
+| Rule đang chạy theo MITRE tactic | Số rule đang chạy theo tactic MITRE. | siem-rules | `origin:wazuh_rule AND mode:active` | count / terms `mitre.tactic` top 10 | Top 10. Wazuh 4.14 không trả tactic cho phần lớn rule nên nhiều rule nằm ở `(chưa gắn)`. |
 | Đề xuất AI theo trạng thái | Số đề xuất AI theo trạng thái. | siem-rules | `origin:ai_proposal` | count / terms `proposal.status_label` top 10 | — |
-| Rule kêu nhiều nhất (7 ngày): mã rule và tên | Rule kêu nhiều nhất 7 ngày (tổng `alerts.d7`). | siem-rules | `origin:(rule OR wazuh_rule) AND alerts.d7:>0` | sum(alerts.d7) / terms `rule.id` top 10 (theo metric), rồi terms `rule.name` size 1 | Gom theo mã rule (ổn định), tên là cột thứ hai. Không lọc `mode`: rule bóng vẫn ra alert nên cũng hiện. `sum` rồi sắp theo kết quả metric (`orderBy 1`). |
+| Rule kêu nhiều nhất (7 ngày): mã rule và tên | Rule kêu nhiều nhất 7 ngày (tổng `alerts.d7`). | siem-rules | `origin:wazuh_rule AND alerts.d7:>0` | sum(alerts.d7) / terms `rule.id` top 10 (theo metric), rồi terms `rule.name` size 1 | Gom theo mã rule (ổn định), tên là cột thứ hai. Không lọc `mode`: rule bóng vẫn ra alert nên cũng hiện. `sum` rồi sắp theo kết quả metric (`orderBy 1`). |
 
-**Hàng: Danh sách rule, ngoại lệ, đề xuất AI — lọc bằng các ô phía trên**
-
-| Panel | Hiển thị | Index | Query | Metric và bucket | Cách đọc, lưu ý |
-|---|---|---|---|---|---|
-| Rule và đề xuất AI — bấm mã rule xem cảnh báo của rule, bấm trạng thái đề xuất để mở trên console | Bảng rule, ngoại lệ, đề xuất AI, lọc bằng các biến phía trên. | siem-rules | `origin:${origin:raw} AND mitre.tactic:$tactic AND tags:$tag AND fields:$field AND (${q:raw})` | raw_data 500 dòng | Tối đa 500 dòng. Bấm mã rule xem alert của rule, bấm trạng thái đề xuất để mở trên console. |
-
-**Hàng: So sánh đề xuất AI với rule hiện có — chọn đề xuất ở ô “Đề xuất cần so sánh”**
+**Hàng: Danh sách rule và đề xuất AI — lọc bằng các ô phía trên**
 
 | Panel | Hiển thị | Index | Query | Metric và bucket | Cách đọc, lưu ý |
 |---|---|---|---|---|---|
-| Đề xuất đã chọn | Chi tiết đề xuất AI đang chọn ở biến `proposal`. | siem-rules | `origin:ai_proposal AND proposal.pick:${proposal:lucene}` | raw_data 200 dòng | Dùng `${proposal:lucene}` để thoát ký tự đặc biệt trong tên đề xuất. |
-| Rule hiện có liên quan — điều kiện hai bên đặt cạnh nhau, xếp theo mức liên quan | Rule hiện có gần với đề xuất đã chọn, điều kiện hai bên đặt cạnh nhau. | siem-rules | `origin:comparison AND proposal.pick:${proposal:lucene}` | raw_data 200 dòng | Xếp theo cột "Mức liên quan" giảm dần; cột "Vì sao liên quan" giải thích. |
+| Rule và đề xuất AI — bấm mã rule xem cảnh báo của rule, bấm trạng thái đề xuất để mở trên console | Bảng rule Wazuh và đề xuất AI, lọc bằng các biến phía trên. | siem-rules | `origin:${origin:raw} AND mitre.tactic:$tactic AND tags:$tag AND fields:$field AND (${q:raw})` | raw_data 500 dòng | Tối đa 500 dòng. Bấm mã rule xem alert của rule, bấm trạng thái đề xuất để mở trên console. Cột *Case playbook* đã bỏ (danh mục không còn trường này). |
+
+Hàng *So sánh đề xuất AI với rule hiện có* (biến `proposal`, bảng "Đề xuất đã chọn" và "Rule hiện có liên quan") đã bỏ ở Task 26: vế
+"rule hiện có" là rule YAML đã xóa, bảng luôn trống (R78). Dashboard còn 15 panel (trước 19); `tools/e2e_test.py` kiểm số này.
 
 ## 5. Dashboard "SOC KPI" (`soc-kpi`)
 
@@ -308,7 +302,7 @@ Dữ liệu đi: Wazuh (agent + manager) → Kafka → analyzer (Python, chuẩn
 Hiểu đúng mấy khái niệm hay nhầm:
 
 - **Alert chạy bóng** (`alert.shadow:true`): rule mới hoặc rule gốc Wazuh chưa được tin cậy vẫn sinh alert để đo, nhưng SOAR bỏ qua và console ẩn mặc định. KPI không tính. Alert bóng nằm cùng index `siem-alerts`; mọi ô đếm alert trên Grafana đều có `NOT alert.shadow:true`, riêng ô "Alert chạy bóng" của Tổng quan đếm chúng.
-- **`alert.source`**: `rule` (rule YAML), `wazuh` (rule Wazuh, mã `WZH-<id>`), `ml` (Isolation Forest), `rba` (cộng dồn rủi ro nhiều alert trên một máy / tài khoản), `health` (sự cố nền tảng HLT-*).
+- **`alert.source`**: `rule` (rule YAML, chỉ còn ở alert cũ trước R65), `wazuh` (rule Wazuh, mã `WZH-<id>`, gồm rule AI và SigmaHQ), `ml` (Isolation Forest), `rba` (cộng dồn rủi ro nhiều alert trên một máy / tài khoản), `health` (sự cố nền tảng HLT-*).
 - **MTTD** (`metrics.ttd_seconds`): từ event đầu của chuỗi tới lúc sinh alert. **MTTA / MTTC** (`metrics.tta_seconds` / `ttc_seconds` của case): từ lúc mở case tới khi có người nhận / khoanh vùng xong. **P1-P4** là mức ưu tiên = mức độ rule kết hợp độ quan trọng tài sản (SOC-OPERATIONS.md mục 2).
 - **Báo nhầm** chỉ tính alert có trạng thái `false_positive` (mục 3 SOC-OPERATIONS.md). Alert `closed` với kết luận `duplicate` hay `benign_true_positive` không là báo nhầm.
 
@@ -334,11 +328,11 @@ Hiểu đúng mấy khái niệm hay nhầm:
 
 **Panel rỗng là bình thường khi**: chưa có log firewall (panel "Kết nối bị firewall chặn"), chưa có POST `login` trong log Apache, chưa case P1 nào được nhận (MTTA / MTTC P1), chưa alert nào đóng với kết luận (`alert.verdict`), chưa rule AI hay ngoại lệ, và khoảng thời gian chọn ngắn hơn tuổi dữ liệu.
 
-### Khi cắt sang rule Wazuh hoàn toàn (Task 18)
+### Khi cắt sang rule Wazuh hoàn toàn (Task 18, lịch sử)
 
 - Alert đều là `alert.source:wazuh`, `rule.id` dạng `WZH-*`; `rule.name` là mô tả Wazuh và tactic MITRE chỉ có tactic đầu.
-- Các ô Thư viện rule đã đếm cả `origin:(rule OR wazuh_rule)` với `mode:active` nên không về 0 khi tắt engine YAML (riêng "Rule do AI viết" vẫn là `origin:rule`).
-- Độ phủ ATT&CK (KPI và bảng cuối trang) **không** vỡ: `kpi.py` đã đọc cả rule YAML và rule Wazuh không bóng, ghi nguồn ở `attack_coverage_source`.
+- Các ô Thư viện rule đã đếm cả `origin:(rule OR wazuh_rule)` với `mode:active` nên không về 0 khi tắt engine YAML. **Sau Task 26 (P4)** chỉ còn `origin:wazuh_rule`; rule AI đếm theo đề xuất `approved`, ô ngoại lệ bỏ (R83).
+- Độ phủ ATT&CK (KPI và bảng cuối trang) **không** vỡ: khi đó `kpi.py` đọc cả rule YAML và rule Wazuh không bóng; từ Task 25 chỉ đọc rule Wazuh, Elasticsearch lỗi thì để trống (R82).
 - Số alert Wazuh tăng mạnh nên "Top rule" (I4, còn mở) sẽ lộ rõ; alert bóng đã bị loại khỏi mọi số đếm.
 - Sự kiện đăng nhập console không đi qua Wazuh nên các ô đăng nhập console không đổi ý nghĩa.
 

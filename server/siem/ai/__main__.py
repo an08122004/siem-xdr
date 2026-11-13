@@ -18,6 +18,9 @@ from .. import settings, store
 from . import triage
 from .golden import PublicDatasets
 from .llm import LLMError, OllamaClient
+from .sandbox import Sandbox
+from .wazuh_events import golden_events
+from .wazuh_gate import WazuhGate
 from .worker import AIWorker, now_iso
 
 log = logging.getLogger("ai")
@@ -67,9 +70,10 @@ def main() -> None:
     if not args.once:
         triage.start(es, llm)            # AI hỗ trợ analyst (tóm tắt, giải thích lệnh...): luồng riêng, không chờ chu kỳ rule
     golden = PublicDatasets.load()
-    worker = AIWorker(es, llm, golden)
+    raw = golden_events(golden, golden.directory)      # log thô cho sandbox Wazuh, khóa id(doc): dựng một lần
+    worker = AIWorker(es, llm, golden, gate_factory=lambda: WazuhGate(Sandbox(), raw))
     set_status(es, model=settings.AI_MODEL, model_ready=True, last_error=None,
-               datasets={"attack": len(golden.attack), "normal": len(golden.normal),
+               datasets={"attack": len(golden.attack), "normal": len(golden.normal), "raw": len(raw),
                          "unobservable": golden.unobservable, "sigma": len(golden.sigma)})
     if args.once:
         print(json.dumps(worker.run_cycle(requested_by="--once"), ensure_ascii=False, indent=1))

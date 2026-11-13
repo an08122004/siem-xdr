@@ -68,8 +68,8 @@ def load(path: Path) -> dict[int, dict]:
     return rules
 
 
-def is_real(r: dict) -> bool:
-    return r["level"] >= 12 or (r["level"] >= 7 and bool(r["groups"] & REAL_GROUPS))
+def is_real(r: dict, min_level: int = 12) -> bool:
+    return r["level"] >= min_level or (r["level"] >= 7 and bool(r["groups"] & REAL_GROUPS))
 
 
 def _parents(r: dict, carriers: dict[str, set[int]], known) -> set[tuple[int, bool]]:
@@ -83,7 +83,7 @@ def _beats_or_ties_first(s: dict, h: dict) -> bool:
     return h["level"] < s["level"] or (h["level"] == s["level"] and s["file"] < h["file"])
 
 
-def analyse(stock: dict, project: dict, pinned: set[int]) -> dict[int, dict]:
+def analyse(stock: dict, project: dict, pinned: set[int], min_level: int = 12) -> dict[int, dict]:
     """{id rule gốc alert thật dưới cha bị móc: {tops, group, pinned, guaranteed, why}}. Chỉ trả rule gốc KHÔNG thuộc project."""
     carriers: dict[str, set[int]] = {}
     for rid, r in stock.items():
@@ -104,7 +104,7 @@ def analyse(stock: dict, project: dict, pinned: set[int]) -> dict[int, dict]:
             todo, seen = [(c1, g1)], {c1}
             while todo:
                 c, viag = todo.pop()
-                if c not in project and is_real(stock[c]):
+                if c not in project and is_real(stock[c], min_level):
                     f = found.setdefault(c, {"tops": set(), "group": False, "bad": []})
                     f["tops"].add(top)
                     f["group"] |= viag
@@ -120,9 +120,9 @@ def analyse(stock: dict, project: dict, pinned: set[int]) -> dict[int, dict]:
     return found
 
 
-def unpinned(stock: dict, project: dict, pinned: set[int]) -> dict[int, set[int]]:
+def unpinned(stock: dict, project: dict, pinned: set[int], min_level: int = 12) -> dict[int, set[int]]:
     """{id alert thật không có (a) lẫn (b): các cha gốc bị móc}."""
-    return {c: f["tops"] for c, f in analyse(stock, project, pinned).items() if not (f["pinned"] or f["guaranteed"])}
+    return {c: f["tops"] for c, f in analyse(stock, project, pinned, min_level).items() if not (f["pinned"] or f["guaranteed"])}
 
 
 def parent_errors(stock: dict, project: dict) -> list[str]:
@@ -153,6 +153,8 @@ def main() -> int:
     ap.add_argument("stock", type=Path, help="thư mục (hoặc file) rule gốc, vd /var/ossec/ruleset/rules chép ra từ container")
     ap.add_argument("--rules", type=Path, default=ROOT / "wazuh/manager/rules")
     ap.add_argument("--cases", type=Path, default=ROOT / "wazuh/manager/tests/cases")
+    ap.add_argument("--min-level", type=int, default=12,
+                    help="alert thật = level >= này (R65 / WAZUH_ALERT_MIN_LEVEL: 7; 12 = định nghĩa R38 cũ)")
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")       # console Windows mặc định cp1252
     stock, project = load(a.stock), load(a.rules)
@@ -163,7 +165,7 @@ def main() -> int:
         print(f"không đọc được rule gốc ở {a.stock}", file=sys.stderr)
         return 2
     pinned = pinned_ids(a.cases)
-    res = analyse(stock, project, pinned)
+    res = analyse(stock, project, pinned, a.min_level)
     errors = parent_errors(stock, project)
     for rid in sorted(res):
         f = res[rid]

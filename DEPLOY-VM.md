@@ -36,7 +36,7 @@ chỉ được nói chuyện với `siem-server` qua cổng Wazuh.
 | VM | Vùng · IP | Vai trò | Tên agent (bắt buộc) | vCPU / RAM / Đĩa |
 |---|---|---|---|---|
 | `fw` (F001) | WAN: DHCP từ VMnet8; 10.10.40.254, 10.10.20.254, 10.10.30.254, 203.0.113.1 | Firewall, NAT ra Internet, DNS, NTP, Suricata, gửi syslog | — | 2 / 2 GB / 16 GB |
-| `siem-server` | SOC 10.10.40.10 | Elasticsearch, Kafka, Wazuh manager (kèm cổng syslog 514), Vector (chuyển log Wazuh vào Kafka), analyzer, SOAR, console, Grafana | — | 4 / **8 GB** / 60 GB. Bật AI: 16 GB+ / 100 GB (mục 2.4) |
+| `siem-server` | SOC 10.10.40.10 | Elasticsearch, Kafka, Wazuh manager (kèm cổng syslog 514), Vector (chuyển log Wazuh vào Kafka), analyzer, SOAR, console, Grafana | — | 4 / **8 GB** / 60 GB. Bật AI (Ollama + `wazuh-sandbox`): 16 GB+ / 100 GB (mục 2.4, 9.1) |
 | `Web-01` | DMZ 10.10.20.20 | Máy chủ web S001 (Apache) | `Web-01` | 1 / 1,5 GB / 20 GB |
 | `Ubuntu-01` | LAN 10.10.30.21 | Máy trạm Linux A003 | `Ubuntu-01` | 1 / 1,5 GB / 20 GB |
 | `PC-01` | LAN 10.10.30.30 | Máy trạm Windows A001 | `PC-01` | 2 / 4 GB / 50 GB |
@@ -267,7 +267,7 @@ sau firewall của tài liệu này.
 |---|---|
 | Xem trạng thái | `sudo ./install.sh status` |
 | In lại địa chỉ, mật khẩu tạm, lệnh cài agent | `sudo ./install.sh info` |
-| Cập nhật mã nguồn mới | trên Windows: `powershell -ExecutionPolicy Bypass -File .\tools\deploy-vm.ps1 <user>@10.10.40.10 -Update` (gửi bản commit mới, build lại image; rule AI đã duyệt trên VM giữ nguyên); hoặc trên VM: `sudo --preserve-env=GITHUB_TOKEN ./install.sh --fetch` (tải nhánh `main` từ GitHub; file đã sửa trên VM bị đè, riêng `server/config` được lưu bản cũ ở `server/config.bak-<ngày giờ>`; file đã xóa trên GitHub không tự xóa trên VM) |
+| Cập nhật mã nguồn mới | trên Windows: `powershell -ExecutionPolicy Bypass -File .\tools\deploy-vm.ps1 <user>@10.10.40.10 -Update` (gửi bản commit mới, build lại image; rule AI đã duyệt và ngoại lệ nằm trong volume `wazuh_dynamic_rules`, giữ nguyên); hoặc trên VM: `sudo --preserve-env=GITHUB_TOKEN ./install.sh --fetch` (tải nhánh `main` từ GitHub; file đã sửa trên VM bị đè, riêng `server/config` được lưu bản cũ ở `server/config.bak-<ngày giờ>`; file đã xóa trên GitHub không tự xóa trên VM) |
 | Đổi IP máy chủ | `sudo ./install.sh --ip <IP mới>`: script hỏi, sinh lại chứng chỉ (CA mới: import lại `ca.crt`), giữ dữ liệu; agent đã cài phải sửa `<address>` trong `ossec.conf` |
 | Bật thêm máy demo / AI | `sudo ./install.sh --demo` / `sudo ./install.sh --ai` (GPU NVIDIA tự dùng nếu có nvidia-container-toolkit) |
 | Mọi lệnh compose | `docker compose ps`, `docker compose logs -f analyzer`... — **không cần** `-f` hay `--profile`: `.env` đã ghi `COMPOSE_FILE`, `COMPOSE_PROFILES` |
@@ -467,7 +467,7 @@ Làm sau khi `siem-server` chạy (mục 2). `assets.yml` đã khai IP các cổ
    - Tải bộ luật *ETOpen Emerging Threats* (pfSense: *Services → Suricata → Global Settings*; OPNsense: tab *Download*).
    - Bật Suricata trên cổng `INET_GIA` (và `DMZ` nếu đủ RAM), chế độ chỉ phát hiện (không chặn) để SOAR là bên phản ứng.
    - **Rule Suricata của Wazuh (86601...) và NET-004 bản XML cần agent Wazuh trên OPNsense đọc `/var/log/suricata/eve.json`** (`<localfile>` `log_format json`, plugin `os-wazuh-agent`). Spike S6: Suricata qua syslog 514 KHÔNG có decoder Wazuh (cả RFC 3164 lẫn 5424), nên đường syslog dưới đây chỉ nuôi parser Suricata của analyzer YAML.
-   - Gửi alert dạng EVE qua syslog (đường phụ cho analyzer YAML): pfSense *Interface Settings → EVE Output Settings*: bật *EVE JSON Log*, *EVE Output
+   - Gửi alert dạng EVE qua syslog (đường phụ cho parser Suricata của analyzer, chỉ ra event: engine YAML đã xóa ở Task 25): pfSense *Interface Settings → EVE Output Settings*: bật *EVE JSON Log*, *EVE Output
      Type* `SYSLOG`, tắt ghi payload (dòng syslog quá dài bị cắt thì analyzer không đọc được JSON); OPNsense *Settings →
      Enable eve syslog output*.
    - Analyzer chỉ đọc JSON EVE từ dòng syslog có tên chương trình `suricata` (mặc định của cả hai).
@@ -527,10 +527,54 @@ Kết quả đúng: không có alert LNX-002 và không có lệnh *Kill tiến 
 - Xóa sạch backend (mất toàn bộ event, alert, case, tài khoản): `docker compose down -v`, rồi chạy lại `sudo ./install.sh` (bí mật cũ được giữ).
 - Nhanh nhất: quay về snapshot "sạch" của mục 1.5.
 
-## 9. Nâng cấp hệ thống đang chạy lên bộ rule Wazuh XML (chạy bóng)
+## 9. Nâng cấp hệ thống đang chạy
+
+### 9.1 Lên mã P4: rule AI và SigmaHQ ra Wazuh XML, xóa engine YAML
+
+Áp dụng khi máy đang chạy mã sau R65 (bộ rule Wazuh XML, engine YAML đã tắt) và muốn chạy mã của kế hoạch P4 (Task 19 đến 26,
+[RULES.md](RULES.md) mục 2, [AI-README.md](AI-README.md) mục 7, 8). **Chỉ triển khai khi chủ dự án đã gộp PR và yêu cầu.**
+
+**Thay đổi:**
+- Service mới `wazuh-sandbox` (profile `ai`): wazuh-manager cô lập, **cùng image** `wazuh/wazuh-manager:4.14.8`, `network_mode: none`,
+  không secrets, không cổng; ai-worker giao việc qua thư mục job trên **volume mới `ai_sandbox`** (không cần docker socket).
+  Tài nguyên thêm khi bật profile `ai`: một wazuh-manager nữa (kế hoạch ước khoảng 1 GB RAM) cộng model Ollama `qwen3.5:9b` (khoảng
+  6,6 GB đĩa). Profile `demo` / mặc định không đổi.
+- `wazuh/manager/rules/0966-sigmahq.xml` (30 rule SigmaHQ, chạy bóng) vào ruleset; rule AI duyệt trên console được ghi vào
+  `rules-dynamic/ai.xml` (volume `wazuh_dynamic_rules` đã có).
+- Bỏ mount `./server/rules` của manager, analyzer, ai-worker; image server không còn `COPY rules`, phải build lại. Biến `.env`
+  `RULE_ENGINE_ENABLED`, `AI_MIN_GROUP_EVENTS` hết tác dụng (xóa được). Thư mục `server/rules/ai`, `server/rules/exceptions` cũ trên máy
+  (không track trong git) không service nào đọc nữa; lần đồng bộ thư viện rule đầu tiên xóa các bản ghi `origin: rule` /
+  `exception` / `comparison` cũ khỏi index `siem-rules`.
+- **Quyền file trên Linux (S2):** `wazuh/manager/rules` và `wazuh/manager/decoders` mount chỉ đọc vào container và user `wazuh` trong
+  container phải đọc được: file **644**, thư mục **755** (đã đo: file mode 600 thì analysisd báo `(1103) Permission denied` và bỏ file).
+  `install.sh` chạy sẵn `chmod -R a+rX ... wazuh ...`; cài tay hoặc checkout với umask chặt thì chạy
+  `chmod -R a+rX wazuh/manager/rules wazuh/manager/decoders wazuh/sandbox`.
+
+**Các bước:**
+1. Sao lưu: các volume (`wazuh_etc`, `wazuh_api_configuration`, `wazuh_logs`, `wazuh_dynamic_rules`, dữ liệu Elasticsearch) vào
+   thư mục sao lưu ngoài máy, rồi `python tools/es_snapshot.py now`; ghi lại commit đang chạy và gắn tag rollback cho image
+   `siem-xdr-server` đang chạy (để quay lại).
+2. Lấy mã mới (`git pull` hoặc `tools/deploy-vm.ps1 -Update`), kiểm quyền file như trên.
+3. Build image: `docker compose build` (hoặc `sudo ./install.sh --update`), rồi `docker compose --profile demo up -d --no-build
+   --remove-orphans`. Chỉ thêm `--profile ai` (kèm `-f docker-compose.gpu.yml` nếu dùng GPU) khi chủ dự án đồng ý bật AI.
+4. Kiểm wazuh-manager: log có `[siem-setup] ruleset hợp lệ`; `ossec.log` không có `(7612)`, `(7617)`, `(7619)` (rule 108xxx của
+   `0966-sigmahq.xml` phải nạp sau 0595 / 0800). Khi bật AI: `docker compose logs wazuh-sandbox` có dòng `[sandbox-runner] chờ job`.
+5. `python tools/e2e_test.py` phải đạt đủ (08/11/2026 trên project thử: 43/43, [Test.md](Test.md) mục 0).
+6. Gỡ rule AI **cuối cùng** hoặc ngoại lệ **cuối cùng** trên console: console xóa hẳn file `ai.xml` / `exceptions.xml` rồi reload
+   (Wazuh từ chối `<group>` rỗng, [RULES.md](RULES.md) mục 9.10); reload lỗi thì khôi phục file cũ và reload lại.
+7. Dọn đề xuất AI kiểu cũ (engine YAML) đang chờ duyệt: đề xuất `gap-own:` và ngoại lệ dạng `{rule_id, condition}` không duyệt được
+   nữa (bấm duyệt báo 409 "đề xuất kiểu cũ (engine YAML), hãy từ chối"). Khi bật profile `ai`, chu kỳ AI đầu tiên tự đánh `invalid`
+   các đề xuất này nếu tạo trong 30 ngày gần nhất, lịch sử đề xuất ghi lý do. Đề xuất cũ hơn 30 ngày, hoặc khi không bật AI: bấm
+   **Từ chối** từng đề xuất trên console.
+
+**Quay lại:** checkout commit cũ, dùng image đã gắn tag ở bước 1, `docker compose up -d --no-build`. Volume `ai_sandbox` và
+container `wazuh-sandbox` không ảnh hưởng gì khi không bật profile `ai`.
+
+### 9.2 Lịch sử: lên bộ rule Wazuh XML chạy bóng (trước R65)
 
 Áp dụng khi máy đang chạy `main` cũ (engine YAML) và muốn chạy mã của nhánh `feature/wazuh-unified-ruleset` (RULES.md mục 9).
-Lần triển khai này **chưa** là cổng chuyển (Task 18): engine YAML vẫn chạy thật, rule XML của dự án chạy bóng.
+Lần triển khai này **chưa** là cổng chuyển (Task 18): khi đó engine YAML vẫn chạy thật, rule XML của dự án chạy bóng. Từ R65
+(05/11/2026) engine YAML tắt và từ Task 25 đã bị xóa; phần này giữ làm lịch sử.
 
 **Thay đổi so với `main`:** bí mật mới `secrets/wazuh_rules_api_password` (user API `siem-rules` của console); volume mới
 `wazuh_dynamic_rules` (rule động `ai.xml`, `exceptions.xml` và sổ `exceptions.json`); wazuh-manager mount thư mục
@@ -593,11 +637,12 @@ Chỉ cần khi không dùng `install.sh` (vd máy không phải Ubuntu / Debian
    ```
    Trên VM: `tar -xzf siem-xdr.tgz && cd siem-xdr`.
 4. Bí mật và quyền. Container chạy bằng user riêng (uid 10001, Grafana 472) nên file bí mật phải đọc được (644), bảo vệ ở
-   cấp thư mục (700); manager ghi rule AI đã duyệt vào 2 thư mục rules:
+   cấp thư mục (700); rule và decoder Wazuh của repo phải đọc được với user `wazuh` trong container (644 / 755, mục 9.1). Rule AI và
+   ngoại lệ nằm trong volume `wazuh_dynamic_rules`, wazuh-manager tự cấp quyền mỗi lần khởi động:
    ```bash
    sudo python3 tools/init_secrets.py
    sudo chown -R root:root secrets && sudo chmod 700 secrets && sudo chmod 644 secrets/*
-   mkdir -p server/rules/ai server/rules/exceptions && sudo chown -R 10001:10001 server/rules/ai server/rules/exceptions
+   chmod -R a+rX wazuh/manager/rules wazuh/manager/decoders wazuh/sandbox
    ```
 5. Cấu hình `.env` **trước lần khởi động đầu** (chứng chỉ TLS sinh một lần theo `MANAGER_TLS_IPS`):
    ```bash

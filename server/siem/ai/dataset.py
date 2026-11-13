@@ -17,7 +17,6 @@ from ..pipeline.normalize import Doc, get
 log = logging.getLogger("ai.dataset")
 
 REAL_CASE_STATUSES = ["contained", "closed"]
-GROUP_FIELDS = ["event.module", "event.category", "event.action"]
 
 
 @dataclass
@@ -26,17 +25,6 @@ class RuleEvidence:
     tp: list[Doc] = field(default_factory=list)          # trigger + related event của alert sự cố thật
     fp_alert_ids: list[str] = field(default_factory=list)
     tp_alert_ids: list[str] = field(default_factory=list)
-
-
-@dataclass
-class EventGroup:
-    key: dict[str, Any]
-    count: int
-    samples: list[Doc]
-
-    @property
-    def key_str(self) -> str:
-        return "|".join(str(self.key.get(f) or "-") for f in GROUP_FIELDS)
 
 
 class ESDataSource:
@@ -124,32 +112,6 @@ class ESDataSource:
         self._events = events
         log.info("replay: đã nạp %d event (%s -> nay)", len(events), self.replay_from)
         return events
-
-    # ------------------------------------------------------------ nhóm event
-    def event_groups(self, min_count: int, max_groups: int = 30, samples: int = 15) -> list[EventGroup]:
-        try:
-            res = self.es.search(index=f"{settings.IDX_EVENTS}-*", size=0,
-                                 query={"range": {"@timestamp": {"gte": self.replay_from}}},
-                                 aggs={"g": {"composite": {"size": 500, "sources": [
-                                     {f.replace(".", "_"): {"terms": {"field": f, "missing_bucket": True}}}
-                                     for f in GROUP_FIELDS]}}})
-        except Exception as e:  # noqa: BLE001
-            log.warning("không nhóm được event: %s", e)
-            return []
-        buckets = sorted(res["aggregations"]["g"]["buckets"], key=lambda b: -b["doc_count"])
-        groups = []
-        for b in buckets:
-            if b["doc_count"] < min_count or len(groups) >= max_groups:
-                continue
-            key = {f: b["key"][f.replace(".", "_")] for f in GROUP_FIELDS}
-            flt: list[dict] = [{"range": {"@timestamp": {"gte": self.replay_from}}}]
-            must_not: list[dict] = []
-            for f, v in key.items():
-                (flt.append({"term": {f: v}}) if v is not None else must_not.append({"exists": {"field": f}}))
-            hits = self._search(f"{settings.IDX_EVENTS}-*", {"bool": {"filter": flt, "must_not": must_not}},
-                                size=samples, source={"excludes": ["raw"]}, sort=[{"@timestamp": "desc"}])
-            groups.append(EventGroup(key, b["doc_count"], [h["_source"] for h in hits]))
-        return groups
 
     # ------------------------------------------------------------ đề xuất cũ
     def proposals(self, statuses: list[str] | None = None, since: str = "now-30d", size: int = 500) -> list[dict]:

@@ -9,8 +9,8 @@ hiện giá trị mới nhất (tô màu theo đích) và xu hướng; console �
   Báo nhầm   alert kết luận báo nhầm / alert đã đóng
   Tải        alert mỗi analyst mỗi ca (SOC_SHIFTS_PER_DAY ca / ngày, analyst = người đã xử lý alert / case trong kỳ)
   Làm giàu   % alert có ngữ cảnh tài sản (asset.*) từ danh mục tài sản
-  ATT&CK     % kỹ thuật ưu tiên (config/threat_profile.yml) có ít nhất một rule đang bật trong siem-rules: YAML chính thức đã
-             kiểm thử hoặc rule Wazuh không bóng / không tắt (rules_catalog.attack_coverage); ghi nguồn yaml / wazuh / both
+  ATT&CK     % kỹ thuật ưu tiên (config/threat_profile.yml) có ít nhất một rule Wazuh đang bật và ra alert trong siem-rules
+             (rules_catalog.attack_coverage, R49); không đọc được siem-rules thì bỏ trống, không đoán
   Nguồn log  % nguồn đã onboard không im lặng (siem-sources, soar/health.py)
   Hunting    số cuộc hunt hoàn thành trong kỳ (siem-hunts)
 Mọi KPI có mẫu số là "alert" chỉ tính alert PHÁT HIỆN (R62): alert.source rule / wazuh / ml, không bóng. Loại rba (cộng dồn
@@ -67,8 +67,7 @@ def _avg(aggs: dict[str, Any], name: str) -> float | None:
     return round(v, 1) if v is not None else None
 
 
-def compute(es, rules_dir: Path | None = None, config_dir: Path | None = None, days: int | None = None,
-            now: datetime | None = None) -> dict[str, Any]:
+def compute(es, config_dir: Path | None = None, days: int | None = None, now: datetime | None = None) -> dict[str, Any]:
     days = days or settings.KPI_WINDOW_DAYS
     now = now or datetime.now(timezone.utc)
     since = (now - timedelta(days=days)).isoformat()
@@ -165,29 +164,21 @@ def compute(es, rules_dir: Path | None = None, config_dir: Path | None = None, d
         doc["ai_assist"], doc["ai_acceptance_pct"] = {"requests": 0}, None
 
     # ---------------------------------------------------------------- độ phủ ATT&CK
-    if rules_dir:
-        from ..detection.lint import lint
-        rep = lint(rules_dir, config_dir)
-        cov, doc["attack_coverage_source"] = rep.coverage, "lint-yaml"
-        try:   # R49: rule YAML đang bật HOẶC rule Wazuh đang bật và ra alert (thư viện siem-rules)
-            from ..rules_catalog import attack_coverage
+    if config_dir:
+        from ..rules_catalog import attack_coverage, load_profile
+        try:   # R49: rule Wazuh đang bật và ra alert (thư viện siem-rules)
             hits = es.search(index=settings.IDX_RULES, size=10000, track_total_hits=True, sort=[{"_doc": "asc"}],
-                             query={"terms": {"origin": ["rule", "wazuh_rule"]}},
-                             _source=["origin", "source", "rule.id", "mode", "shadow", "bridged", "status", "tests", "mitre.technique"])
+                             query={"term": {"origin": "wazuh_rule"}},
+                             _source=["origin", "rule.id", "mode", "shadow", "bridged", "status", "mitre.technique"])
             rows = [h["_source"] for h in hits["hits"]["hits"]]
             total = hits["hits"]["total"]["value"]
             if total > len(rows):
                 log.warning("độ phủ ATT&CK: siem-rules có %s rule, chỉ đọc %s", total, len(rows))
-            if any(r.get("origin") == "wazuh_rule" for r in rows) or not settings.RULE_ENGINE_ENABLED:      # chưa có rule Wazuh (khởi động đầu, API Wazuh tắt) = lùi về lint
-                cov, doc["attack_coverage_source"] = attack_coverage(rows, rep.profile), "siem-rules"
-            else:
-                log.warning("độ phủ ATT&CK: siem-rules chưa có rule Wazuh, dùng kết quả lint YAML")
-        except Exception as e:  # noqa: BLE001
-            log.warning("độ phủ ATT&CK: không đọc được %s, dùng kết quả lint YAML: %s", settings.IDX_RULES, e)
-        doc["attack_coverage_pct"] = _pct(sum(c["covered"] for c in cov), len(cov)) or 0.0
-        doc["attack_coverage"] = [{k: c.get(k) for k in ("id", "name", "covered", "rules", "rules_n", "sources")} for c in cov]
-        doc["rules"] = {"total": len(rep.rules), "shadow": sum(r.mode == "shadow" for r in rep.rules.values()),
-                        "tested": sum(r.tested for r in rep.rules.values()), "lint_errors": len(rep.errors)}
+            cov = attack_coverage(rows, load_profile(config_dir))
+            doc["attack_coverage_pct"] = _pct(sum(c["covered"] for c in cov), len(cov)) or 0.0
+            doc["attack_coverage"] = [{k: c.get(k) for k in ("id", "name", "covered", "rules", "rules_n", "sources")} for c in cov]
+        except Exception as e:  # noqa: BLE001 - ES lỗi: KPI khác vẫn ghi, độ phủ để trống
+            log.warning("độ phủ ATT&CK: không đọc được %s: %s", settings.IDX_RULES, e)
     doc["grade"] = {k: grade(k, doc.get(k)) for k in TARGETS}
     doc["targets"] = {k: {"gd2": g2, "gd4": g4, "better": way} for k, (g2, g4, way) in TARGETS.items()}
     return doc

@@ -226,10 +226,6 @@ services:
     volumes:
       - *ca-mount
       - {type: volume, source: certs, target: /certs/manager, read_only: true, volume: {subpath: manager}}
-      # duyệt đề xuất AI: manager CHỈ ghi được 2 thư mục rules/ai và rules/exceptions, rule gốc chỉ đọc
-      - ./server/rules:/app/rules:ro
-      - ./server/rules/ai:/app/rules/ai
-      - ./server/rules/exceptions:/app/rules/exceptions
       - ./server/config:/app/config:ro                # priority.yml (ưu tiên / SLA), threat_profile.yml (độ phủ ATT&CK)
       - ./datasets/processed:/datasets:ro
       - wazuh_dynamic_rules:/app/wazuh-rules          # ai.xml, exceptions.xml của Wazuh (siem/wazuh_rules.py)
@@ -315,7 +311,6 @@ services:
       MISP_API_KEY_FILE: /run/secrets/misp_api_key   # feed IOC từ MISP khi đặt MISP_URL trong .env (pipeline/misp.py)
     secrets: [analyzer_es_password, misp_api_key]
     volumes:
-      - ./server/rules:/app/rules:ro
       - ./server/config:/app/config:ro
       - mldata:/data
       - *ca-mount
@@ -362,14 +357,32 @@ services:
       DATASETS_DIR: /datasets
     secrets: [ai_es_password]
     volumes:
-      - ./server/rules:/app/rules:ro
       - ./server/config:/app/config:ro
       - ./datasets/processed:/datasets:ro
+      - ${AI_SANDBOX_PATH:-ai_sandbox}:/sandbox            # thư mục job của wazuh-sandbox (siem/ai/sandbox.py)
       - *ca-mount
     depends_on:
       elasticsearch: {condition: service_healthy}
       es-setup: {condition: service_completed_successfully}
       ollama: {condition: service_started}
+
+  # Sandbox Wazuh cho AI (R67): kiểm rule ứng viên trên analysisd thật, cùng image với wazuh-manager. KHÔNG mạng, không
+  # secrets, không cổng -> alert của nó không đi đâu (không ES, không SOAR). ai-worker giao việc qua thư mục job trên
+  # volume ai_sandbox (giao thức ở wazuh/sandbox/runner.py), không cần docker socket. Rule động thật chỉ đọc (/live-dynamic).
+  wazuh-sandbox:
+    image: wazuh/wazuh-manager:4.14.8
+    hostname: wazuh-sandbox
+    restart: unless-stopped
+    profiles: [ai]
+    network_mode: none
+    volumes:
+      - ./wazuh/manager/rules:/var/ossec/etc/rules:ro
+      - ./wazuh/manager/decoders:/var/ossec/etc/decoders:ro
+      - ./wazuh/manager/ossec.conf:/wazuh-config-mount/etc/ossec.conf:ro
+      - wazuh_dynamic_rules:/live-dynamic:ro
+      - ${AI_SANDBOX_PATH:-ai_sandbox}:/sandbox
+      - ./wazuh/sandbox:/sandbox-runner:ro
+      - ./wazuh/sandbox/entrypoint:/entrypoint-scripts:ro   # tắt filebeat, list CDB, chạy runner (dịch vụ s6)
 
   # Máy chủ web demo (vai trò S001) có cài Wazuh agent 4.14.7 — dùng để kiểm tra luồng XDR end-to-end
   demo-web:
@@ -436,3 +449,4 @@ volumes:
   grafanadata:
   mldata:
   ollama:
+  ai_sandbox:

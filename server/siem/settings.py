@@ -73,15 +73,12 @@ WAZUH_ALERT_EXCLUDE_GROUPS = {g.strip() for g in os.getenv("WAZUH_ALERT_EXCLUDE_
 # (trừ level >= WAZUH_ALERT_ANY_LEVEL): cầu nối vẫn chuyển để đo, SOAR bỏ qua.
 WAZUH_ALERT_ACTIVE_GROUPS = {g.strip() for g in os.getenv(
     "WAZUH_ALERT_ACTIVE_GROUPS", "syscheck,rootcheck,vulnerability-detector,virustotal,yara").split(",") if g.strip()}
-# R65 (cổng T18, 05/11/2026): engine YAML tắt, phát hiện chạy hoàn toàn trong wazuh-analysisd. =true để bật lại engine YAML.
-RULE_ENGINE_ENABLED = os.getenv("RULE_ENGINE_ENABLED", "false").lower() in ("1", "true", "yes")
 # R65: rule gốc Wazuh level 7-11 ngoài nhóm cũ là alert thật. =true để khôi phục chế độ bóng (R38).
 WAZUH_STOCK_SHADOW = os.getenv("WAZUH_STOCK_SHADOW", "false").lower() in ("1", "true", "yes")
 WAZUH_ALERT_SUPPRESS = int(os.getenv("WAZUH_ALERT_SUPPRESS", "60"))     # giây: cùng rule + cùng nguồn chỉ 1 alert
 
-# Thư mục cấu hình (rules, playbooks, intel, assets)
+# Thư mục cấu hình (playbooks, intel, assets)
 CONFIG_DIR = Path(os.getenv("CONFIG_DIR", BASE_DIR / "config"))
-RULES_DIR = Path(os.getenv("RULES_DIR", BASE_DIR / "rules"))
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 
 # ML — TẠM DỪNG (mặc định tắt): đánh giá cho thấy tỉ lệ báo nhầm quá cao, xem README mục 3.
@@ -157,12 +154,15 @@ AI_LOOKBACK_DAYS = int(os.getenv("AI_LOOKBACK_DAYS", "30"))             # lấy 
 AI_REPLAY_DAYS = int(os.getenv("AI_REPLAY_DAYS", "7"))                  # replay dữ liệu để ước lượng số alert
 AI_REPLAY_MAX_EVENTS = int(os.getenv("AI_REPLAY_MAX_EVENTS", "200000"))
 AI_MIN_FALSE_POSITIVES = int(os.getenv("AI_MIN_FALSE_POSITIVES", "3"))  # rule có >= N báo nhầm mới đề xuất ngoại lệ
-AI_MIN_GROUP_EVENTS = int(os.getenv("AI_MIN_GROUP_EVENTS", "20"))       # nhóm event chưa có rule cần >= N event
 AI_MAX_NEW_RULE_ALERTS_PER_DAY = float(os.getenv("AI_MAX_NEW_RULE_ALERTS_PER_DAY", "20"))
 AI_MAX_PROPOSALS_PER_RUN = int(os.getenv("AI_MAX_PROPOSALS_PER_RUN", "5"))
 AI_REFINE_ROUNDS = int(os.getenv("AI_REFINE_ROUNDS", "6"))            # rule từ dataset: số lượt LLM bổ sung mẫu cho biến thể còn sót
 AI_SIGMAHQ_CANDIDATES = os.getenv("AI_SIGMAHQ_CANDIDATES", "true").lower() in ("1", "true", "yes")  # vế từ rule SigmaHQ
 AI_KNOWLEDGE_ROUND = os.getenv("AI_KNOWLEDGE_ROUND", "true").lower() in ("1", "true", "yes")        # hỏi cách làm khác
+# Sandbox Wazuh (R67, ai/sandbox.py): thư mục job dùng chung với container wazuh-sandbox (volume ai_sandbox), và số giây
+# tối đa chờ một job (gồm restart manager ~13 giây; 50.000 event ~95 giây, đo S4 06/11/2026)
+AI_SANDBOX_DIR = Path(os.getenv("AI_SANDBOX_DIR", "/sandbox"))
+AI_SANDBOX_TIMEOUT = float(os.getenv("AI_SANDBOX_TIMEOUT", "900"))
 
 # Log từng request HTTP tới Elasticsearch quá nhiều -> chỉ giữ cảnh báo
 import logging as _logging  # noqa: E402

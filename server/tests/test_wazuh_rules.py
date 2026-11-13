@@ -103,6 +103,23 @@ def test_failed_reload_removes_new_file_when_none_before(tmp_path):
     assert list(tmp_path.iterdir()) == [] and api.reloads == 2
 
 
+def test_delete_removes_file_and_reloads(tmp_path):
+    (tmp_path / "ai.xml").write_text(GOOD)
+    api = FakeApi()
+    wazuh_rules.write_dynamic("ai.xml", None, api, root=tmp_path)
+    assert list(tmp_path.iterdir()) == [] and api.reloads == 1
+    wazuh_rules.write_dynamic("ai.xml", None, api, root=tmp_path)          # đã không có file: vẫn êm
+    assert api.reloads == 2
+
+
+def test_failed_reload_on_delete_restores_file(tmp_path):
+    (tmp_path / "ai.xml").write_text(GOOD)
+    api = FakeApi(errors=["boom"])
+    with pytest.raises(WazuhRuleError, match="boom"):
+        wazuh_rules.write_dynamic("ai.xml", None, api, root=tmp_path)
+    assert (tmp_path / "ai.xml").read_text() == GOOD and api.reloads == 2
+
+
 def test_api_reload_ok(monkeypatch):
     body = {"error": 0, "data": {"affected_items": [{"name": "m", "msg": OK_MSG}], "failed_items": []}}
     api_with(monkeypatch, body).reload()

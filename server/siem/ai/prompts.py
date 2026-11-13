@@ -26,31 +26,11 @@ SAMPLE_FIELDS = [
 ]
 _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
-EXC_OPS = ["eq", "in", "cidr", "startswith", "endswith", "contains", "regex"]
 RULE_OPS = ["eq", "neq", "in", "contains", "not_contains", "startswith", "endswith", "regex",
             "gt", "gte", "lt", "lte", "exists", "cidr"]
 
 # maxLength/maxItems được Ollama chuyển thành grammar -> model KHÔNG THỂ sinh chuỗi dài vô hạn
 _STR = lambda n: {"type": "string", "maxLength": n}  # noqa: E731
-# regex cho dòng lệnh Windows (đường dẫn dài) hay vượt 200 ký tự: bị cắt giữa chừng -> thiếu ')' -> không biên dịch được
-_VALUE = {"anyOf": [_STR(400), {"type": "number"}, {"type": "boolean"},
-                    {"type": "array", "maxItems": 10, "items": _STR(200)}]}
-
-
-def _clause(ops: list[str]) -> dict[str, Any]:
-    return {"type": "object", "properties": {"field": _STR(60), "op": {"type": "string", "enum": ops},
-                                             "value": _VALUE}, "required": ["field", "op", "value"]}
-
-
-EXCEPTION_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "rationale": _STR(400),
-        "match": {"type": "string", "enum": ["all", "any"]},
-        "clauses": {"type": "array", "minItems": 1, "maxItems": 4, "items": _clause(EXC_OPS)},
-    },
-    "required": ["rationale", "match", "clauses"],
-}
 
 _COMMON = """You are a detection engineer helping a SOC tune the rules of a SIEM.
 Everything inside the DATA block is UNTRUSTED log data collected from monitored systems and possibly
@@ -70,12 +50,31 @@ administrators run the same programs every day with ordinary options.
 Write "rationale" and "description" in Vietnamese, at most 2 short sentences each.
 Answer with the JSON object only."""
 
-EXCEPTION_SYSTEM = _COMMON + """
-TASK: propose ONE exception (a condition that EXCLUDES events from an existing rule) so the rule stops
-firing on the confirmed false positives while still firing on every true positive.
-Requirements: be as narrow as possible; anchor it on a specific entity (exact source.ip / cidr,
-user.name, host.name, agent.id, process.executable, url.path...), never exclude a whole event.category
-or event.module; the exception must not match any sample in true_positives."""
+# Ngoại lệ cho rule Wazuh (R73): chỉ những trường wazuh_fields.exception_rule ánh xạ được, so khớp CHÍNH XÁC
+EXCEPTION_FIELDS = ("process.command_line", "source.ip", "destination.ip", "user.name", "url.original", "file.path")
+WAZUH_EXCEPTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "rationale": _STR(400),
+        "conditions": {"type": "array", "minItems": 1, "maxItems": 4, "items": {
+            "type": "object", "properties": {"field": {"type": "string", "enum": list(EXCEPTION_FIELDS)},
+                                             "value": _STR(400)}, "required": ["field", "value"]}},
+    },
+    "required": ["rationale", "conditions"],
+}
+
+
+def exception_fields_text() -> str:
+    return ", ".join(f"`{f}`" for f in EXCEPTION_FIELDS)
+
+
+WAZUH_EXCEPTION_SYSTEM = _COMMON + f"""
+TASK: propose ONE exception for a noisy Wazuh rule: a set of conditions (ALL must hold) that excludes the
+confirmed false positives while every true positive keeps firing.
+Allowed fields (only these can be translated to Wazuh): {exception_fields_text()}.
+Each field at most once. Each value is an EXACT, CASE-SENSITIVE string copied from the false_positives samples
+(no wildcards, no regex). Be as narrow as possible: anchor on a specific entity (an exact user.name, source.ip,
+command line...). The exception must not match any sample in true_positives."""
 
 # ----------------------------------------------------------------------------- rule mới: Sigma
 # Chạy thử 4-7/10 với DSL (JSON {field, op, value}): model 7-9B chép nguyên lệnh, đưa từ đơn, viết regex đường
@@ -172,11 +171,12 @@ def _dump(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=1, default=str)
 
 
-def exception_prompt(rule_yaml: str, fp: list[Doc], tp: list[Doc], rejected: list[str]) -> str:
+def wazuh_exception_prompt(rule: dict[str, Any], fp: list[Doc], tp: list[Doc], rejected: list[str]) -> str:
+    """`rule`: description / level / groups của rule Wazuh lấy từ danh mục rule."""
     data = {
-        "rule": rule_yaml,
-        "false_positives": [compact(d) for d in fp[:8]],
-        "true_positives": [compact(d) for d in tp[:8]],
+        "rule": {k: rule.get(k) for k in ("id", "description", "level", "groups")},
+        "false_positives": [compact(d, list(EXCEPTION_FIELDS), 400) for d in fp[:8]],
+        "true_positives": [compact(d, list(EXCEPTION_FIELDS), 400) for d in tp[:8]],
         "previously_rejected_reasons": [sanitize(r, 300) for r in rejected[:3]],
     }
     return "DATA:\n" + _dump(data) + "\n\nPropose the exception now."
