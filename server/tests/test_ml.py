@@ -1,4 +1,4 @@
-import json, random
+import json, math, random
 from siem.detection import ml
 
 def web(ip, path="/", status=200, kb=1, ua="UA1", n=0):
@@ -141,3 +141,46 @@ def test_windows_from_events_matches_online():
     for d, _ in docs:
         w.add(d)
     assert off[0][0] == "1.1.1.1" and off[0][1] == 0 and off[0][2] == w.vector()
+
+def test_fp_does_not_drift_with_retrain():
+    # fit lại mỗi giờ trên lưu lượng bình thường ổn định: tỉ lệ gắn cờ từng giờ không được trôi lên theo số lần fit
+    det = ml.AnomalyDetector(learn_hours=1, min_windows=200, target_fp=0.01, cooldown=0, retrain_hours=1)
+    hits, flush = [], det.flush
+    det.flush = lambda now: hits.extend(flush(now)) or []       # cooldown=0: mỗi cửa sổ bị gắn cờ là một Anomaly
+    end = normal_traffic(det, 0, 1)                              # học 1 giờ, active ở flush cuối
+    for h in range(11):
+        hits.clear()
+        end = normal_traffic(det, end, 1, seed=100 + h)          # 12 cửa sổ x 50 IP = 600 cửa sổ được chấm
+        assert len(hits) / 600 <= 3 * 0.01, f"giờ {h}: {len(hits)}/600"
+
+def test_restart_does_not_reopen_closed_windows(tmp_path):
+    p = tmp_path / "ml-state.json"
+    det = ml.AnomalyDetector(state_path=p)
+    for i in range(6):
+        det.add(web("1.2.3.4", f"/a{i}"), 10)
+    det.flush(400); det.save()                                   # đóng cửa sổ [0, 300)
+    again = ml.AnomalyDetector(state_path=p)
+    again.add(web("1.2.3.4", "/late"), 20)                       # backlog của cửa sổ đã đóng trước khi khởi động lại
+    again.add(web("5.5.5.5", "/x"), 100)                         # cửa sổ đó cũng đã đóng với IP chưa có event nào
+    again.add(web("1.2.3.4", "/new"), 320)                       # cửa sổ [300, 600) chưa đóng: nhận
+    assert again.status()["web"]["dropped_late"] == 2 and again.status()["web"]["windows"] == 1
+
+def test_non_finite_inputs_are_safe(tmp_path, caplog):
+    w = ml.Window(ml.SPECS["web"])
+    for b in (10 ** 400, float("nan"), float("inf"), -5 * 1024, "1e999", 1e300, 1024):
+        d = web("1.1.1.1"); d["http"]["response"]["bytes"] = b
+        w.add(d)
+    v = w.vector()
+    assert all(math.isfinite(x) for x in v) and v[5] == 1.0
+    p = tmp_path / "ml-state.json"
+    for bad in ('[[NaN, 6, 0, 0, 0, 1, 1]], "first_seen": 0', '[[6, 6, 0, 0, 0, 1, 1]], "first_seen": Infinity'):
+        p.write_text('{"version": 2, "models": {"web": {"train": %s, "last_fit": null}}}' % bad, encoding="utf-8")
+        caplog.clear()
+        assert ml.AnomalyDetector(state_path=p).status()["web"]["windows"] == 0 and "ML" in caplog.text
+
+def test_loads_state_without_flags(tmp_path):
+    # file trạng thái version 2 cũ (chưa có "flagged", "last_flush"): mọi cửa sổ coi như không bị gắn cờ
+    p = tmp_path / "ml-state.json"
+    p.write_text(json.dumps({"version": 2, "models": {"web": {"train": [[6, 6, 0, 0, 0, 1, 1]] * 3, "first_seen": 0,
+                                                              "last_fit": None}}}), encoding="utf-8")
+    assert ml.AnomalyDetector(state_path=p).status()["web"]["windows"] == 3

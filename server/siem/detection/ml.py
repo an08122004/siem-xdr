@@ -2,14 +2,16 @@
 
 Mỗi model gom event theo (IP nguồn, cửa sổ thời gian) thành một vector đặc trưng. Model chỉ học từ lưu lượng thật:
 giai đoạn học kéo dài tới khi đủ `learn_hours` kể từ cửa sổ đầu tiên VÀ đủ `min_windows` cửa sổ; sau đó fit Isolation
-Forest trên 80% vector cũ, ngưỡng = phân vị `target_fp` của điểm trên 20% vector mới nhất (tập giữ lại, ≥ 50), tức tỉ
-lệ báo nhầm có chủ đích. Cửa sổ bị gắn cờ, bị `exclude` (IP có alert thật) hay của IP đang im lặng thì không học.
+Forest trên 80% cửa sổ cũ, ngưỡng = phân vị `target_fp` của điểm trên 20% cửa sổ mới nhất (tập giữ lại, ≥ 50), tức tỉ
+lệ báo nhầm có chủ đích. Cửa sổ bị gắn cờ hay của IP đang im lặng vẫn được lưu (có cờ) để hiệu chỉnh ngưỡng nhưng không
+dùng để fit; cửa sổ bị `exclude` (IP có alert thật) thì không lưu.
 Trạng thái lưu dạng JSON (vector, không lưu model) và fit lại khi nạp: pickle scikit-learn vỡ giữa các phiên bản.
 """
 from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -27,8 +29,8 @@ FEATURES_AUTH = ("n_attempts", "n_fail", "fail_ratio", "n_users", "n_success")
 
 CAP = 1000            # phần tử tối đa mỗi tập trong một cửa sổ
 MAX_IDS = 20          # event.id giữ lại mỗi cửa sổ
-MAX_TRAIN = 20_000    # vector học tối đa mỗi model
-MAX_CLOSED = 2000     # idx cửa sổ đã đóng nhớ lại mỗi model
+MAX_TRAIN = 20_000    # cửa sổ lưu tối đa mỗi model (kể cả bị gắn cờ)
+MAX_NUM = 1e15        # giá trị số từ event lớn hơn thế là rác (byte của một response): coi như 0
 HOLDOUT_MIN = 50
 VERSION = 2
 
@@ -62,10 +64,19 @@ def accepts(spec: ModelSpec, doc: Doc) -> bool:
 
 
 def _num(v) -> float:
+    """Số hữu hạn trong [0, MAX_NUM), còn lại 0: NaN / vô cực / âm từ log không được làm hỏng vector."""
     try:
-        return float(v or 0)
-    except (TypeError, ValueError):
+        x = float(v or 0)
+    except (TypeError, ValueError, OverflowError):
         return 0.0
+    return x if 0 <= x < MAX_NUM else 0.0
+
+
+def _finite(v) -> float:
+    x = float(v)
+    if not math.isfinite(x):
+        raise ValueError(f"giá trị không hữu hạn {x}")
+    return x
 
 
 def _put(s: set, v) -> None:
@@ -151,10 +162,10 @@ def windows_from_events(docs: Iterable[tuple[Doc, float]], spec: ModelSpec) -> l
 class _Model:
     spec: ModelSpec
     open: dict[int, dict[str, Window]] = field(default_factory=dict)
-    closed: set[int] = field(default_factory=set)
     excluded: set[tuple[str, int]] = field(default_factory=set)
     silenced: dict[str, float] = field(default_factory=dict)        # IP -> hết im lặng (thời gian cửa sổ)
-    train: list[list[float]] = field(default_factory=list)
+    train: list[list[float]] = field(default_factory=list)          # vector cửa sổ đã lưu, cũ -> mới
+    flags: list[bool] = field(default_factory=list)                 # song song với train: True = không dùng để fit
     first_seen: float | None = None
     last_fit: float | None = None
     forest: IsolationForest | None = None
@@ -174,6 +185,7 @@ class AnomalyDetector:
         self.learn_hours, self.min_windows, self.target_fp = learn_hours, min_windows, target_fp
         self.cooldown, self.retrain_hours, self.grace = cooldown, retrain_hours, grace
         self.max_entities = max_entities
+        self.last_flush: float | None = None     # watermark: cửa sổ đã đóng trước mốc này không bao giờ mở lại
         self.models = {name: _Model(spec) for name, spec in specs.items()}
         self._load()
 
@@ -183,8 +195,8 @@ class AnomalyDetector:
             if not accepts(m.spec, doc):
                 continue
             idx = int(ts // m.spec.window)
-            if idx in m.closed:
-                m.dropped_late += 1          # không mở lại cửa sổ đã chấm thành nửa cửa sổ
+            if self.last_flush is not None and (idx + 1) * m.spec.window + self.grace <= self.last_flush:
+                m.dropped_late += 1          # cửa sổ đã đóng (kể cả trước khi khởi động lại): không mở lại thành nửa cửa sổ
                 continue
             per_ip = m.open.setdefault(idx, {})
             ip = get(doc, "source.ip")
@@ -200,16 +212,14 @@ class AnomalyDetector:
 
     def flush(self, now: float) -> list[Anomaly]:
         out: list[Anomaly] = []
+        self.last_flush = now if self.last_flush is None else max(self.last_flush, now)
         for m in self.models.values():
             self._maybe_fit(m, now)
             w = m.spec.window
             for idx in sorted(i for i in m.open if (i + 1) * w + self.grace <= now):
-                m.closed.add(idx)
                 out += self._close(m, idx, m.open.pop(idx))
-            if len(m.closed) > MAX_CLOSED:
-                m.closed = set(sorted(m.closed)[-MAX_CLOSED:])
-            # cửa sổ nào đóng sau lần này đều bắt đầu sau `horizon`: mục loại trừ / im lặng cũ hơn thì vô dụng
-            horizon = now - self.grace - w
+            # nhờ watermark, cửa sổ nào đóng sau lần này đều bắt đầu sau `horizon`: mục loại trừ / im lặng cũ hơn vô dụng
+            horizon = self.last_flush - self.grace - w
             m.excluded = {(ip, i) for ip, i in m.excluded if i * w > horizon}
             m.silenced = {ip: t for ip, t in m.silenced.items() if t > horizon}
         return out
@@ -231,11 +241,13 @@ class AnomalyDetector:
                 m.silenced[ip] = start + self.cooldown
                 out.append(Anomaly(m.spec.name, ip, float(scores[k]), float(m.threshold),
                                    dict(zip(m.spec.features, vec)), _top(m, vec), win.last_event, win.event_ids, start))
-            if not (flagged or silenced or (ip, idx) in m.excluded):
+            if (ip, idx) not in m.excluded:
                 m.train.append(vec)
+                m.flags.append(flagged or silenced)
                 if m.first_seen is None:
                     m.first_seen = start
         del m.train[:-MAX_TRAIN]
+        del m.flags[:-MAX_TRAIN]
         return out
 
     # ---------------- học ----------------
@@ -250,23 +262,31 @@ class AnomalyDetector:
 
     def _fit(self, m: _Model, now: float) -> None:
         x = _matrix(m.spec, m.train)
+        ok = ~np.array(m.flags, dtype=bool)
         hold = max(HOLDOUT_MIN, len(x) // 5)
-        forest = IsolationForest(n_estimators=200, random_state=0).fit(x[:-hold])
+        base = x[:-hold][ok[:-hold]]
+        if len(base) < HOLDOUT_MIN:
+            return
+        forest = IsolationForest(n_estimators=200, random_state=0).fit(base)
+        # ngưỡng trên MỌI cửa sổ mới nhất, kể cả bị gắn cờ: bỏ chúng thì tập hiệu chỉnh thiếu đúng phần đuôi model cũ đã
+        # cắt và mỗi lần fit lại ngưỡng nhích lên (tỉ lệ gắn cờ trôi dần ~ phần đã gắn cờ + target_fp)
         threshold = float(np.quantile(forest.decision_function(x[-hold:]), self.target_fp))
         if m.forest is None:
             m.scored = m.flagged = 0
             log.info("ML %s: chuyển sang active (%d cửa sổ, ngưỡng %.3f)", m.spec.name, len(x), threshold)
         m.forest, m.threshold, m.last_fit = forest, threshold, now
-        m.median = np.median(np.array(m.train), axis=0).tolist()
+        m.median = np.median(np.array(m.train)[ok], axis=0).tolist()
 
     def seed(self, name: str, vectors: list[list[float]], first_seen: float) -> None:
         """Khởi tạo offline (tools/ml_eval.py): thay tập học; model được fit ở lần flush kế tiếp nếu đủ điều kiện."""
         m = self.models[name]
         m.train = [[float(x) for x in v] for v in vectors][-MAX_TRAIN:]
+        m.flags = [False] * len(m.train)
         m.first_seen, m.forest, m.threshold, m.last_fit = first_seen, None, None, None
 
     # ---------------- trạng thái ----------------
     def status(self) -> dict[str, dict]:
+        """`windows` = số cửa sổ đang lưu, kể cả cửa sổ bị gắn cờ (chỉ dùng hiệu chỉnh ngưỡng, không fit)."""
         return {name: {"phase": "active" if m.forest is not None else "learning", "windows": len(m.train),
                        "threshold": m.threshold, "first_seen": m.first_seen, "dropped_late": m.dropped_late,
                        "dropped_entities": m.dropped_entities} for name, m in self.models.items()}
@@ -279,8 +299,9 @@ class AnomalyDetector:
     def save(self) -> None:
         if not self.state_path:
             return
-        data = {"version": VERSION, "models": {name: {"train": m.train, "first_seen": m.first_seen,
-                                                      "last_fit": m.last_fit} for name, m in self.models.items()}}
+        data = {"version": VERSION, "last_flush": self.last_flush,
+                "models": {name: {"train": m.train, "flagged": m.flags, "first_seen": m.first_seen,
+                                  "last_fit": m.last_fit} for name, m in self.models.items()}}
         tmp = self.state_path.with_name(self.state_path.name + ".tmp")
         try:
             self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -297,23 +318,29 @@ class AnomalyDetector:
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
             if data.get("version") != VERSION:
                 raise ValueError(f"version {data.get('version')!r}")
-            loaded = {}
+            last_flush, loaded = _opt(data.get("last_flush")), {}
             for name, m in self.models.items():
                 s = data["models"].get(name) or {}
-                train = [[float(x) for x in v] for v in s.get("train", [])]
+                train = [[_finite(x) for x in v] for v in s.get("train", [])]
                 if any(len(v) != len(m.spec.features) for v in train):
                     raise ValueError(f"vector {name} sai số chiều")
-                first, last = s.get("first_seen"), s.get("last_fit")
-                loaded[name] = (train[-MAX_TRAIN:], None if first is None else float(first),
-                                None if last is None else float(last))
+                flags = s.get("flagged", [False] * len(train))     # file cũ chưa có cờ: coi như không bị gắn cờ
+                if len(flags) != len(train) or not all(isinstance(f, bool) for f in flags):
+                    raise ValueError(f"cờ {name} không khớp vector")
+                loaded[name] = (train[-MAX_TRAIN:], flags[-MAX_TRAIN:], _opt(s.get("first_seen")), _opt(s.get("last_fit")))
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as e:
             log.warning("ML: file trạng thái %s hỏng hoặc khác version (%s), học lại từ đầu", self.state_path, e)
             return
-        for name, (train, first, last_fit) in loaded.items():
+        self.last_flush = last_flush
+        for name, (train, flags, first, last_fit) in loaded.items():
             m = self.models[name]
-            m.train, m.first_seen, m.last_fit = train, first, last_fit
+            m.train, m.flags, m.first_seen, m.last_fit = train, flags, first, last_fit
         log.info("ML: nạp trạng thái %s (%s)", self.state_path,
                  ", ".join(f"{n} {len(m.train)} cửa sổ" for n, m in self.models.items()))
+
+
+def _opt(v) -> float | None:
+    return None if v is None else _finite(v)
 
 
 def _top(m: _Model, vec: list[float]) -> list[tuple[str, float, float]]:
