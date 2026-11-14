@@ -1,0 +1,143 @@
+import json, random
+from siem.detection import ml
+
+def web(ip, path="/", status=200, kb=1, ua="UA1", n=0):
+    return {"event": {"category": "web", "id": f"e{n}"}, "source": {"ip": ip}, "url": {"path": path},
+            "http": {"response": {"status_code": status, "bytes": kb * 1024}}, "user_agent": {"original": ua}}
+
+def auth(ip, user="u", ok=True, n=0):
+    return {"event": {"category": "authentication", "outcome": "success" if ok else "failure", "id": f"a{n}"},
+            "source": {"ip": ip}, "user": {"name": user}}
+
+def normal_traffic(det, start, hours, ips=50, seed=1):
+    """mỗi IP mỗi cửa sổ web 5 phút: 6-30 request, 3-10 path, ít 404; trả về thời điểm cuối"""
+    rng = random.Random(seed); t = start
+    while t < start + hours * 3600:
+        for k in range(ips):
+            for i in range(rng.randint(6, 30)):
+                det.add(web(f"10.0.0.{k}", f"/p{rng.randint(1, 10)}", 404 if rng.random() < 0.02 else 200,
+                            rng.randint(1, 40), f"UA{k % 5}", i), t + rng.uniform(0, 290))
+        t += 300; det.flush(t + 31)
+    return t
+
+def normal_vectors(n=1000, seed=0):
+    """vector web đã cộng dồn, cùng phân bố với normal_traffic. Không seed n bản sao của một vector: dữ liệu học
+    giống hệt nhau làm Isolation Forest suy biến (cây không tách được, mọi điểm cùng điểm số, không gì bị gắn cờ).
+    1000 vector để tập giữ lại (200) đủ ước lượng phân vị 0,5%; với 300 (giữ lại 60) ngưỡng gần như là điểm thấp
+    nhất của 60 cửa sổ, dao động theo seed và có seed làm máy quét lọt ngưỡng"""
+    rng = random.Random(seed); out = []
+    for _ in range(n):
+        k = rng.randint(6, 30); n404 = sum(rng.random() < 0.02 for _ in range(k))
+        out.append([k, len({rng.randint(1, 10) for _ in range(k)}), n404 / k, 0, n404,
+                    sum(rng.randint(1, 40) for _ in range(k)), 1])
+    return out
+
+def test_web_vector_counts():
+    w = ml.Window(ml.SPECS["web"])
+    for d in [web("1.1.1.1", "/a", 200, 2, "X"), web("1.1.1.1", "/b", 404, 1, "Y"), web("1.1.1.1", "/a", 401, 1, "X")]:
+        w.add(d)
+    assert w.vector() == [3, 2, 2 / 3, 1, 1, 4.0, 2]
+
+def test_auth_vector():
+    w = ml.Window(ml.SPECS["auth"])
+    for d in [auth("1.1.1.1", "a", False), auth("1.1.1.1", "b", False), auth("1.1.1.1", "a", True)]:
+        w.add(d)
+    assert w.vector() == [3, 2, 2 / 3, 2, 1]
+
+def test_learning_phase_emits_nothing():
+    det = ml.AnomalyDetector(learn_hours=48, min_windows=200)
+    end = normal_traffic(det, 0, 2)
+    for i in range(500):
+        det.add(web("9.9.9.9", f"/x{i}", 404), end + 1)
+    assert det.flush(end + 400) == [] and det.status()["web"]["phase"] == "learning"
+
+def test_active_flags_scan_not_normals():
+    det = ml.AnomalyDetector(learn_hours=1, min_windows=200)
+    end = normal_traffic(det, 0, 6)                         # 72 cửa sổ x 50 IP
+    assert det.status()["web"]["phase"] == "active"
+    later = normal_traffic(det, end, 1, seed=2)             # thêm 12 cửa sổ x 50 IP bình thường
+    assert det.flagged_ratio("web") <= 0.02                 # cửa sổ bình thường hầu như không bị gắn cờ
+    for i in range(400):
+        det.add(web("9.9.9.9", f"/x{i}", 404, 0, "scanner", i), later + 5 + i * 0.5)
+    hits = [a for a in det.flush(later + 300 + 31) if a.entity == "9.9.9.9"]
+    assert len(hits) == 1 and hits[0].model == "web"
+    assert {f for f, _, _ in hits[0].top} & {"n_paths", "n_404", "n_requests"}
+    assert ml.severity(hits[0]) in ("medium", "high") and "thường" in ml.explain(hits[0])
+
+def test_threshold_calibrated_to_target_fp():
+    det = ml.AnomalyDetector(learn_hours=1, min_windows=200, target_fp=0.01, cooldown=0)
+    end = normal_traffic(det, 0, 6)
+    n_windows, hits = 0, 0
+    for s in range(3, 13):                                   # 10 giờ bình thường mới, khác seed
+        t0 = end; end = normal_traffic(det, t0, 1, seed=s)
+    st = det.status()["web"]
+    assert st["threshold"] is not None
+    # đếm qua status: tỉ lệ cửa sổ bình thường bị gắn cờ không quá 3 lần mục tiêu
+    assert det.flagged_ratio("web") <= 0.03
+
+def test_min_events_gate():
+    det = ml.AnomalyDetector(learn_hours=0, min_windows=1)
+    det.seed("web", normal_vectors(), first_seen=0)
+    det.add(web("8.8.8.8", "/a", 404), 10); det.add(web("8.8.8.8", "/b", 404), 11)
+    assert det.flush(400) == []                              # 2 request < tối thiểu 5
+
+def test_cooldown_suppresses_repeat():
+    det = ml.AnomalyDetector(learn_hours=0, min_windows=1, cooldown=1800)
+    det.seed("web", normal_vectors(), first_seen=0)
+    out = []
+    for w in range(3):                                       # 3 cửa sổ liên tiếp đều quét
+        for i in range(300):
+            det.add(web("9.9.9.9", f"/x{w}-{i}", 404), w * 300 + i * 0.5)
+        out += det.flush(w * 300 + 331)
+    assert len([a for a in out if a.entity == "9.9.9.9"]) == 1
+
+def test_excluded_windows_not_learned():
+    det = ml.AnomalyDetector(learn_hours=48, min_windows=200)
+    for i in range(10):
+        det.add(web("7.7.7.7", f"/a{i}"), 5)
+    det.exclude("7.7.7.7", 5)
+    det.flush(400)
+    assert det.status()["web"]["windows"] == 0
+
+def test_late_events_for_closed_window_dropped():
+    det = ml.AnomalyDetector()
+    for i in range(6):
+        det.add(web("1.2.3.4", f"/a{i}"), 10)
+    det.flush(400)                                           # đóng cửa sổ [0, 300)
+    det.add(web("1.2.3.4", "/late"), 20)                     # event muộn của cửa sổ đã đóng
+    assert det.flush(800) == [] and det.status()["web"]["dropped_late"] == 1
+    assert det.status()["web"]["windows"] == 1
+
+def test_caps_bound_memory():
+    w = ml.Window(ml.SPECS["web"])
+    for i in range(5000):
+        w.add(web("1.1.1.1", f"/p{i}", 404, 0, f"ua{i}", i))
+    assert w.vector()[1] == 1000 and w.vector()[6] == 1000 and len(w.event_ids) == 20
+    det = ml.AnomalyDetector(max_entities=100)
+    for k in range(150):
+        det.add(web(f"10.1.{k // 250}.{k % 250}"), 1)
+    det.flush(400)
+    assert det.status()["web"]["dropped_entities"] == 50
+
+def test_state_roundtrip_and_resume_learning(tmp_path):
+    p = tmp_path / "ml-state.json"
+    det = ml.AnomalyDetector(state_path=p, learn_hours=48)
+    normal_traffic(det, 1000, 1)
+    det.save()
+    again = ml.AnomalyDetector(state_path=p, learn_hours=48)
+    assert again.status()["web"]["windows"] == det.status()["web"]["windows"] > 0
+    assert again.status()["web"]["first_seen"] == det.status()["web"]["first_seen"]
+    assert json.loads(p.read_text(encoding="utf-8"))["version"] == 2
+
+def test_corrupt_state_starts_fresh(tmp_path, caplog):
+    p = tmp_path / "ml-state.json"; p.write_text("{không phải json", encoding="utf-8")
+    det = ml.AnomalyDetector(state_path=p)
+    assert det.status()["web"]["windows"] == 0 and "ML" in caplog.text
+
+def test_windows_from_events_matches_online():
+    docs = [(web("1.1.1.1", f"/a{i % 4}", 200 if i % 5 else 404, 3, "U", i), 10 + i) for i in range(12)]
+    off = ml.windows_from_events(docs, ml.SPECS["web"])
+    w = ml.Window(ml.SPECS["web"])
+    for d, _ in docs:
+        w.add(d)
+    assert off[0][0] == "1.1.1.1" and off[0][1] == 0 and off[0][2] == w.vector()

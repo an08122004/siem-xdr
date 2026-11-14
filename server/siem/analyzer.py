@@ -28,11 +28,9 @@ FLUSH_SIZE = 500
 class Analyzer:
     def __init__(self) -> None:
         self.enricher = default_enricher()
-        self.detector = ml.AnomalyDetector(
-            window=settings.ML_WINDOW_SECONDS, min_samples=settings.ML_MIN_SAMPLES,
-            contamination=settings.ML_CONTAMINATION, model_dir=settings.DATA_DIR / "models",
-            bootstrap=settings.ML_BOOTSTRAP_SYNTHETIC,
-        ) if settings.ML_ENABLED else None
+        # shortcut: tạm cho Task 2 gỡ — chưa nạp biến ML_* mới, chưa save() định kỳ (khởi động lại thì học lại)
+        self.detector = (ml.AnomalyDetector(state_path=settings.DATA_DIR / "models" / "ml-state.json")
+                         if settings.ML_ENABLED else None)
         self.es = store.connect()
         bus.wait_for_kafka()
         self.producer = bus.producer()
@@ -70,7 +68,7 @@ class Analyzer:
         now = time.time()
         if self.detector:
             for a in self.detector.flush(now):
-                self.emit(alert_builder.from_anomaly(a, ml.severity_for(a.score), ml.describe(a), ml.feature_dict(a)))
+                self.emit(alert_builder.from_anomaly(a, ml.severity(a), ml.explain(a), a.features))
         if self.buffer and (len(self.buffer) >= FLUSH_SIZE or now - self.last_flush >= FLUSH_EVERY):
             try:
                 store.bulk_index(self.es, self.buffer)

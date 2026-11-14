@@ -68,6 +68,7 @@ def _timing(alert: Doc, first: float | None) -> None:
 
 
 def from_anomaly(a: Any, severity: str, description: str, features: dict[str, Any]) -> Doc:
+    # shortcut: tạm cho Task 2 gỡ — vẫn rule ML-001, chưa theo ModelSpec (ML-WEB / ML-AUTH, bóng)
     alert: Doc = {
         "@timestamp": now_iso(),
         "alert": {"id": new_id(), "status": "open", "source": "ml"},
@@ -81,13 +82,13 @@ def from_anomaly(a: Any, severity: str, description: str, features: dict[str, An
         "severity_score": SEVERITY_SCORE[severity],
         "risk_score": _risk(severity, a.event),
         "ml": {"score": round(a.score, 4), "features": features},
-        "count": int(features.get("n_events", 0)),
+        "count": int(features.get("n_requests") or features.get("n_attempts") or 0),
         "related_events": a.event_ids,
         "event_time": a.event.get("@timestamp"),
         "trigger_event": _trigger(a.event),
     }
     _copy_entities(a.event, alert)
-    alert.setdefault("source", {})["ip"] = a.ip
+    alert.setdefault("source", {})["ip"] = a.entity
     _timing(alert, event_time(a.event))
     alert["message"] = _message(alert)
     return alert
