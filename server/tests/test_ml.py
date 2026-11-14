@@ -186,9 +186,13 @@ def test_non_finite_inputs_are_safe(tmp_path, caplog):
 def test_loads_state_without_flags(tmp_path):
     # file trạng thái version 2 cũ (chưa có "flagged", "last_flush"): mọi cửa sổ coi như không bị gắn cờ
     p = tmp_path / "ml-state.json"
-    p.write_text(json.dumps({"version": 2, "models": {"web": {"train": [[6, 6, 0, 0, 0, 1, 1]] * 3, "first_seen": 0,
-                                                              "last_fit": None}}}), encoding="utf-8")
-    assert ml.AnomalyDetector(state_path=p).status()["web"]["windows"] == 3
+    p.write_text(json.dumps({"version": 2, "last_flush": 700, "models": {"web": {"train": [[6, 6, 0, 0, 0, 1, 1]] * 3,
+                                                                             "first_seen": 0, "last_fit": None}}}),
+                 encoding="utf-8")
+    det = ml.AnomalyDetector(state_path=p)
+    det.add(web("1.2.3.4"), 20); det.add(auth("1.2.3.4"), 20)    # watermark chung cũ áp cho cả hai model
+    assert det.status()["web"]["windows"] == 3
+    assert det.status()["web"]["dropped_late"] == 1 and det.status()["auth"]["dropped_late"] == 1
 
 def test_backlog_replay_keeps_windows_complete(tmp_path):
     # analyzer khởi động lại / agent dồn log: 30 phút event của 2 giờ trước tới theo lô 500, sau mỗi lô tick() gọi
@@ -224,3 +228,21 @@ def test_idle_stream_closes_windows_by_clock():
     assert det.status()["web"]["windows"] == 0
     det.flush(400 + ml.IDLE_SECONDS)                              # im đủ IDLE_SECONDS: đóng theo đồng hồ
     assert det.status()["web"]["windows"] == 1
+
+def test_cross_model_skew_not_dropped(tmp_path):
+    # auth từ nguồn khác (sshd trên VM web, đăng nhập console) tới trễ 90 s so với web, tick flush mỗi giây:
+    # watermark của model web không được làm rơi event auth, cửa sổ auth phải đủ như gom offline
+    rng = random.Random(3); p = tmp_path / "ml-state.json"
+    det = ml.AnomalyDetector(state_path=p); auths = []
+    for now in range(1000, 4600):
+        for k in range(3):
+            det.add(web(f"10.4.0.{k}", f"/p{rng.randint(1, 10)}", n=now), now - rng.uniform(0, 1))
+        if rng.random() < 0.2:
+            auths.append((auth(f"10.5.0.{rng.randint(0, 2)}", f"u{rng.randint(0, 3)}", rng.random() < 0.8, now), now - 90))
+            det.add(*auths[-1])
+        det.flush(now)
+    det.flush(5000); det.save()                                 # nguồn im tới quá cửa sổ auth cuối [4200, 4800)
+    st = det.status()
+    assert st["auth"]["dropped_late"] == 0 and st["web"]["dropped_late"] == 0
+    ref = sorted(v for _, _, v, _ in ml.windows_from_events(auths, ml.SPECS["auth"]))
+    assert ref and sorted(json.loads(p.read_text(encoding="utf-8"))["models"]["auth"]["train"]) == ref

@@ -176,6 +176,12 @@ class _Model:
     flagged: int = 0
     dropped_late: int = 0
     dropped_entities: int = 0
+    # watermark theo thời gian EVENT, riêng mỗi model (nguồn auth có thể trễ hơn nguồn web): cửa sổ hết trước mốc này
+    # (+ grace) đã đóng và không bao giờ mở lại
+    watermark: float | None = None
+    max_ts: float | None = None             # thời gian event lớn nhất model đã nhận (kẹp theo đồng hồ ở flush)
+    last_event_now: float | None = None     # `now` của lần flush gần nhất model có event mới
+    arrived: bool = False
 
 
 class AnomalyDetector:
@@ -186,11 +192,6 @@ class AnomalyDetector:
         self.learn_hours, self.min_windows, self.target_fp = learn_hours, min_windows, target_fp
         self.cooldown, self.retrain_hours, self.grace = cooldown, retrain_hours, grace
         self.max_entities = max_entities
-        # watermark theo thời gian EVENT: cửa sổ hết trước mốc này (+ grace) đã đóng và không bao giờ mở lại
-        self.watermark: float | None = None
-        self.max_ts: float | None = None         # thời gian event lớn nhất đã nhận (kẹp theo đồng hồ ở flush)
-        self.last_event_now: float | None = None  # `now` của lần flush gần nhất có event mới
-        self._arrived = False
         self.models = {name: _Model(spec) for name, spec in specs.items()}
         self._load()
 
@@ -199,10 +200,10 @@ class AnomalyDetector:
         for m in self.models.values():
             if not accepts(m.spec, doc):
                 continue
-            self.max_ts = ts if self.max_ts is None else max(self.max_ts, ts)
-            self._arrived = True
+            m.max_ts = ts if m.max_ts is None else max(m.max_ts, ts)
+            m.arrived = True
             idx = int(ts // m.spec.window)
-            if self.watermark is not None and (idx + 1) * m.spec.window + self.grace <= self.watermark:
+            if m.watermark is not None and (idx + 1) * m.spec.window + self.grace <= m.watermark:
                 m.dropped_late += 1          # cửa sổ đã đóng (kể cả trước khi khởi động lại): không mở lại thành nửa cửa sổ
                 continue
             per_ip = m.open.setdefault(idx, {})
@@ -219,34 +220,19 @@ class AnomalyDetector:
 
     def flush(self, now: float) -> list[Anomaly]:
         out: list[Anomaly] = []
-        self._advance(now)
         for m in self.models.values():
+            _advance(m, now)
             self._maybe_fit(m, now)
-            if self.watermark is None:
+            if m.watermark is None:
                 continue
             w = m.spec.window
-            for idx in sorted(i for i in m.open if (i + 1) * w + self.grace <= self.watermark):
+            for idx in sorted(i for i in m.open if (i + 1) * w + self.grace <= m.watermark):
                 out += self._close(m, idx, m.open.pop(idx))
             # nhờ watermark, cửa sổ nào đóng sau lần này đều bắt đầu sau `horizon`: mục loại trừ / im lặng cũ hơn vô dụng
-            horizon = self.watermark - self.grace - w
+            horizon = m.watermark - self.grace - w
             m.excluded = {(ip, i) for ip, i in m.excluded if i * w > horizon}
             m.silenced = {ip: t for ip, t in m.silenced.items() if t > horizon}
         return out
-
-    def _advance(self, now: float) -> None:
-        """Watermark = thời gian event lớn nhất (không vượt đồng hồ): backlog cũ (khởi động lại, agent dồn log) vẫn
-        rơi đúng cửa sổ và đóng đủ. Nguồn im IDLE_SECONDS thì theo đồng hồ để cửa sổ cuối không treo mãi."""
-        if self._arrived or self.last_event_now is None:     # lần flush đầu (vừa khởi động) cũng tính là mốc
-            self.last_event_now, self._arrived = now, False
-        if now - self.last_event_now >= IDLE_SECONDS:
-            wm = now
-        elif self.max_ts is not None:
-            # event ghi giờ tương lai chỉ kéo được tới đồng hồ, một lần, rồi watermark lại theo thời gian event
-            self.max_ts = wm = min(self.max_ts, now)
-        else:
-            return
-        if self.watermark is None or wm > self.watermark:
-            self.watermark = wm
 
     def _close(self, m: _Model, idx: int, per_ip: dict[str, Window]) -> list[Anomaly]:
         start = float(idx * m.spec.window)
@@ -323,9 +309,9 @@ class AnomalyDetector:
     def save(self) -> None:
         if not self.state_path:
             return
-        data = {"version": VERSION, "watermark": self.watermark,
+        data = {"version": VERSION,
                 "models": {name: {"train": m.train, "flagged": m.flags, "first_seen": m.first_seen,
-                                  "last_fit": m.last_fit} for name, m in self.models.items()}}
+                                  "last_fit": m.last_fit, "watermark": m.watermark} for name, m in self.models.items()}}
         tmp = self.state_path.with_name(self.state_path.name + ".tmp")
         try:
             self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -342,7 +328,8 @@ class AnomalyDetector:
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
             if data.get("version") != VERSION:
                 raise ValueError(f"version {data.get('version')!r}")
-            watermark, loaded = _opt(data.get("watermark", data.get("last_flush"))), {}   # last_flush: file cc2da4a
+            # file cũ có một watermark chung ("last_flush" của cc2da4a, "watermark" của 74e15f1): áp cho mọi model
+            shared, loaded = data.get("watermark", data.get("last_flush")), {}
             for name, m in self.models.items():
                 s = data["models"].get(name) or {}
                 train = [[_finite(x) for x in v] for v in s.get("train", [])]
@@ -351,16 +338,34 @@ class AnomalyDetector:
                 flags = s.get("flagged", [False] * len(train))     # file cũ chưa có cờ: coi như không bị gắn cờ
                 if len(flags) != len(train) or not all(isinstance(f, bool) for f in flags):
                     raise ValueError(f"cờ {name} không khớp vector")
-                loaded[name] = (train[-MAX_TRAIN:], flags[-MAX_TRAIN:], _opt(s.get("first_seen")), _opt(s.get("last_fit")))
+                loaded[name] = (train[-MAX_TRAIN:], flags[-MAX_TRAIN:], _opt(s.get("first_seen")), _opt(s.get("last_fit")),
+                                _opt(s.get("watermark", shared)))
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as e:
             log.warning("ML: file trạng thái %s hỏng hoặc khác version (%s), học lại từ đầu", self.state_path, e)
             return
-        self.watermark = watermark
-        for name, (train, flags, first, last_fit) in loaded.items():
+        for name, (train, flags, first, last_fit, watermark) in loaded.items():
             m = self.models[name]
-            m.train, m.flags, m.first_seen, m.last_fit = train, flags, first, last_fit
+            m.train, m.flags, m.first_seen, m.last_fit, m.watermark = train, flags, first, last_fit, watermark
         log.info("ML: nạp trạng thái %s (%s)", self.state_path,
                  ", ".join(f"{n} {len(m.train)} cửa sổ" for n, m in self.models.items()))
+
+
+def _advance(m: _Model, now: float) -> None:
+    """Watermark của model = thời gian event lớn nhất model nhận (không vượt đồng hồ): backlog cũ (khởi động lại, agent
+    dồn log) vẫn rơi đúng cửa sổ và đóng đủ. Model im IDLE_SECONDS thì theo đồng hồ để cửa sổ cuối không treo mãi."""
+    if m.arrived or m.last_event_now is None:     # lần flush đầu (vừa khởi động) cũng tính là mốc
+        m.last_event_now, m.arrived = now, False
+    if now - m.last_event_now >= IDLE_SECONDS:
+        # shortcut: Kafka nghẽn > IDLE_SECONDS giữa lúc phát lại backlog thì quy tắc này đóng nửa cửa sổ và phần backlog
+        # còn lại bị bỏ như event muộn (có đếm dropped_late), nâng cấp khi analyzer biết trạng thái lag của consumer
+        wm = now
+    elif m.max_ts is not None:
+        # event ghi giờ tương lai chỉ kéo được tới đồng hồ, một lần, rồi watermark lại theo thời gian event
+        m.max_ts = wm = min(m.max_ts, now)
+    else:
+        return
+    if m.watermark is None or wm > m.watermark:
+        m.watermark = wm
 
 
 def _opt(v) -> float | None:
