@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from siem.detection.alerts import SEVERITY_SCORE
-from siem.detection.ml import AnomalyDetector
+from siem.detection.ml import IDLE_SECONDS, AnomalyDetector
 from siem.pipeline.enrich import Enricher
 from siem.pipeline.normalize import get, normalize
 
@@ -231,7 +231,7 @@ def test_ml_flags_scanner_not_normal(enricher):
     for k in range(400):
         d = enricher.enrich(normalize(apache("10.66.66.66", f"GET /admin{k}.php HTTP/1.1", 404 if k % 10 else 200)))
         det.add(d, t + k * 0.1)
-    flagged = {a.entity for a in det.flush(t + 331)}
+    flagged = {a.entity for a in det.flush(t + 331) + det.flush(t + 331 + IDLE_SECONDS)}
     assert det.status()["web"]["phase"] == "active"
     assert "10.66.66.66" in flagged
     assert len(flagged & {f"10.1.0.{u}" for u in range(20)}) <= 1

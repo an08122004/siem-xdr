@@ -1,4 +1,4 @@
-import json, math, random
+import json, math, random, time
 from siem.detection import ml
 
 def web(ip, path="/", status=200, kb=1, ua="UA1", n=0):
@@ -19,6 +19,10 @@ def normal_traffic(det, start, hours, ips=50, seed=1):
                             rng.randint(1, 40), f"UA{k % 5}", i), t + rng.uniform(0, 290))
         t += 300; det.flush(t + 31)
     return t
+
+def settle(det, now):
+    """flush, rồi flush lần nữa sau IDLE_SECONDS không có event: nguồn im thì cửa sổ đóng theo đồng hồ"""
+    return det.flush(now) + det.flush(now + ml.IDLE_SECONDS)
 
 def normal_vectors(n=1000, seed=0):
     """vector web đã cộng dồn, cùng phân bố với normal_traffic. Không seed n bản sao của một vector: dữ liệu học
@@ -49,7 +53,7 @@ def test_learning_phase_emits_nothing():
     end = normal_traffic(det, 0, 2)
     for i in range(500):
         det.add(web("9.9.9.9", f"/x{i}", 404), end + 1)
-    assert det.flush(end + 400) == [] and det.status()["web"]["phase"] == "learning"
+    assert settle(det, end + 400) == [] and det.status()["web"]["phase"] == "learning"
 
 def test_active_flags_scan_not_normals():
     det = ml.AnomalyDetector(learn_hours=1, min_windows=200)
@@ -59,7 +63,7 @@ def test_active_flags_scan_not_normals():
     assert det.flagged_ratio("web") <= 0.02                 # cửa sổ bình thường hầu như không bị gắn cờ
     for i in range(400):
         det.add(web("9.9.9.9", f"/x{i}", 404, 0, "scanner", i), later + 5 + i * 0.5)
-    hits = [a for a in det.flush(later + 300 + 31) if a.entity == "9.9.9.9"]
+    hits = [a for a in settle(det, later + 300 + 31) if a.entity == "9.9.9.9"]
     assert len(hits) == 1 and hits[0].model == "web"
     assert {f for f, _, _ in hits[0].top} & {"n_paths", "n_404", "n_requests"}
     assert ml.severity(hits[0]) in ("medium", "high") and "thường" in ml.explain(hits[0])
@@ -79,7 +83,7 @@ def test_min_events_gate():
     det = ml.AnomalyDetector(learn_hours=0, min_windows=1)
     det.seed("web", normal_vectors(), first_seen=0)
     det.add(web("8.8.8.8", "/a", 404), 10); det.add(web("8.8.8.8", "/b", 404), 11)
-    assert det.flush(400) == []                              # 2 request < tối thiểu 5
+    assert settle(det, 400) == [] and det.status()["web"]["windows"] == 1000   # 2 request < tối thiểu 5
 
 def test_cooldown_suppresses_repeat():
     det = ml.AnomalyDetector(learn_hours=0, min_windows=1, cooldown=1800)
@@ -89,6 +93,7 @@ def test_cooldown_suppresses_repeat():
         for i in range(300):
             det.add(web("9.9.9.9", f"/x{w}-{i}", 404), w * 300 + i * 0.5)
         out += det.flush(w * 300 + 331)
+    out += det.flush(2 * 300 + 331 + ml.IDLE_SECONDS)
     assert len([a for a in out if a.entity == "9.9.9.9"]) == 1
 
 def test_excluded_windows_not_learned():
@@ -96,14 +101,14 @@ def test_excluded_windows_not_learned():
     for i in range(10):
         det.add(web("7.7.7.7", f"/a{i}"), 5)
     det.exclude("7.7.7.7", 5)
-    det.flush(400)
+    settle(det, 400)
     assert det.status()["web"]["windows"] == 0
 
 def test_late_events_for_closed_window_dropped():
     det = ml.AnomalyDetector()
     for i in range(6):
         det.add(web("1.2.3.4", f"/a{i}"), 10)
-    det.flush(400)                                           # đóng cửa sổ [0, 300)
+    settle(det, 400)                                         # đóng cửa sổ [0, 300)
     det.add(web("1.2.3.4", "/late"), 20)                     # event muộn của cửa sổ đã đóng
     assert det.flush(800) == [] and det.status()["web"]["dropped_late"] == 1
     assert det.status()["web"]["windows"] == 1
@@ -158,7 +163,7 @@ def test_restart_does_not_reopen_closed_windows(tmp_path):
     det = ml.AnomalyDetector(state_path=p)
     for i in range(6):
         det.add(web("1.2.3.4", f"/a{i}"), 10)
-    det.flush(400); det.save()                                   # đóng cửa sổ [0, 300)
+    settle(det, 400); det.save()                                 # đóng cửa sổ [0, 300), watermark 460
     again = ml.AnomalyDetector(state_path=p)
     again.add(web("1.2.3.4", "/late"), 20)                       # backlog của cửa sổ đã đóng trước khi khởi động lại
     again.add(web("5.5.5.5", "/x"), 100)                         # cửa sổ đó cũng đã đóng với IP chưa có event nào
@@ -184,3 +189,38 @@ def test_loads_state_without_flags(tmp_path):
     p.write_text(json.dumps({"version": 2, "models": {"web": {"train": [[6, 6, 0, 0, 0, 1, 1]] * 3, "first_seen": 0,
                                                               "last_fit": None}}}), encoding="utf-8")
     assert ml.AnomalyDetector(state_path=p).status()["web"]["windows"] == 3
+
+def test_backlog_replay_keeps_windows_complete(tmp_path):
+    # analyzer khởi động lại / agent dồn log: 30 phút event của 2 giờ trước tới theo lô 500, sau mỗi lô tick() gọi
+    # flush(time.time()). Mọi cửa sổ phải đóng đủ (giống hệt gom offline), không event nào bị coi là muộn
+    rng = random.Random(7); t0 = time.time() - 7200
+    docs = sorted(((web(f"10.2.0.{k}", f"/p{rng.randint(1, 10)}", 200, 1, "UA", i), t0 + rng.uniform(0, 1800))
+                   for k in range(20) for i in range(145)), key=lambda e: e[1])
+    p = tmp_path / "ml-state.json"
+    det = ml.AnomalyDetector(state_path=p)
+    for b in range(0, len(docs), 500):
+        for d, ts in docs[b:b + 500]:
+            det.add(d, ts)
+        det.flush(time.time())
+    det.flush(time.time() + ml.IDLE_SECONDS); det.save()
+    ref = sorted(v for _, _, v, _ in ml.windows_from_events(docs, ml.SPECS["web"]))
+    assert det.status()["web"]["dropped_late"] == 0 and len(ref) >= 120
+    assert sorted(json.loads(p.read_text(encoding="utf-8"))["models"]["web"]["train"]) == ref
+
+def test_future_event_cannot_push_watermark_past_clock():
+    det = ml.AnomalyDetector()
+    for i in range(6):
+        det.add(web("6.6.6.6", f"/f{i}"), 10 ** 6)                # đồng hồ máy gửi lệch về tương lai
+    det.flush(400)
+    det.add(web("1.2.3.4", "/a"), 350)                            # [300, 600) chưa hết theo đồng hồ: vẫn nhận
+    det.flush(401)
+    assert det.status()["web"]["dropped_late"] == 0 and det.status()["web"]["windows"] == 0
+
+def test_idle_stream_closes_windows_by_clock():
+    det = ml.AnomalyDetector()
+    for i in range(6):
+        det.add(web("1.2.3.4", f"/a{i}"), 10 + i)
+    det.flush(400); det.flush(400 + ml.IDLE_SECONDS - 1)          # event vừa tới: watermark theo thời gian event (15)
+    assert det.status()["web"]["windows"] == 0
+    det.flush(400 + ml.IDLE_SECONDS)                              # im đủ IDLE_SECONDS: đóng theo đồng hồ
+    assert det.status()["web"]["windows"] == 1
