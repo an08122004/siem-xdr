@@ -282,7 +282,7 @@ check("grafana", "Sign out trong Grafana → đăng xuất luôn phiên console"
 st, orgs = admin.grafana("/api/user/orgs")
 check("grafana", "quản trị console (e2e-admin) → Admin trong Grafana", st == 200 and orgs[0]["role"] == "Admin")
 st, d = admin.grafana("/api/dashboards/uid/siem-overview")
-check("grafana", "dashboard Tổng quan SOC tải được", st == 200 and len(d["dashboard"]["panels"]) == 40,
+check("grafana", "dashboard Tổng quan SOC tải được", st == 200 and len(d["dashboard"]["panels"]) == 42,
       f"{len(d['dashboard']['panels'])} panel" if st == 200 else str(st))
 q = {"refId": "A", "datasource": {"type": "elasticsearch", "uid": "siem-events"},
      "query": "event.module:console AND event.category:authentication", "metrics": [{"id": "1", "type": "count"}],

@@ -18,7 +18,7 @@
   "graphTooltip": 1,
   "panels": [
     {
-      "id": 41,
+      "id": 43,
       "type": "row",
       "title": "Thực thể: ${q}",
       "collapsed": false,
@@ -31,7 +31,7 @@
       "panels": []
     },
     {
-      "id": 42,
+      "id": 44,
       "type": "stat",
       "title": "Event",
       "datasource": {
@@ -100,7 +100,7 @@
       }
     },
     {
-      "id": 43,
+      "id": 45,
       "type": "stat",
       "title": "Alert",
       "datasource": {
@@ -169,7 +169,7 @@
       }
     },
     {
-      "id": 44,
+      "id": 46,
       "type": "stat",
       "title": "Alert nghiêm trọng / cao",
       "datasource": {
@@ -238,7 +238,7 @@
       }
     },
     {
-      "id": 45,
+      "id": 47,
       "type": "stat",
       "title": "Đăng nhập thất bại (cả console)",
       "datasource": {
@@ -307,7 +307,7 @@
       }
     },
     {
-      "id": 46,
+      "id": 48,
       "type": "table",
       "title": "Event theo loại",
       "datasource": {
@@ -411,7 +411,7 @@
       }
     },
     {
-      "id": 47,
+      "id": 49,
       "type": "timeseries",
       "title": "Alert theo mức độ",
       "datasource": {
@@ -578,7 +578,7 @@
       }
     },
     {
-      "id": 48,
+      "id": 50,
       "type": "table",
       "title": "Hành động (event.action)",
       "datasource": {
@@ -682,7 +682,7 @@
       }
     },
     {
-      "id": 49,
+      "id": 51,
       "type": "table",
       "title": "URL bị truy cập",
       "datasource": {
@@ -786,7 +786,7 @@
       }
     },
     {
-      "id": 50,
+      "id": 52,
       "type": "table",
       "title": "Tiến trình",
       "datasource": {
@@ -890,7 +890,7 @@
       }
     },
     {
-      "id": 51,
+      "id": 53,
       "type": "table",
       "title": "IP liên quan",
       "datasource": {
@@ -994,7 +994,7 @@
       }
     },
     {
-      "id": 52,
+      "id": 54,
       "type": "table",
       "title": "Alert của thực thể — bấm tên rule để mở trên console",
       "datasource": {
@@ -1263,7 +1263,7 @@
       }
     },
     {
-      "id": 53,
+      "id": 55,
       "type": "table",
       "title": "Event gần đây",
       "datasource": {

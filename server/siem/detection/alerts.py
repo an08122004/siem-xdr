@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .. import priority as prio
+from . import ml
 from ..pipeline.normalize import Doc, get
 from ..store import new_id, now_iso
 
@@ -67,26 +68,32 @@ def _timing(alert: Doc, first: float | None) -> None:
     alert["metrics"] = {"ttd_seconds": prio.seconds_between(ts, alert["@timestamp"])}
 
 
-def from_anomaly(a: Any, severity: str, description: str, features: dict[str, Any]) -> Doc:
-    # shortcut: tạm cho Task 2 gỡ — vẫn rule ML-001, chưa theo ModelSpec (ML-WEB / ML-AUTH, bóng)
+def from_anomaly(a: Any, spec: Any, shadow: bool) -> Doc:
+    """Alert ML-WEB / ML-AUTH (D7). shadow: alert.shadow=true, SOAR và KPI bỏ qua (cơ chế bóng sẵn có)."""
+    sev = ml.severity(a)
     alert: Doc = {
         "@timestamp": now_iso(),
         "alert": {"id": new_id(), "status": "open", "source": "ml"},
         "rule": {
-            "id": "ML-001", "name": "Hành vi bất thường của IP nguồn (Isolation Forest)",
-            "description": f"Điểm bất thường {a.score:.3f}. Đặc trưng nổi bật: {description}",
-            "type": "ml", "severity": severity, "tags": ["ml", "anomaly"],
-            "mitre": {"tactic": "Discovery", "technique": []},
+            "id": spec.rule_id, "name": spec.title,
+            "description": f"Điểm bất thường {a.score:.3f} (ngưỡng {a.threshold:.3f}). {ml.explain(a)}",
+            "type": "ml", "severity": sev, "tags": ["ml", "anomaly", spec.name],
+            "mitre": {"tactic": spec.tactic, "technique": [spec.technique]},
         },
-        "severity": severity,
-        "severity_score": SEVERITY_SCORE[severity],
-        "risk_score": _risk(severity, a.event),
-        "ml": {"score": round(a.score, 4), "features": features},
-        "count": int(features.get("n_requests") or features.get("n_attempts") or 0),
+        "severity": sev,
+        "severity_score": SEVERITY_SCORE[sev],
+        "risk_score": _risk(sev, a.event),
+        "ml": {"model": a.model, "score": round(a.score, 4), "threshold": round(a.threshold, 4),
+               "features": {k: round(v, 3) for k, v in a.features.items()},
+               "top": [{"feature": f, "value": round(x, 3), "median": round(m, 3)} for f, x, m in a.top]},
+        "count": int(a.features.get("n_requests") or a.features.get("n_attempts") or 0),
         "related_events": a.event_ids,
         "event_time": a.event.get("@timestamp"),
         "trigger_event": _trigger(a.event),
     }
+    if shadow:
+        alert["alert"]["shadow"] = True
+        alert["rule"]["mode"] = "shadow"
     _copy_entities(a.event, alert)
     alert.setdefault("source", {})["ip"] = a.entity
     _timing(alert, event_time(a.event))

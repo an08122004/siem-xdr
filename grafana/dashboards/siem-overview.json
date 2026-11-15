@@ -1645,19 +1645,227 @@
     },
     {
       "id": 18,
+      "type": "table",
+      "title": "Alert ML theo model (gồm bóng)",
+      "datasource": {
+        "type": "elasticsearch",
+        "uid": "siem-alerts"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "elasticsearch",
+            "uid": "siem-alerts"
+          },
+          "query": "alert.source:ml",
+          "alias": "",
+          "timeField": "@timestamp",
+          "metrics": [
+            {
+              "id": "1",
+              "type": "count"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "id": "3",
+              "type": "terms",
+              "field": "rule.id",
+              "settings": {
+                "size": "5",
+                "order": "desc",
+                "orderBy": "_count",
+                "min_doc_count": "1"
+              }
+            }
+          ]
+        }
+      ],
+      "options": {
+        "showHeader": false,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#4f9dde"
+          },
+          "min": 0,
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "number"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "string"
+            },
+            "properties": [
+              {
+                "id": "custom.minWidth",
+                "value": 50
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 19,
+      "type": "table",
+      "title": "IP bị ML gắn cờ nhiều nhất",
+      "datasource": {
+        "type": "elasticsearch",
+        "uid": "siem-alerts"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "elasticsearch",
+            "uid": "siem-alerts"
+          },
+          "query": "alert.source:ml",
+          "alias": "",
+          "timeField": "@timestamp",
+          "metrics": [
+            {
+              "id": "1",
+              "type": "count"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "id": "3",
+              "type": "terms",
+              "field": "source.ip",
+              "settings": {
+                "size": "10",
+                "order": "desc",
+                "orderBy": "_count",
+                "min_doc_count": "1"
+              }
+            }
+          ]
+        }
+      ],
+      "options": {
+        "showHeader": false,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#4f9dde"
+          },
+          "min": 0,
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "number"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "string"
+            },
+            "properties": [
+              {
+                "id": "custom.minWidth",
+                "value": 50
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 20,
       "type": "row",
       "title": "Telemetry",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 32,
+        "y": 40,
         "w": 24,
         "h": 1
       },
       "panels": []
     },
     {
-      "id": 19,
+      "id": 21,
       "type": "timeseries",
       "title": "HTTP status code (Apache)",
       "datasource": {
@@ -1666,7 +1874,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 33,
+        "y": 41,
         "w": 8,
         "h": 8
       },
@@ -1821,7 +2029,7 @@
       }
     },
     {
-      "id": 20,
+      "id": 22,
       "type": "table",
       "title": "IP xác thực thất bại nhiều nhất",
       "datasource": {
@@ -1830,7 +2038,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 33,
+        "y": 41,
         "w": 8,
         "h": 8
       },
@@ -1925,7 +2133,7 @@
       }
     },
     {
-      "id": 21,
+      "id": 23,
       "type": "table",
       "title": "Nguồn dữ liệu (event.module)",
       "datasource": {
@@ -1934,7 +2142,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 33,
+        "y": 41,
         "w": 8,
         "h": 8
       },
@@ -2029,7 +2237,7 @@
       }
     },
     {
-      "id": 22,
+      "id": 24,
       "type": "table",
       "title": "Top URL bị truy cập",
       "datasource": {
@@ -2038,7 +2246,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 41,
+        "y": 49,
         "w": 12,
         "h": 8
       },
@@ -2133,7 +2341,7 @@
       }
     },
     {
-      "id": 23,
+      "id": 25,
       "type": "table",
       "title": "Kết nối bị firewall chặn (IP nguồn)",
       "datasource": {
@@ -2142,7 +2350,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 41,
+        "y": 49,
         "w": 12,
         "h": 8
       },
@@ -2237,20 +2445,20 @@
       }
     },
     {
-      "id": 24,
+      "id": 26,
       "type": "row",
       "title": "Phiên đăng nhập",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 49,
+        "y": 57,
         "w": 24,
         "h": 1
       },
       "panels": []
     },
     {
-      "id": 25,
+      "id": 27,
       "type": "stat",
       "title": "Đăng nhập hệ thống thành công",
       "datasource": {
@@ -2259,7 +2467,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 50,
+        "y": 58,
         "w": 4,
         "h": 4
       },
@@ -2319,7 +2527,7 @@
       }
     },
     {
-      "id": 26,
+      "id": 28,
       "type": "stat",
       "title": "Đăng nhập hệ thống thất bại",
       "datasource": {
@@ -2328,7 +2536,7 @@
       },
       "gridPos": {
         "x": 4,
-        "y": 50,
+        "y": 58,
         "w": 4,
         "h": 4
       },
@@ -2388,7 +2596,7 @@
       }
     },
     {
-      "id": 27,
+      "id": 29,
       "type": "stat",
       "title": "Đặc quyền đăng nhập hệ thống được (root/Administrator/admin)",
       "datasource": {
@@ -2397,7 +2605,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 50,
+        "y": 58,
         "w": 4,
         "h": 4
       },
@@ -2457,7 +2665,7 @@
       }
     },
     {
-      "id": 28,
+      "id": 30,
       "type": "stat",
       "title": "Đăng nhập form web bị từ chối",
       "datasource": {
@@ -2466,7 +2674,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 50,
+        "y": 58,
         "w": 4,
         "h": 4
       },
@@ -2526,7 +2734,7 @@
       }
     },
     {
-      "id": 29,
+      "id": 31,
       "type": "stat",
       "title": "Đăng nhập console SOC thành công",
       "datasource": {
@@ -2535,7 +2743,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 50,
+        "y": 58,
         "w": 4,
         "h": 4
       },
@@ -2595,7 +2803,7 @@
       }
     },
     {
-      "id": 30,
+      "id": 32,
       "type": "stat",
       "title": "Đăng nhập console SOC thất bại",
       "datasource": {
@@ -2604,7 +2812,7 @@
       },
       "gridPos": {
         "x": 20,
-        "y": 50,
+        "y": 58,
         "w": 4,
         "h": 4
       },
@@ -2664,7 +2872,7 @@
       }
     },
     {
-      "id": 31,
+      "id": 33,
       "type": "timeseries",
       "title": "Đăng nhập hệ thống theo kết quả",
       "datasource": {
@@ -2673,7 +2881,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 54,
+        "y": 62,
         "w": 12,
         "h": 8
       },
@@ -2793,7 +3001,7 @@
       }
     },
     {
-      "id": 32,
+      "id": 34,
       "type": "table",
       "title": "IP đăng nhập form web nhiều nhất",
       "datasource": {
@@ -2802,7 +3010,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 54,
+        "y": 62,
         "w": 12,
         "h": 8
       },
@@ -2897,7 +3105,7 @@
       }
     },
     {
-      "id": 33,
+      "id": 35,
       "type": "table",
       "title": "Tài khoản đăng nhập thất bại nhiều nhất",
       "datasource": {
@@ -2906,7 +3114,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 62,
+        "y": 70,
         "w": 6,
         "h": 8
       },
@@ -3001,7 +3209,7 @@
       }
     },
     {
-      "id": 34,
+      "id": 36,
       "type": "table",
       "title": "IP nguồn đăng nhập thành công",
       "datasource": {
@@ -3010,7 +3218,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 62,
+        "y": 70,
         "w": 6,
         "h": 8
       },
@@ -3105,7 +3313,7 @@
       }
     },
     {
-      "id": 35,
+      "id": 37,
       "type": "table",
       "title": "Đăng nhập theo máy",
       "datasource": {
@@ -3114,7 +3322,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 62,
+        "y": 70,
         "w": 6,
         "h": 8
       },
@@ -3209,7 +3417,7 @@
       }
     },
     {
-      "id": 36,
+      "id": 38,
       "type": "table",
       "title": "Hình thức đăng nhập",
       "datasource": {
@@ -3218,7 +3426,7 @@
       },
       "gridPos": {
         "x": 18,
-        "y": 62,
+        "y": 70,
         "w": 6,
         "h": 8
       },
@@ -3313,7 +3521,7 @@
       }
     },
     {
-      "id": 37,
+      "id": 39,
       "type": "table",
       "title": "Phiên đăng nhập gần đây",
       "datasource": {
@@ -3322,7 +3530,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 70,
+        "y": 78,
         "w": 24,
         "h": 10
       },
@@ -3535,20 +3743,20 @@
       }
     },
     {
-      "id": 38,
+      "id": 40,
       "type": "row",
       "title": "Phản ứng (XDR / SOAR)",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 80,
+        "y": 88,
         "w": 24,
         "h": 1
       },
       "panels": []
     },
     {
-      "id": 39,
+      "id": 41,
       "type": "table",
       "title": "Lệnh phản ứng gần đây",
       "datasource": {
@@ -3557,7 +3765,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 81,
+        "y": 89,
         "w": 24,
         "h": 9
       },
@@ -3779,7 +3987,7 @@
       }
     },
     {
-      "id": 40,
+      "id": 42,
       "type": "table",
       "title": "Case đang mở — bấm tiêu đề để mở trên console",
       "datasource": {
@@ -3788,7 +3996,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 90,
+        "y": 98,
         "w": 24,
         "h": 9
       },

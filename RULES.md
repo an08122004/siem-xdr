@@ -38,7 +38,7 @@ Alert trong hệ thống đến từ các nguồn sau (đếm rule trên mã ng�
 | Rule do AI đề xuất (`rules-dynamic/ai.xml`) | chưa rule nào được triển khai (06/11/2026: 178 đề xuất, 0 đã triển khai) | `WZH-109xxx`, mã `AI-NNN` | Bóng khi duyệt, bật chính thức trên console (mục 2.9) |
 | Ngoại lệ (`rules-dynamic/exceptions.xml`) | rule level 0, không sinh alert | 110000–110999 | Hai người khác nhau duyệt (mục 2.5) |
 | Phát hiện của nền tảng | RBA-001 (`soar/risk.py`), HLT-* (`soar/health.py`) | `RBA-001`, `HLT-*` | Đang chạy |
-| ML (Isolation Forest) | — | `ML-001` | Tắt (`ML_ENABLED=false`, báo nhầm khoảng 32%) |
+| ML (Isolation Forest theo IP) | — | `ML-WEB`, `ML-AUTH` | Tắt mặc định (`ML_ENABLED=false`); bật thì chạy bóng (`ML_MODE=shadow`), thiết kế ở [AI-README.md](AI-README.md) mục 16 |
 
 ## 2. Cơ chế hoạt động
 
