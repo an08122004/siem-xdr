@@ -40,6 +40,7 @@ nghìn lần qua SigmaHQ; hệ thống biên dịch rule Sigma sang cây điều
 13. [Nhật ký thay đổi pipeline](#13-nhật-ký-thay-đổi-pipeline)
 14. [Nghiên cứu: phương án dùng AI tự động sinh bộ rule](#14-nghiên-cứu-phương-án-dùng-ai-tự-động-sinh-bộ-rule-14102026)
 15. [Kế hoạch phát triển AI sinh rule](#15-kế-hoạch-phát-triển-ai-sinh-rule-16102026)
+16. [ML phát hiện bất thường theo IP (ML-WEB, ML-AUTH)](#16-ml-phát-hiện-bất-thường-theo-ip-ml-web-ml-auth)
 
 ## 1. AI làm gì và không làm gì
 
@@ -56,7 +57,7 @@ nên luôn trượt cổng Wazuh (R78).
 Phần LLM làm khá hẹp: nhìn vài mẫu tấn công, vài mẫu bình thường, rồi viết ra chữ ký chung. Mọi bước khác do code tất định và
 con người làm. Ngoài phạm vi, có chủ đích: AI không tự triển khai rule (một rule tệ có thể làm ngập alert, một ngoại lệ tệ có thể
 làm mù SIEM), không phân loại event theo thời gian thực, và không phát hiện bất thường (phần đó là module ML Isolation Forest,
-đang tắt vì báo nhầm cao).
+nay là `ML-WEB` / `ML-AUTH`, chạy bóng, mục 16).
 
 LLM chạy nội bộ bằng Ollama, không publish cổng; log không rời khỏi máy.
 
@@ -1371,3 +1372,49 @@ chưa có tập bình thường thật (mục 10: điểm nghẽn là dữ liệ
 - GPU laptop nóng, một chu kỳ có lúc 60 phút; máy ngủ từng làm bench treo 20 giờ (mục 9.9). Chạy đo ban đêm, tắt chế độ ngủ.
 - Người duyệt quá tải khi thêm đề xuất SigmaHQ và CTI: tối đa 10 đề xuất mỗi chu kỳ, đề xuất kèm báo cáo, rule gọn.
 - Các rủi ro chung ở 14.8.
+
+## 16. ML phát hiện bất thường theo IP (ML-WEB, ML-AUTH)
+
+Module `server/siem/detection/ml.py` (Isolation Forest của scikit-learn) thay bản ML cũ `ML-001`. Bản cũ tắt từ 26/09 vì báo
+nhầm khoảng 32% lưu lượng bình thường và 100% với IP chỉ có 1 event. Bản mới sửa từng nguyên nhân; phần này chỉ mô tả thiết kế
+(số đo trên lab sẽ ghi sau khi chạy xong thí nghiệm).
+
+### 16.1 Quyết định thiết kế
+
+| # | Quyết định | Lý do |
+|---|---|---|
+| D1 | Hai model: `web` (khóa `source.ip`, cửa sổ 300 giây, tối thiểu 5 request) và `auth` (khóa `source.ip`, cửa sổ 600 giây, tối thiểu 1 lần đăng nhập). Không dùng đặc trưng cổng / bị chặn (lab chưa có log firewall) | Một model chung cho mọi nguồn là nguyên nhân chính của báo nhầm; cửa sổ 60 giây quá ngắn cho một phiên duyệt web |
+| D2 | Không còn baseline tổng hợp. Model chỉ hoạt động sau giai đoạn học: từ cửa sổ đầu tiên đủ `ML_LEARN_HOURS` (48) giờ **và** có ít nhất `ML_MIN_WINDOWS` (200) cửa sổ | Baseline tổng hợp lệch dữ liệu thật |
+| D3 | Ngưỡng là phân vị `ML_TARGET_FP` (0,005) của điểm trên **tập giữ lại**: 20% cửa sổ mới nhất, tối thiểu 50 | Báo nhầm có chủ đích thay cho ngưỡng cứng |
+| D4 | Trạng thái lưu JSON (`/data/models/ml-state.json`, version 2) chứa vector cửa sổ, fit lại khi nạp | Pickle scikit-learn vỡ giữa các phiên bản (máy dev Python 3.14, image 3.12) |
+| D5 | Không học cửa sổ của IP có alert thật (không bóng) trong cùng cửa sổ, cũng không học cửa sổ ML đã gắn cờ. Analyzer gọi `detector.exclude(ip, thời điểm event)` mỗi khi cầu nối Wazuh sinh alert thật có `source.ip` | Chống "đầu độc" baseline bằng chính cuộc tấn công |
+| D6 | Mỗi (model, IP) báo tối đa 1 lần mỗi `ML_COOLDOWN_MINUTES` (30) | Chống lặp alert |
+| D7 | Alert `rule.id` `ML-WEB` / `ML-AUTH`, `alert.source` `ml`, `alert.shadow=true` và `rule.mode=shadow` khi `ML_MODE=shadow` (mặc định) | Dùng lại cơ chế bóng: SOAR bỏ qua, KPI không tính |
+| D8 | Giải thích: tối đa 3 đặc trưng có `(x + 1) / (trung vị + 1) ≥ 2`, xếp giảm dần, dạng `n_paths=340 (thường 8)` | Analyst đọc được, không cần hiểu điểm Isolation Forest |
+| D9 | Mức độ theo khoảng cách dưới ngưỡng `m = ngưỡng − điểm`: `m > 0,15` high, `m > 0,05` medium, còn lại low | Đơn điệu, dễ kiểm |
+| D10 | Có thể khởi tạo model offline từ event đã thu trong Elasticsearch (công cụ `tools/ml_eval.py`, thêm ở bước thí nghiệm của kế hoạch), rồi chép `ml-state.json` vào volume của analyzer | Analyzer chỉ có quyền ghi ES, không đọc lịch sử |
+| D11 | Kịch bản tấn công của lab chạy từ IP 10.10.1.60–69, khác dải người dùng 40–59; nhãn ở `/var/log/labsim/attacks.jsonl` | Nhãn rõ ràng theo IP và thời gian |
+
+Chi tiết vận hành đã kiểm bằng test: cửa sổ đóng theo **thời gian event** (watermark riêng mỗi model; nguồn im quá 60 giây thì
+đóng theo đồng hồ), event tới muộn cho cửa sổ đã đóng bị bỏ và đếm (`dropped_late`), bộ nhớ bị chặn (tối đa 1000 phần tử mỗi
+tập, 50.000 IP mỗi cửa sổ; phần vượt đếm ở `dropped_entities`), file trạng thái hỏng hoặc khác version thì học lại từ đầu và
+analyzer không chết. Analyzer lưu trạng thái mỗi giờ và khi nhận SIGTERM (`docker stop`), nên khởi động lại giữa giai đoạn học
+vẫn học tiếp. Mỗi giờ log một dòng mỗi model, ví dụ `ML web: active, 812 cửa sổ, ngưỡng -0.071, bỏ muộn 3, bỏ IP 0`.
+
+### 16.2 Cách bật
+
+1. Đặt `ML_ENABLED=true` trong `.env`, tạo lại container analyzer. Mặc định `ML_MODE=shadow`: alert ML ghi vào `siem-alerts` với
+   `alert.shadow=true`, SOAR không phản ứng, KPI không tính, dashboard *Tổng quan SOC* có hai ô riêng (*Alert ML theo model (gồm
+   bóng)*, *IP bị ML gắn cờ nhiều nhất*).
+2. Chờ hết giai đoạn học (≥ 48 giờ và ≥ 200 cửa sổ mỗi model). Trong lúc học model không báo gì.
+3. Chuyển `ML_MODE=active` chỉ khi đạt tiêu chí chạy bóng của [SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 4: ít nhất 7 ngày,
+   dưới 5 alert/ngày, báo nhầm dưới 30% trên alert đã có kết luận.
+4. Biến cấu hình: `ML_ENABLED`, `ML_MODE`, `ML_LEARN_HOURS`, `ML_MIN_WINDOWS`, `ML_TARGET_FP`, `ML_COOLDOWN_MINUTES`,
+   `ML_RETRAIN_HOURS` (xem `.env.example`). Bốn biến cũ `ML_WINDOW_SECONDS`, `ML_MIN_SAMPLES`, `ML_CONTAMINATION`,
+   `ML_BOOTSTRAP_SYNTHETIC` đã bỏ.
+
+### 16.3 Lab
+
+Lab đo mô hình nằm ở `tools/lab/mllab/`: `Ubuntu_GSANM` chạy Apache có `/portal` Basic Auth và SSH (agent `lab-web`), máy
+`Ubuntu-lab-wazuh` chạy dịch vụ `labsim` mô phỏng 20 người dùng (IP 10.10.1.40–59, agent `lab-client`). Tài khoản tạo trong VM
+luôn có tiền tố `lab_`. Kết quả đo sẽ ghi ở mục này khi có.

@@ -18,7 +18,7 @@
   "graphTooltip": 1,
   "panels": [
     {
-      "id": 54,
+      "id": 56,
       "type": "row",
       "title": "Tổng quan thư viện rule Wazuh",
       "collapsed": false,
@@ -31,7 +31,7 @@
       "panels": []
     },
     {
-      "id": 55,
+      "id": 57,
       "type": "stat",
       "title": "Rule đang chạy (tạo alert thật)",
       "datasource": {
@@ -100,7 +100,7 @@
       }
     },
     {
-      "id": 56,
+      "id": 58,
       "type": "stat",
       "title": "Rule chạy bóng (đo thử, không ra alert thật)",
       "datasource": {
@@ -169,7 +169,7 @@
       }
     },
     {
-      "id": 57,
+      "id": 59,
       "type": "stat",
       "title": "Rule Wazuh không cầu nối (không ra alert)",
       "datasource": {
@@ -238,7 +238,7 @@
       }
     },
     {
-      "id": 58,
+      "id": 60,
       "type": "stat",
       "title": "Rule đã tắt",
       "datasource": {
@@ -307,7 +307,7 @@
       }
     },
     {
-      "id": 59,
+      "id": 61,
       "type": "stat",
       "title": "Rule Wazuh (tổng, mọi chế độ)",
       "datasource": {
@@ -376,7 +376,7 @@
       }
     },
     {
-      "id": 60,
+      "id": 62,
       "type": "stat",
       "title": "Rule im lặng 7 ngày (đang chạy)",
       "datasource": {
@@ -445,7 +445,7 @@
       }
     },
     {
-      "id": 61,
+      "id": 63,
       "type": "stat",
       "title": "Đề xuất AI đã triển khai (rules-dynamic/ai.xml)",
       "datasource": {
@@ -514,7 +514,7 @@
       }
     },
     {
-      "id": 62,
+      "id": 64,
       "type": "stat",
       "title": "Đề xuất AI chờ duyệt",
       "datasource": {
@@ -583,7 +583,7 @@
       }
     },
     {
-      "id": 63,
+      "id": 65,
       "type": "stat",
       "title": "Đề xuất không đạt kiểm định",
       "datasource": {
@@ -652,7 +652,7 @@
       }
     },
     {
-      "id": 64,
+      "id": 66,
       "type": "table",
       "title": "Rule đang chạy theo MITRE tactic",
       "datasource": {
@@ -756,7 +756,7 @@
       }
     },
     {
-      "id": 65,
+      "id": 67,
       "type": "table",
       "title": "Đề xuất AI theo trạng thái",
       "datasource": {
@@ -860,7 +860,7 @@
       }
     },
     {
-      "id": 66,
+      "id": 68,
       "type": "table",
       "title": "Rule kêu nhiều nhất (7 ngày): mã rule và tên",
       "datasource": {
@@ -976,7 +976,7 @@
       }
     },
     {
-      "id": 67,
+      "id": 69,
       "type": "row",
       "title": "Danh sách rule và đề xuất AI — lọc bằng các ô phía trên",
       "collapsed": false,
@@ -989,7 +989,7 @@
       "panels": []
     },
     {
-      "id": 68,
+      "id": 70,
       "type": "table",
       "title": "Rule và đề xuất AI — bấm mã rule xem cảnh báo của rule, bấm trạng thái đề xuất để mở trên console",
       "datasource": {

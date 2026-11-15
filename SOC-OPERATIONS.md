@@ -142,6 +142,12 @@ Chi tiết viết và kiểm thử rule: [RULES.md](RULES.md) mục 2.12 và 9.5
 5. Rà soát hằng quý theo cột báo nhầm trong *Thư viện rule*: rule báo nhầm nhiều thì sửa điều kiện, thêm ngoại lệ hoặc hạ level
    (rule gốc: `overwrite` ở `0999-tuning.xml`).
 
+**ML cũng đi qua cổng chạy bóng này.** Bật `ML_ENABLED=true` thì `ML-WEB` và `ML-AUTH` chạy ở `ML_MODE=shadow` (alert có
+`alert.shadow`, SOAR và KPI bỏ qua) sau giai đoạn học (≥ 48 giờ, ≥ 200 cửa sổ mỗi model). Bật chính thức = đặt `ML_MODE=active`
+và tạo lại container analyzer, chỉ khi đạt đủ ba tiêu chí của bước 4 (≥ 7 ngày, < 5 alert/ngày, báo nhầm < 30%; ML không bỏ tiêu
+chí 7 ngày như rule XML ở R65). Nút *Bật chính thức* của console chỉ áp cho rule AI, ML đổi bằng biến môi trường. Thiết kế:
+[AI-README.md](AI-README.md) mục 16.
+
 **Lịch sử.** Đợt chuyển sang rule XML (R65, 05/11/2026) **bỏ tiêu chí 7 ngày chạy bóng** theo quyết định của chủ dự án: rule XML
 có sẵn của dự án vào chạy thật mà chưa đủ 7 ngày đo. Từ đó rule MỚI đi qua chạy bóng đủ tiêu chí ở bước 4.
 

@@ -127,6 +127,8 @@ docker exec siem-xdr-elasticsearch-1 curl -sk -u "grafana:$MATKHAU" \
 | MITRE ATT&CK tactic | Số alert theo tactic MITRE. | siem-alerts | `(NOT alert.source:(health OR rba)) AND NOT alert.shadow:true` | count / terms `rule.mitre.tactic` top 10 | Alert không có tactic không có dòng nào (HLT đã bị loại khỏi query). Rule Wazuh chỉ ghi tactic đầu. |
 | Top IP tấn công (từ alert) | IP nguồn xuất hiện nhiều nhất trong alert. | siem-alerts | `(NOT alert.source:(health OR rba)) AND NOT alert.shadow:true` | count / terms `source.ip` top 10 | Có thể là IP nội bộ / cổng Docker, không hẳn kẻ tấn công. |
 | Host bị nhắm tới | Máy bị nhắm tới nhiều nhất (`host.name` của alert). | siem-alerts | `(NOT alert.source:(health OR rba)) AND NOT alert.shadow:true` | count / terms `host.name` top 10 | Một máy có thể mang nhiều tên (`web-01`, `web01`). |
+| Alert ML theo model (gồm bóng) | Số alert của `ML-WEB` / `ML-AUTH`, kể cả alert chạy bóng. | siem-alerts | `alert.source:ml` | count / terms `rule.id` top 5 | Cố ý không lọc `alert.shadow`: để xem ML trong giai đoạn chạy bóng. |
+| IP bị ML gắn cờ nhiều nhất | IP nguồn bị ML gắn cờ nhiều lần nhất (gồm bóng). | siem-alerts | `alert.source:ml` | count / terms `source.ip` top 10 | Trống khi `ML_ENABLED=false` hoặc model còn đang học. |
 | Alert mới nhất — bấm tên rule để mở trên console | 200 alert mới nhất, bấm tên rule để mở trên console. | siem-alerts | `NOT alert.shadow:true` | raw_data 200 dòng | Cột `alert.id` ẩn dùng cho liên kết `/go/alert/<id>`. Chỉ 200 dòng. Giữ cả alert RBA và HLT, chỉ bỏ alert bóng. |
 
 **Hàng: Telemetry**
@@ -302,7 +304,7 @@ Dữ liệu đi: Wazuh (agent + manager) → Kafka → analyzer (Python, chuẩn
 Hiểu đúng mấy khái niệm hay nhầm:
 
 - **Alert chạy bóng** (`alert.shadow:true`): rule mới hoặc rule gốc Wazuh chưa được tin cậy vẫn sinh alert để đo, nhưng SOAR bỏ qua và console ẩn mặc định. KPI không tính. Alert bóng nằm cùng index `siem-alerts`; mọi ô đếm alert trên Grafana đều có `NOT alert.shadow:true`, riêng ô "Alert chạy bóng" của Tổng quan đếm chúng.
-- **`alert.source`**: `rule` (rule YAML, chỉ còn ở alert cũ trước R65), `wazuh` (rule Wazuh, mã `WZH-<id>`, gồm rule AI và SigmaHQ), `ml` (Isolation Forest), `rba` (cộng dồn rủi ro nhiều alert trên một máy / tài khoản), `health` (sự cố nền tảng HLT-*).
+- **`alert.source`**: `rule` (rule YAML, chỉ còn ở alert cũ trước R65), `wazuh` (rule Wazuh, mã `WZH-<id>`, gồm rule AI và SigmaHQ), `ml` (Isolation Forest, `ML-WEB` / `ML-AUTH`; chạy bóng thì có `alert.shadow`), `rba` (cộng dồn rủi ro nhiều alert trên một máy / tài khoản), `health` (sự cố nền tảng HLT-*).
 - **MTTD** (`metrics.ttd_seconds`): từ event đầu của chuỗi tới lúc sinh alert. **MTTA / MTTC** (`metrics.tta_seconds` / `ttc_seconds` của case): từ lúc mở case tới khi có người nhận / khoanh vùng xong. **P1-P4** là mức ưu tiên = mức độ rule kết hợp độ quan trọng tài sản (SOC-OPERATIONS.md mục 2).
 - **Báo nhầm** chỉ tính alert có trạng thái `false_positive` (mục 3 SOC-OPERATIONS.md). Alert `closed` với kết luận `duplicate` hay `benign_true_positive` không là báo nhầm.
 

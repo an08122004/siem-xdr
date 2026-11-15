@@ -43,7 +43,7 @@ Docker. Quy trình vận hành: **[SOC-OPERATIONS.md](SOC-OPERATIONS.md)**. Lộ
 | Message bus | Kafka 7.7 (Confluent) chế độ **KRaft**, không dùng ZooKeeper | `docker-compose.yml` |
 | Chuẩn hóa log (ECS rút gọn) + làm giàu | Python | `server/siem/pipeline/` |
 | Phân tích dựa trên luật | `wazuh-analysisd`: ruleset gốc Wazuh 4.14.8 + rule XML của dự án, SigmaHQ, rule AI; cầu nối đổi cảnh báo thành alert | `wazuh/manager/rules/`, `server/siem/detection/wazuh.py` |
-| Phân tích dựa trên ML (**tạm dừng**) | Isolation Forest (scikit-learn) | `server/siem/detection/ml.py` |
+| Phân tích dựa trên ML (chạy bóng khi bật) | Isolation Forest (scikit-learn) | `server/siem/detection/ml.py` |
 | SOAR + quản lý case | Playbook tự động + case playbook NIST, phản ứng qua Wazuh active response | `server/siem/soar/`, `server/config/playbooks.yml`, `server/config/case_playbooks.yml` |
 | Vận hành SOC | 6 vai trò theo năng lực, ưu tiên P1–P4 + SLA, kết luận bắt buộc, rule chạy bóng + CI kho rule, risk-based alerting, giám sát sức khỏe HLT-*, sao lưu SLM, KPI, MISP + dò ngược IOC, threat hunting, giao ca, MFA | [SOC-OPERATIONS.md](SOC-OPERATIONS.md), `server/siem/manager/`, `server/siem/soar/`, `.github/workflows/ci.yml` |
 | AI hỗ trợ viết rule (chỉ đề xuất) và hỗ trợ analyst | Ollama (`qwen3.5:9b`) + kiểm định trên wazuh-manager cô lập (`wazuh-sandbox`) + duyệt trên console; tóm tắt alert / case, giải thích lệnh, nháp báo cáo | `server/siem/ai/`, `wazuh/sandbox/`, `tools/fetch_datasets.py`, `tools/convert_datasets.py` |
@@ -352,10 +352,12 @@ alert bóng (SOAR bỏ qua). Rule gốc level 7–11 là alert thật từ R65 (
 dataset công khai (863 mẫu Splunk không có log thô nên không tính), Wazuh bắt 1.484/15.088 mẫu web (CSIC 2010), 74/2.218 mẫu Windows và 12/1.146 mẫu Linux dựng lại từ
 Atomic Red Team; 16.882 mẫu còn là khoảng trống. SigmaHQ lô 1 bắt thêm 186 mẫu, không cướp phát hiện nào của rule khác. Đây là chỗ AI và SigmaHQ được giao lấp.
 
-**ML (tạm dừng, `ML_ENABLED=false`)**: Isolation Forest theo (IP nguồn, cửa sổ 60 giây). Thử nghiệm cho thấy
-model bắt được tấn công nhưng **báo nhầm khoảng 32%** lưu lượng bình thường, và 100% với các IP chỉ có 1 event.
-Nguyên nhân chính: baseline tổng hợp và một model chung cho mọi nguồn. Code được giữ lại trong `server/siem/detection/ml.py`.
-Trước khi bật lại cần: giai đoạn học trên dữ liệu thật, tách model theo nguồn, hiệu chỉnh ngưỡng, chống lặp alert.
+**ML (`ML_ENABLED=false` mặc định; bật thì chạy bóng)**: hai model Isolation Forest theo IP nguồn, `ML-WEB` (cửa sổ 5 phút) và
+`ML-AUTH` (cửa sổ 10 phút), thay bản `ML-001` cũ đã tắt vì báo nhầm cao. Không còn baseline tổng hợp: model học trên dữ liệu
+thật (≥ 48 giờ và ≥ 200 cửa sổ), ngưỡng là phân vị trên tập giữ lại, cửa sổ của IP có alert thật không vào tập học, mỗi IP báo
+tối đa 1 lần mỗi 30 phút, alert nêu đặc trưng lệch nhất (`n_paths=340 (thường 8)`). Mặc định `ML_MODE=shadow`: alert gắn
+`alert.shadow`, SOAR và KPI bỏ qua; `ML_MODE=active` khi đạt tiêu chí chạy bóng ([SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 4).
+Thiết kế D1–D11 và cách bật: [AI-README.md](AI-README.md) mục 16.
 
 **Lịch sử: cảnh báo từ ruleset Wazuh khi còn engine YAML (trước R65)**: rule của SIEM/XDR chạy trên MỌI event lấy từ
 `archives.json`. Ruleset Wazuh (hơn 3.000 rule) phần lớn trùng việc với rule tự viết (web, SSH, đăng nhập Windows...), nên

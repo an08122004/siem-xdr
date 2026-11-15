@@ -610,6 +610,16 @@ Lần triển khai này **chưa** là cổng chuyển (Task 18): khi đó engine
 trong volume Wazuh nhưng không dùng; ngoại lệ Wazuh đã duyệt nằm trong volume `wazuh_dynamic_rules` (không xóa volume này nếu
 còn muốn giữ chúng).
 
+### 9.3 Bật ML bất thường (ML-WEB, ML-AUTH)
+
+1. Thêm `ML_ENABLED=true` vào `.env` (mặc định chạy bóng, `ML_MODE=shadow`), rồi `docker compose up -d analyzer`. Volume `mldata`
+   giữ `models/ml-state.json` qua các lần khởi động lại; `docker stop` lưu trạng thái trước khi thoát.
+2. Log analyzer mỗi giờ có một dòng mỗi model, vd `ML web: learning, 120 cửa sổ, ngưỡng chưa có, bỏ muộn 0, bỏ IP 0`. Model chuyển
+   `active` sau ≥ 48 giờ và ≥ 200 cửa sổ.
+3. Lab đo nằm ở `tools/lab/mllab/` (`provision_web.sh`, `provision_client.sh`, `simulate_users.py`). Chỉ dùng hai VM Ubuntu của lab;
+   tài khoản tạo ra có tiền tố `lab_`.
+4. Quay lại: bỏ `ML_ENABLED` rồi tạo lại container analyzer; alert ML cũ giữ nguyên trong `siem-alerts`.
+
 ## Phụ lục A. Cài máy chủ bằng tay
 
 Chỉ cần khi không dùng `install.sh` (vd máy không phải Ubuntu / Debian). Đây đúng là các bước script làm.

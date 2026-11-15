@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import signal
 import time
 
 from . import bus, settings, store
@@ -28,9 +29,10 @@ FLUSH_SIZE = 500
 class Analyzer:
     def __init__(self) -> None:
         self.enricher = default_enricher()
-        # shortcut: tạm cho Task 2 gỡ — chưa nạp biến ML_* mới, chưa save() định kỳ (khởi động lại thì học lại)
-        self.detector = (ml.AnomalyDetector(state_path=settings.DATA_DIR / "models" / "ml-state.json")
-                         if settings.ML_ENABLED else None)
+        self.detector = (ml.AnomalyDetector(
+            state_path=settings.ML_STATE_PATH, learn_hours=settings.ML_LEARN_HOURS, min_windows=settings.ML_MIN_WINDOWS,
+            target_fp=settings.ML_TARGET_FP, cooldown=settings.ML_COOLDOWN_MINUTES * 60,
+            retrain_hours=settings.ML_RETRAIN_HOURS) if settings.ML_ENABLED else None)
         self.es = store.connect()
         bus.wait_for_kafka()
         self.producer = bus.producer()
@@ -46,6 +48,8 @@ class Analyzer:
             # cảnh báo từ alerts.json của Wazuh: event gốc đã đến qua archives.json (được lưu ở đó), ở đây chuyển cảnh
             # báo thành alert theo bộ lọc của cầu nối (detection/wazuh.py)
             if (alert := wazuh_bridge.to_alert(doc)):
+                if self.detector and not get(alert, "alert.shadow") and (ip := get(alert, "source.ip")):
+                    self.detector.exclude(ip, alert_builder.event_time(doc))   # D5: IP có alert thật không vào tập học
                 if get(alert, "alert.shadow") or not self.suppressor.seen(wazuh_bridge.suppress_key(doc), time.monotonic()):
                     self.emit(alert)
             return
@@ -68,7 +72,7 @@ class Analyzer:
         now = time.time()
         if self.detector:
             for a in self.detector.flush(now):
-                self.emit(alert_builder.from_anomaly(a, ml.severity(a), ml.explain(a), a.features))
+                self.emit(alert_builder.from_anomaly(a, ml.SPECS[a.model], shadow=settings.ML_MODE != "active"))
         if self.buffer and (len(self.buffer) >= FLUSH_SIZE or now - self.last_flush >= FLUSH_EVERY):
             try:
                 store.bulk_index(self.es, self.buffer)
@@ -83,9 +87,28 @@ class Analyzer:
             if self.producer.flush(5) == 0 and self.stream is not None:
                 self.stream.done()
 
+    def ml_checkpoint(self) -> None:
+        """Mỗi giờ: lưu trạng thái ML và ghi một dòng trạng thái mỗi model."""
+        if not self.detector:
+            return
+        self.detector.save()
+        for name, st in self.detector.status().items():
+            log.info("ML %s: %s, %d cửa sổ, ngưỡng %s, bỏ muộn %d, bỏ IP %d", name, st["phase"], st["windows"],
+                     "chưa có" if st["threshold"] is None else f"{st['threshold']:.3f}", st["dropped_late"],
+                     st["dropped_entities"])
+
+    def install_signal_handlers(self) -> None:
+        """docker stop gửi SIGTERM: lưu trạng thái ML rồi thoát, để khởi động lại không học lại từ đầu."""
+        def stop(signum, frame):  # noqa: ARG001
+            if self.detector:
+                self.detector.save()
+            raise SystemExit(0)
+        signal.signal(signal.SIGTERM, stop)
+
     def run(self) -> None:
         log.info("analyzer bắt đầu tiêu thụ topic %s", settings.TOPIC_RAW)
-        last_report = time.time()
+        last_report = last_ml = time.time()
+        self.install_signal_handlers()
         self.stream = bus.consume("siem-analyzer", [settings.TOPIC_RAW], poll_timeout=0.5)
         for msg in self.stream:
             if msg is not None:
@@ -98,6 +121,9 @@ class Analyzer:
             if time.time() - last_report > 60:
                 log.info("thống kê: %s", self.stats)
                 last_report = time.time()
+            if time.time() - last_ml >= 3600:
+                self.ml_checkpoint()
+                last_ml = time.time()
 
 
 def main() -> None:
