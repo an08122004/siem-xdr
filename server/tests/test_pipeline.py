@@ -4,6 +4,7 @@ Chạy: cd server && python -m pytest -q
 from __future__ import annotations
 
 import json
+import random
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -11,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from siem.detection.alerts import SEVERITY_SCORE
-from siem.detection.ml import AnomalyDetector
+from siem.detection.ml import IDLE_SECONDS, AnomalyDetector
 from siem.pipeline.enrich import Enricher
 from siem.pipeline.normalize import get, normalize
 
@@ -211,19 +212,27 @@ def test_threat_intel_and_assets(enricher):
 
 # ------------------------------------------------------------------ ML
 def test_ml_flags_scanner_not_normal(enricher):
-    det = AnomalyDetector(window=60, min_samples=10_000, bootstrap=True)
-    base = T0.timestamp()
-    # 20 người dùng bình thường
+    # ML học trên event thật của pipeline (normalize + enrich): 60 cửa sổ 5 phút x 20 người dùng, 6-30 request, ~2% 404
+    rng = random.Random(0)
+    det = AnomalyDetector(learn_hours=0, min_windows=1200)
+    docs = {(u, p, s): enricher.enrich(normalize(apache(f"10.1.0.{u}", f"GET /page{p} HTTP/1.1", s)))
+            for u in range(20) for p in range(1, 11) for s in (200, 404)}
+    t = T0.timestamp() // 300 * 300
+    for _ in range(60):
+        for u in range(20):
+            for k in range(rng.randint(6, 30)):
+                det.add(docs[u, rng.randint(1, 10), 404 if rng.random() < 0.02 else 200], t + k)
+        t += 300
+        det.flush(t + 31)
+    # cửa sổ kế tiếp: 20 người dùng bình thường + 1 IP quét 400 request, 90% 404, URL khác nhau
     for u in range(20):
         for k in range(10):
-            d = enricher.enrich(normalize(apache(f"10.1.0.{u}", f"GET /page{k % 5} HTTP/1.1", 200)))
-            det.add(d, base + k)
-    # 1 IP quét: 400 request, 90% 404, URL khác nhau
+            det.add(docs[u, k % 5 + 1, 200], t + k)
     for k in range(400):
         d = enricher.enrich(normalize(apache("10.66.66.66", f"GET /admin{k}.php HTTP/1.1", 404 if k % 10 else 200)))
-        det.add(d, base + k * 0.1)
-    anomalies = det.flush(base + 200)
-    flagged = {a.ip for a in anomalies}
+        det.add(d, t + k * 0.1)
+    flagged = {a.entity for a in det.flush(t + 331) + det.flush(t + 331 + IDLE_SECONDS)}
+    assert det.status()["web"]["phase"] == "active"
     assert "10.66.66.66" in flagged
     assert len(flagged & {f"10.1.0.{u}" for u in range(20)}) <= 1
 

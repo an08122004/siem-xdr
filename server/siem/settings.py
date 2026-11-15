@@ -81,12 +81,15 @@ WAZUH_ALERT_SUPPRESS = int(os.getenv("WAZUH_ALERT_SUPPRESS", "60"))     # giây:
 CONFIG_DIR = Path(os.getenv("CONFIG_DIR", BASE_DIR / "config"))
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 
-# ML — TẠM DỪNG (mặc định tắt): đánh giá cho thấy tỉ lệ báo nhầm quá cao, xem README mục 3.
+# ML (ML-WEB / ML-AUTH, Isolation Forest theo IP; thiết kế ở AI-README mục ML). Mặc định tắt; bật thì chạy bóng.
 ML_ENABLED = _bool("ML_ENABLED", False)
-ML_WINDOW_SECONDS = int(os.getenv("ML_WINDOW_SECONDS", "60"))
-ML_MIN_SAMPLES = int(os.getenv("ML_MIN_SAMPLES", "50"))
-ML_CONTAMINATION = float(os.getenv("ML_CONTAMINATION", "0.02"))
-ML_BOOTSTRAP_SYNTHETIC = _bool("ML_BOOTSTRAP_SYNTHETIC", True)
+ML_MODE = os.getenv("ML_MODE", "shadow")                              # shadow: alert không kích hoạt SOAR/KPI; active: alert thật
+ML_LEARN_HOURS = float(os.getenv("ML_LEARN_HOURS", "48"))             # giờ học tối thiểu kể từ cửa sổ đầu tiên
+ML_MIN_WINDOWS = int(os.getenv("ML_MIN_WINDOWS", "200"))              # số cửa sổ học tối thiểu
+ML_TARGET_FP = float(os.getenv("ML_TARGET_FP", "0.005"))              # tỉ lệ báo nhầm đích: phân vị đặt ngưỡng
+ML_COOLDOWN_MINUTES = float(os.getenv("ML_COOLDOWN_MINUTES", "30"))   # mỗi (model, IP) báo tối đa 1 lần trong khoảng này
+ML_RETRAIN_HOURS = float(os.getenv("ML_RETRAIN_HOURS", "24"))
+ML_STATE_PATH = DATA_DIR / "models" / "ml-state.json"
 
 # SOAR
 SOAR_AUTO_RESPONSE = _bool("SOAR_AUTO_RESPONSE", True)
