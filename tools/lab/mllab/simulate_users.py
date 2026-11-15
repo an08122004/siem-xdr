@@ -37,6 +37,7 @@ DOCS = [f"/docs/tai-lieu-{i}.pdf" for i in range(1, 9)]
 ASSETS = ["/assets/site.css", "/assets/site.js"]
 TYPOS = ["/new/", "/tin-tuc", "/docs/tai-lieu.pdf", "/portal/report/", "/favicon.ico", "/index.php"]
 LOCK = threading.Lock()
+STEP = 60                     # giây giữa hai lần quyết định mở phiên mới của một người dùng
 
 
 def hour_rate(h: int) -> float:
@@ -67,10 +68,20 @@ class User:
         headers = {"User-Agent": self.ua, "Accept": "*/*", "Connection": "keep-alive"}
         if auth:
             headers["Authorization"] = "Basic " + base64.b64encode(auth.encode()).decode()
-        conn.request("GET", path, headers=headers)
-        r = conn.getresponse()
-        r.read()
-        return r.status
+        for attempt in (1, 2):
+            try:
+                conn.request("GET", path, headers=headers)
+                r = conn.getresponse()
+                r.read()
+                return r.status
+            except (http.client.RemoteDisconnected, http.client.CannotSendRequest, ConnectionResetError,
+                    BrokenPipeError):
+                # Apache đóng kết nối keep-alive sau vài giây rảnh (lúc người dùng đọc trang): trình duyệt thật mở
+                # kết nối mới và gửi lại, ở đây cũng vậy (HTTPConnection tự kết nối lại sau close())
+                conn.close()
+                if attempt == 2:
+                    raise
+        return 0
 
     def view(self, conn, path: str, auth: str | None = None) -> int:
         st = self.get(conn, path, auth)
@@ -130,10 +141,15 @@ class User:
 
     # ------------------------------------------------------------------ vòng đời
     def run(self) -> None:
-        time.sleep(self.rng.uniform(0, 120))
+        time.sleep(self.rng.uniform(0, STEP))
         while True:
+            # quá trình Poisson theo giờ: mỗi bước STEP giây quyết định có mở phiên không theo nhịp CỦA GIỜ HIỆN TẠI.
+            # (Bản đầu tính trước thời gian ngủ tới 6 giờ theo nhịp ban đêm -> sáng hôm sau vẫn "ngủ", và máy host
+            # tạm dừng VM thì thời gian chờ không trôi.)
+            time.sleep(STEP)
             rate = hour_rate(datetime.now().hour) * self.activity * self.a.scale     # phiên / giờ
-            time.sleep(min(6 * 3600, self.rng.expovariate(rate / 3600)))
+            if self.rng.random() >= 1 - math.exp(-rate * STEP / 3600):
+                continue
             try:
                 if self.role == "admin" and self.rng.random() < 0.3:
                     self.ssh()
