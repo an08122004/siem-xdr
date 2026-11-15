@@ -9,6 +9,16 @@ def auth(ip, user="u", ok=True, n=0):
     return {"event": {"category": "authentication", "outcome": "success" if ok else "failure", "id": f"a{n}"},
             "source": {"ip": ip}, "user": {"name": user}}
 
+def test_auth_ignores_console_and_siem_internal_events():
+    for mod in ("console", "siem-xdr"):
+        d = auth("203.0.113.5"); d["event"]["module"] = mod
+        assert not ml.accepts(ml.SPECS["auth"], d)
+    assert ml.accepts(ml.SPECS["auth"], auth("203.0.113.5"))
+    d = auth("203.0.113.5"); d["event"]["module"] = "auth"
+    assert ml.accepts(ml.SPECS["auth"], d)
+    w = web("203.0.113.5"); w["event"]["module"] = "console"
+    assert ml.accepts(ml.SPECS["web"], w)
+
 def normal_traffic(det, start, hours, ips=50, seed=1):
     """mỗi IP mỗi cửa sổ web 5 phút: 6-30 request, 3-10 path, ít 404; trả về thời điểm cuối"""
     rng = random.Random(seed); t = start

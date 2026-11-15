@@ -1383,7 +1383,7 @@ nhầm khoảng 32% lưu lượng bình thường và 100% với IP chỉ có 1 
 
 | # | Quyết định | Lý do |
 |---|---|---|
-| D1 | Hai model: `web` (khóa `source.ip`, cửa sổ 300 giây, tối thiểu 5 request) và `auth` (khóa `source.ip`, cửa sổ 600 giây, tối thiểu 1 lần đăng nhập). Không dùng đặc trưng cổng / bị chặn (lab chưa có log firewall) | Một model chung cho mọi nguồn là nguyên nhân chính của báo nhầm; cửa sổ 60 giây quá ngắn cho một phiên duyệt web |
+| D1 | Hai model: `web` (khóa `source.ip`, cửa sổ 300 giây, tối thiểu 5 request) và `auth` (khóa `source.ip`, cửa sổ 600 giây, tối thiểu 1 lần đăng nhập). Không dùng đặc trưng cổng / bị chặn (lab chưa có log firewall) | Một model chung cho mọi nguồn là nguyên nhân chính của báo nhầm; cửa sổ 60 giây quá ngắn cho một phiên duyệt web; sự kiện auth nội bộ của console/siem-xdr (`event.module`) bị loại khỏi model `auth`, cùng ranh giới với KPI INTERNAL |
 | D2 | Không còn baseline tổng hợp. Model chỉ hoạt động sau giai đoạn học: từ cửa sổ đầu tiên đủ `ML_LEARN_HOURS` (48) giờ **và** có ít nhất `ML_MIN_WINDOWS` (200) cửa sổ | Baseline tổng hợp lệch dữ liệu thật |
 | D3 | Ngưỡng là phân vị `ML_TARGET_FP` (0,005) của điểm trên **tập giữ lại**: 20% cửa sổ mới nhất, tối thiểu 50 | Báo nhầm có chủ đích thay cho ngưỡng cứng |
 | D4 | Trạng thái lưu JSON (`/data/models/ml-state.json`, version 2) chứa vector cửa sổ, fit lại khi nạp | Pickle scikit-learn vỡ giữa các phiên bản (máy dev Python 3.14, image 3.12) |

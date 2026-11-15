@@ -61,7 +61,8 @@ def accepts(spec: ModelSpec, doc: Doc) -> bool:
         return False
     if spec.name == "web":
         return get(doc, "event.category") == "web" and get(doc, "http.response.status_code") is not None
-    return get(doc, "event.category") == "authentication"
+    # Bỏ auth nội bộ của console/siem-xdr (login+logout của analyst), song song KPI INTERNAL ở tools/gen_dashboard.py
+    return get(doc, "event.category") == "authentication" and get(doc, "event.module") not in ("console", "siem-xdr")
 
 
 def _num(v) -> float:
