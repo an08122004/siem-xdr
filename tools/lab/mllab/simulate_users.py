@@ -49,6 +49,16 @@ def hour_rate(h: int) -> float:
     return 0.08
 
 
+def ssh_hour_rate(h: int) -> float:
+    """Số phiên SSH quản trị mỗi giờ của một admin theo giờ (nhịp cao hơn người dùng web để model auth có đủ cửa sổ:
+    ~6/giờ ban ngày với 2 admin -> ~12 cửa sổ auth/giờ, đủ 200 cửa sổ trong vài giờ làm việc)."""
+    if 8 <= h < 12 or 13 <= h < 18:
+        return 6.0
+    if 12 <= h < 13 or 18 <= h < 23:
+        return 2.0
+    return 0.5
+
+
 class User:
     def __init__(self, name: str, password: str, role: str, ip: str, rng: random.Random, a: argparse.Namespace):
         self.name, self.password, self.role, self.ip, self.a = name, password, role, ip, a
@@ -140,23 +150,29 @@ class User:
             time.sleep(self.rng.uniform(4, 12))
 
     # ------------------------------------------------------------------ vòng đời
+    def _do(self, fn) -> None:
+        try:
+            fn()
+        except Exception as e:  # noqa: BLE001 - mô phỏng không được chết vì một lỗi lẻ
+            self.log("error", error=f"{type(e).__name__}: {e}"[:200])
+
     def run(self) -> None:
         time.sleep(self.rng.uniform(0, STEP))
         while True:
-            # quá trình Poisson theo giờ: mỗi bước STEP giây quyết định có mở phiên không theo nhịp CỦA GIỜ HIỆN TẠI.
-            # (Bản đầu tính trước thời gian ngủ tới 6 giờ theo nhịp ban đêm -> sáng hôm sau vẫn "ngủ", và máy host
-            # tạm dừng VM thì thời gian chờ không trôi.)
+            # quá trình Poisson theo giờ: mỗi bước STEP giây quyết định ĐỘC LẬP có mở phiên web / phiên SSH không,
+            # theo nhịp CỦA GIỜ HIỆN TẠI. (Bản đầu tính trước thời gian ngủ tới 6 giờ theo nhịp ban đêm -> sáng hôm
+            # sau vẫn "ngủ", và máy host tạm dừng VM thì thời gian chờ không trôi.)
             time.sleep(STEP)
-            rate = hour_rate(datetime.now().hour) * self.activity * self.a.scale     # phiên / giờ
-            if self.rng.random() >= 1 - math.exp(-rate * STEP / 3600):
-                continue
-            try:
-                if self.role == "admin" and self.rng.random() < 0.3:
-                    self.ssh()
-                else:
-                    self.session()
-            except Exception as e:  # noqa: BLE001 - mô phỏng không được chết vì một lỗi lẻ
-                self.log("error", error=f"{type(e).__name__}: {e}"[:200])
+            h = datetime.now().hour
+            web_rate = hour_rate(h) * self.activity * self.a.scale                   # phiên web / giờ
+            if self.rng.random() < 1 - math.exp(-web_rate * STEP / 3600):
+                self._do(self.session)
+            # admin SSH vào máy chủ để kiểm tra (nguồn DUY NHẤT sinh event đăng nhập trong lab, tách riêng khỏi nhịp
+            # web để model auth đủ cửa sổ thoát giai đoạn học). Phiên web của admin KHÔNG còn bị SSH thay thế.
+            if self.role == "admin":
+                ssh_rate = ssh_hour_rate(h) * self.a.scale                           # phiên SSH / giờ
+                if self.rng.random() < 1 - math.exp(-ssh_rate * STEP / 3600):
+                    self._do(self.ssh)
 
 
 def ip_range(spec: str) -> list[str]:
