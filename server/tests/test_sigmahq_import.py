@@ -133,10 +133,17 @@ def test_license_header(tmp_path, three_sigma_rules):
     assert "DRL 1.1" in (tmp_path / "r.xml").read_text(encoding="utf-8")[:600]
 
 
-def test_skips_values_wazuh_keeps_as_xml_entities():
+def test_literal_value_with_xml_entity_chars_now_imports():
+    # 19c: giá trị chữ có < > & nay dịch được (khớp cả ký tự lẫn thực thể Wazuh) -> thành ứng viên, không bị bỏ
     row, text = sigma_rule("rules/g.yml", "Redirect", "  sel:\n    CommandLine|contains: ' > '\n  condition: sel", EVASION)
     cands, skipped = imp.candidates(ITEMS, [row], {row["path"]: text}, CONFIG)
-    assert cands == [] and skipped == {"không dịch được sang Wazuh": 1}         # emit từ chối < > & trên Windows (M1)
+    assert [c.title for c in cands] == ["Redirect"] and skipped == {}
+
+def test_regex_with_xml_entity_chars_still_skipped():
+    # regex tùy ý có < > & vẫn bị emit từ chối (không biến đổi dạng thực thể được)
+    row, text = sigma_rule("rules/h.yml", "Redirect re", "  sel:\n    CommandLine|re: 'foo > bar'\n  condition: sel", EVASION)
+    cands, skipped = imp.candidates(ITEMS, [row], {row["path"]: text}, CONFIG)
+    assert cands == [] and skipped == {"không dịch được sang Wazuh": 1}
 
 
 def test_positive_sample_is_not_shadowed_by_an_earlier_rule_of_the_batch():

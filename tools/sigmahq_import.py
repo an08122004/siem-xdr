@@ -138,10 +138,10 @@ def candidates(items: list[dict], rows: list[dict], originals: dict[str, str], c
         if any(regex_risk(e.text or "") for e in ET.fromstring("<g>" + em.xml + "</g>").iter() if e.get("type") == "pcre2"):
             skipped["mẫu regex quá dài / ReDoS (lint)"] += 1
             continue
-        if dom == "windows" and re.search(r"\\x(?:3c|3e|26)", em.xml):
-            # Wazuh giữ nguyên thực thể XML (&gt; &lt; &amp;) trong win.eventdata.*: giá trị có < > & đã bị emit từ chối (M1);
-            # còn regex viết sẵn mã \x3c \x3e \x26 (đo 07/11/2026: mẫu có `>` không khớp) thì loại ở đây
-            skipped["giá trị có & < > (Wazuh giữ thực thể XML)"] += 1
+        # Giá trị chữ có < > & nay được emit thành `(?:\x3e|&amp;gt;)`… khớp cả ký tự lẫn thực thể Wazuh (19c): GIỮ.
+        # Chỉ còn loại byte-escape `\x3c \x3e \x26` ĐƠN LẺ (regex viết sẵn mã này, không bọc dạng thực thể -> không khớp `&gt;`).
+        if dom == "windows" and re.search(r"\\x3c(?!\|&amp;lt;)|\\x3e(?!\|&amp;gt;)|\\x26(?!\|&amp;amp;)", em.xml):
+            skipped["regex có byte-escape < > & (Wazuh giữ thực thể XML)"] += 1
             continue
         cond = Condition(tree)
         if any(cond.match(d) for d in normal[dom]):
