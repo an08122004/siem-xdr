@@ -181,4 +181,17 @@ def test_emit_original_file_name_to_wazuh_field():
     assert f.get("name") == "win.eventdata.originalFileName"
     py = re.compile(f.text.replace(r"\z", r"\Z"))
     assert py.search("reg.exe") and py.search("REG.EXE")          # Wazuh lưu tên file, không đường dẫn
+    assert not py.search("xreg.exe")
     assert wx.EMITTER_VERSION == "3"
+
+
+def test_new_field_backslash_is_doubled_like_other_windows_fields():
+    tree = {"field": "winlog.event_data.Description", "op": "contains", "value": "a\\b"}
+    r, = rules(wx.emit(tree, **{**KW, "domain": "windows"}).xml)
+    assert r"a(?:\x5c){1,2}b" in r.find("field").text
+
+
+def test_original_file_name_mixed_leading_separator_rejected():
+    tree = {"field": "winlog.event_data.OriginalFileName", "op": "endswith", "value": ["\\reg.exe", "cmd.exe"]}
+    with pytest.raises(SigmaError):
+        wx.emit(tree, **{**KW, "domain": "windows"})

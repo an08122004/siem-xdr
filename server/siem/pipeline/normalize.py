@@ -478,7 +478,7 @@ def _windows_sysmon(eid: int, f: Doc, doc: Doc) -> None:
         put(doc, "process.command_line", f.get("CommandLine"))
         put(doc, "process.pid", _int(f.get("ProcessId")))
         # mẫu không mang OriginalFileName: suy ra từ tên file của Image (đúng cho binary không đổi tên)
-        put(doc, "winlog.event_data.OriginalFileName", f.get("OriginalFileName") or _basename(f.get("Image")))
+        put(doc, "winlog.event_data.OriginalFileName", f.get("OriginalFileName") if f.get("OriginalFileName") not in (None, "", "-") else _basename(f.get("Image")))
         put(doc, "process.parent.executable", f.get("ParentImage"))
         put(doc, "process.parent.name", _basename(f.get("ParentImage")))
         put(doc, "process.parent.command_line", f.get("ParentCommandLine"))

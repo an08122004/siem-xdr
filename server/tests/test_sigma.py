@@ -298,3 +298,11 @@ def test_description_product_company_mapped():
     for f in ("Description", "Product", "Company"):
         tree, notes = _compile(f"  sel:\n    {f}: X\n  condition: sel\n")
         assert any(l["field"] == f"winlog.event_data.{f}" for l in _leaves(tree)) and not notes
+
+
+def test_original_file_name_endswith_compiles_to_eq_on_bare_name():
+    tree, _ = _compile("  sel:\n    OriginalFileName|endswith: '\\reg.exe'\n  condition: sel\n")
+    assert tree == {"field": "winlog.event_data.OriginalFileName", "op": "eq", "value": "reg.exe"}
+    from siem.ai.condition import Condition
+    assert Condition(tree).match({"winlog": {"event_data": {"OriginalFileName": "reg.exe"}}})
+    assert not Condition(tree).match({"winlog": {"event_data": {"OriginalFileName": "xreg.exe"}}})

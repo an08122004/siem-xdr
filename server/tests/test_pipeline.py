@@ -485,3 +485,8 @@ def test_sysmon_derives_original_file_name_when_missing():
 def test_sysmon_keeps_real_original_file_name():
     d = _sysmon1(Image="C:\\tools\\xcopy.exe", OriginalFileName="robocopy.exe")
     assert get(d, "winlog.event_data.OriginalFileName") == "robocopy.exe"   # KHÔNG ghi đè
+
+
+def test_sysmon_dash_original_file_name_is_derived():
+    d = _sysmon1(Image="C:\\Windows\\System32\\reg.exe", OriginalFileName="-")
+    assert get(d, "winlog.event_data.OriginalFileName") == "reg.exe"

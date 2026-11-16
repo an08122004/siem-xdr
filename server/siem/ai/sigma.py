@@ -470,6 +470,9 @@ def _map(name: str, op: str, val: Any, domain: str, notes: set[str]) -> Any:
                 return _leaf(_PROC_NAME[canon], "eq", val[1:])
             if op == "eq" and not re.search(r"[\\/]", val):
                 return _leaf(_PROC_NAME[canon], "eq", val)
+        if canon == "OriginalFileName" and op == "endswith" and isinstance(val, str) \
+                and val.startswith(("\\", "/")) and not re.search(r"[\\/]", val[1:]):
+            return _leaf(_PROC[canon], "eq", val[1:])    # trường chỉ là tên file: khớp bộ dịch Wazuh (eq, không endswith lỏng)
         return _leaf(_PROC[canon], op, val)
     if domain == "web":
         canon = _canon(name, _WEB)
