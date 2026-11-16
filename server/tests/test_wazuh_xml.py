@@ -156,8 +156,8 @@ def test_windows_regex_with_literal_backslash_raises_but_classes_ok():
     assert wx.emit({"field": "process.command_line", "op": "regex", "value": r"\d{3}\s+x"}, **KW).ids
     assert wx.emit({"field": "process.command_line", "op": "regex", "value": r"C:\\x"}, **{**KW, "domain": "linux"}).ids
 
-def test_emitter_version_is_2():
-    assert wx.EMITTER_VERSION == "2"
+def test_emitter_version_is_3():
+    assert wx.EMITTER_VERSION == "3"
 
 def test_windows_parents_pinned():
     assert wx.PARENTS["windows"]["if_sid"] == "61603,92025,92028,92042,92069"
@@ -172,3 +172,13 @@ def test_windows_value_with_xml_entity_chars_raises(op, ch):
     with pytest.raises(SigmaError, match="thực thể XML"):
         wx.emit({"all": [pos, leaf]}, **KW)
     assert wx.emit({"all": [pos, leaf]}, **{**KW, "domain": "linux"}).ids == [109000]
+
+
+def test_emit_original_file_name_to_wazuh_field():
+    tree = {"field": "winlog.event_data.OriginalFileName", "op": "endswith", "value": "\\reg.exe"}
+    r, = rules(wx.emit(tree, **{**KW, "domain": "windows"}).xml)
+    f = r.find("field")
+    assert f.get("name") == "win.eventdata.originalFileName"
+    py = re.compile(f.text.replace(r"\z", r"\Z"))
+    assert py.search("reg.exe") and py.search("REG.EXE")          # Wazuh lưu tên file, không đường dẫn
+    assert wx.EMITTER_VERSION == "3"

@@ -91,11 +91,11 @@ def test_web_query_matches_raw_and_decoded_forms():
 
 def test_unavailable_fields_are_dropped_from_or_and_reported_in_and():
     cond, notes = sigma.compile_rule(sigma.parse(
-        "detection:\n  img:\n    - Image|endswith: '\\reg.exe'\n    - OriginalFileName: reg.exe\n  condition: img\n"),
+        "detection:\n  img:\n    - Image|endswith: '\\reg.exe'\n    - IntegrityLevel: High\n  condition: img\n"),
         "windows")
-    assert cond == {"field": "process.name", "op": "eq", "value": "reg.exe"} and "OriginalFileName" in notes[0]
-    with pytest.raises(SigmaError, match="never match.*OriginalFileName"):
-        sigma.compile_rule(sigma.parse("detection:\n  sel:\n    OriginalFileName: reg.exe\n    CommandLine|contains: "
+    assert cond == {"field": "process.name", "op": "eq", "value": "reg.exe"} and "IntegrityLevel" in notes[0]
+    with pytest.raises(SigmaError, match="never match.*IntegrityLevel"):
+        sigma.compile_rule(sigma.parse("detection:\n  sel:\n    IntegrityLevel: High\n    CommandLine|contains: "
                                        "save\n  condition: sel\n"), "windows")
 
 
@@ -273,3 +273,28 @@ def test_file_extension_alone_is_not_a_signature_but_fine_with_a_program():
     tied = _cond("detection:\n  sel:\n    Image|endswith: '\\rundll32.exe'\n    CommandLine|contains: '.inf'\n"
                  "  condition: sel\n")
     assert weak_values(alone) == [".inf"] and weak_values(tied) == []
+
+
+def _leaves(tree):
+    if "field" in tree:
+        return [tree]
+    return [l for k in ("all", "any") for c in tree.get(k, []) for l in _leaves(c)] + \
+           (_leaves(tree["not"]) if "not" in tree else [])
+
+
+def _compile(det: str):
+    return sigma.compile_rule(sigma.parse(
+        f"```yaml\ntitle: t\nlogsource:\n  category: process_creation\n  product: windows\ndetection:\n{det}level: low\n```"),
+        "windows")
+
+
+def test_compile_maps_original_file_name():
+    tree, notes = _compile("  sel:\n    OriginalFileName|endswith: '\\reg.exe'\n  condition: sel\n")
+    assert any(l["field"] == "winlog.event_data.OriginalFileName" for l in _leaves(tree))
+    assert all("not recorded" not in n for n in notes)
+
+
+def test_description_product_company_mapped():
+    for f in ("Description", "Product", "Company"):
+        tree, notes = _compile(f"  sel:\n    {f}: X\n  condition: sel\n")
+        assert any(l["field"] == f"winlog.event_data.{f}" for l in _leaves(tree)) and not notes

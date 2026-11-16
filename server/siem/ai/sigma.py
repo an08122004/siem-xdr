@@ -42,7 +42,10 @@ FIELDS = {
     "windows": {"Image": "full path of the program", "CommandLine": "full command line",
                 "ParentImage": "full path of the program that started it",
                 "ParentCommandLine": "command line of the parent", "User": "account (DOMAIN\\user)",
-                "CurrentDirectory": "working directory"},
+                "CurrentDirectory": "working directory",
+                "OriginalFileName": "original file name from the PE header (file name only, no path)",
+                "Description": "file description from the PE header", "Product": "product name from the PE header",
+                "Company": "company name from the PE header"},
     "linux": {"Image": "path of the program", "CommandLine": "full command line",
               "ParentImage": "path of the program that started it", "ParentCommandLine": "command line of the parent",
               "User": "account"},
@@ -53,7 +56,8 @@ FIELDS = {
 }
 _PROC = {"Image": "process.executable", "CommandLine": "process.command_line",
          "ParentImage": "process.parent.executable", "ParentCommandLine": "process.parent.command_line",
-         "User": "user.name", "CurrentDirectory": "winlog.event_data.CurrentDirectory"}
+         "User": "user.name", "CurrentDirectory": "winlog.event_data.CurrentDirectory",
+         **{f: f"winlog.event_data.{f}" for f in ("OriginalFileName", "Description", "Product", "Company")}}
 _PROC_NAME = {"Image": "process.name", "ParentImage": "process.parent.name"}
 # trường web -> (trường so cả giá trị / phần đầu, trường so chuỗi con / phần cuối / regex). url.query còn mã hóa
 # phần trăm, url.decoded là cả URL đã giải mã: model viết payload đã giải mã (' or 'a'='a) hay còn mã hóa (%27)

@@ -470,3 +470,18 @@ def test_case_playbooks_from_soc_plan_catalog():
     assert pick("TI-002", ["T1071"]) == "PB-06" and APPROVAL_PERMISSIONS["SOC Manager"] == "declare"
     insider = cp.build("X", "high", tags=["insider"])
     assert any(t["approval"] == "SOC Manager" and "Đóng băng quyền" in t["title"] for t in insider["tasks"])
+
+
+def _sysmon1(**fields):
+    return normalize(raw("windows_event", {"event_id": 1, "channel": "Microsoft-Windows-Sysmon/Operational",
+                                           "fields": fields}, source="eventlog", agent="A001-PC-01"))
+
+
+def test_sysmon_derives_original_file_name_when_missing():
+    d = _sysmon1(Image="C:\\Windows\\System32\\reg.exe", CommandLine="reg query")
+    assert get(d, "winlog.event_data.OriginalFileName") == "reg.exe"
+
+
+def test_sysmon_keeps_real_original_file_name():
+    d = _sysmon1(Image="C:\\tools\\xcopy.exe", OriginalFileName="robocopy.exe")
+    assert get(d, "winlog.event_data.OriginalFileName") == "robocopy.exe"   # KHÔNG ghi đè

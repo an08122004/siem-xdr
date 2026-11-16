@@ -19,7 +19,7 @@ from .condition import regex_risk
 from ..wazuh_fields import escape_literal
 from .sigma import MAX_TERMS, SigmaError
 
-EMITTER_VERSION = "2"      # 2: dấu `\` trong trường Windows khớp cả dạng đơn lẫn nhân đôi (eventchannel)
+EMITTER_VERSION = "3"      # 3: thêm OriginalFileName/Description/Product/Company; 2: dấu `\` trong trường Windows khớp cả dạng đơn lẫn nhân đôi (eventchannel)
 LEVEL = {"low": 5, "medium": 7, "high": 10, "critical": 10}      # R70: không thắng rule gốc level 11-12 cùng cha
 _WEB_PARENTS = "31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123"
 PARENTS: dict[str, dict] = {
@@ -39,7 +39,11 @@ FIELDS: dict[str, dict[str, tuple[str, str]]] = {
                 "process.parent.name": ("win.eventdata.parentImage", "base"),
                 "process.parent.command_line": ("win.eventdata.parentCommandLine", ""),
                 "user.name": ("win.eventdata.user", ""),
-                "winlog.event_data.CurrentDirectory": ("win.eventdata.currentDirectory", "")},
+                "winlog.event_data.CurrentDirectory": ("win.eventdata.currentDirectory", ""),
+                "winlog.event_data.OriginalFileName": ("win.eventdata.originalFileName", ""),
+                "winlog.event_data.Description": ("win.eventdata.description", ""),
+                "winlog.event_data.Product": ("win.eventdata.product", ""),
+                "winlog.event_data.Company": ("win.eventdata.company", "")},
     "linux": {"process.executable": ("exe", ""), "process.command_line": ("cmd", ""), "process.name": ("name", ""),
               "process.parent.name": ("parent", "")},
     "web": {**_URL, "http.request.method": ("protocol", ""), "http.response.status_code": ("id", ""),
@@ -136,6 +140,14 @@ def _map_leaf(leaf: dict, domain: str) -> dict:
             raise SigmaError(f"phép so {op} trên {f} không dịch được (chỉ eq / in / endswith)")
         out["value"] = [("" if op == "endswith" else "\\") + v for v in _vals(leaf)]
         out["op"] = "not_endswith" if op == "neq" else "endswith"
+    if f == "winlog.event_data.OriginalFileName" and op == "endswith":
+        # Sysmon lưu OriginalFileName là TÊN FILE (không đường dẫn): `endswith: \reg.exe` thành so bằng `reg.exe`
+        vs = _vals(leaf)
+        lead = [v.startswith(("\\", "/")) for v in vs]
+        if any(lead):
+            if not all(lead):
+                raise SigmaError("OriginalFileName: không trộn giá trị có và không có dấu gạch chéo đầu trong một điều kiện")
+            out["op"], out["value"] = "eq", [v[1:] for v in vs]
     if op == "regex":                       # giá trị từ LLM / SigmaHQ: phải tự cân ngoặc (không thoát được `(?:…)`) và không ReDoS
         for v in _vals(leaf):
             try:
