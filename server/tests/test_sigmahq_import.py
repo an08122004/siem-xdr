@@ -77,6 +77,23 @@ def test_pick_counts_only_samples_wazuh_has_not_hit_yet():
     assert imp.pick(cands, ITEMS, covered={0, 1}, batch=30) == []           # đã bắt hết: không nhập
 
 
+def test_pick_excludes_samples_won_by_written_batch_rules():
+    items = [win(0, RUNDLL + " javascript:a", "attack"), win(1, RUNDLL + " javascript:b", "attack"),
+             win(2, RUNDLL + " shell32.dll,Control_RunDLL desk.cpl", "normal")]
+    row, text = sigma_rule("rules/a.yml", "Rundll32 JavaScript", JS, EVASION)
+    cands, _ = imp.candidates(items, [row], {row["path"]: text}, CONFIG)
+    picked = imp.pick(cands, items, covered=set(), batch=30, already={0})       # mẫu 0 đã bị rule 108xxx cũ bắt
+    assert picked and picked[0].hits_new == {1} and picked[0].pos["i"] == 1
+
+
+def test_pick_drops_candidate_fully_shadowed_by_batch():
+    items = [win(0, RUNDLL + " javascript:a", "attack"), win(1, RUNDLL + " javascript:b", "attack"),
+             win(2, RUNDLL + " shell32.dll,Control_RunDLL desk.cpl", "normal")]
+    row, text = sigma_rule("rules/a.yml", "Rundll32 JavaScript", JS, EVASION)
+    cands, _ = imp.candidates(items, [row], {row["path"]: text}, CONFIG)
+    assert imp.pick(cands, items, covered=set(), batch=30, already={0, 1}) == []
+
+
 @pytest.fixture
 def three_sigma_rules():
     rows = [sigma_rule(f"rules/{n}.yml", f"Rundll32 rule {n}", JS.replace("javascript:", w), EVASION)
