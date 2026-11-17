@@ -138,10 +138,13 @@ def candidates(items: list[dict], rows: list[dict], originals: dict[str, str], c
         if any(regex_risk(e.text or "") for e in ET.fromstring("<g>" + em.xml + "</g>").iter() if e.get("type") == "pcre2"):
             skipped["mẫu regex quá dài / ReDoS (lint)"] += 1
             continue
-        # Giá trị chữ có < > & nay được emit thành `(?:\x3e|&amp;gt;)`… khớp cả ký tự lẫn thực thể Wazuh (19c): GIỮ.
-        # Chỉ còn loại byte-escape `\x3c \x3e \x26` ĐƠN LẺ (regex viết sẵn mã này, không bọc dạng thực thể -> không khớp `&gt;`).
-        if dom == "windows" and re.search(r"\\x3c(?!\|&amp;lt;)|\\x3e(?!\|&amp;gt;)|\\x26(?!\|&amp;amp;)", em.xml):
-            skipped["regex có byte-escape < > & (Wazuh giữ thực thể XML)"] += 1
+        # Loại rule Windows chạm < > & trong giá trị/regex. Task 19c định emit `(?:\x3e|&amp;gt;)` khớp cả ký tự lẫn
+        # thực thể, nhưng ĐO LẠI ở Task 4 (manager 4.14.8, ca eventchannel tổng hợp của rule "Redirection to Local Admin
+        # Share"): commandLine của mẫu có `1> \\127.0.0.1\ADMIN$\...` KHÔNG khớp vế nào (cả token thường như `127` cũng
+        # trượt, chỉ EID1 báo) -> decoder eventchannel không cho khớp commandLine có `>`/`&`/UNC `$`. Rule như vậy rớt ca CI,
+        # không được nhập (cổng R66). Bộ dịch VẪN giữ khả năng _win_lit (test đơn vị), nhưng chờ kiểm trên log agent thật.
+        if dom == "windows" and re.search(r"\\x(?:3c|3e|26)|&amp;(?:lt|gt|amp);", em.xml):
+            skipped["giá trị / regex có < > & (ca eventchannel không khớp được, R77)"] += 1
             continue
         cond = Condition(tree)
         if any(cond.match(d) for d in normal[dom]):

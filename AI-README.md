@@ -931,9 +931,14 @@ Windows, Linux, web) nạp được qua `write_dynamic`, `ossec.log` không có 
 `/zz9probe.bak`, tiến trình có `zz9probe` trong dòng lệnh) ra alert `WZH-109003` (web) và `WZH-109001` (Linux), mức medium, gắn
 `alert.shadow`. Khi trả file về rỗng (gỡ hết), Wazuh từ chối `<group>` rỗng (`Group 'group' without any rule.`); đã sửa (Task 26b): `write_dynamic(name, None, api)` xóa file rồi reload (reload lỗi thì khôi phục file cũ và reload lại).
 
-**SigmaHQ cùng bộ dịch** (Task 24, sinh lại ở review cuối): 30 rule Windows (`0966-sigmahq.xml`) bắt thêm 186 mẫu mới trên 17.306
-mẫu tấn công Windows + web (cây Python ước 186), 0 mẫu bị lô cướp phát hiện của rule khác (đo có / không có lô), 60 ca test 0 sai
-(`RULES.md` mục 2.10, 4.6).
+**SigmaHQ cùng bộ dịch** (Task 24, sinh lại ở review cuối, mở rộng ở Task 4 phủ trường 16/11/2026): **34 rule Windows**
+(`0966-sigmahq.xml`, id 108000–108033) bắt thêm **190 mẫu mới** trên 17.306 mẫu tấn công Windows + web, 0 mẫu bị lô cướp phát hiện
+của rule khác (đo có / không có lô, `--measure` thoát 0), 68 ca test 0 sai (`RULES.md` mục 2.10, 4.6). Lô 1 là 30 rule / 186 mẫu;
+lô 2 (Task 4) thêm **4 rule / 4 mẫu mới** nhờ ánh xạ trường Sysmon mới: NetworkProvider dò tín chỉ T1003, Regsvr32 cờ bất thường
+T1218.010, **làm rối dòng lệnh bằng Unicode T1027 (qua `OriginalFileName`)**, trinh sát GatherNetworkInfo T1615. **1 rule nhờ
+`OriginalFileName`** (Task 1); **0 rule nhờ `< > &`** (Task 3): ca eventchannel của rule `<>&` không khớp trên Wazuh 4.14.8 thật
+nên `sigmahq_import` loại lại (R77). Ứng viên qua mọi bộ lọc: 183; trần độ phủ của bộ dữ liệu Atomic dựng lại đã chạm (không có
+mẫu binary đổi tên nên `OriginalFileName` hầu như trùng việc rule `Image`).
 
 ## 10. Đánh giá các model và vì sao tỉ lệ đạt thấp
 

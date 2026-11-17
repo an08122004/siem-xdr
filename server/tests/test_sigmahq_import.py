@@ -133,11 +133,12 @@ def test_license_header(tmp_path, three_sigma_rules):
     assert "DRL 1.1" in (tmp_path / "r.xml").read_text(encoding="utf-8")[:600]
 
 
-def test_literal_value_with_xml_entity_chars_now_imports():
-    # 19c: giá trị chữ có < > & nay dịch được (khớp cả ký tự lẫn thực thể Wazuh) -> thành ứng viên, không bị bỏ
+def test_literal_value_with_xml_entity_chars_skipped_r77():
+    # 19c định dịch được, NHƯNG Task 4 đo end-to-end: ca eventchannel của rule <>& không khớp trên Wazuh 4.14.8 thật
+    # (commandLine mang >/&/UNC $ không matchable qua đường ca test) -> sigmahq_import loại lại rule <>& (R77)
     row, text = sigma_rule("rules/g.yml", "Redirect", "  sel:\n    CommandLine|contains: ' > '\n  condition: sel", EVASION)
     cands, skipped = imp.candidates(ITEMS, [row], {row["path"]: text}, CONFIG)
-    assert [c.title for c in cands] == ["Redirect"] and skipped == {}
+    assert cands == [] and skipped == {"giá trị / regex có < > & (ca eventchannel không khớp được, R77)": 1}
 
 def test_regex_with_xml_entity_chars_still_skipped():
     # regex tùy ý có < > & vẫn bị emit từ chối (không biến đổi dạng thực thể được)
