@@ -141,7 +141,8 @@ def candidates(items: list[dict], rows: list[dict], originals: dict[str, str], c
         # Loại rule Windows chạm < > & trong giá trị/regex. Task 19c định emit `(?:\x3e|&amp;gt;)` khớp cả ký tự lẫn
         # thực thể, nhưng ĐO LẠI ở Task 4 (manager 4.14.8, ca eventchannel tổng hợp của rule "Redirection to Local Admin
         # Share"): commandLine của mẫu có `1> \\127.0.0.1\ADMIN$\...` KHÔNG khớp vế nào (cả token thường như `127` cũng
-        # trượt, chỉ EID1 báo) -> decoder eventchannel không cho khớp commandLine có `>`/`&`/UNC `$`. Rule như vậy rớt ca CI,
+        # trượt, chỉ EID1 báo) -> commandLine có `>`/`&`/UNC `$` KHÔNG khớp qua đường ca eventchannel tổng hợp (decoder Wazuh
+        # hay escaping của case-harness: chưa truy nguyên, hộp đen đủ để chốt cổng). Rule như vậy rớt ca CI,
         # không được nhập (cổng R66). Bộ dịch VẪN giữ khả năng _win_lit (test đơn vị), nhưng chờ kiểm trên log agent thật.
         if dom == "windows" and re.search(r"\\x(?:3c|3e|26)|&amp;(?:lt|gt|amp);", em.xml):
             skipped["giá trị / regex có < > & (ca eventchannel không khớp được, R77)"] += 1
