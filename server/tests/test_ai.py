@@ -28,6 +28,10 @@ def ev(ip, path="/admin/login", status=401, sec=0, ua="Mozilla/5.0", i=0):
 def test_regex_guard():
     assert regex_risk("(a+)+$") and regex_risk("x" * 400) and regex_risk("([")
     assert regex_risk(r"^/admin/(login|logout)$") is None
+    for bad in (r"((a+))+$", r"^(a|aa)+$", r"(a?){20}a{20}", r"(?:x(?:y|z)*)+"):          # lọt bộ kiểm cũ
+        assert regex_risk(bad), bad
+    for ok in (r"(?:\d{1,3}\.){3}\d{1,3}", r"union\s+select", r"(?i)^(?=[\s\S]*?(?:cmd\.exe))"):
+        assert regex_risk(ok) is None, ok
 
 
 # ------------------------------------------------------------------ kiểm định rule mới

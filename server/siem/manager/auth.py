@@ -201,6 +201,10 @@ class UserStore:
     def put(self, user: dict[str, Any]) -> None:
         self.es.index(index=settings.IDX_USERS, id=user["username"], document=user, refresh="wait_for")
 
+    def patch(self, username: str, fields: dict[str, Any]) -> None:
+        """Cập nhật một phần (ES gộp object lồng nhau): không ghi đè trường admin vừa đổi (disabled, role...) như put()."""
+        self.es.update(index=settings.IDX_USERS, id=username, doc=fields, refresh="wait_for")
+
     def list(self) -> list[dict[str, Any]]:
         try:
             res = self.es.search(index=settings.IDX_USERS, size=500, query={"match_all": {}})
@@ -240,6 +244,13 @@ class MemoryUserStore(UserStore):
 
     def put(self, user):
         self.users[user["username"]] = dict(user)
+
+    def patch(self, username, fields):
+        def merge(dst, src):
+            for k, v in src.items():
+                dst[k] = merge(dict(dst.get(k) or {}), v) if isinstance(v, dict) else v
+            return dst
+        self.users[username] = merge(dict(self.users[username]), fields)
 
     def list(self):
         return [dict(u) for _, u in sorted(self.users.items())]
@@ -699,8 +710,8 @@ def login(body: LoginBody, request: Request, response: Response) -> dict[str, An
         user["mfa"]["last_step"] = step
     throttle.success(keys[0])
     token, s = sessions.create(user, ip)
-    user["last_login"] = store.now_iso()
-    users.put(user)
+    # cập nhật một phần: put(user) cả document đọc TRƯỚC scrypt sẽ hoàn tác thao tác khóa/đổi vai trò của admin chen giữa
+    users.patch(username, {"last_login": store.now_iso()} | ({"mfa": {"last_step": step}} if mfa_enabled(user) else {}))
     response.set_cookie(COOKIE, token, httponly=True, secure=True, samesite="strict", path="/",
                         max_age=settings.CONSOLE_SESSION_HOURS * 3600)
     audit("login", "success", username, ip, role=user["role"])

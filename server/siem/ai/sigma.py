@@ -18,6 +18,7 @@ Chỉ hỗ trợ tập con Sigma cho rule 1 event: không có aggregation (| cou
 from __future__ import annotations
 
 import fnmatch
+import itertools
 import re
 import uuid
 from datetime import date
@@ -124,6 +125,12 @@ _COLON_VALUE = re.compile(r"^(\s*(?:-\s+)?[A-Za-z_][\w\-|.]*:[ \t]+)([^'\"\n|>&*
 class _Loader(yaml.SafeLoader):
     """Khóa lặp trong cùng selection (`CommandLine|contains: a` rồi `CommandLine|contains: b`): YAML giữ cái cuối và
     bỏ lặng lẽ các cái trước, trong khi ý model là phải có đủ (AND) -> gộp thành `CommandLine|contains|all: [a, b]`."""
+
+    def compose_node(self, parent, index):
+        # alias (&a / *a) lồng nhau nhân dữ liệu theo hàm mũ ("bom" YAML từ câu trả lời model -> OOM); Sigma không cần alias
+        if self.check_event(yaml.AliasEvent):
+            raise yaml.YAMLError("YAML alias (*name) không được dùng trong rule")
+        return super().compose_node(parent, index)
 
 
 def _mapping(loader: yaml.SafeLoader, node: yaml.MappingNode) -> dict[Any, Any]:
@@ -418,12 +425,21 @@ def _glob(value: str, mod: str | None) -> tuple[str, Any]:
     return "regex", ("" if lead else "^") + rx + ("" if trail else "$")
 
 
+_DASHES = ("-", "/", "–", "—", "―")     # như pySigma: -, /, en dash, em dash, horizontal bar
+_FLAG = re.compile(r"\B[-/]\b")
+
+
 def _windash(value: str) -> list[str]:
-    """`-foo` cũng khớp `/foo` (và gạch ngang dài) — cờ dòng lệnh Windows viết kiểu nào cũng được."""
-    for i, ch in enumerate(value):
-        if ch in "-/" and (i == 0 or value[i - 1] in " \t\"'"):
-            return [value[:i] + d + value[i + 1:] for d in ("-", "/", "\u2013")]
-    return [value]
+    """`-foo` cũng khớp `/foo` và các gạch dài — cờ dòng lệnh Windows viết kiểu nào cũng được, ở MỌI cờ
+    (`-nop -w hidden` khớp `/nop /w hidden`). Trước đây chỉ 3 ký tự và chỉ cờ đầu tiên."""
+    pos = [m.start() for m in _FLAG.finditer(value)][:3]          # 5^3 = 125 biến thể là trần
+    out = []
+    for combo in itertools.product(_DASHES, repeat=len(pos)):
+        s = list(value)
+        for p, d in zip(pos, combo):
+            s[p] = d
+        out.append("".join(s))
+    return out
 
 
 def _value_ops(v: Any, mods: list[str], key: str) -> list[tuple[str, Any]]:

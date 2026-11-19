@@ -169,6 +169,25 @@ def test_strangers_failures_do_not_lock_other_accounts(env):
     assert login(env, "admin", ADMIN_TMP).status_code == 200
 
 
+def test_login_does_not_undo_concurrent_disable(env, monkeypatch):
+    from siem.manager import auth
+    real = auth.verify_password
+
+    def racing(pw, h):
+        ok = real(pw, h)
+        env.users.users["admin"]["disabled"] = True      # admin khác khóa tài khoản đúng lúc login đang tính scrypt
+        return ok
+    monkeypatch.setattr(auth, "verify_password", racing)
+    login(env, "admin", ADMIN_TMP)
+    assert env.users.get("admin")["disabled"] is True and env.users.get("admin")["last_login"]
+
+
+def test_oversized_body_rejected_before_auth(env):
+    r = env.post("/api/v1/actions", content=b"{}", headers={**H, "Content-Type": "application/json",
+                                                             "Content-Length": str(50 * 1024 * 1024)})
+    assert r.status_code == 413
+
+
 def test_password_change_respects_lockout(env):
     from siem.manager import auth
     auth.throttle.__init__()
