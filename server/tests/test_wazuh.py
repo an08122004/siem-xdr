@@ -184,6 +184,14 @@ def test_auditd_execve_and_sca_and_auth():
     assert get(doc, "event.module") == "auditd" and get(doc, "process.name") == "curl"
     assert get(doc, "process.command_line") == "curl http://x/s.sh" and get(doc, "process.parent.pid") == 70
 
+    payload = "echo pwned > /tmp/x"                     # có khoảng trắng -> auditd ghi HEX, decoder Wazuh bỏ mất
+    full = (f'type=SYSCALL msg=audit(1.1:2): arch=c000003e syscall=59 a0=55d1 a1=55d2 exe="/usr/bin/bash" '
+            f'type=EXECVE msg=audit(1.1:2): argc=3 a0="bash" a1="-c" a2={payload.encode().hex().upper()}')
+    doc = normalize(wz(location="/var/log/audit/audit.log", decoder={"name": "auditd"}, full_log=full, data={"audit": {
+        "type": "EXECVE", "syscall": "59", "exe": "/usr/bin/bash", "pid": "8", "ppid": "7",
+        "execve": {"argc": "3", "a0": "bash", "a1": "-c"}}}))
+    assert get(doc, "process.command_line") == f"bash -c {payload}"
+
     doc = normalize(wz(location="sca", data={"sca": {"type": "check", "policy": "CIS Debian 13",
                                                      "check": {"id": "7001", "title": "Ensure X", "result": "failed"}}}))
     assert get(doc, "event.module") == "sca" and get(doc, "sca.check.result") == "failed"

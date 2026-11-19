@@ -692,7 +692,7 @@ def parse_wazuh(ev: Doc, doc: Doc) -> None:
     elif full and _SIEM_PROC_LOC.search(loc) and (m := _SIEM_PROC.match(full)):
         parse_process({"pid": m["pid"], "ppid": m["ppid"], "uid": m["uid"], "name": m["name"], "executable": m["exe"],
                        "command_line": m["cmd"], "parent_name": m["parent"]}, doc)
-    elif isinstance(data.get("audit"), dict) and _wazuh_audit(data["audit"], doc):
+    elif isinstance(data.get("audit"), dict) and _wazuh_audit(data["audit"], doc, full):
         pass
     elif isinstance(data.get("sca"), dict):
         _wazuh_sca(data["sca"], doc, full)
@@ -787,13 +787,34 @@ def _wazuh_windows(win: Doc, doc: Doc, agent_name: Any) -> None:
         put(doc, "message", sysd["message"].strip('"'))
 
 
-def _wazuh_audit(audit: Doc, doc: Doc) -> bool:
+_EXECVE_REC = re.compile(r"type=EXECVE\b.*?(?=\stype=|$)", re.S)
+_EXECVE_ARG = re.compile(r'\ba(\d+)=("[^"]*"|[0-9A-Fa-f]+)(?=\s|$)')
+
+
+def _execve_args(full: str) -> list[str]:
+    """Đối số EXECVE từ dòng auditd gốc: đối số có khoảng trắng / ký tự lạ bị auditd ghi dạng HEX không nháy, decoder
+    Wazuh bỏ qua -> `bash -c <payload>` chỉ còn `bash -c`. Chỉ đọc bản ghi EXECVE (a0.. của SYSCALL là số thô)."""
+    rec = _EXECVE_REC.search(full or "")
+    out: dict[int, str] = {}
+    for m in _EXECVE_ARG.finditer(rec.group(0) if rec else ""):
+        v = m[2]
+        if v.startswith('"'):
+            out[int(m[1])] = v[1:-1]
+        else:
+            try:
+                out[int(m[1])] = bytes.fromhex(v).decode("utf-8", "replace").replace("\0", " ")
+            except ValueError:
+                out[int(m[1])] = v
+    return [out[i] for i in sorted(out)]
+
+
+def _wazuh_audit(audit: Doc, doc: Doc, full: str = "") -> bool:
     """auditd (Linux thật, log_format audit): EXECVE / SYSCALL execve -> tiến trình mới.
     auditd không ghi tên tiến trình cha, nên rule cần process.parent.name (LNX-002) không bắt được từ nguồn này."""
     execve = audit.get("execve") if isinstance(audit.get("execve"), dict) else {}
     if not execve and str(audit.get("syscall")) not in ("59", "322"):
         return False
-    args = [str(execve[f"a{i}"]) for i in range(len(execve)) if f"a{i}" in execve]
+    args = _execve_args(full) or [str(execve[f"a{i}"]) for i in range(len(execve)) if f"a{i}" in execve]
     exe = audit.get("exe")
     parse_process({"pid": audit.get("pid"), "ppid": audit.get("ppid"), "uid": audit.get("auid") or audit.get("uid"),
                    "name": audit.get("command") or _basename(exe), "executable": exe,
