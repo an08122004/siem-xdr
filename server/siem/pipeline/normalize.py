@@ -72,7 +72,7 @@ def _clean_ip(v: Any) -> str | None:
     if v is None:
         return None
     s = str(v).strip().strip("[]")
-    if s.startswith("::ffff:"):
+    if s.lower().startswith("::ffff:") and "." in s:      # IPv4 ánh xạ (Windows có thể ghi ::FFFF:)
         s = s[7:]
     if s in ("", "-", "::1", "127.0.0.1", "0.0.0.0", "localhost"):
         return s if s in ("::1", "127.0.0.1") else None

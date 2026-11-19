@@ -438,6 +438,18 @@ def test_soar_opens_case_for_every_medium_alert():
         assert len(notified) == (1 if score >= SEVERITY_SCORE["high"] else 0), sev
 
 
+def test_ip_scope_special_ranges():
+    from siem.pipeline.enrich import ip_scope
+    assert [ip_scope(x) for x in ("224.0.0.251", "::", "198.18.0.5", "ff02::1", "203.0.113.9", "8.8.8.8")] == \
+        ["private", "private", "private", "private", "public", "public"]          # 203.0.113/24 = "Internet" của lab
+
+
+def test_case_host_scopes_non_ip_entities():
+    from siem.soar.engine import case_host
+    assert case_host({"user": {"name": "www-data"}, "host": {"name": "web-01"}}) == "web-01"   # webshell 2 máy: 2 case
+    assert case_host({"source": {"ip": "203.0.113.7"}, "host": {"name": "web-01"}}) is None    # theo IP: gộp như cũ
+
+
 def test_soar_case_gets_playbook():
     from siem.soar.cases import CasePlaybooks
     from siem.soar.engine import Notifier, Soar, load_playbooks

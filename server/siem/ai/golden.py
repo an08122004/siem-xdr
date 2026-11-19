@@ -298,6 +298,8 @@ class PublicDatasets:
                 s += 1.5  # cùng kỹ thuật ATT&CK
             if want and all(ls.get(k2) == v for k2, v in want.items()):
                 s *= 2  # cùng loại nguồn log
+            if not str(r.get("path") or "rules/").startswith("rules/"):
+                s *= 0.5  # rule CVE / chiến dịch (rules-emerging-threats...) là khuôn tệ cho rule chung, như sigmahq_for
             scored.append((s, r))
         scored.sort(key=lambda x: -x[0])
         return [r for s, r in scored[:k] if s > 0]

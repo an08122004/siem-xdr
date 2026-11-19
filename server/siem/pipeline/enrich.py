@@ -223,6 +223,9 @@ _PRIVATE_NETS = [ipaddress.ip_network(n) for n in (
     "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16", "fc00::/7", "fe80::/10")]
 
 
+_BENCH = ipaddress.ip_network("198.18.0.0/15")
+
+
 def ip_scope(ip: str | None) -> str | None:
     if not ip:
         return None
@@ -232,7 +235,8 @@ def ip_scope(ip: str | None) -> str | None:
         return None
     if a.is_loopback:
         return "loopback"
-    if any(a in n for n in _PRIVATE_NETS if n.version == a.version):
+    # multicast / :: / dải benchmark 198.18/15 / reserved không định tuyến ra Internet: không phải "public" (tra TI, geo)
+    if a.is_multicast or a.is_unspecified or a.is_reserved or a in _BENCH or             any(a in n for n in _PRIVATE_NETS if n.version == a.version):
         return "private"
     return "public"
 

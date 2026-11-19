@@ -95,6 +95,12 @@ def case_entity(alert: dict[str, Any]) -> str:
     return str(get(alert, "source.ip") or get(alert, "user.name") or get(alert, "host.name") or "unknown")
 
 
+def case_host(alert: dict[str, Any]) -> str | None:
+    """Thực thể không phải IP (user www-data, SYSTEM...) thì máy cũng phân biệt sự cố: webshell trên web-01 và web-02
+    là hai case, không gộp vào case mang host=web-01 và ghìm thông báo của máy thứ hai."""
+    return None if get(alert, "source.ip") else get(alert, "host.name")
+
+
 class Playbook:
     def __init__(self, d: dict[str, Any]):
         self.name = d["name"]
@@ -313,7 +319,7 @@ class Soar:
         existing = store.search(self.es, settings.IDX_CASES, size=1, query={"bool": {"filter": [
             {"term": {"rule_id": get(alert, "rule.id")}}, {"term": {"entity": entity}},
             {"terms": {"status": list(OPEN_CASE_STATUSES)}}, {"range": {"created_at": {"gte": since}}},
-        ]}}, sort=[{"created_at": "desc"}])
+        ] + ([{"term": {"host": h}}] if (h := case_host(alert)) else [])}}, sort=[{"created_at": "desc"}])
         alert_id, now = get(alert, "alert.id"), store.now_iso()
         level = alert.get("priority")
         if level not in prio.PRIORITIES:                # alert tạo trước khi có priority.py
@@ -407,7 +413,7 @@ class Notifier:
         """None: đang trong thời gian chờ, gộp alert này. Ngược lại: số alert đã gộp kể từ lần gửi trước."""
         if self.cooldown <= 0:
             return 0
-        key, now = (str(get(alert, "rule.id")), case_entity(alert)), self.clock()
+        key, now = (str(get(alert, "rule.id")), case_entity(alert), case_host(alert)), self.clock()
         last = self._last.get(key)
         if last and now - last[0] < self.cooldown:
             self._last[key] = (last[0], last[1] + 1)
