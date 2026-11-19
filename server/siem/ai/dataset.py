@@ -86,32 +86,70 @@ class ESDataSource:
         return out
 
     # ------------------------------------------------------------ replay
-    def replay_events(self) -> list[Doc]:
-        """Event trong AI_REPLAY_DAYS gần nhất, sắp theo thời gian (đúng thứ tự để rule ngưỡng / chuỗi chạy đúng)."""
-        if self._events is not None:
-            return self._events
+    def _scan(self, query: dict, source: Any, limit: int) -> list[Doc]:
+        """Event siem-events-* khớp `query`, sắp theo thời gian (đúng thứ tự để rule ngưỡng / chuỗi chạy đúng)."""
         events: list[Doc] = []
         after = None
-        while len(events) < self.max_events:
+        while len(events) < limit:
             kw: dict[str, Any] = {}
             if after:
                 kw["search_after"] = after
             try:
-                res = self.es.search(index=f"{settings.IDX_EVENTS}-*", size=min(5000, self.max_events - len(events)),
-                                     query={"range": {"@timestamp": {"gte": self.replay_from}}},
-                                     sort=[{"@timestamp": "asc"}, {"event.id": "asc"}],
-                                     _source={"excludes": ["raw"]}, **kw)
+                res = self.es.search(index=f"{settings.IDX_EVENTS}-*", size=min(5000, limit - len(events)), query=query,
+                                     sort=[{"@timestamp": "asc"}, {"event.id": "asc"}], _source=source, **kw)
             except Exception as e:  # noqa: BLE001
-                log.warning("không đọc được event để replay: %s", e)
+                log.warning("không đọc được event: %s", e)
                 break
             hits = res["hits"]["hits"]
             if not hits:
                 break
             events.extend(h["_source"] for h in hits)
             after = hits[-1]["sort"]
-        self._events = events
-        log.info("replay: đã nạp %d event (%s -> nay)", len(events), self.replay_from)
         return events
+
+    def replay_events(self) -> list[Doc]:
+        """Event trong AI_REPLAY_DAYS gần nhất."""
+        if self._events is None:
+            self._events = self._scan({"range": {"@timestamp": {"gte": self.replay_from}}}, {"excludes": ["raw"]},
+                                      self.max_events)
+            log.info("replay: đã nạp %d event (%s -> nay)", len(self._events), self.replay_from)
+        return self._events
+
+    # ------------------------------------------------------------ gap-ml (sự cố ML đã xác nhận -> rule tần suất)
+    def ml_incidents(self) -> list[dict]:
+        """Alert ML-WEB / ML-AUTH có kết luận true_positive (analyst trên console, hoặc nhãn lab của tools/ml_eval.py)."""
+        return [h["_source"] for h in self._search(settings.IDX_ALERTS, {"bool": {"filter": [
+            {"range": {"@timestamp": {"gte": self.lookback}}}, {"terms": {"rule.id": ["ML-WEB", "ML-AUTH"]}},
+            {"term": {"alert.verdict": "true_positive"}}]}}, size=500, sort=[{"@timestamp": "asc"}],
+            source=["alert.id", "rule", "source.ip", "ml", "event_time"])]
+
+    def events_of(self, ip: str, start: str, end: str) -> list[Doc]:
+        """Event của một IP trong [start, end], kèm dòng log gốc (raw.full_log) để bơm vào sandbox."""
+        return self._scan({"bool": {"filter": [{"term": {"source.ip": ip}},
+                                               {"range": {"@timestamp": {"gte": start, "lte": end}}}]}},
+                          ["@timestamp", "event.id", "source.ip", "wazuh.rule", "raw.full_log", "raw.location", "message"],
+                          5000)
+
+    def rule_hits(self, sid: str) -> list[Doc]:
+        """(thời điểm, IP) mọi event rule Wazuh `sid` khớp trong AI_REPLAY_DAYS: lưu lượng để đặt ngưỡng / đo báo nhầm."""
+        return self._scan({"bool": {"filter": [{"term": {"wazuh.rule.id": sid}},
+                                               {"range": {"@timestamp": {"gte": self.replay_from}}}]}},
+                          ["@timestamp", "source.ip"], self.max_events)
+
+    def alert_ips(self, start: str, end: str, real_only: bool = False) -> set[str]:
+        """IP có alert trong [start, end], trừ alert analyst đã kết luận báo nhầm. real_only: chỉ alert thật của rule
+        (không bóng, không phải ML), tức là hành vi đã có rule bắt."""
+        flt = [{"range": {"@timestamp": {"gte": start, "lte": end}}}, {"exists": {"field": "source.ip"}}]
+        skip: list[dict] = [{"term": {"alert.verdict": "false_positive"}}]
+        if real_only:
+            skip += [{"term": {"alert.source": "ml"}}, {"term": {"alert.shadow": True}}]
+        try:
+            res = self.es.search(index=settings.IDX_ALERTS, size=0, query={"bool": {"filter": flt, "must_not": skip}},
+                                 aggs={"ip": {"terms": {"field": "source.ip", "size": 10000}}})
+        except Exception as e:  # noqa: BLE001
+            log.warning("không đọc được IP có alert: %s", e)
+            raise
+        return {b["key"] for b in res["aggregations"]["ip"]["buckets"]}
 
     # ------------------------------------------------------------ đề xuất cũ
     def proposals(self, statuses: list[str] | None = None, since: str = "now-30d", size: int = 500) -> list[dict]:

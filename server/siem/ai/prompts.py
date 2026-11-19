@@ -182,6 +182,33 @@ def wazuh_exception_prompt(rule: dict[str, Any], fp: list[Doc], tp: list[Doc], r
     return "DATA:\n" + _dump(data) + "\n\nPropose the exception now."
 
 
+# ----------------------------------------------------------------------------- rule tần suất từ sự cố ML (gap-ml)
+# Phần phát hiện (rule Wazuh được đếm, ngưỡng, khoảng thời gian) do code tính từ dữ liệu; model chỉ đặt tên, mô tả,
+# gắn ATT&CK và có quyền từ chối khi hành vi không phải tấn công.
+FREQUENCY_SCHEMA = {
+    "type": "object",
+    "properties": {"no_rule": _STR(300), "title": _STR(120), "description": _STR(400), "rationale": _STR(400),
+                   "techniques": {"type": "array", "maxItems": 3, "items": {"type": "string", "pattern": r"^T\d{4}(\.\d{3})?$"}}},
+    "required": ["no_rule", "title", "description", "rationale", "techniques"],
+}
+FREQUENCY_SYSTEM = _COMMON + """
+TASK: the anomaly detector flagged source IPs whose behaviour an analyst CONFIRMED as malicious, and no existing
+rule raised an alert for them. A frequency rule has already been computed from the data: it fires when the
+Wazuh rule in DATA.counted_rule matches `threshold` times from the same source IP within `timeframe_seconds`
+(normal users reach at most DATA.normal_max in such a period). Your job is to document it:
+- title: English, at most 10 words, naming the attack (e.g. "Password spraying against web portal");
+- description: what the rule detects and why it is suspicious;
+- techniques: 1-3 MITRE ATT&CK technique ids that fit the behaviour seen in DATA.samples;
+- no_rule: empty string, or a short reason if the samples clearly show legitimate activity (then the rule is dropped)."""
+
+
+def frequency_prompt(data: dict[str, Any], samples: list[str], rejected: list[str]) -> str:
+    """`data`: rule được đếm, ngưỡng, khoảng thời gian, số đo; `samples`: dòng log gốc của sự cố (không tin cậy)."""
+    body = sanitize_deep(data, 300) | {"samples": [sanitize(s, 300) for s in samples[:8]],
+                                      "previously_rejected_reasons": [sanitize(r, 300) for r in rejected[:3]]}
+    return "DATA:\n" + _dump(body) + "\n\nDocument the frequency rule now."
+
+
 def sigma_view(doc: Doc, domain: str, limit: int = 300) -> dict[str, Any]:
     """Event dưới tên trường Sigma (process_creation / webserver) như model đã quen; nhóm event thật khác: trường ECS."""
     if domain in ("windows", "linux"):

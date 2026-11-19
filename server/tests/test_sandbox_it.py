@@ -58,6 +58,25 @@ def test_candidate_catches_only_its_own_event(sandbox):
     assert ids(res, 2) == {119000} and not ids(res, 3)
 
 
+def test_frequency_rule_counts_stock_31101_per_source_ip(sandbox):
+    """gap-ml: rule tần suất của emit_frequency đếm thẳng rule gốc 31101 (lỗi 4xx). 16 lần 401 từ 10.10.1.62: job nền
+    31151 kích hoạt ở lần 14; có ứng viên (5 lần / 300 giây) thì ứng viên lấy lần 5, 10, 15 nên 31151 hụt đếm, nhưng IP
+    vẫn bị phát hiện (so theo IP). 10.10.1.41 hai lần: không kích hoạt."""
+    from siem.ai.wazuh_gate import CANDIDATE_BASE, WazuhGate
+    from siem.ai.wazuh_xml import emit_frequency
+    line = '{ip} - - [19/Nov/2026:12:00:{s:02d} +0700] "GET /portal/ HTTP/1.1" 401 459 "-" "Mozilla/5.0"'
+
+    def raws(ip, idents):
+        return [we.log_event(i, we.WEB_LOCATION, line.format(ip=ip, s=i % 60)) for i in idents]
+
+    em = emit_frequency(sid=31101, count=5, timeframe=300, rule_id=CANDIDATE_BASE, level=7, code="AI-CAND", title="t",
+                        techniques=["T1110.003"], groups=["siem", "ai"], shadow_since=None)
+    checks, m = WazuhGate(sandbox, {}).check_frequency(em.xml, {"10.10.1.62": raws("10.10.1.62", range(1, 17))},
+                                                       {"10.10.1.41": raws("10.10.1.41", (17, 18))})
+    assert all(c.ok for c in checks), [(c.name, c.detail) for c in checks]
+    assert m["wazuh_incidents_detected"] == 1 and m["wazuh_normal_fired"] == 0 and m["wazuh_stolen"] == 0
+
+
 def test_duplicate_candidate_id_is_load_error(sandbox):
     res = sandbox.run(_events()[1], CANDIDATE.replace("119000", "102001"))
     assert res.load_error and "7612" in res.load_error and res.hits == {}

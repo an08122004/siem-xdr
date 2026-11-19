@@ -75,7 +75,13 @@ def siem_proc_event(ident: int, exe: str, cmd: str, name: str, parent: str, uid:
 
 
 def apache_event(ident: int, line: str) -> RawEvent:
-    return RawEvent(ident, "apache", f"1:[001] (sbx-{ident}) any->{WEB_LOCATION}:{line}")
+    return log_event(ident, WEB_LOCATION, line, "apache")
+
+
+def log_event(ident: int, location: str, line: str, fmt: str = "log") -> RawEvent:
+    """Dòng log gốc của agent (event trong ES: raw.full_log, raw.location), header agent "(sbx-<ident>)"."""
+    line = re.sub(r"[\r\n\x00]+", " ", line)          # một dòng = một event; NUL cắt chuỗi C trong analysisd
+    return RawEvent(ident, fmt, f"1:[001] (sbx-{ident}) any->{location or 'syslog'}:{line}")
 
 
 def _process_event(ident: int, doc: dict, platform: str) -> RawEvent | None:

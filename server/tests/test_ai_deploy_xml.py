@@ -87,6 +87,18 @@ def test_approve_writes_shadow_block(env):
     assert "<description>AI-001 " in text                  # M4: alert ghi đúng mã đề xuất mà console hiện
 
 
+def test_approve_frequency_rule_from_gap_ml(env):
+    p = env.pending(level=7, domain="frequency")
+    p.update(target="gap-ml:web:31101", proposal={"id": "AI-002", "title": "Password spraying", "type": "frequency",
+             "frequency": {"sid": 31101, "count": 5, "timeframe": 300, "group_by": "source.ip"},
+             "mitre": {"technique": ["T1110.003"]}})
+    out = deploy.approve(env.es, p["id"], "an", env.api, now="2026-11-20T08:00:00+00:00")
+    text = env.text()
+    assert '<rule id="109000" level="7" frequency="5" timeframe="300">' in text
+    assert "<if_matched_sid>31101</if_matched_sid>" in text and "<same_source_ip />" in text
+    assert "shadow_since=2026-11-20" in text and out["status"] == "approved" and out["wazuh"]["ids"] == [109000]
+
+
 def test_code_falls_back_to_rule_id_when_proposal_id_is_odd(env):
     p = env.pending()
     p["proposal"]["id"] = "khong hop le"
