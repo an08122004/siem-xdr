@@ -279,7 +279,7 @@ services:
       interval: 15s
       timeout: 10s
       retries: 20
-    networks: [soc]
+    networks: [soc, lab]          # lab: chỉ để agent của demo-web enroll/gửi log (1514/1515)
 
   # Đọc archives.json / alerts.json của wazuh-manager (volume wazuh_logs, chỉ đọc) -> Kafka siem.raw. Xem vector/wazuh.yaml.
   wazuh-forwarder:
@@ -336,7 +336,7 @@ services:
   # ---------------------------------------------------------------- AI hỗ trợ viết rule (profile ai)
   # LLM chạy nội bộ, không publish cổng ra ngoài. GPU: thêm -f docker-compose.gpu.yml
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.34.4       # ghim: latest mới có thể đổi API mà ai-worker dùng (0.34.4 = bản đã chạy thử)
     restart: unless-stopped
     profiles: [ai]
     environment:
@@ -401,7 +401,9 @@ services:
     ports: ["127.0.0.1:8081:80"]
     depends_on:
       wazuh-manager: {condition: service_healthy}
-    networks: [soc]
+    # mạng riêng: máy cố ý có lỗ hổng, chiếm được web shell KHÔNG được chạm tới Kafka (PLAINTEXT, không xác thực ->
+    # bơm alert giả cho SOAR tự chặn/kill), Ollama, Vector API, Elasticsearch. Chỉ thấy wazuh-manager.
+    networks: [lab]
 
 secrets:
   elastic_password:       {file: ./secrets/elastic_password}
@@ -421,6 +423,8 @@ secrets:
 networks:
   soc:
     name: soc-lab
+  lab:
+    name: soc-demo-lab
   # chỉ manager <-> grafana; không ra Internet
   grafana-auth:
     internal: true

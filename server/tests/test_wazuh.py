@@ -36,7 +36,9 @@ def test_apache_via_wazuh(enricher):
     raw = wz(full_log=line, decoder={"name": "web-accesslog"}, location="/usr/local/apache2/logs/access_log")
     doc = enricher.enrich(normalize(raw))
     assert get(doc, "agent.id") == "001" and get(doc, "agent.type") == "wazuh" and get(doc, "host.name") == "demo-web"
-    assert get(doc, "event.id").startswith("wazuh-001-1790609494.501537-")
+    assert get(doc, "event.id").startswith("wazuh-001-")
+    other_file = dict(raw, data=dict(raw["data"], id="1790609494.999999"))   # cùng event, vị trí khác trong alerts.json
+    assert get(normalize(other_file), "event.id") == get(doc, "event.id")
     assert get(normalize(raw), "event.id") == get(doc, "event.id")       # cố định -> đọc lại không tạo bản ghi trùng
     assert get(doc, "@timestamp") == "2026-09-28T15:31:34+00:00"          # thời gian trong dòng log
     assert get(doc, "source.ip") == "203.0.113.9" and get(doc, "url.decoded") == "/p?id=1 union select 1,2"

@@ -646,8 +646,10 @@ def parse_wazuh(ev: Doc, doc: Doc) -> None:
         # bản ghi), dòng trong alerts.json khớp dòng archives.json của cùng event, còn event khác nhau thì khác id.
         body = ev.get("full_log") or json.dumps(ev.get("syscheck") or ev.get("data") or {}, sort_keys=True, default=str)
         basis = "\x1f".join(str(x) for x in (ev.get("timestamp"), ag.get("id"), ev.get("location"), body))
-        digest = hashlib.sha1(basis.encode("utf-8", "replace")).hexdigest()[:12]
-        doc["event"]["id"] = f"wazuh-{ag.get('id', '000')}-{ev['id']}-{digest}"
+        digest = hashlib.sha1(basis.encode("utf-8", "replace")).hexdigest()[:16]
+        # KHÔNG ghép ev["id"]: cùng một event có id khác nhau ở archives.json và alerts.json (vị trí trong từng file)
+        # -> related_events của alert trỏ tới event không tồn tại (đo 19/11: 227/500 alert)
+        doc["event"]["id"] = f"wazuh-{ag.get('id', '000')}-{digest}"
     doc["agent"] = {k: v for k, v in {"id": ag.get("id"), "name": ag.get("name"), "hostname": ag.get("name"),
                                       "ip": ag.get("ip"), "type": "wazuh"}.items() if v}
     put(doc, "host.name", ag.get("name"))

@@ -123,6 +123,14 @@ def test_late_events_for_closed_window_dropped():
     assert det.flush(800) == [] and det.status()["web"]["dropped_late"] == 1
     assert det.status()["web"]["windows"] == 1
 
+def test_future_windows_do_not_pile_up():
+    det = ml.AnomalyDetector()
+    for k in range(50):                                      # syslog giả giờ: mỗi event một cửa sổ tương lai
+        det.add(web("1.2.3.4", n=k), 10_000_000 + k * 300)
+    det.add(web("1.2.3.4"), 100)
+    det.flush(400)
+    assert all(i * 300 <= 700 for i in det.models["web"].open)   # chỉ còn cửa sổ hiện tại
+
 def test_caps_bound_memory():
     w = ml.Window(ml.SPECS["web"])
     for i in range(5000):

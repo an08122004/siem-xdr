@@ -115,17 +115,19 @@ def test_report_status_and_save(enricher, caplog):
     assert "ML web: active, 812 cửa sổ, ngưỡng -0.071, bỏ muộn 3, bỏ IP 0" in caplog.text
 
 
-def test_sigterm_handler_saves(enricher):
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT])     # compose: stop_signal SIGINT
+def test_sigterm_handler_saves(enricher, sig):
     d = Det()
     d.save = lambda: setattr(d, "saved", True)
     an = make(enricher, d)
     an.install_signal_handlers()
     try:
-        handler = signal.getsignal(signal.SIGTERM)
+        handler = signal.getsignal(sig)
         try:
-            handler(signal.SIGTERM, None)
+            handler(sig, None)
         except SystemExit:
             pass
         assert d.saved is True
     finally:
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        signal.signal(signal.SIGINT, signal.default_int_handler)

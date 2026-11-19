@@ -224,9 +224,14 @@ class AnomalyDetector:
         for m in self.models.values():
             _advance(m, now)
             self._maybe_fit(m, now)
+            w = m.spec.window
+            # cửa sổ ở TƯƠNG LAI (log giả giờ, vd syslog RFC5424 tự đặt thời gian) không bao giờ đóng -> bộ nhớ tăng mãi
+            if (future := [i for i in m.open if i * w > now + w]):
+                for i in future:
+                    del m.open[i]
+                log.warning("ML %s: bỏ %d cửa sổ có giờ tương lai", m.spec.name, len(future))
             if m.watermark is None:
                 continue
-            w = m.spec.window
             for idx in sorted(i for i in m.open if (i + 1) * w + self.grace <= m.watermark):
                 out += self._close(m, idx, m.open.pop(idx))
             # nhờ watermark, cửa sổ nào đóng sau lần này đều bắt đầu sau `horizon`: mục loại trừ / im lặng cũ hơn vô dụng
