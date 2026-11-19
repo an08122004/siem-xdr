@@ -1376,8 +1376,8 @@ chưa có tập bình thường thật (mục 10: điểm nghẽn là dữ liệ
 ## 16. ML phát hiện bất thường theo IP (ML-WEB, ML-AUTH)
 
 Module `server/siem/detection/ml.py` (Isolation Forest của scikit-learn) thay bản ML cũ `ML-001`. Bản cũ tắt từ 26/09 vì báo
-nhầm khoảng 32% lưu lượng bình thường và 100% với IP chỉ có 1 event. Bản mới sửa từng nguyên nhân; phần này chỉ mô tả thiết kế
-(số đo trên lab sẽ ghi sau khi chạy xong thí nghiệm).
+nhầm khoảng 32% lưu lượng bình thường và 100% với IP chỉ có 1 event. Bản mới sửa từng nguyên nhân. Mục 16.1–16.3 mô tả thiết kế,
+mục 16.4 là số đo trên lab; stack thật chạy bóng từ 19/11/2026.
 
 ### 16.1 Quyết định thiết kế
 
@@ -1417,4 +1417,33 @@ vẫn học tiếp. Mỗi giờ log một dòng mỗi model, ví dụ `ML web: a
 
 Lab đo mô hình nằm ở `tools/lab/mllab/`: `Ubuntu_GSANM` chạy Apache có `/portal` Basic Auth và SSH (agent `lab-web`), máy
 `Ubuntu-lab-wazuh` chạy dịch vụ `labsim` mô phỏng 20 người dùng (IP 10.10.1.40–59, agent `lab-client`). Tài khoản tạo trong VM
-luôn có tiền tố `lab_`. Kết quả đo sẽ ghi ở mục này khi có.
+luôn có tiền tố `lab_`. Kết quả đo ở mục 16.4.
+
+### 16.4 Kết quả đo (17–19/11/2026)
+
+Báo cáo đầy đủ: [docs/ml-eval-2026-11-17.md](docs/ml-eval-2026-11-17.md). Dữ liệu học tính từ 15/11 15:20 (+07), khi lưu lượng mô
+phỏng đã ổn định (máy host ngủ đông sáng 15/11; `simulate_users.py` sửa keep-alive lúc 15:18). Bảy kịch bản `attacks.py` chạy
+17/11 21:04–22:13 (+07) từ 10.10.1.60–66, dải này bị loại khỏi tập học.
+
+| Lần đo | Học / thử | Cửa sổ học (web / auth) | Kịch bản bắt được | Báo nhầm trên 10.10.1.40–59 |
+|---|---|---|---|---|
+| 1 | 53,7 giờ / 2,4 giờ | 1.233 / 166 | 4/7 | 1 / 51 cửa sổ (1,96%) |
+| 2 | 29,7 giờ / 26,4 giờ | 790 / 92 | 5/7 | 1 / 568 cửa sổ (0,18%) |
+
+- Bắt ngay cửa sổ đầu ở cả hai lần: `scan_dirs`, `portal_bruteforce`, `password_spray`, `slow_scan`. Hai kịch bản sau rule Wazuh
+  **không** bắt; ngược lại rule Wazuh bắt `ssh_bruteforce` ổn định hơn ML (ML chỉ bắt ở lần 2).
+- Bỏ sót ở cả hai lần: `scraper` (105 request / 5 phút, không lỗi) và `exfil` (7–16 MB / 5 phút, gấp khoảng 100 lần trung vị). Nguyên
+  nhân chung: Isolation Forest chia trong khoảng [min, max] của tập học nên không ngoại suy; giá trị vượt xa khoảng đó bị chấm như
+  giá trị ở biên. Model auth còn thêm một yếu tố: tập học chỉ có 2 IP và `n_fail` chỉ là 0 hoặc 2.
+- Báo nhầm duy nhất: người dùng 10.10.1.51 gõ sai mật khẩu portal 2 lần trong một cửa sổ 32 request, điểm -0,198 so với ngưỡng
+  -0,177 (sát ngưỡng). Lần 1 vượt mức dừng 1% của kế hoạch chỉ vì khoảng thử có 51 cửa sổ; lần 2 với 568 cửa sổ cho 0,18%, dưới tỉ
+  lệ đích 0,5%. Vì alert ở chế độ bóng, ML được bật để đo tiếp trên dữ liệu thật trong giai đoạn bóng.
+
+**Trên stack thật (19/11):** `ml_eval.py train` (15/11 08:20 → 19/11 03:54 UTC, bỏ 10.10.1.60–69) cho web 1.279 cửa sổ, auth 174;
+analyzer nạp trạng thái, log `ML web: chuyển sang active (1279 cửa sổ, ngưỡng -0.189)`, model auth còn học (cần 200 cửa sổ).
+`attacks.py --scenario scan_dirs` từ 10.10.1.60 lúc 03:55:38 UTC sinh alert `ML-WEB` bóng lúc 04:00:38 (5 phút), mức medium,
+`n_404=396 (thường 0), n_paths=297 (thường 12), n_requests=400 (thường 23)`; SOAR không có hành động, không case nào chứa alert ML.
+
+**Việc tiếp theo:** theo dõi 7 ngày chạy bóng (tiêu chí [SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 4) trước khi đặt
+`ML_MODE=active`; cổng bổ sung khi một đặc trưng đếm vượt k lần giá trị lớn nhất của tập học (bắt `exfil`, ổn định `ssh_bruteforce`);
+thêm lần đăng nhập thất bại vào lưu lượng auth bình thường của `labsim`; đặc trưng nhịp request cho `scraper`.
