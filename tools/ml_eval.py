@@ -4,14 +4,16 @@ Chạy từ thư mục stack THẬT (nơi .env ghim project siem-xdr; es_snapsho
 
     cd D:/GSANM/BTL/siem-xdr && python <worktree>/tools/ml_eval.py train --from ISO --to ISO --out ml-state.json
     python .../tools/ml_eval.py eval --train-from ISO --train-to ISO --test-from ISO --test-to ISO \
-        --attacks attacks.jsonl --out REPORT.md
+        --attacks attacks.jsonl --out REPORT.md [--scores-csv scores.csv]
 
 `train` ghi file trạng thái version 2 bằng chính AnomalyDetector.save() (chép vào volume của analyzer).
-`eval` học trên khoảng học, chấm khoảng thử, báo bắt được kịch bản nào và tỉ lệ báo nhầm trên người dùng bình thường.
+`eval` học trên khoảng học, chấm khoảng thử, báo bắt được kịch bản nào và tỉ lệ báo nhầm trên người dùng bình thường;
+`--scores-csv` ghi thêm điểm của MỌI cửa sổ thử (vẽ histogram điểm, ROC / PR).
 """
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from datetime import datetime, timezone
@@ -108,6 +110,22 @@ def fp_rate(anomalies: list, normal_ips: set[str], scored_windows: int) -> float
     return sum(a.entity in normal_ips for a in anomalies) / scored_windows if scored_windows else 0.0
 
 
+def score_rows(det: ml.AnomalyDetector, events, attack: set[str], normal: set[str]) -> list[list]:
+    """Điểm Isolation Forest của mọi cửa sổ thử, kể cả cửa sổ không bị gắn cờ (flush chỉ trả cửa sổ dưới ngưỡng).
+    Model chưa học xong (forest None) thì bỏ qua."""
+    rows = []
+    for name, spec in ml.SPECS.items():
+        m = det.models[name]
+        wins = ml.windows_from_events(events, spec)
+        if m.forest is None or not wins:
+            continue
+        scores = m.forest.decision_function(ml._matrix(spec, [v for _, _, v, _ in wins]))
+        for (ip, start, _, _), s in zip(wins, scores):
+            label = "attack" if ip in attack else "normal" if ip in normal else "other"
+            rows.append([name, ip, _iso(start), round(float(s), 5), round(m.threshold, 5), label, int(s < m.threshold)])
+    return rows
+
+
 # ---------------------------------------------------------------- lệnh
 def _seeded(vecs, t_from, t_to, state_path=None, **kw) -> ml.AnomalyDetector:
     det = ml.AnomalyDetector(state_path, **kw)
@@ -174,6 +192,10 @@ def cmd_eval(a) -> None:
     lines += ["", f"Báo nhầm trên {a.normal_ips}: {nfa} / {tot} cửa sổ = {fp_rate(found, normal, tot):.4f}"]
     Path(a.out).write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
+    if a.scores_csv:
+        with open(a.scores_csv, "w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerows([["model", "ip", "window_start", "score", "threshold", "label", "flagged"],
+                                     *score_rows(det, test_ev, atk, normal)])
 
 
 def main() -> None:
@@ -189,6 +211,7 @@ def main() -> None:
         e.add_argument("--" + k, required=True)
     e.add_argument("--exclude-ips", default="10.10.1.60-69")
     e.add_argument("--normal-ips", default="10.10.1.40-59")
+    e.add_argument("--scores-csv", help="ghi điểm mọi cửa sổ thử ra CSV")
     a = ap.parse_args()
     {"train": cmd_train, "eval": cmd_eval}[a.cmd](a)
 
