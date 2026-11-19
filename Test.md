@@ -18,14 +18,20 @@ Kế hoạch: [2026-11-14-ml-anomaly.md](docs/superpowers/plans/2026-11-14-ml-an
 | Đo offline (`tools/ml_eval.py eval`, 7 kịch bản `attacks.py`) | lần 1 (thử 2,4 giờ): 4/7 kịch bản, báo nhầm 1/51 cửa sổ = 1,96%; lần 2 (thử 26,4 giờ): 5/7, báo nhầm 1/568 = 0,18%. Chi tiết và chẩn đoán: [docs/ml-eval-2026-11-17.md](docs/ml-eval-2026-11-17.md), [AI-README.md](AI-README.md) mục 16.4 |
 | Bật chạy bóng (19/11) | `ml_eval.py train` → `/data/models/ml-state.json` (web 1.279, auth 174 cửa sổ); `ML_ENABLED=true`; log analyzer `ML web: chuyển sang active (1279 cửa sổ, ngưỡng -0.189)`; auth còn học (< 200 cửa sổ) |
 | Kiểm trên live (`attacks.py --scenario scan_dirs`, 10.10.1.60, 03:55:38 UTC) | alert `ML-WEB` **bóng** lúc 04:00:38 (5 phút), medium, T1595, `n_404=396 (thường 0)`; SOAR không có hành động, không case nào chứa alert ML (case PB-02 của cùng lượt quét chỉ gom alert Wazuh thật `WZH-31151`) |
+| Chuyển chạy thật (19/11 05:09 UTC, `ML_MODE=active`, `ML_MIN_WINDOWS=150`; bỏ qua 7 ngày chạy bóng theo yêu cầu chủ dự án) | cả hai model `active` (web 1.334 cửa sổ, ngưỡng -0.185; auth 183, ngưỡng -0.238); `scan_dirs` lúc 05:09:21 → alert `ML-WEB` **không bóng** lúc 05:10:31; SOAR mở case PB-05 cho alert ML, không chặn IP |
 
 **Lỗi tìm thấy, chưa sửa:** log lỗi Apache (`/var/log/apache2/error.log`) ghi giờ địa phương không kèm múi giờ; `parse_apache_error`
 (`server/siem/pipeline/normalize.py`) đọc giờ đó và `_iso` coi là UTC, nên trên VM múi giờ +07 event lỗi Apache lệch +7 giờ (37 event
 trên `lab-web` đến 17/11). ML không bị ảnh hưởng (event lỗi không có mã HTTP, cả hai model bỏ qua); dòng thời gian và dashboard
 hiển thị sai giờ các event này.
 
-**Chưa kiểm:** ô ML trên dashboard Grafana (mới kiểm alert trong `siem-alerts`); alert `ML-AUTH` trên live (model auth chưa đủ 200 cửa sổ);
-giai đoạn bóng 7 ngày.
+**Lỗi tìm thấy, chưa sửa:** `docker-compose.yml` đặt `stop_signal: SIGINT` cho các service server, còn analyzer chỉ lưu trạng thái ML
+khi nhận SIGTERM (`Analyzer.install_signal_handlers`); SIGINT thành `KeyboardInterrupt` và bị nuốt ở `main`. Vì vậy `docker stop` / tạo
+lại container **không** lưu `ml-state.json` như [DEPLOY-VM.md](DEPLOY-VM.md) mục 9.3 ghi; chỉ còn lần lưu mỗi giờ (mất tối đa 1 giờ cửa
+sổ học). Cách tạm khi cần tạo lại analyzer: `docker kill -s TERM siem-xdr-analyzer-1` trước (đã dùng 19/11 05:06).
+
+**Chưa kiểm:** ô ML trên dashboard Grafana (mới kiểm alert trong `siem-alerts`); alert `ML-AUTH` trên live; báo nhầm của ML trên dữ
+liệu thật (đã bỏ qua giai đoạn bóng).
 
 ### 0.1 Mã P4: rule AI và SigmaHQ ra Wazuh XML, xóa engine YAML (08/11/2026)
 
