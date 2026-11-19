@@ -449,7 +449,60 @@ def fig_ml_pr() -> None:
     save(fig, "ml-3-precision-recall.png")
 
 
+def fig_ml_target() -> None:
+    """Đánh đổi theo ML_TARGET_FP. Forest giữ nguyên ở mọi mức (random_state=0), chỉ ngưỡng dịch: ngưỡng từng mức do
+    `ml_eval eval --target-fp` tính (datasets/ml_target_fp_2026-11-17.csv), điểm lấy từ file điểm chung."""
+    rows, scen = ml_rows()
+    th: dict[str, dict[str, float]] = {}
+    with (DATA / "ml_target_fp_2026-11-17.csv").open(encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            th.setdefault(r["target_fp"], {})[r["model"]] = float(r["threshold"])
+    cur, levels, names = "0.005", list(th), list(SCEN)
+    assert all(th[cur][r["model"]] == r["threshold"] for r in rows)     # hai file dữ liệu cùng một lần học
+    normal = [r for r in rows if r["label"] == "normal"]
+
+    def flag(r: dict, t: str) -> bool:
+        return r["score"] < th[t][r["model"]]
+
+    caught = {t: [any(flag(r, t) for r in rows if r["label"] == "attack" and scen[r["ip"]] == n) for n in names]
+              for t in levels}
+    fp = [sum(flag(r, t) for r in normal) for t in levels]
+    fig, (top, bot) = plt.subplots(2, 1, figsize=(7.2, 5.4), sharex=True,
+                                   gridspec_kw={"height_ratios": [3, 2], "hspace": 0.15})
+    ci = levels.index(cur)
+    for ax in (top, bot):
+        ax.axvspan(ci - 0.42, ci + 0.42, color="#f0efec", zorder=0)
+        ax.spines["left"].set_visible(False)
+    for j, t in enumerate(levels):
+        for i, ok in enumerate(caught[t]):
+            top.scatter(j, i, s=60, zorder=3, color=S2 if ok else SURFACE, edgecolor=S2 if ok else MUTED, linewidth=1.5)
+        top.text(j, -0.85, f"{sum(caught[t])}/7", ha="center", va="bottom", fontsize=8, color=INK, fontweight="bold")
+    top.set_yticks(range(len(names)), [SCEN[n] for n in names])
+    top.set_ylim(len(names) - 0.5, -1.05)
+    top.spines["bottom"].set_visible(False)
+    top.tick_params(axis="x", length=0)
+    top.legend(handles=[Line2D([], [], marker="o", ls="", color=S2, markersize=7, label="bắt được (≥ 1 cửa sổ bị gắn cờ)"),
+                        Line2D([], [], marker="o", ls="", markerfacecolor=SURFACE, markeredgecolor=MUTED, markersize=7,
+                               label="bỏ sót")], loc="lower left", bbox_to_anchor=(0, 1.0), ncol=2, fontsize=8)
+    bot.plot(range(len(levels)), [100 * n / len(normal) for n in fp], color=S1, linewidth=2, marker="o", markersize=6,
+             markeredgecolor=SURFACE, markeredgewidth=1.5, zorder=3)
+    for j in (ci, len(levels) - 1):
+        bot.annotate(f"{fp[j]}/{len(normal)} ({vn(100 * fp[j] / len(normal), 2)}%)", (j, 100 * fp[j] / len(normal)),
+                     xytext=(0, 8), textcoords="offset points", ha="center", fontsize=7.5, color=INK2)
+    bot.set_ylim(0, 100 * max(fp) / len(normal) * 1.3)
+    bot.set_ylabel("Báo nhầm trên\ncửa sổ thường (%)")
+    bot.grid(axis="y")
+    bot.text(ci, bot.get_ylim()[1], "đang dùng", ha="center", va="top", fontsize=7.5, color=INK2)
+    bot.set_xticks(range(len(levels)), [vn(100 * float(t), 1).rstrip("0").rstrip(",") + "%" for t in levels])
+    bot.set_xlabel("ML_TARGET_FP (phân vị điểm của tập giữ lại dùng làm ngưỡng)")
+    frame(fig, "Đánh đổi theo ML_TARGET_FP: kịch bản bắt được và báo nhầm",
+          "Cùng một model, chỉ dịch ngưỡng; 7 kịch bản tấn công, 568 cửa sổ người dùng thường\n"
+          "Nguồn: datasets/ml_scores_2026-11-17.csv, ml_target_fp_2026-11-17.csv (ml_eval --target-fp)", above=0.30)
+    fig.subplots_adjust(left=0.2)
+    save(fig, "ml-4-danh-doi-target-fp.png")
+
+
 if __name__ == "__main__":
     for f in (fig_models, fig_ablation, fig_complement, fig_rejections, fig_stability, fig_ml_hist, fig_ml_roc,
-              fig_ml_pr):
+              fig_ml_pr, fig_ml_target):
         f()

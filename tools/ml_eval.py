@@ -4,7 +4,7 @@ Chạy từ thư mục stack THẬT (nơi .env ghim project siem-xdr; es_snapsho
 
     cd D:/GSANM/BTL/siem-xdr && python <worktree>/tools/ml_eval.py train --from ISO --to ISO --out ml-state.json
     python .../tools/ml_eval.py eval --train-from ISO --train-to ISO --test-from ISO --test-to ISO \
-        --attacks attacks.jsonl --out REPORT.md [--scores-csv scores.csv]
+        --attacks attacks.jsonl --out REPORT.md [--scores-csv scores.csv] [--target-fp 0.005]
 
 `train` ghi file trạng thái version 2 bằng chính AnomalyDetector.save() (chép vào volume của analyzer).
 `eval` học trên khoảng học, chấm khoảng thử, báo bắt được kịch bản nào và tỉ lệ báo nhầm trên người dùng bình thường;
@@ -160,7 +160,7 @@ def cmd_eval(a) -> None:
     train_ev, _, al = _load(tr0, tr1)
     vecs = training_vectors(train_ev, atk, al)
     # cooldown 0 và không fit lại: mỗi cửa sổ bất thường được đếm, model không bị học thêm từ khoảng thử
-    det = _seeded(vecs, tr0, tr1, learn_hours=0, min_windows=1, cooldown=0, retrain_hours=1e9)
+    det = _seeded(vecs, tr0, tr1, learn_hours=0, min_windows=1, cooldown=0, retrain_hours=1e9, target_fp=a.target_fp)
     test_ev, alerts, _ = _load(te0, te1)
     found, last = [], tr1
     for doc, ts in test_ev:
@@ -212,6 +212,7 @@ def main() -> None:
     e.add_argument("--exclude-ips", default="10.10.1.60-69")
     e.add_argument("--normal-ips", default="10.10.1.40-59")
     e.add_argument("--scores-csv", help="ghi điểm mọi cửa sổ thử ra CSV")
+    e.add_argument("--target-fp", type=float, default=0.005, help="như ML_TARGET_FP: phân vị điểm tập giữ lại làm ngưỡng")
     a = ap.parse_args()
     {"train": cmd_train, "eval": cmd_eval}[a.cmd](a)
 

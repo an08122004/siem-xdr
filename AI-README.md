@@ -937,7 +937,7 @@ mẫu tấn công Windows + web (cây Python ước 186), 0 mẫu bị lô cư�
 
 ### 9.12 Hình cho báo cáo
 
-`python tools/report_figures.py` (cần `matplotlib`, dùng Python của máy, không phải venv server) vẽ lại 8 hình từ số đo ở các
+`python tools/report_figures.py` (cần `matplotlib`, dùng Python của máy, không phải venv server) vẽ lại 9 hình từ số đo ở các
 mục trên và mục 16, ra `docs/figures/`:
 
 | Hình | Nội dung | Số liệu |
@@ -950,8 +950,13 @@ mục trên và mục 16, ra `docs/figures/`:
 | [ml-1-histogram-diem.png](docs/figures/ml-1-histogram-diem.png) | ML: phân bố điểm Isolation Forest của người dùng thường và 7 kịch bản tấn công, model web và auth | 16 |
 | [ml-2-roc.png](docs/figures/ml-2-roc.png) | ML: đường ROC gộp 2 model (AUC 0,98), ngưỡng đang dùng bắt 12/16 cửa sổ tấn công, báo nhầm 1/568 | 16 |
 | [ml-3-precision-recall.png](docs/figures/ml-3-precision-recall.png) | ML: Precision–Recall (AP 0,80), ngưỡng đang dùng precision 92% / recall 75%; precision phụ thuộc tỉ lệ tấn công 2,7% của tập thử | 16 |
+| [ml-4-danh-doi-target-fp.png](docs/figures/ml-4-danh-doi-target-fp.png) | ML: đánh đổi theo `ML_TARGET_FP` 0,1–10%: kịch bản bắt được (1, 2, 5, 5, 5, 5, 6 trên 7) và báo nhầm (1 → 31/568); 0,5% bắt nhiều nhất với báo nhầm thấp nhất | 16 |
 
-Ba hình ML đọc `datasets/ml_scores_2026-11-17.csv`, ghi bằng `ml_eval.py eval --scores-csv` với đúng khoảng của lần 2 trong
+Hình đánh đổi lấy ngưỡng từng mức từ `ml_eval.py eval --target-fp` (cùng khoảng học / thử bên dưới, lưu ở
+`datasets/ml_target_fp_2026-11-17.csv`). Forest giống nhau ở mọi mức (`random_state=0`, điểm từng cửa sổ trùng khớp giữa 7 lần
+chạy), chỉ ngưỡng dịch.
+
+Các hình ML đọc `datasets/ml_scores_2026-11-17.csv`, ghi bằng `ml_eval.py eval --scores-csv` với đúng khoảng của lần 2 trong
 `docs/ml-eval-2026-11-17.md` (học 15/11 08:20 → 16/11 14:04:06, thử tới 17/11 16:30 UTC, nhãn
 `datasets/ml_attacks_2026-11-17.jsonl`); lần chạy lại cho đúng kết quả cũ (5/7 kịch bản, báo nhầm 1/568).
 
