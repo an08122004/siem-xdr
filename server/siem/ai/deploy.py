@@ -22,7 +22,7 @@ from typing import Any
 from .. import settings, wazuh_exceptions, wazuh_rules
 from .condition import Rule
 from .golden import PublicDatasets
-from .wazuh_xml import EMITTER_VERSION, emit, unshadow
+from .wazuh_xml import EMITTER_VERSION, emit, emit_frequency, unshadow
 from .validate import _app_specific, common_program_only, describe, lab_wrapper, leaves_of, ordinary_hits, weak_values
 
 log = logging.getLogger("ai.deploy")
@@ -69,8 +69,9 @@ def _save(es, pid: str, doc: dict[str, Any], seq: int, term: int) -> None:
 def recheck(p: dict[str, Any]) -> list[str]:
     """Kiểm tra lại rule mới ngay trước khi triển khai. Trả về danh sách lý do KHÔNG được triển khai. (Đề xuất ngoại lệ
     không qua đây: người duyệt thứ hai kiểm ở trang ngoại lệ Wazuh, R73.)"""
-    rule = Rule.from_dict(p["proposal"])
-    return recheck_dataset_rule(p["proposal"], rule, golden()) if str(p.get("target", "")).startswith("gap-dataset:") else []
+    if not str(p.get("target", "")).startswith("gap-dataset:"):
+        return []                    # rule tần suất gap-ml không có cây điều kiện / không học từ dataset
+    return recheck_dataset_rule(p["proposal"], Rule.from_dict(p["proposal"]), golden())
 
 
 def recheck_dataset_rule(rd: dict[str, Any], rule: Rule, g: PublicDatasets) -> list[str]:
@@ -160,10 +161,14 @@ def _deploy_new(es, pid: str, p: dict[str, Any], seq: int, term: int, now: str, 
         ids = next_ids(_deployed(es, skip=pid, used=True), int(w.get("rules") or 1))
         # mã đề xuất (AI-154) như console hiện; mã lạ thì theo id rule như trước
         code = str(prop.get("id")) if _CODE.fullmatch(str(prop.get("id"))) else f"AI-{ids[0] % 1000:03d}"
+        meta = dict(level=int(w["level"]), code=code, title=prop["title"],
+                    techniques=(prop.get("mitre") or {}).get("technique") or [], groups=["siem", "ai"], shadow_since=day)
         try:
-            em = emit(prop["condition"], domain=w["domain"], first_id=ids[0], level=int(w["level"]), code=code,
-                      title=prop["title"], techniques=(prop.get("mitre") or {}).get("technique") or [],
-                      groups=["siem", "ai"], shadow_since=day)
+            if prop.get("type") == "frequency":
+                f = prop["frequency"]
+                em = emit_frequency(sid=f["sid"], count=f["count"], timeframe=f["timeframe"], rule_id=ids[0], **meta)
+            else:
+                em = emit(prop["condition"], domain=w["domain"], first_id=ids[0], **meta)
         except ValueError as e:                                         # SigmaError: cây không dịch được nữa
             raise DeployError(409, f"không dịch được sang Wazuh XML, cần kiểm định lại: {e}") from None
         p["wazuh"] = w | {"ids": em.ids, "deployed_xml": em.xml, "code": code, "shadow_since": day}

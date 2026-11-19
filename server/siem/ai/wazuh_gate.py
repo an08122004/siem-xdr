@@ -119,3 +119,43 @@ class WazuhGate:
         log.info("cổng Wazuh: ứng viên %r sau %.0f giây: bắt %d/%d mẫu kiểm tra, báo nhầm %d/%d, che %d event, "
                  "lệch Python %d/%d", title[:80], res.seconds, hit, len(test), nh, len(normal), len(lost), py_only, wz_only)
         return checks, m
+
+    def check_frequency(self, xml: str, attack: dict[str, list[RawEvent]],
+                        normal: dict[str, list[RawEvent]]) -> tuple[list[Check], dict]:
+        """Rule tần suất (gap-ml, id CANDIDATE_BASE): mỗi IP bơm thành một loạt liên tiếp (nằm trong timeframe), chạy có và
+        không có ứng viên. Đạt: Wazuh nạp được; kích hoạt cho IP của sự cố; KHÔNG kích hoạt cho IP bình thường đếm nhiều
+        nhất; không IP nào mất phát hiện đang có. So theo IP (không theo event): rule tần suất lấy đi đúng event thứ N
+        của rule được đếm, nên rule anh em (vd 31151) có thể kích hoạt ở event khác mà IP vẫn bị phát hiện."""
+        owner = {e.ident: ip for ip, evs in (*attack.items(), *normal.items()) for e in evs}
+        events = sorted((e for evs in (*attack.values(), *normal.values()) for e in evs), key=lambda e: e.ident)
+        base = self._run(events)
+        if base.load_error:
+            self._error = SandboxError(f"ruleset Wazuh hiện tại không nạp được trong sandbox: {base.load_error}")
+            raise self._error
+        res = self._run(events, f'<group name="siem,ai,ai_candidate,">\n{xml}</group>\n')
+        m: dict = {"wazuh_rules": 1, "wazuh_events": len(events), "wazuh_seconds": res.seconds}
+        if res.load_error:
+            return [Check("Wazuh nạp được rule", False, f"Wazuh không nạp được rule ứng viên: {res.load_error[:800]}")], m
+
+        def per_ip(r: SandboxResult) -> dict[str, list[Hit]]:
+            out: dict[str, list[Hit]] = {}
+            for ident, hs in r.hits.items():
+                out.setdefault(owner[ident], []).extend(hs)
+            return out
+
+        before, after = per_ip(base), per_ip(res)
+        fired = {ip for ip, hs in after.items() if any(h.rule_id == CANDIDATE_BASE for h in hs)}
+        caught, noisy = sorted(set(attack) & fired), sorted(set(normal) & fired)
+        lost = sorted(ip for ip in owner.values() if detections(before.get(ip, [])) and not detections(after.get(ip, [])))
+        m.update(wazuh_incidents=len(attack), wazuh_incidents_detected=len(caught), wazuh_normal_ips=len(normal),
+                 wazuh_normal_fired=len(noisy), wazuh_stolen=len(set(lost)))
+        log.info("cổng Wazuh (tần suất): %d/%d IP sự cố, %d/%d IP bình thường kích hoạt, %d IP mất phát hiện",
+                 len(caught), len(attack), len(noisy), len(normal), len(set(lost)))
+        return [Check("Wazuh nạp được rule", True, f"{len(events)} event, {res.seconds:g} giây"),
+                Check("bắt sự cố (Wazuh)", len(caught) * 2 >= len(attack) > 0,
+                      f"rule kích hoạt cho {len(caught)}/{len(attack)} IP của sự cố đã xác nhận (cần ≥ 50%)"),
+                Check("IP bình thường không kích hoạt (Wazuh)", not noisy,
+                      f"{len(noisy)}/{len(normal)} IP bình thường đếm nhiều nhất làm rule kích hoạt"
+                      + (f": {', '.join(noisy[:5])}" if noisy else "")),
+                Check("không che rule khác", not lost, "không IP nào mất phát hiện đang có" if not lost
+                      else f"{len(set(lost))} IP mất phát hiện của rule Wazuh đang có: {', '.join(sorted(set(lost))[:5])}")], m

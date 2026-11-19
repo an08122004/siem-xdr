@@ -77,3 +77,15 @@ def test_score_rows_scores_every_window_with_labels():
 
 def test_ip_range():
     assert ev.ip_range("10.10.1.60-62") == ["10.10.1.60", "10.10.1.61", "10.10.1.62"]
+
+
+def test_lab_verdict_for_ml_alerts():
+    sc = [{"scenario": "password_spray", "ip": "10.10.1.62", "start": "2026-11-17T21:10:09+07:00",
+           "end": "2026-11-17T21:20:09+07:00"}]
+    normal = set(ev.ip_range("10.10.1.40-59"))
+    t = epoch("2026-11-17T21:15:00+07:00")
+    assert ev.lab_verdict("10.10.1.62", "web", t, sc, normal) == "true_positive"
+    assert ev.lab_verdict("10.10.1.62", "web", epoch("2026-11-17T21:24:00+07:00"), sc, normal) == "true_positive"  # +1 cửa sổ
+    assert ev.lab_verdict("10.10.1.62", "web", epoch("2026-11-17T22:00:00+07:00"), sc, normal) is None
+    assert ev.lab_verdict("10.10.1.51", "web", t, sc, normal) == "false_positive"
+    assert ev.lab_verdict("203.0.113.9", "auth", t, sc, normal) is None

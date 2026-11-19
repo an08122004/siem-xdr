@@ -221,23 +221,47 @@ def _element(w: str, mode: str, pos: list[dict], neg: list[dict]) -> str:
     return f'<field name="{w}" type="pcre2">{p}</field>'
 
 
-def emit(tree: dict, *, domain: str, first_id: int, level: int, code: str, title: str, techniques: list[str],
-         groups: list[str], shadow_since: str | None, info: dict[str, str] | None = None) -> Emitted:
-    if domain not in PARENTS:
-        raise SigmaError(f"lĩnh vực {domain} chưa có rule Wazuh")
+def _meta(code: str, title: str, techniques: list[str], groups: list[str], shadow_since: str | None,
+          info: dict[str, str] | None) -> tuple[str, list[str], list[str]]:
+    """(mô tả, các dòng <mitre>/<info> đứng sau mô tả, dòng <group>) dùng chung cho emit / emit_frequency."""
     if shadow_since is not None and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", shadow_since):
         raise SigmaError(f"shadow_since phải là YYYY-MM-DD: {shadow_since!r}")
-    terms = _dnf(_prep(tree, domain))
-    if not terms:
-        raise SigmaError("rule không có vế nào")
-    parent = PARENTS[domain]
     gs = [g for g in (re.sub(r"[^A-Za-z0-9_.\-]", "", x) for x in groups) if g] + (["shadow"] if shadow_since else [])
     extra = [f'<info type="text">{re.sub(r"[^A-Za-z0-9_]", "", str(k))}={escape(_clean(v, 300))}</info>'
              for k, v in (info or {}).items() if re.sub(r"[^A-Za-z0-9_]", "", str(k))]
     if shadow_since:
         extra.insert(0, f'<info type="text">shadow_since={shadow_since}</info>')
     mitre = [t for t in techniques if re.fullmatch(r"T\d{4}(\.\d{3})?", t)]
-    desc = f"{_clean(code, 40)} {_clean(title, 200)}"
+    if mitre:
+        extra.insert(0, "<mitre>" + "".join(f"<id>{t}</id>" for t in mitre) + "</mitre>")
+    return f"{_clean(code, 40)} {_clean(title, 200)}", extra, [f"<group>{','.join(gs)},</group>"]
+
+
+def _rule(rule_id: int, level: int, lines: list[str], attrs: str = "") -> str:
+    return f'  <rule id="{rule_id}" level="{int(level)}"{attrs}>\n' + "".join(f"    {x}\n" for x in lines) + "  </rule>\n"
+
+
+def emit_frequency(*, sid: int, count: int, timeframe: int, rule_id: int, level: int, code: str, title: str,
+                   techniques: list[str], groups: list[str], shadow_since: str | None,
+                   info: dict[str, str] | None = None) -> Emitted:
+    """Một rule tần suất: `count` lần rule `sid` khớp từ cùng IP nguồn trong `timeframe` giây (như 31151; frequency.py)."""
+    if not (2 <= int(count) <= 10000 and 1 <= int(timeframe) <= 86400 and int(sid) > 0):
+        raise SigmaError(f"rule tần suất không hợp lệ: sid={sid} count={count} timeframe={timeframe}")
+    desc, extra, group = _meta(code, title, techniques, groups, shadow_since, info)
+    lines = [f"<if_matched_sid>{int(sid)}</if_matched_sid>", "<same_source_ip />",
+             f"<description>{escape(desc)}</description>", *extra, *group]
+    return Emitted(_rule(rule_id, level, lines, f' frequency="{int(count)}" timeframe="{int(timeframe)}"'), [rule_id])
+
+
+def emit(tree: dict, *, domain: str, first_id: int, level: int, code: str, title: str, techniques: list[str],
+         groups: list[str], shadow_since: str | None, info: dict[str, str] | None = None) -> Emitted:
+    if domain not in PARENTS:
+        raise SigmaError(f"lĩnh vực {domain} chưa có rule Wazuh")
+    desc, extra, group = _meta(code, title, techniques, groups, shadow_since, info)
+    terms = _dnf(_prep(tree, domain))
+    if not terms:
+        raise SigmaError("rule không có vế nào")
+    parent = PARENTS[domain]
     rules, ids = [], []
     for k, term in enumerate(terms):
         by: dict[str, dict] = {}
@@ -251,13 +275,9 @@ def emit(tree: dict, *, domain: str, first_id: int, level: int, code: str, title
             lines.append(f'<location type="pcre2">{escape(parent["location"])}</location>')
         lines += [_element(w, g["mode"], g["pos"], g["neg"]) for w, g in by.items()]
         d = desc + (f" (vế {k + 1}/{len(terms)})" if len(terms) > 1 else "")
-        lines.append(f"<description>{escape(d)}</description>")
-        if mitre:
-            lines.append("<mitre>" + "".join(f"<id>{t}</id>" for t in mitre) + "</mitre>")
-        lines += extra + [f"<group>{','.join(gs)},</group>"]
+        lines += [f"<description>{escape(d)}</description>", *extra, *group]
         ids.append(first_id + k)
-        rules.append(f'  <rule id="{first_id + k}" level="{int(level)}">\n' +
-                     "".join(f"    {x}\n" for x in lines) + "  </rule>\n")
+        rules.append(_rule(first_id + k, level, lines))
     return Emitted("".join(rules), ids)
 
 

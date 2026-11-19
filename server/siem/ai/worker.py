@@ -1,8 +1,11 @@
 """AI worker: mỗi chu kỳ tìm chỗ cần cải thiện rule -> hỏi LLM -> kiểm định -> lưu ĐỀ XUẤT chờ duyệt.
 
-Hai nguồn ứng viên:
+Ba nguồn ứng viên:
   1. exception   — rule Wazuh có nhiều alert bị analyst đánh dấu false positive (nhãn thật từ case / console)
-  2. gap-dataset — mẫu tấn công trong dataset công khai mà Wazuh chưa bắt (alert của sandbox Wazuh, wazuh_gate.py;
+  2. gap-ml      — alert ML (ML-WEB / ML-AUTH) analyst kết luận true_positive mà không rule thật nào báo cho IP đó:
+                   rule TẦN SUẤT đếm rule Wazuh đã khớp các event của sự cố (frequency.py); ngưỡng tính từ lưu lượng
+                   người dùng thường, LLM chỉ đặt tên / mô tả / ATT&CK; kiểm định trên sandbox Wazuh như nhánh 3
+  3. gap-dataset — mẫu tấn công trong dataset công khai mà Wazuh chưa bắt (alert của sandbox Wazuh, wazuh_gate.py;
                    rule mới cũng phải qua cổng Wazuh mới được chờ duyệt): web gom theo LOẠI tấn công
                    (attack_types.py), endpoint Windows / Linux gom theo KỸ THUẬT ATT&CK (Atomic Red Team);
                    tách tập đưa cho LLM / tập kiểm tra, xếp lượt xen kẽ web / Windows / Linux
@@ -24,20 +27,23 @@ import yaml
 
 from .. import settings
 from .condition import Rule, regex_risk
+from ..detection.ml import SPECS as ML_SPECS
 from ..pipeline.normalize import Doc, get
 from .attack_types import TYPES
 from .dataset import ESDataSource
 from .deploy import recheck_dataset_rule
 from .golden import OS_NAME, PublicDatasets
-from . import sigma, wazuh_xml
+from . import frequency as fq, sigma, wazuh_xml
 from .llm import LLMError, LLMResult, LLMTooLong, OllamaClient
-from .prompts import (WAZUH_EXCEPTION_SCHEMA, WAZUH_EXCEPTION_SYSTEM, wazuh_exception_prompt, SIGMA_KNOWLEDGE_SYSTEM, SIGMA_REFINE_SYSTEM, SIGMA_SYSTEM,
+from .prompts import (FREQUENCY_SCHEMA, FREQUENCY_SYSTEM, WAZUH_EXCEPTION_SCHEMA, WAZUH_EXCEPTION_SYSTEM,
+                      frequency_prompt, wazuh_exception_prompt, SIGMA_KNOWLEDGE_SYSTEM, SIGMA_REFINE_SYSTEM, SIGMA_SYSTEM,
                       rule_to_yaml, sigma_knowledge_prompt, sigma_refine_prompt, sigma_rule_prompt,
                       sigma_view)
 from .sandbox import SandboxError
 from .sigma import SigmaError
-from .wazuh_gate import WazuhGate
-from .wazuh_xml import EMITTER_VERSION, LEVEL
+from .wazuh_events import log_event
+from .wazuh_gate import CANDIDATE_BASE, WazuhGate
+from .wazuh_xml import EMITTER_VERSION, LEVEL, emit_frequency
 from .validate import (Check, Validation, _app_specific, common_program_only, describe, lab_wrapper, leaves_of,
                        ordinary_hits, validate_exception_wazuh, validate_new_rule, weak_values)
 
@@ -69,12 +75,21 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _epoch(ts: str) -> float:
+    d = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).timestamp()
+
+
+def _iso(t: float) -> str:
+    return datetime.fromtimestamp(t, timezone.utc).isoformat()
+
+
 def generator_id(model: str) -> str:
     """Dấu vân tay của model + system prompt + phiên bản logic sinh rule (GENERATOR_REVISION) + phiên bản bộ dịch Wazuh
     XML (kết luận của cổng Wazuh phụ thuộc vào nó), ghi vào mỗi đề xuất. Đổi một thứ thì mục tiêu từng bị kiểm định loại
     được thử lại ngay."""
     return hashlib.sha1("\n".join([model, WAZUH_EXCEPTION_SYSTEM, SIGMA_SYSTEM, SIGMA_REFINE_SYSTEM, SIGMA_KNOWLEDGE_SYSTEM,
-                                   GENERATOR_REVISION, wazuh_xml.EMITTER_VERSION]).encode()).hexdigest()[:10]
+                                   FREQUENCY_SYSTEM, GENERATOR_REVISION, wazuh_xml.EMITTER_VERSION]).encode()).hexdigest()[:10]
 
 
 def legacy_reason(p: dict[str, Any]) -> str:
@@ -82,7 +97,7 @@ def legacy_reason(p: dict[str, Any]) -> str:
     if p.get("kind") == "exception":
         return "" if {"rule", "conditions"} <= set(p.get("proposal") or {}) else \
             "đề xuất kiểu cũ (engine YAML): ngoại lệ dạng {rule_id, condition}, nay ngoại lệ đi qua trang ngoại lệ Wazuh"
-    if p.get("kind") == "new_rule" and not str(p.get("target", "")).startswith("gap-dataset:"):
+    if p.get("kind") == "new_rule" and not str(p.get("target", "")).startswith(("gap-dataset:", "gap-ml:")):
         return f"đề xuất kiểu cũ (engine YAML): nhánh {str(p.get('target', '')).split(':')[0]} đã bỏ"
     return ""
 
@@ -213,7 +228,31 @@ class AIWorker:
             self._try(summary, target, lambda: self.propose_exception(rid, ev, ds, rejected[target]))
             budget -= 1
 
-        # 2) khoảng trống: kiểm định trên sandbox Wazuh. Sandbox hỏng -> ghi lỗi, bỏ nhánh này trong chu kỳ
+        # 2) sự cố ML analyst đã xác nhận mà chưa rule thật nào bắt -> rule tần suất. Đi trước dataset: tấn công thật
+        # trong chính môi trường này đáng tin hơn mẫu công khai
+        try:
+            gaps = self.ml_gaps(ds, summary) if budget > 0 else []
+        except Exception as e:  # noqa: BLE001 — ES lỗi: không kiểm được "đã có rule bắt chưa" thì không đề xuất
+            summary["errors"].append(f"gap-ml: không đọc được sự cố ML: {e}")
+            log.warning("gap-ml: không đọc được sự cố ML: %s", e)
+            gaps = []
+        try:
+            for key, group in gaps:
+                if budget <= 0:
+                    break
+                target = f"gap-ml:{key}"
+                if target in open_targets or target in recent_closed:
+                    summary["skipped"].append(f"{target}: đã có đề xuất đang chờ / vừa bị loại")
+                    continue
+                if gate is None:
+                    raise SandboxError("AI worker chưa được cấu hình sandbox Wazuh")
+                self._try(summary, target, lambda: self.propose_frequency_rule(key, group, ds, rejected[target], gate))
+                budget -= 1
+        except SandboxError as e:
+            summary["errors"].append(f"sandbox Wazuh lỗi, bỏ nhánh gap-ml của chu kỳ: {e}")
+            log.warning("sandbox Wazuh lỗi, bỏ nhánh gap-ml: %s", e)
+
+        # 3) khoảng trống: kiểm định trên sandbox Wazuh. Sandbox hỏng -> ghi lỗi, bỏ nhánh này trong chu kỳ
         # (Review Focus #2: không coi là "rule không bắt" hay "mọi mẫu là khoảng trống")
         try:
             if budget > 0 and self.golden and self.golden.attack:
@@ -254,7 +293,9 @@ class AIWorker:
         try:
             for p in history:
                 legacy = legacy_reason(p) if p.get("status") == "pending" else ""
-                if not legacy and (not self.golden or p.get("status") != "pending" or p.get("kind") != "new_rule"):
+                # rule tần suất (gap-ml) không học từ dataset: không có gì để kiểm lại với bộ mẫu vàng
+                if not legacy and (not self.golden or p.get("status") != "pending" or p.get("kind") != "new_rule"
+                                   or not str(p.get("target", "")).startswith("gap-dataset:")):
                     continue
                 old = (p.get("llm") or {}).get("generator") != gen
                 ungated = gate is not None and (p.get("wazuh") or {}).get("emitter") != EMITTER_VERSION
@@ -381,6 +422,126 @@ class AIWorker:
                  required_approvals=1,        # R73: người bấm duyệt tạo ngoại lệ chờ duyệt, người thứ hai duyệt ở trang ngoại lệ
                  status="pending" if val.passed else "invalid",
                  evidence={"fp_alert_ids": ev.fp_alert_ids[:200], "tp_alert_ids": ev.tp_alert_ids[:200]})
+        return p
+
+    # ------------------------------------------------------------------ gap-ml: sự cố ML -> rule tần suất
+    def ml_gaps(self, ds: ESDataSource, summary: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+        """Alert ML true_positive mà không rule thật nào báo cho cùng IP trong cửa sổ đó ± 1 cửa sổ, gom theo (model, rule
+        Wazuh được đếm). Rule được đếm = rule Wazuh (level >= 1: level 0 không đếm được, đo sandbox) khớp nhiều event nhất
+        của IP trong khoảng đó, như 31101 (lỗi 4xx web) hay 101000 (đăng nhập thất bại)."""
+        groups: dict[str, dict[str, Any]] = {}
+        for inc in ds.ml_incidents():
+            spec, ip, t = ML_SPECS.get(str(get(inc, "ml.model"))), get(inc, "source.ip"), inc.get("event_time")
+            if not (spec and ip and t):
+                continue
+            ws = int(_epoch(t) // spec.window) * spec.window
+            start, end = _iso(ws - spec.window), _iso(ws + 2 * spec.window)
+            what = f"gap-ml: alert {get(inc, 'alert.id')} ({ip})"
+            if ip in ds.alert_ips(start, end, real_only=True):
+                summary["skipped"].append(f"{what}: rule Wazuh đã báo cho IP này quanh thời điểm sự cố")
+                continue
+            evs = [e for e in ds.events_of(ip, start, end)
+                   if get(e, "raw.full_log") and str(get(e, "wazuh.rule.id") or "").isdigit()
+                   and int(get(e, "wazuh.rule.level") or 0) >= 1]
+            if not evs:
+                summary["skipped"].append(f"{what}: không rule Wazuh nào khớp event của sự cố để đếm")
+                continue
+            sid = Counter(str(get(e, "wazuh.rule.id")) for e in evs).most_common(1)[0][0]
+            g = groups.setdefault(f"{spec.name}:{sid}", {"model": spec.name, "sid": sid, "window": spec.window,
+                                                         "incidents": []})
+            g["incidents"].append({"alert_id": get(inc, "alert.id"), "ip": ip, "anomaly": get(inc, "rule.description"),
+                                   "mitre": get(inc, "rule.mitre") or {}, "events": evs,
+                                   "times": sorted(_epoch(e["@timestamp"]) for e in evs
+                                                   if str(get(e, "wazuh.rule.id")) == sid)})
+        return sorted(groups.items(), key=lambda kv: (-len(kv[1]["incidents"]), kv[0]))
+
+    def propose_frequency_rule(self, key: str, g: dict[str, Any], ds: ESDataSource, rejected: list[str],
+                               gate: WazuhGate) -> dict[str, Any]:
+        sid, w, incidents = g["sid"], g["window"], g["incidents"]
+        # lưu lượng thường của rule được đếm: bỏ IP sự cố và IP có alert chưa kết luận báo nhầm. 2/3 đầu khoảng replay đặt
+        # ngưỡng, 1/3 cuối (ngưỡng chưa thấy) đo báo nhầm
+        end = datetime.now(timezone.utc).timestamp()
+        begin = end - settings.AI_REPLAY_DAYS * 86400
+        bad = {i["ip"] for i in incidents} | ds.alert_ips(_iso(begin), _iso(end))
+        normal = [(ip, _epoch(h["@timestamp"])) for h in ds.rule_hits(sid) if (ip := get(h, "source.ip")) and ip not in bad]
+        cut = begin + (end - begin) * 2 / 3
+        fit, held = fq.by_ip(x for x in normal if x[1] < cut), fq.by_ip(x for x in normal if x[1] >= cut)
+        count, normal_max = fq.threshold(fit, w), max([fq.max_in_span(ts, w) for ts in fit.values()] + [0])
+        held_fires = sum(len(fq.fires(ts, count, w)) for ts in held.values())
+        held_days = (end - cut) / 86400
+        reached = [(i, fq.max_in_span(i["times"], w)) for i in incidents]
+        caught = [i for i, n in reached if n >= count]
+        rate = held_fires / held_days
+        checks = [
+            Check("lưu lượng bình thường", True, f"{len(normal)} lần rule {sid} khớp từ {len(fit) + len(held)} IP bình "
+                  f"thường trong {settings.AI_REPLAY_DAYS} ngày; một IP nhiều nhất {normal_max} lần / {w} giây",
+                  blocking=False),
+            Check("bắt sự cố đã xác nhận", len(caught) * 2 >= len(incidents) > 0,
+                  f"{len(caught)}/{len(incidents)} sự cố đạt ngưỡng {count} lần / {w} giây (cần ≥ 50%; số lần: "
+                  + ", ".join(f"{i['ip']} {n}" for i, n in reached[:5]) + ")"),
+            Check("báo nhầm trên lưu lượng thật", rate <= 1,
+                  f"{held_fires} lần kích hoạt trên lưu lượng bình thường của {held_days:.1f} ngày gần nhất chưa dùng để "
+                  f"đặt ngưỡng ({rate:.2f}/ngày, tối đa 1)"),
+        ]
+        metrics: dict[str, Any] = {"frequency_count": count, "frequency_timeframe": w, "incidents": len(incidents),
+                                   "incidents_caught": len(caught), "normal_ips": len(fit) + len(held),
+                                   "normal_hits": len(normal), "held_fires": held_fires,
+                                   "held_fires_per_day": round(rate, 3)}
+        passed = all(c.ok for c in checks if c.blocking)
+        mitre = next((i["mitre"] for i in incidents if i["mitre"]), {})
+        if passed:          # chỉ hỏi LLM khi rule đã đạt phần đo bằng số liệu
+            data = {"model": g["model"], "counted_rule": {"id": sid, "description": next(
+                        (get(e, "wazuh.rule.description") for i in incidents for e in i["events"]
+                         if str(get(e, "wazuh.rule.id")) == sid), "")},
+                    "threshold": count, "timeframe_seconds": w, "normal_max": normal_max,
+                    "incidents": [{"ip": i["ip"], "count_in_timeframe": n, "anomaly": i["anomaly"]} for i, n in reached[:5]]}
+            samples = [get(e, "raw.full_log") for i in caught for e in i["events"]][:8]
+            res = self.llm.chat_json(FREQUENCY_SYSTEM, frequency_prompt(data, samples, rejected), FREQUENCY_SCHEMA)
+        else:
+            res = LLMResult(data={}, raw="", model=self.llm.model, seconds=0.0, prompt_tokens=0, output_tokens=0)
+        pid = uuid.uuid4().hex[:12]
+        if str(res.data.get("no_rule") or "").strip():
+            p = self._base("new_rule", f"gap-ml:{key}", res, f"gap-ml:{key}: AI không đề xuất rule")
+            p.update(id=pid, status="no_action", required_approvals=0, rationale=str(res.data["no_rule"])[:2000])
+            return p
+        rid = self._next_ai_id(ds)
+        techs = [t for t in res.data.get("techniques") or [] if MITRE_ID.match(str(t))][:3] or \
+            [t for t in mitre.get("technique") or [] if MITRE_ID.match(str(t))][:3]
+        title = str(res.data.get("title") or f"Lặp lại rule Wazuh {sid} bất thường từ một IP")[:200]
+        rd = {"id": rid, "title": title, "description": str(res.data.get("description") or "")[:1000],
+              "severity": "medium", "mitre": {"tactic": str(mitre.get("tactic") or "")[:60], "technique": techs},
+              "tags": ["ai-generated", "gap-ml", g["model"]], "type": "frequency",
+              "frequency": {"sid": int(sid), "count": count, "timeframe": w, "group_by": "source.ip"},
+              "ai_proposal_id": pid}
+        if passed:
+            em = emit_frequency(sid=int(sid), count=count, timeframe=w, rule_id=CANDIDATE_BASE, level=LEVEL["medium"],
+                                code="AI-CAND", title=title, techniques=techs, groups=["siem", "ai"], shadow_since=None)
+            idents = iter(range(1, 10 ** 9))
+
+            def raw(evs: list[Doc]) -> list:
+                return [log_event(next(idents), str(get(e, "raw.location") or ""), str(get(e, "raw.full_log")))
+                        for e in evs]
+
+            attack = {i["ip"]: raw(i["events"]) for i in caught}
+            # IP bình thường đếm nhiều nhất: bơm đúng khoảng bận nhất của nó, phải KHÔNG kích hoạt
+            top = sorted(((ip, *fq.busiest(ts, w)) for ip, ts in fq.by_ip(normal).items()), key=lambda x: -x[1])[:3]
+            normal_raw = {ip: raw([e for e in ds.events_of(ip, _iso(t0), _iso(t0 + w))
+                                   if str(get(e, "wazuh.rule.id")) == sid and get(e, "raw.full_log")]) for ip, _, t0 in top}
+            wz, wm = gate.check_frequency(em.xml, attack, {ip: evs for ip, evs in normal_raw.items() if evs})
+            checks += wz
+            metrics.update(wm)
+            passed = all(c.ok for c in checks if c.blocking)
+        val = Validation(passed, "cao" if held_fires or metrics.get("wazuh_normal_fired") else "thấp", checks, metrics)
+        p = self._base("new_rule", f"gap-ml:{key}", res, f"Rule mới {rid} — {title}")
+        p.update(id=pid, target_rule_id=rid, proposal=rd, yaml=rule_to_yaml(rd), validation=val.to_dict(), risk=val.risk,
+                 required_approvals=1, status="pending" if passed else "invalid",
+                 evidence={"ml_alert_ids": [i["alert_id"] for i in incidents][:200]})
+        if passed:
+            p["wazuh"] = {"emitter": EMITTER_VERSION, "domain": "frequency", "level": LEVEL["medium"], "rules": 1,
+                          "validated_at": now_iso()}
+        p["history"].append({"at": now_iso(), "by": "ai-worker", "text": (
+            f"từ {len(incidents)} sự cố ML đã xác nhận: đếm rule Wazuh {sid} từ cùng IP, ngưỡng {count} lần / {w} giây "
+            "(tính từ lưu lượng người dùng thường)")})
         return p
 
     def dataset_gaps(self, gate: WazuhGate) -> list[tuple[str, list]]:

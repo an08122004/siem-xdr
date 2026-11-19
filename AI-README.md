@@ -41,6 +41,7 @@ nghìn lần qua SigmaHQ; hệ thống biên dịch rule Sigma sang cây điều
 14. [Nghiên cứu: phương án dùng AI tự động sinh bộ rule](#14-nghiên-cứu-phương-án-dùng-ai-tự-động-sinh-bộ-rule-14102026)
 15. [Kế hoạch phát triển AI sinh rule](#15-kế-hoạch-phát-triển-ai-sinh-rule-16102026)
 16. [ML phát hiện bất thường theo IP (ML-WEB, ML-AUTH)](#16-ml-phát-hiện-bất-thường-theo-ip-ml-web-ml-auth)
+17. [Nối ML với AI sinh rule: rule tần suất từ sự cố ML (gap-ml)](#17-nối-ml-với-ai-sinh-rule-rule-tần-suất-từ-sự-cố-ml-gap-ml)
 
 ## 1. AI làm gì và không làm gì
 
@@ -50,6 +51,7 @@ AI là trợ lý cho người viết rule phát hiện. Phát hiện do `wazuh-a
 |---|---|---|
 | Giảm nhiễu | Rule Wazuh (`WZH-<id>`) có ≥ 3 alert bị analyst đánh dấu báo nhầm trong 30 ngày | Ngoại lệ hẹp cho rule đó (ngoại lệ Wazuh, mục 8) |
 | Lấp lỗ hổng phát hiện | Mẫu tấn công trong dataset công khai mà Wazuh chưa bắt (đo trên `wazuh-sandbox`) | Rule mới cho loại tấn công / kỹ thuật ATT&CK đó |
+| Biến phát hiện ML thành rule (`gap-ml`, mục 17) | Alert `ML-WEB` / `ML-AUTH` có kết luận `true_positive` mà không rule thật nào báo cho IP đó | Rule tần suất: đếm rule Wazuh đã khớp các event của sự cố, ngưỡng tính từ lưu lượng người dùng thường |
 
 Nguồn thứ ba cũ (`gap-own`: nhóm event thật chưa rule nào xem xét) đã bỏ ở Task 25: nó dựa vào engine YAML và không có log thô
 nên luôn trượt cổng Wazuh (R78).
@@ -1488,3 +1490,59 @@ analyzer nạp trạng thái, log `ML web: chuyển sang active (1279 cửa sổ
 **Việc tiếp theo:** theo dõi 7 ngày chạy bóng (tiêu chí [SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 4) trước khi đặt
 `ML_MODE=active`; cổng bổ sung khi một đặc trưng đếm vượt k lần giá trị lớn nhất của tập học (bắt `exfil`, ổn định `ssh_bruteforce`);
 thêm lần đăng nhập thất bại vào lưu lượng auth bình thường của `labsim`; đặc trưng nhịp request cho `scraper`.
+
+## 17. Nối ML với AI sinh rule: rule tần suất từ sự cố ML (gap-ml)
+
+ML (mục 16) bắt được hành vi không có chữ ký trong một event lẻ (`password_spray`, `slow_scan`), nhưng mỗi lần chỉ là một alert
+lẻ, dựa trên model phải học lại. Nguồn ứng viên `gap-ml` của AI worker biến sự cố ML **đã được xác nhận** thành một rule Wazuh cố
+định: rẻ, giải thích được, SOAR dùng được, và ML không phải học lại hành vi đã có rule (IP có alert thật bị loại khỏi tập học, D5).
+
+```
+alert ML ─ kết luận true_positive (analyst trên console, hoặc `ml_eval.py label` trong lab)
+   └─ ml_gaps: bỏ sự cố mà rule Wazuh thật đã báo cho cùng IP trong cửa sổ ± 1 cửa sổ
+      └─ rule được đếm = rule Wazuh (level >= 1) khớp nhiều event nhất của IP đó; gom theo (model, rule được đếm)
+         └─ ngưỡng = nhiều nhất một IP bình thường đạt trong một timeframe (2/3 đầu của 7 ngày) + 1, tối thiểu 3
+            └─ đo: bắt ≥ 50% sự cố; ≤ 1 lần kích hoạt / ngày trên 1/3 cuối (chưa dùng đặt ngưỡng)
+               └─ LLM: tên, mô tả, ATT&CK, hoặc từ chối (chỉ hỏi khi phần đo đã đạt)
+                  └─ cổng sandbox (check_frequency) ─ người duyệt ─ ai.xml chạy bóng ─ bật chính thức
+```
+
+**Vì sao đếm rule có sẵn thay vì để LLM viết điều kiện chọn event.** Đo trên `wazuh-sandbox` 4.14.8 (19/11/2026), rule tần suất
+`frequency=5` trên một rule nền con của 31101, IP A 8 request 401 và IP B 3 request:
+
+| Hỏi | Kết quả |
+|---|---|
+| Rule nền level 0 có được đếm? | Không: rule tần suất không bao giờ kích hoạt |
+| Rule nền level 3 | Kích hoạt đúng ở event thứ 5 của A, bộ đếm về 0 (A#6–8 không kích hoạt lại); B không kích hoạt |
+| Tác dụng phụ | Event #1–4 của A ra alert của rule nền thay vì 31101: rule nền **cướp** event của rule gốc, 31151 (đếm 31101) mất đếm |
+
+Rule nền mới vì thế sẽ làm mù rule gốc. Rule tần suất của `gap-ml` đếm thẳng rule đã khớp các event của sự cố, đúng cấu trúc rule
+gốc 31151 (`if_matched_sid` + `same_source_ip`): 31101 (lỗi 4xx web), 101000 (bộ đếm đăng nhập thất bại AUTH-000). Phần phát hiện
+(rule được đếm, ngưỡng, timeframe = cửa sổ ML) do code tính; LLM (`FREQUENCY_SYSTEM`, JSON schema) chỉ viết tên, mô tả, ATT&CK và
+được quyền từ chối khi mẫu là hoạt động hợp lệ.
+
+**Kiểm định** (`WazuhGate.check_frequency`): mỗi IP bơm thành một loạt liên tiếp từ dòng log gốc (`raw.full_log`), chạy không / có
+ứng viên. Chặn khi: Wazuh không nạp được; kích hoạt cho < 50% IP sự cố; IP bình thường đếm nhiều nhất (bơm đúng khoảng bận nhất) làm
+rule kích hoạt; một IP đang có phát hiện mất phát hiện. So theo IP, không theo event: rule tần suất lấy đi event thứ N của rule được
+đếm nên 31151 có thể kích hoạt ở event khác (16 lần 401: job nền 31151 ở lần 14; có ứng viên 5 lần / 300 giây thì ứng viên lấy lần 5,
+10, 15, 31151 hụt đếm, IP vẫn bị phát hiện bởi ứng viên). Báo nhầm theo thời gian thật ước lượng bằng mô phỏng Python
+(`frequency.fires`) trên lưu lượng 7 ngày, vì bơm dồn vào sandbox làm sai timeframe.
+
+**Duyệt:** như rule AI khác (mục 8); `deploy._deploy_new` dịch đề xuất `type: frequency` bằng `emit_frequency`, cùng dải id
+109000–109999, chạy bóng, bật chính thức, gỡ như cũ.
+
+**Nhãn lab** (`tools/ml_eval.py label --attacks attacks.jsonl`): đóng alert ML chưa có kết luận theo nhãn kịch bản: IP tấn công
+trong khoảng chạy ± 1 cửa sổ thì `true_positive`, dải người dùng mô phỏng thì `false_positive`, ghi đúng các trường như console
+(`closed_by: lab-attacks`). Chỉ dùng trong lab; ngoài lab kết luận là của analyst.
+
+**Kiểm thử (19/11/2026):** unit test `tests/test_gap_ml.py` (đếm trượt, giả lập Wazuh theo số đo sandbox, ngưỡng, XML, chu kỳ worker:
+đề xuất đạt / LLM từ chối / ngưỡng vượt sự cố thì không gọi LLM hay sandbox, so theo IP của cổng), `test_ai_deploy_xml.py` (duyệt rule
+tần suất), `test_ml_eval.py` (nhãn lab); cả bộ 742 đạt, 34 bỏ qua. Tích hợp trên `wazuh-sandbox` thật
+(`test_sandbox_it.py::test_frequency_rule_counts_stock_31101_per_source_ip`, chạy bằng mã của nhánh trong container `ai-worker`):
+rule nạp được, kích hoạt cho IP sự cố, không cho IP bình thường, không IP nào mất phát hiện.
+
+**Giới hạn:**
+- Chỉ sinh rule tần suất. Sự cố ML có chữ ký trong từng event (vd đường dẫn `/.git`) chưa đi nhánh rule một event với dữ liệu thật.
+- Rule được đếm là rule Wazuh có sẵn, nên độ mịn bằng rule đó (31101 = mọi lỗi 4xx, không riêng `/portal/`).
+- Mô phỏng Python không tính event bị rule anh em giành khỏi bộ đếm (`frequency.fires`, shortcut), có thể đếm dư vài event.
+- Cần ít nhất một sự cố đã xác nhận; ngưỡng chỉ tốt bằng 7 ngày lưu lượng trong ES.

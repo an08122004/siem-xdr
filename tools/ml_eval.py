@@ -9,6 +9,11 @@ Chạy từ thư mục stack THẬT (nơi .env ghim project siem-xdr; es_snapsho
 `train` ghi file trạng thái version 2 bằng chính AnomalyDetector.save() (chép vào volume của analyzer).
 `eval` học trên khoảng học, chấm khoảng thử, báo bắt được kịch bản nào và tỉ lệ báo nhầm trên người dùng bình thường;
 `--scores-csv` ghi thêm điểm của MỌI cửa sổ thử (vẽ histogram điểm, ROC / PR).
+`label` (CHỈ cho lab, lệnh duy nhất GHI ES): đóng alert ML chưa có kết luận bằng nhãn của attacks.jsonl, thay cho analyst:
+IP kịch bản tấn công trong khoảng chạy thì true_positive, dải người dùng mô phỏng thì false_positive. AI worker lấy alert
+ML true_positive làm nguồn khoảng trống gap-ml (rule tần suất):
+
+    python .../tools/ml_eval.py label --attacks attacks.jsonl [--since ISO] [--normal-ips 10.10.1.40-59]
 """
 from __future__ import annotations
 
@@ -16,6 +21,7 @@ import argparse
 import csv
 import json
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -87,6 +93,15 @@ def training_vectors(events, exclude: set[str], alerted: dict[str, list[float]] 
         out[name] = [v for ip, start, v, _ in ml.windows_from_events(events, spec)
                      if not any(start <= t < start + spec.window for t in alerted.get(ip, ()))]
     return out
+
+
+def lab_verdict(ip: str, model: str, t: float, scenarios: list[dict], normal_ips: set[str]) -> str | None:
+    """Kết luận cho alert ML ở thời điểm t: cùng IP với kịch bản tấn công và nằm trong [start - 1 cửa sổ, end + 1 cửa sổ]
+    (như match) thì true_positive; IP người dùng mô phỏng thì false_positive; còn lại để analyst."""
+    w = ml.SPECS[model].window
+    if any(sc["ip"] == ip and to_epoch(sc["start"]) - w <= t <= to_epoch(sc["end"]) + w for sc in scenarios):
+        return "true_positive"
+    return "false_positive" if ip in normal_ips else None
 
 
 def match(anomalies: list, scenarios: list[dict]) -> dict[str, dict]:
@@ -198,6 +213,33 @@ def cmd_eval(a) -> None:
                                      *score_rows(det, test_ev, atk, normal)])
 
 
+def cmd_label(a) -> None:
+    from es_snapshot import es
+    scenarios = [json.loads(x) for x in Path(a.attacks).read_text(encoding="utf-8").splitlines() if x.strip()]
+    normal = set(ip_range(a.normal_ips))
+    # chỉ alert ML CHƯA có kết luận: không ghi đè kết luận của analyst
+    q = {"bool": {"filter": [{"terms": {"rule.id": ["ML-WEB", "ML-AUTH"]}}, {"range": {"@timestamp": {"gte": a.since}}}],
+                  "must_not": [{"exists": {"field": "alert.verdict"}}]}}
+    now, done = datetime.now(timezone.utc).isoformat(), Counter()
+    for h in list(_search("siem-alerts", q, tie="alert.id")):
+        s = h["_source"]
+        al, ip, model = s.get("alert") or {}, (s.get("source") or {}).get("ip"), (s.get("ml") or {}).get("model")
+        verdict = lab_verdict(ip, model, to_epoch(s.get("event_time") or s["@timestamp"]), scenarios, normal) \
+            if ip and model in ml.SPECS else None
+        if not verdict:
+            done["để analyst"] += 1
+            continue
+        status = "false_positive" if verdict == "false_positive" else "closed"     # như api.closing
+        note = {"at": now, "by": "lab-attacks", "text": f"trạng thái: {al.get('status')} -> {status} (nhãn lab {verdict}, "
+                                                        f"{Path(a.attacks).name})"}
+        es("POST", f"/siem-alerts/_update/{h['_id']}?refresh=true", {"doc": {"alert": {
+            "status": status, "verdict": verdict, "updated_at": now, "updated_by": "lab-attacks", "closed_at": now,
+            "closed_by": "lab-attacks", "history": (al.get("history") or [])[-99:] + [note]}}})
+        done[verdict] += 1
+        print(f"{s.get('rule', {}).get('id')} {ip} {s.get('event_time')}: {verdict}")
+    print("tổng:", dict(done))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -213,8 +255,12 @@ def main() -> None:
     e.add_argument("--normal-ips", default="10.10.1.40-59")
     e.add_argument("--scores-csv", help="ghi điểm mọi cửa sổ thử ra CSV")
     e.add_argument("--target-fp", type=float, default=0.005, help="như ML_TARGET_FP: phân vị điểm tập giữ lại làm ngưỡng")
+    lb = sub.add_parser("label")
+    lb.add_argument("--attacks", required=True)
+    lb.add_argument("--since", default="now-7d")
+    lb.add_argument("--normal-ips", default="10.10.1.40-59")
     a = ap.parse_args()
-    {"train": cmd_train, "eval": cmd_eval}[a.cmd](a)
+    {"train": cmd_train, "eval": cmd_eval, "label": cmd_label}[a.cmd](a)
 
 
 if __name__ == "__main__":
