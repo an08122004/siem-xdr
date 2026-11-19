@@ -170,7 +170,7 @@
   events:
     - 'Oct 31 10:00:00 host sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/bin/su -'
 
-- rule: 101006   # AUTH-006: sudo sai mật khẩu
+- rule: 101016   # AUTH-006: sudo sai mật khẩu một lần -> bộ đếm 101016 (level 2); trước 19/11 là 101006 level 7 (mỗi lần gõ sai một case)
   log_format: syslog
   location: /var/log/auth.log
   events:
@@ -674,3 +674,44 @@
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for v2 from 203.0.113.103 port 4444 ssh2'
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for v3 from 203.0.113.103 port 4444 ssh2'
     - 'Oct 31 10:00:00 host sshd[1234]: Failed password for v4 from 203.0.113.103 port 4444 ssh2'
+
+# ---------------------------------------------------------------- sửa sau rà soát 19/11/2026
+- rule: 101016   # AUTH-006 bộ đếm: một lần sudo gõ sai mật khẩu (level 2, không alert)
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov 19 10:00:00 host sudo:   deploy : 1 incorrect password attempt ; TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/apt update'
+- none:   # AUTH-006 âm: sudo gõ sai một lần khi mở bash không mở case (dòng thất bại cũng có COMMAND=)
+  - 101006
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov 19 10:00:00 host sudo:   deploy : 1 incorrect password attempt ; TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/bin/bash'
+- none:   # AUTH-006 âm bộ đếm: sudo thành công
+  - 101016
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov 19 10:00:00 host sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/apt update'
+- rule: 101026   # AUTH-006: 3 lần sudo thất bại của cùng user trong 5 phút
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov 19 10:00:00 host sudo:   deploy : 1 incorrect password attempt ; TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/apt update'
+  - 'Nov 19 10:00:01 host sudo:   deploy : 1 incorrect password attempt ; TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/apt update'
+  - 'Nov 19 10:00:02 host sudo:   deploy : user NOT in sudoers ; TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/bin/bash'
+- none:   # AUTH-006 âm: 2 lần thất bại chưa đủ ngưỡng
+  - 101026
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov 19 10:00:00 host sudo:   deploy : 1 incorrect password attempt ; TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/apt update'
+  - 'Nov 19 10:00:01 host sudo:   deploy : 1 incorrect password attempt ; TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/apt update'
+- none:   # AUTH-006 âm: 3 lần thất bại của 3 user khác nhau
+  - 101026
+  log_format: syslog
+  location: /var/log/auth.log
+  events:
+  - 'Nov 19 10:00:00 host sudo:   u1 : 1 incorrect password attempt ; TTY=pts/0 ; PWD=/home/u1 ; USER=root ; COMMAND=/bin/ls'
+  - 'Nov 19 10:00:01 host sudo:   u2 : 1 incorrect password attempt ; TTY=pts/0 ; PWD=/home/u2 ; USER=root ; COMMAND=/bin/ls'
+  - 'Nov 19 10:00:02 host sudo:   u3 : 1 incorrect password attempt ; TTY=pts/0 ; PWD=/home/u3 ; USER=root ; COMMAND=/bin/ls'

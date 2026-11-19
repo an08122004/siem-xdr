@@ -145,11 +145,36 @@
 
   <!-- AUTH-006: sudo mở shell/su, hoặc sudo thất bại. Con của các rule sudo gốc (đứng sau chúng mới thấy được).
        Giới hạn: sudo thất bại qua PAM ("pam_unix(sudo:auth): authentication failure") đi vào nhóm PAM gốc (5503), không phải rule sudo -> chưa phủ;
-       trường hợp phổ biến còn lại "incorrect password attempt" thì có. -->
+       trường hợp phổ biến còn lại "incorrect password attempt" thì có.
+       Sửa 19/11/2026: MỘT lần sudo thất bại (gõ sai mật khẩu, user không có trong sudoers, lệnh không được phép) không còn ra alert level 7 (playbook mở case cho mọi
+       WZH-* từ medium nên mỗi lần gõ sai là một case). Thất bại vào bộ đếm 101016 (level 2, không alert); 101026 báo khi >= 3 lần thất bại của CÙNG user trên
+       cùng máy trong 5 phút. 101006 chỉ còn nhánh mở shell root, và loại dòng thất bại (dòng thất bại cũng mang COMMAND=). Dòng "3 incorrect password attempts"
+       vẫn do rule gốc 5404 (level 10, con của 5401, level cao hơn) nhận, không vào bộ đếm. -->
   <rule id="101006" level="7">
     <if_sid>5401, 5402, 5403, 5405, 5406, 5407</if_sid>
-    <regex type="pcre2">incorrect password attempt|NOT in sudoers|command not allowed|COMMAND=\S*/(ba|z|da)?sh(\s|$)|COMMAND=(\S*/)?su(\s+-?)?\s*$|COMMAND=.*\s-i$</regex>
-    <description>AUTH-006 Sudo mở shell root hoặc sudo thất bại: $(dstuser)</description>
+    <regex type="pcre2">^(?!.*(?:incorrect password attempt|NOT in sudoers|command not allowed)).*(?:COMMAND=\S*/(ba|z|da)?sh(\s|$)|COMMAND=(\S*/)?su(\s+-?)?\s*$|COMMAND=.*\s-i$)</regex>
+    <description>AUTH-006 Sudo mở shell root: $(dstuser)</description>
+    <mitre>
+      <id>T1548.003</id>
+    </mitre>
+    <group>siem,auth,legacy_AUTH-006,</group>
+  </rule>
+
+  <rule id="101016" level="2">
+    <if_sid>5401, 5405, 5406</if_sid>
+    <regex type="pcre2">incorrect password attempt|NOT in sudoers|command not allowed</regex>
+    <description>AUTH-006 Sudo thất bại (bộ đếm cho 101026)</description>
+    <mitre>
+      <id>T1548.003</id>
+    </mitre>
+    <group>siem,auth,legacy_AUTH-006,</group>
+  </rule>
+
+  <rule id="101026" level="7" frequency="3" timeframe="300">
+    <if_matched_sid>101016</if_matched_sid>
+    <same_srcuser />
+    <same_location />
+    <description>AUTH-006 Sudo thất bại lặp lại: $(srcuser) thất bại &gt;= 3 lần trong 5 phút</description>
     <mitre>
       <id>T1548.003</id>
     </mitre>

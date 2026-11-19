@@ -1321,19 +1321,19 @@
   events:
   - '198.51.100.71 - - [05/Jan/2026:09:00:00 +0000] "GET /cgi-bin/ping.cgi?host=1%3bid HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
 
-- rule: 104004   # WEB-004 |uname thô
+- rule: 104044   # WEB-004 |uname thô (từ 19/11: nhánh | / & đơn là rule 104044)
   log_format: apache
   location: (demo-web) any->/usr/local/apache2/logs/access_log
   events:
   - '198.51.100.72 - - [05/Jan/2026:09:00:00 +0000] "GET /cgi-bin/ping.cgi?host=1|uname+-a HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
 
-- rule: 104004   # WEB-004 %7cuname
+- rule: 104044   # WEB-004 %7cuname (104044)
   log_format: apache
   location: (demo-web) any->/usr/local/apache2/logs/access_log
   events:
   - '198.51.100.73 - - [05/Jan/2026:09:00:00 +0000] "GET /cgi-bin/ping.cgi?host=1%7cuname HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
 
-- rule: 104004   # WEB-004 &cat /etc/passwd (dấu & thô)
+- rule: 104044   # WEB-004 &cat /etc/passwd (dấu & thô, 104044)
   log_format: apache
   location: (demo-web) any->/usr/local/apache2/logs/access_log
   events:
@@ -1579,7 +1579,7 @@
   - '198.51.100.103 - - [05/Jan/2026:09:00:08 +0000] "POST /admin/index.php HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
   - '198.51.100.103 - - [05/Jan/2026:09:00:09 +0000] "POST /admin/index.php HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"'
 
-- rule: 104007   # WEB-007 10 POST /wp-admin/admin-ajax.php (chứa admin, không phải wp-login)
+- none: [104007]   # WEB-007 âm từ 19/11: 10 POST /wp-admin/admin-ajax.php (heartbeat WordPress, trước đây báo và chặn IP biên tập viên)
   log_format: apache
   location: (demo-web) any->/usr/local/apache2/logs/access_log
   events:
@@ -1940,3 +1940,66 @@
   location: (demo-web) any->/usr/local/apache2/logs/access_log
   events:
   - '198.51.100.154 - - [05/Jan/2026:09:00:00 +0000] "GET /cgi-bin/test.cgi HTTP/1.1" 200 512 "-" "() { :;}; /bin/bash -c id sqlmap"'
+
+# ---------------------------------------------------------------- sửa sau rà soát 19/11/2026
+- none:   # WEB-004 âm: tìm kiếm có & (bread & cat food), trước 19/11 ra level 12 + chặn IP
+  - 104004
+  - 104044
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - 198.51.100.150 - - [19/Nov/2026:10:00:00 +0700] "GET /search?q=bread+%26+cat+food HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"
+- none:   # WEB-004 âm: danh sách trường fields=name|id
+  - 104004
+  - 104044
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - 198.51.100.151 - - [19/Nov/2026:10:00:00 +0700] "GET /api/items?fields=name|id HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"
+- rule: 104004   # WEB-004: chèn lệnh bằng xuống dòng %0a
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - 198.51.100.152 - - [19/Nov/2026:10:00:00 +0700] "GET /ping.php?ip=127.0.0.1%0aid HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"
+- rule: 104044   # WEB-004 (104044): | cat /etc/passwd
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - 198.51.100.153 - - [19/Nov/2026:10:00:00 +0700] "GET /ping.php?ip=1|cat+/etc/passwd HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"
+- rule: 104044   # WEB-004 (104044): %26 whoami
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - 198.51.100.154 - - [19/Nov/2026:10:00:00 +0700] "GET /ping.php?ip=1%26whoami HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"
+- rule: 104001   # WEB-001: UNION%09SELECT (tab mã hóa)
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - 198.51.100.155 - - [19/Nov/2026:10:00:00 +0700] "GET /item.php?id=1+UNION%09SELECT+user,pass+FROM+users HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"
+- rule: 104001   # WEB-001: UNION%0aSELECT (xuống dòng mã hóa)
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - 198.51.100.156 - - [19/Nov/2026:10:00:00 +0700] "GET /item.php?id=1+UNION%0aSELECT+user,pass+FROM+users HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"
+- rule: 104001   # WEB-001: UNION/*x*/SELECT (comment có nội dung)
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - 198.51.100.157 - - [19/Nov/2026:10:00:00 +0700] "GET /item.php?id=1/*x*/UNION/*abc*/SELECT/*x*/1,2 HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"
+- rule: 104013   # WEB-001: SQLi số không nháy =1 OR 1=1
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - 198.51.100.158 - - [19/Nov/2026:10:00:00 +0700] "GET /item.php?id=1+OR+1%3D1 HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"
+- none:   # WEB-001 âm: hai vế khác nhau (=1 or 2=3)
+  - 104013
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - 198.51.100.159 - - [19/Nov/2026:10:00:00 +0700] "GET /item.php?id=1+or+2%3D3 HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"
+- none:   # WEB-008 âm: thumb.php?c=1 trong images (tham số c chỉ còn với tên webshell)
+  - 104008
+  log_format: apache
+  location: (demo-web) any->/usr/local/apache2/logs/access_log
+  events:
+  - 198.51.100.160 - - [19/Nov/2026:10:00:00 +0700] "GET /images/thumb.php?c=1&w=200 HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"

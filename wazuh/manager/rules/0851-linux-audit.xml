@@ -60,12 +60,13 @@
     <group>siem,linux,legacy_LNX-001,</group>
   </rule>
 
-  <!-- LNX-003, nhánh 2 của rule cũ: (curl|wget) ... -o|-O /tmp/... && chmod +x, đoạn hex trong cùng đối số bash -c. Nhánh `| sh` không phủ (xem đầu file). -->
+  <!-- LNX-003, nhánh 2 của rule cũ: (curl|wget) ... -o|-O /tmp/... && chmod +x, đoạn hex trong cùng đối số bash -c. Nhánh `| sh` không phủ (xem đầu file).
+       Khoảng trắng sau -o là (?:20)? (một byte hex "20"); trước 19/11/2026 viết 20? nên `-o/tmp/x` (không cách) bị lọt. -->
   <rule id="102503" level="10">
     <if_sid>80792, 92600</if_sid>
     <field name="audit.key" type="pcre2">^audit-wazuh-c$</field>
     <location type="pcre2">(^|/)audit\.log$</location>
-    <regex type="pcre2">(?:6375726C|77676574)\w*202D(?:4F|6F)20?2F746D702F\w*2026262063686D6F64202B78</regex>
+    <regex type="pcre2">(?:6375726C|77676574)\w*202D(?:4F|6F)(?:20)?2F746D702F\w*2026262063686D6F64202B78</regex>
     <description>LNX-003 Tải script vào /tmp rồi chmod +x (auditd, payload hex): $(audit.exe)</description>
     <mitre>
       <id>T1105</id>
@@ -87,12 +88,12 @@
     <group>siem,linux,legacy_LNX-004,</group>
   </rule>
 
-  <!-- LNX-006, nhánh đối số rời. -->
+  <!-- LNX-006, nhánh đối số rời. crontab có thể không kèm tùy chọn (`crontab /tmp/x` là cách cài crontab từ file phổ biến nhất; trước 19/11/2026 regex đòi dấu -). -->
   <rule id="102506" level="10">
     <if_sid>80792, 92600</if_sid>
     <field name="audit.key" type="pcre2">^audit-wazuh-c$</field>
     <location type="pcre2">(^|/)audit\.log$</location>
-    <regex type="pcre2">crontab(?:\s+|"\s+a\d+=")-[lr]?(?:\s*|"\s+a\d+=")\S*/tmp|systemctl(?:\s+|"\s+a\d+=")enable(?:\s+|"\s+a\d+=")\S+.*/tmp</regex>
+    <regex type="pcre2">crontab(?:\s+|"\s+a\d+=")(?:-[a-z](?:\s+|"\s+a\d+=")){0,4}\S*/tmp|systemctl(?:\s+|"\s+a\d+=")enable(?:\s+|"\s+a\d+=")\S+.*/tmp</regex>
     <description>LNX-006 Can thiệp cơ chế duy trì (auditd): $(audit.exe)</description>
     <mitre>
       <id>T1053.003</id>

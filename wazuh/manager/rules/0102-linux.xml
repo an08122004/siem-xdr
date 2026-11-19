@@ -33,11 +33,15 @@
     <group>siem,linux,legacy_LNX-001,</group>
   </rule>
 
-  <!-- LNX-002: web server sinh ra shell/công cụ. CHỈ chạy trên siem-proc: auditd không ghi tên tiến trình cha (chỉ ppid), nên không diễn đạt được điều kiện cha-con. -->
+  <!-- LNX-002: web server sinh ra shell/công cụ. CHỈ chạy trên siem-proc: auditd không ghi tên tiến trình cha (chỉ ppid), nên không diễn đạt được điều kiện cha-con.
+       Sửa 19/11/2026 (rule này kéo kill_process): bỏ cha `java` (Jenkins, Elasticsearch, Kafka sinh sh / curl hằng ngày; Tomcat chạy dưới tên java nên webshell JSP
+       chỉ còn WEB-008 / FIM bắt), php-fpm / php nhận hậu tố phiên bản (php-fpm8.2), và bỏ đúng một dạng hợp lệ: hàm mail() của PHP chạy `sh -c sendmail <tùy chọn>`
+       (không có ; | & $ ` hay chuyển hướng phía sau; nối thêm lệnh khác vẫn báo). -->
   <rule id="102002" level="12">
     <if_sid>102000</if_sid>
-    <field name="parent" type="pcre2">^(apache2|httpd|nginx|php-fpm|php|lighttpd|tomcat|java)$</field>
+    <field name="parent" type="pcre2">^(apache2|httpd|nginx|php-fpm[0-9.]*|php[0-9.]*|lighttpd|tomcat[0-9]*)$</field>
     <field name="name" type="pcre2">^(sh|bash|dash|zsh|nc|ncat|python|python3|perl|curl|wget|whoami|id|uname)$</field>
+    <field name="cmd" type="pcre2" negate="yes">^(?:\S*/)?sh\s+-c\s+['"]?(?:\S*/)?sendmail(?:\s+[^;|\x26$`'"\x3c\x3e()\n]*)?['"]?$</field>
     <description>LNX-002 Web server $(parent) sinh ra $(name) (khả năng webshell / RCE)</description>
     <mitre>
       <id>T1505.003</id>
@@ -46,10 +50,17 @@
     <group>siem,linux,legacy_LNX-002,</group>
   </rule>
 
-  <!-- LNX-003: tải script rồi chạy qua shell, trừ bộ cài chính thức (cùng danh sách loại trừ với YAML cũ). -->
+  <!-- LNX-003: tải script rồi chạy qua shell, trừ bộ cài chính thức (cùng danh sách loại trừ với YAML cũ).
+       Sửa 19/11/2026: (1) loại trừ (hai field negate, neo cả dòng) chỉ khi CẢ lệnh là `[sh -c] curl|wget <tùy chọn> URL-bộ-cài | [sudo] sh [đối số]` hoặc
+       `sh -c "$(curl ... URL-bộ-cài)"`: tên miền NEO (sau tên miền phải là / ? # hoặc hết token; get.docker.com.evil.io và ...?r=https://get.docker.com không còn lọt),
+       đường dẫn không có .. / %2e (curl tự rút gọn dot-segment), không nối thêm lệnh (; & |); các token khác chỉ là tùy chọn không chứa ":" (vd tham số proto '=https'
+       và -sSf của lệnh rustup). Tách hai field vì lint giới hạn 300 ký tự / regex. (2) đích pipe đủ dạng: sudo [-E] bash, /bin/bash,
+       dash/zsh/ksh; sau tên shell phải là khoảng trắng, ; ) & hoặc hết dòng nên `| sha256sum`, `| shasum`, `| shellcheck` không còn khớp. (3) bash -c "$(curl ...)" và bash <(curl ...). -->
   <rule id="102003" level="10">
     <if_sid>102000</if_sid>
-    <field name="cmd" type="pcre2">(curl|wget)\s+(?![^|]*://(get\.docker\.com|sh\.rustup\.rs|get\.k3s\.io|install\.python-poetry\.org|deb\.nodesource\.com/|raw\.githubusercontent\.com/(nvm-sh/nvm|homebrew/install|ohmyzsh/ohmyzsh|helm/helm)/))[^|]*\|\s*(ba)?sh|(curl|wget).*(-O|-o)\s*/tmp/.*\x26\x26\s*chmod\s+\+x</field>
+    <field name="cmd" type="pcre2">(?:curl|wget)\s[^|]*\|\s*(?:sudo\s+(?:-\w+\s+)?(?:-\w+\s+)?)?(?:\S*/)?(?:ba|da|z|k)?sh(?=[\s;)\x26]|$)|\b(?:ba|da|z)?sh\s+(?:-c\s+['"]?\$\(|\x3c\(\s*)(?:curl|wget)\s|(curl|wget).*(-O|-o)\s*/tmp/.*\x26\x26\s*chmod\s+\+x</field>
+    <field name="cmd" type="pcre2" negate="yes">^(?:\S*sh\s+-c\s+['"]?(?:\$\()?)?(?:curl|wget)(?:\s[^|:";\x26`]*)?\s['"]?https?://(?:get\.docker\.com|sh\.rustup\.rs|get\.k3s\.io|install\.python-poetry\.org|deb\.nodesource\.com)(?:[/?#](?:(?!\.\.|%2[eE])[^\s|'")])*)?['"]?(?:\s*\|\s*(?:sudo\s+)?(?:\S*/)?(?:ba)?sh\b[^|;\x26]*|\)['"]?)$</field>
+    <field name="cmd" type="pcre2" negate="yes">^(?:\S*sh\s+-c\s+['"]?(?:\$\()?)?(?:curl|wget)(?:\s[^|:";\x26`]*)?\s['"]?https://raw\.githubusercontent\.com/(?i:nvm-sh/nvm|homebrew/install|ohmyzsh/ohmyzsh|helm/helm)/(?:(?!\.\.|%2[eE])[^\s|'")])*['"]?(?:\s*\|\s*(?:sudo\s+)?(?:\S*/)?(?:ba)?sh\b[^|;\x26]*|\)['"]?)$</field>
     <description>LNX-003 Tải script từ mạng rồi chạy thẳng qua shell: $(cmd)</description>
     <mitre>
       <id>T1105</id>
@@ -82,7 +93,7 @@
   <!-- LNX-006: can thiệp cơ chế duy trì (authorized_keys, cron, systemd). -->
   <rule id="102006" level="10">
     <if_sid>102000</if_sid>
-    <field name="cmd" type="pcre2">>>?\s*\S*\.ssh/authorized_keys|crontab\s+-[lr]?\s*\S*/tmp|echo.*>>?\s*/etc/cron|systemctl\s+enable\s+\S+.*/tmp</field>
+    <field name="cmd" type="pcre2">>>?\s*\S*\.ssh/authorized_keys|crontab\s+(?:-[a-z](?:\s+[a-z_][\w.-]*)?\s+){0,4}['"]?\S*/tmp|echo.*>>?\s*/etc/cron|systemctl\s+enable\s+\S+.*/tmp</field>
     <description>LNX-006 Can thiệp cơ chế duy trì (crontab / authorized_keys / systemd): $(cmd)</description>
     <mitre>
       <id>T1053.003</id>
