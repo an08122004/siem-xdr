@@ -937,8 +937,8 @@ mẫu tấn công Windows + web (cây Python ước 186), 0 mẫu bị lô cư�
 
 ### 9.12 Hình cho báo cáo
 
-`python tools/report_figures.py` (cần `matplotlib`, dùng Python của máy, không phải venv server) vẽ lại 5 hình từ số đo ở các
-mục trên, ra `docs/figures/`:
+`python tools/report_figures.py` (cần `matplotlib`, dùng Python của máy, không phải venv server) vẽ lại 7 hình từ số đo ở các
+mục trên và mục 16, ra `docs/figures/`:
 
 | Hình | Nội dung | Số liệu |
 |---|---|---|
@@ -947,6 +947,12 @@ mục trên, ra `docs/figures/`:
 | [ai-3-sigmahq-va-model.png](docs/figures/ai-3-sigmahq-va-model.png) | SigmaHQ và model bổ sung cho nhau (4 góc: cả hai / chỉ một bên / không bên nào đạt) | 9.5, 9.9 |
 | [ai-4-ly-do-loai.png](docs/figures/ai-4-ly-do-loai.png) | Lý do loại 352 vế ứng viên | 9.7 |
 | [ai-5-on-dinh.png](docs/figures/ai-5-on-dinh.png) | Dao động giữa 3 lần chạy cùng nhóm | 9.9 |
+| [ml-1-histogram-diem.png](docs/figures/ml-1-histogram-diem.png) | ML: phân bố điểm Isolation Forest của người dùng thường và 7 kịch bản tấn công, model web và auth | 16 |
+| [ml-2-roc.png](docs/figures/ml-2-roc.png) | ML: đường ROC gộp 2 model (AUC 0,98), ngưỡng đang dùng bắt 12/16 cửa sổ tấn công, báo nhầm 1/568 | 16 |
+
+Hai hình ML đọc `datasets/ml_scores_2026-11-17.csv`, ghi bằng `ml_eval.py eval --scores-csv` với đúng khoảng của lần 2 trong
+`docs/ml-eval-2026-11-17.md` (học 15/11 08:20 → 16/11 14:04:06, thử tới 17/11 16:30 UTC, nhãn
+`datasets/ml_attacks_2026-11-17.jsonl`); lần chạy lại cho đúng kết quả cũ (5/7 kịch bản, báo nhầm 1/568).
 
 Trục SigmaHQ của hình 3 lấy bảng 9.5, không lấy `datasets/sigmahq_baseline_2026-10-07.json`: file đó đánh dấu báo nhầm nhiều
 rule hơn bảng (ví dụ T1059.001: 6 rule so với 2), nên chỉ 5 thay vì 6/14 nhóm đạt 30%.

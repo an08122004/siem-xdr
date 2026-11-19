@@ -1,13 +1,17 @@
-"""Vẽ hình cho báo cáo phần LLM + RAG (sinh rule) từ số đo đã có, ra docs/figures/ai-*.png.
+"""Vẽ hình cho báo cáo từ số đo đã có, ra docs/figures/: ai-*.png (LLM + RAG sinh rule), ml-*.png (ML bất thường).
 
     python tools/report_figures.py        # cần matplotlib (Python của máy, không phải venv server)
 
-Số thô đọc từ datasets/bench_*.jsonl và sigmahq_baseline_*.json; số đã phân tích (ablation 9.9, lý do loại 9.7) đọc
-thẳng từ bảng trong AI-README.md để hình luôn khớp tài liệu. Chế độ sáng, cho bản in.
+LLM: số thô đọc từ datasets/bench_*.jsonl; số đã phân tích (9.5, 9.7, 9.9) đọc thẳng từ bảng trong AI-README.md để hình
+luôn khớp tài liệu. ML: datasets/ml_scores_2026-11-17.csv do `ml_eval.py eval --scores-csv` ghi (lần 2 của
+docs/ml-eval-2026-11-17.md: học 15/11 08:20 -> 16/11 14:04:06, thử -> 17/11 16:30 UTC) và nhãn
+datasets/ml_attacks_2026-11-17.jsonl. Chế độ sáng, cho bản in.
 """
 from __future__ import annotations
 
+import csv
 import json
+import math
 import re
 import statistics
 from pathlib import Path
@@ -52,6 +56,11 @@ def md_table(heading: str) -> list[list[str]]:
         elif rows:
             break
     return rows[2:]
+
+
+def vn(x: float, d: int) -> str:
+    """Số trong câu tiếng Việt: dấu phẩy thập phân."""
+    return f"{x:.{d}f}".replace(".", ",")
 
 
 def pct(cell: str) -> int:
@@ -282,6 +291,111 @@ def fig_stability() -> None:
     save(fig, "ai-5-on-dinh.png")
 
 
+# ---------------------------------------------------------------- ML bất thường
+SCEN = {"scan_dirs": "dò thư mục", "portal_bruteforce": "dò mật khẩu portal", "password_spray": "rải mật khẩu",
+        "ssh_bruteforce": "dò mật khẩu SSH", "slow_scan": "dò chậm", "scraper": "cào trang", "exfil": "tuồn dữ liệu"}
+
+
+def ml_rows() -> tuple[list[dict], dict[str, str]]:
+    """Cửa sổ thử (bỏ nhãn `other`: IP ngoài cả hai dải) và IP -> kịch bản (mỗi kịch bản một IP riêng)."""
+    with (DATA / "ml_scores_2026-11-17.csv").open(encoding="utf-8") as f:
+        rows = [r for r in csv.DictReader(f) if r["label"] != "other"]
+    for r in rows:
+        r["score"], r["threshold"] = float(r["score"]), float(r["threshold"])
+    return rows, {a["ip"]: a["scenario"] for a in jsonl("ml_attacks_2026-11-17.jsonl")}
+
+
+ML_SUB = "Học 15/11 08:20 → 16/11 14:04, thử 26,4 giờ tới 17/11 16:30 (UTC)\nNguồn: datasets/ml_scores_2026-11-17.csv " \
+         "(ml_eval --scores-csv), docs/ml-eval-2026-11-17.md lần 2"
+
+
+def fig_ml_hist() -> None:
+    rows, scen = ml_rows()
+    models = [("web", "Model web"), ("auth", "Model auth")]
+    fig, axes = plt.subplots(2, 2, figsize=(7.2, 4.6), sharex="col",
+                             gridspec_kw={"height_ratios": [3, 2], "hspace": 0.1, "wspace": 0.45})
+    for c, (name, title) in enumerate(models):
+        rr = [r for r in rows if r["model"] == name]
+        th = rr[0]["threshold"]
+        normal = [r["score"] for r in rr if r["label"] == "normal"]
+        attack = [(scen[r["ip"]], r["score"]) for r in rr if r["label"] == "attack"]
+        top, bot = axes[0][c], axes[1][c]
+        lo, hi = min(normal + [s for _, s in attack]), max(normal)
+        w = 0.02
+        top.hist(normal, bins=[math.floor(lo / w) * w + i * w for i in range(int((hi - lo) / w) + 3)], color=S1,
+                 edgecolor=SURFACE, linewidth=1.0, zorder=2)
+        top.set_title(f"{title}: {len(normal)} cửa sổ thường, {sum(s < th for s in normal)} bị gắn cờ",
+                      loc="left", fontsize=8.5, color=INK, pad=6)
+        top.set_ylabel("Số cửa sổ thường")
+        top.grid(axis="y")
+        names = [n for n in SCEN if any(a == n for a, _ in attack)]
+        for n, s in attack:
+            bot.scatter(s, names.index(n), s=40, zorder=3, color=S2 if s < th else SURFACE, edgecolor=S2, linewidth=1.5)
+        bot.set_yticks(range(len(names)),
+                       [f"{SCEN[n]} ({sum(a == n for a, _ in attack)})" for n in names], fontsize=7.5)
+        bot.set_ylim(len(names) - 0.4, -0.6)
+        bot.grid(axis="x")
+        bot.set_xlabel("Điểm Isolation Forest (thấp = bất thường)")
+        for ax in (top, bot):
+            ax.axvline(th, color=INK2, linewidth=0.9, zorder=4)
+            ax.spines["left"].set_visible(False)
+        top.text(th, top.get_ylim()[1], f" ngưỡng {vn(th, 3)}\n ← bị gắn cờ", va="top", ha="left", fontsize=7.5,
+                 color=INK2)
+    fig.legend(handles=[Line2D([], [], color=S1, lw=6, label="cửa sổ người dùng thường"),
+                        Line2D([], [], marker="o", ls="", color=S2, markersize=6, label="cửa sổ tấn công bị gắn cờ"),
+                        Line2D([], [], marker="o", ls="", markerfacecolor=SURFACE, markeredgecolor=S2, markersize=6,
+                               label="cửa sổ tấn công lọt")],
+               loc="upper left", bbox_to_anchor=(0.01, 1 - 0.92 / 4.6), ncol=3, fontsize=8)
+    frame(fig, "Phân bố điểm bất thường: người dùng thường và tấn công", ML_SUB, above=0.72)
+    fig.text(0.01, -0.02, "Số trong ngoặc: số cửa sổ của kịch bản. Ngưỡng = phân vị 0,5% điểm của 20% cửa sổ học mới nhất.",
+             fontsize=7.5, color=INK2)
+    save(fig, "ml-1-histogram-diem.png")
+
+
+def roc(pos: list[float], neg: list[float]) -> tuple[list[tuple[float, float]], float]:
+    """Đường ROC (FPR, TPR) và AUC; điểm lớn hơn = bất thường hơn, điểm bằng nhau đi chéo (hình thang)."""
+    pts = [(0.0, 0.0)] + [(sum(n >= t for n in neg) / len(neg), sum(p >= t for p in pos) / len(pos))
+                          for t in sorted(set(pos) | set(neg), reverse=True)]
+    return pts, sum((x2 - x1) * (y1 + y2) / 2 for (x1, y1), (x2, y2) in zip(pts, pts[1:]))
+
+
+assert roc([2.0], [1.0])[1] == 1.0 and roc([1.0], [1.0])[1] == 0.5 and roc([1.0], [2.0])[1] == 0.0
+
+
+def fig_ml_roc() -> None:
+    rows, _ = ml_rows()
+    # gộp 2 model theo khoảng cách tới ngưỡng riêng của từng model: > 0 nghĩa là bị gắn cờ ở cả hai model
+    pos = [r["threshold"] - r["score"] for r in rows if r["label"] == "attack"]
+    neg = [r["threshold"] - r["score"] for r in rows if r["label"] == "normal"]
+    pts, auc = roc(pos, neg)
+    op = (sum(n > 0 for n in neg) / len(neg), sum(p > 0 for p in pos) / len(pos))
+    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.6), gridspec_kw={"wspace": 0.3})
+    for ax, xmax, title in ((axes[0], 1.0, "Toàn dải"), (axes[1], 0.05, "Phóng to: tỉ lệ báo nhầm ≤ 5%")):
+        ax.plot([0, xmax], [0, xmax], color=AXIS, linewidth=0.9, zorder=1)
+        ax.plot([x for x, _ in pts], [y for _, y in pts], color=S1, linewidth=2, solid_joinstyle="round", zorder=2)
+        ax.scatter(*op, s=48, color=INK, edgecolor=SURFACE, linewidth=1.5, zorder=3)
+        ax.set_xlim(-xmax * 0.02, xmax)
+        ax.set_ylim(-0.02, 1.04)
+        ax.set_title(title, loc="left", fontsize=8.5, color=INK, pad=6)
+        ax.set_xlabel("Tỉ lệ báo nhầm (FPR)")
+        ax.grid(True)
+        ax.xaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0, decimals=0 if xmax == 1 else 1))
+        ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0, decimals=0))
+    axes[0].set_ylabel("Tỉ lệ bắt cửa sổ tấn công (TPR)")
+    axes[1].annotate(f"ngưỡng đang dùng: bắt {sum(p > 0 for p in pos)}/{len(pos)} cửa sổ tấn công,\n"
+                     f"báo nhầm {sum(n > 0 for n in neg)}/{len(neg)} ({vn(100 * op[0], 2)}%)", op, xytext=(14, -30),
+                     textcoords="offset points", fontsize=7.5, color=INK,
+                     arrowprops={"arrowstyle": "-", "color": INK2, "lw": 0.8})
+    full = min(x for x, y in pts if y == 1)
+    frame(fig, f"Đường ROC của ML bất thường (AUC = {vn(auc, 2)})",
+          f"{len(pos)} cửa sổ tấn công (7 kịch bản), {len(neg)} cửa sổ người dùng thường; gộp model web và auth theo "
+          f"khoảng cách tới ngưỡng riêng\n" + ML_SUB.split("\n", 1)[1], above=0.25)
+    fig.text(0.01, -0.03, "Đường chéo xám: đoán ngẫu nhiên. Phần lọt (cào trang, tuồn dữ liệu) lẫn vào đuôi phân bố của "
+             f"người dùng thường: muốn bắt đủ 100% phải chấp nhận báo nhầm {vn(100 * full, 1)}%.", fontsize=7.5,
+             color=INK2)
+    save(fig, "ml-2-roc.png")
+
+
 if __name__ == "__main__":
-    for f in (fig_models, fig_ablation, fig_complement, fig_rejections, fig_stability):
+    for f in (fig_models, fig_ablation, fig_complement, fig_rejections, fig_stability, fig_ml_hist, fig_ml_roc):
         f()
