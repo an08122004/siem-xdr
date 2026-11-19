@@ -56,5 +56,24 @@ def test_train_skips_alerted_windows():
     assert len(vecs["web"]) == 5
 
 
+def test_score_rows_scores_every_window_with_labels():
+    from sklearn.ensemble import IsolationForest
+    det = ml.AnomalyDetector()
+    m = det.models["web"]
+    base = ev.training_vectors(fake_events(["10.10.1.41"], windows=20), exclude=set())["web"]
+    m.forest = IsolationForest(random_state=0).fit(ml._matrix(m.spec, base))
+    m.threshold = -0.05
+    attack = [({"event": {"category": "web", "id": f"x{i}"}, "source": {"ip": "10.10.1.60"},
+                "url": {"path": f"/scan{i}"}, "http": {"response": {"status_code": 404, "bytes": 0}}}, 600 + i)
+              for i in range(60)]
+    rows = ev.score_rows(det, fake_events(["10.10.1.41", "10.10.1.99"], windows=2) + attack,
+                         attack={"10.10.1.60"}, normal={"10.10.1.41"})
+    labels = {(r[1], r[5]) for r in rows}
+    assert labels == {("10.10.1.41", "normal"), ("10.10.1.99", "other"), ("10.10.1.60", "attack")}
+    assert all(r[0] == "web" for r in rows)                       # model auth chưa học: không có dòng
+    assert all(r[6] == int(r[3] < r[4]) for r in rows)
+    assert len(rows) == 5                                          # 2 + 2 cửa sổ thường, 1 cửa sổ tấn công
+
+
 def test_ip_range():
     assert ev.ip_range("10.10.1.60-62") == ["10.10.1.60", "10.10.1.61", "10.10.1.62"]
