@@ -77,6 +77,7 @@ class Candidate:
     hits: set[int] = field(default_factory=set)      # chỉ số mẫu tấn công chưa Hit Wazuh mà cây Python khớp
     pos: dict[str, Any] | None = None                # mẫu dương / âm của ca test (item của wazuh_coverage.load_items)
     neg: dict[str, Any] | None = None
+    hits_new: set[int] = field(default_factory=set)  # hits trừ mẫu rule 108xxx đã ghi bắt (mẫu MỚI thật của rule)
     level: int = 0                                   # level Wazuh khi ghi (pick đặt)
 
     @property
@@ -137,10 +138,14 @@ def candidates(items: list[dict], rows: list[dict], originals: dict[str, str], c
         if any(regex_risk(e.text or "") for e in ET.fromstring("<g>" + em.xml + "</g>").iter() if e.get("type") == "pcre2"):
             skipped["mẫu regex quá dài / ReDoS (lint)"] += 1
             continue
-        if dom == "windows" and re.search(r"\\x(?:3c|3e|26)", em.xml):
-            # Wazuh giữ nguyên thực thể XML (&gt; &lt; &amp;) trong win.eventdata.*: giá trị có < > & đã bị emit từ chối (M1);
-            # còn regex viết sẵn mã \x3c \x3e \x26 (đo 07/11/2026: mẫu có `>` không khớp) thì loại ở đây
-            skipped["giá trị có & < > (Wazuh giữ thực thể XML)"] += 1
+        # Loại rule Windows chạm < > & trong giá trị/regex. Task 19c định emit `(?:\x3e|&amp;gt;)` khớp cả ký tự lẫn
+        # thực thể, nhưng ĐO LẠI ở Task 4 (manager 4.14.8, ca eventchannel tổng hợp của rule "Redirection to Local Admin
+        # Share"): commandLine của mẫu có `1> \\127.0.0.1\ADMIN$\...` KHÔNG khớp vế nào (cả token thường như `127` cũng
+        # trượt, chỉ EID1 báo) -> commandLine có `>`/`&`/UNC `$` KHÔNG khớp qua đường ca eventchannel tổng hợp (decoder Wazuh
+        # hay escaping của case-harness: chưa truy nguyên, hộp đen đủ để chốt cổng). Rule như vậy rớt ca CI,
+        # không được nhập (cổng R66). Bộ dịch VẪN giữ khả năng _win_lit (test đơn vị), nhưng chờ kiểm trên log agent thật.
+        if dom == "windows" and re.search(r"\\x(?:3c|3e|26)|&amp;(?:lt|gt|amp);", em.xml):
+            skipped["giá trị / regex có < > & (ca eventchannel không khớp được, R77)"] += 1
             continue
         cond = Condition(tree)
         if any(cond.match(d) for d in normal[dom]):
@@ -155,21 +160,23 @@ def _tokens(item: dict) -> set[str]:
     return set(_TOKEN.findall(str(text).lower()))
 
 
-def pick(cands: list[Candidate], items: list[dict], covered: set[int], batch: int) -> list[Candidate]:
-    """Tham lam: mỗi bước lấy rule bắt thêm nhiều mẫu tấn công chưa Hit nhất. Ghi `hits`, mẫu dương / âm cho rule được chọn."""
+def pick(cands: list[Candidate], items: list[dict], covered: set[int], batch: int,
+         already: set[int] = frozenset()) -> list[Candidate]:
+    """Tham lam: mỗi bước lấy rule bắt thêm nhiều mẫu tấn công chưa Hit nhất. `already` = mẫu đã bị rule 108xxx đã ghi (lô trước) bắt: không tính là mới. Ghi `hits`, `hits_new`, mẫu dương / âm cho rule được chọn."""
     todo = [it for it in items if it["class"] == "attack" and it["domain"] in ("windows", "web") and it["i"] not in covered]
     for c in cands:
         cond = Condition(c.tree)
         c.hits = {it["i"] for it in todo if it["domain"] == c.domain and cond.match(it["doc"])}
+        c.hits_new = c.hits - already
     picked: list[Candidate] = []
     got: set[int] = set()
-    pool = [c for c in cands if c.hits]
+    pool = [c for c in cands if c.hits_new]
     while pool and len(picked) < batch:
-        best = max(pool, key=lambda c: len(c.hits - got))
-        if not best.hits - got:
+        best = max(pool, key=lambda c: len(c.hits_new - got))
+        if not best.hits_new - got:
             break
         picked.append(best)
-        got |= best.hits
+        got |= best.hits_new
         pool.remove(best)
     done = [it for it in items if it["i"] in covered]
     for c in picked:
@@ -187,7 +194,7 @@ def pick(cands: list[Candidate], items: list[dict], covered: set[int], batch: in
         # SigmaHQ khác của lô che, nếu không ca dương báo nhầm id rule kia
         beat = [conds[m] for m, d in enumerate(picked) if m != k and (d.level, -m) > (c.level, -k)
                 and d.domain == c.domain]
-        own = [i for i in sorted(c.hits) if not any(b.match(by_i[i]["doc"]) for b in beat)]
+        own = [i for i in sorted(c.hits_new) if not any(b.match(by_i[i]["doc"]) for b in beat)]
         if not own:
             print(f"bỏ {c.title}: mọi mẫu của rule đều bị rule khác của lô che", file=sys.stderr)
             continue
@@ -323,15 +330,17 @@ def main() -> int:
     rows = [r for r in rows if str(r.get("id")) not in done]
     cands, skipped = candidates(items, rows, originals, a.config)
     atk = [it for it in items if it["class"] == "attack"]
-    stock = {i for i, r in wazuh_detections(atk).items() if not _mine(r)}
-    picked = pick(cands, items, stock, a.batch)
-    print(f"Ứng viên: {len(cands)} ({sum(1 for c in cands if c.hits)} bắt thêm được mẫu); đã nhập trước đó: {len(done)}; "
+    det = wazuh_detections(atk)         # ruleset hiện tại (có 0966 của lô trước)
+    stock = {i for i, r in det.items() if not _mine(r)}
+    already = {i for i, r in det.items() if _mine(r)}
+    picked = pick(cands, items, stock, a.batch, already)
+    print(f"Ứng viên: {len(cands)} ({sum(1 for c in cands if c.hits_new)} bắt thêm được mẫu); đã nhập trước đó: {len(done)}; "
           "bị loại: " + ", ".join(f"{k} {v}" for k, v in skipped.most_common()))
     print(f"Lô này: {len(picked)} rule\n\n| # | Rule SigmaHQ | Mức | Kỹ thuật | Mẫu mới bắt thêm (cây Python) |\n|---|---|---|---|---|")
     got: set[int] = set()
     for i, c in enumerate(picked, 1):
-        print(f"| {i} | {c.title} | {c.row.get('level')} | {', '.join(c.techniques[:3])} | {len(c.hits - got)} |")
-        got |= c.hits
+        print(f"| {i} | {c.title} | {c.row.get('level')} | {', '.join(c.techniques[:3])} | {len(c.hits_new - got)} |")
+        got |= c.hits_new
     print(f"\nTổng mẫu tấn công chưa Hit mà lô khớp (Python): {len(got)}")
     if a.write and picked:
         ids = write_batch(picked, rules_file=RULES_FILE, cases_file=CASES_FILE, today=date.today().isoformat())

@@ -34,7 +34,7 @@ Alert trong hệ thống đến từ các nguồn sau (đếm rule trên mã ng�
 |---|---|---|---|
 | Ruleset gốc Wazuh 4.14.8 | khoảng 4,5 nghìn rule; 9 rule được chỉnh bằng `overwrite` ở `0999-tuning.xml` (mục 9.8) | `WZH-<id>` | Alert thật từ level 7 (R65), trừ nhóm `sca` |
 | Rule XML của dự án (`wazuh/manager/rules/`, 9 file) | 88 rule; phủ 41 mã cũ qua nhóm `legacy_<MÃ>` (mục 9.4) | `WZH-100xxx` đến `WZH-107xxx`, mã cũ ở đầu mô tả | Chạy thật (R65) |
-| SigmaHQ lô 1 (`0966-sigmahq.xml`) | 30 rule Windows (mục 2.10) | `WZH-108000` đến `WZH-108029`, mã `SHQ-NNN` | Chạy bóng từ 08/11/2026 (sinh lại sau review cuối P4) |
+| SigmaHQ (`0966-sigmahq.xml`) | 34 rule Windows (lô 1: 30, lô 2: 4; mục 2.10) | `WZH-108000` đến `WZH-108033`, mã `SHQ-NNN` | Chạy bóng (lô 1 từ 08/11/2026, lô 2 từ 16/11/2026) |
 | Rule do AI đề xuất (`rules-dynamic/ai.xml`) | chưa rule nào được triển khai (06/11/2026: 178 đề xuất, 0 đã triển khai) | `WZH-109xxx`, mã `AI-NNN` | Bóng khi duyệt, bật chính thức trên console (mục 2.9) |
 | Ngoại lệ (`rules-dynamic/exceptions.xml`) | rule level 0, không sinh alert | 110000–110999 | Hai người khác nhau duyệt (mục 2.5) |
 | Phát hiện của nền tảng | RBA-001 (`soar/risk.py`), HLT-* (`soar/health.py`) | `RBA-001`, `HLT-*` | Đang chạy |
@@ -163,6 +163,14 @@ Lô 1 (07/11/2026): 30 rule Windows 108000–108029, 60 ca 0 sai trên manager t
 Review cuối P4 (08/11/2026) đo lô cũ: 2 mẫu bị cướp (92024 level 14 thành 108017 SHQ-018; 105013 WIN-013 thành 108002 SHQ-003).
 Lô sinh lại bằng tool với quy tắc level tối đa 7: cùng 30 rule, cùng ca test, 4 rule hạ từ 10 xuống 7 (108001, 108002, 108007,
 108017); đo lại 0 mẫu bị cướp.
+
+Lô 2 (Task 4, 16/11/2026): thêm 4 rule Windows 108030–108033 nhờ ánh xạ trường Sysmon mới (`OriginalFileName`, Description,
+Product): NetworkProvider dò tín chỉ T1003, Regsvr32 cờ bất thường T1218.010, làm rối dòng lệnh Unicode T1027 (khớp qua
+`OriginalFileName`), trinh sát GatherNetworkInfo T1615. Ứng viên qua bộ lọc: 183, chỉ 4 bắt thêm mẫu mới → đạt ngưỡng dừng (một
+lô < 5 rule / < 10 mẫu) và cạn nguồn: trần của bộ dữ liệu Atomic dựng lại (không có mẫu đổi tên binary nên rule `OriginalFileName`
+hầu như trùng rule `Image`). **1 rule nhờ `OriginalFileName`** (108032); **0 rule nhờ `< > &`**: 7 ứng viên `<>&` bị loại vì ca
+eventchannel của rule `<>&` không khớp được trên Wazuh 4.14.8 thật (`win.eventdata.commandLine` mang `>`/`&`/UNC `$` không
+matchable qua đường ca test; R77). 8 ca mới (4 rule × dương/âm) 0 sai, lint 0 lỗi, `--measure` thoát 0.
 
 ### 2.11 Sau khi rule bắn
 
@@ -419,9 +427,9 @@ thuộc nhóm khớp chung chung (`GENERIC`, R79).
 - Tổng: 16.882/19.315 mẫu tấn công là khoảng trống. 863 mẫu Splunk không có log thô nên không tính (không đo được trên Wazuh).
 - 4 mẫu bình thường có alert phát hiện ở job nền.
 
-**SigmaHQ lô 1** (đo lại ở review cuối P4, 08/11/2026, lượt có và không có `0966`): trên 17.306 mẫu tấn công Windows + web,
-1.558 mẫu có phát hiện khi không có lô; 30 rule SigmaHQ bắt thêm **186 mẫu mới** (cây Python ước 186), 0 mẫu bị lô cướp phát
-hiện, không event nào bị bỏ. Lô toàn Windows nên không thêm mẫu CSIC nào. Số 188 của Task 24 tính "mẫu có alert 108xxx trừ mẫu có
+**SigmaHQ** (đo lại ở Task 4, 16/11/2026, lượt có và không có `0966`): trên 17.306 mẫu tấn công Windows + web,
+1.558 mẫu có phát hiện khi không có lô; 34 rule SigmaHQ (lô 1 30 + lô 2 4) bắt thêm **190 mẫu mới** (lô 1 186 + lô 2 4), 0 mẫu bị
+lô cướp phát hiện, không event nào bị bỏ. Lô toàn Windows nên không thêm mẫu CSIC nào. Số 188 của Task 24 tính "mẫu có alert 108xxx trừ mẫu có
 phát hiện khác" trên cùng ruleset có lô, nên đếm cả 2 mẫu bị lô cướp thành mẫu mới.
 
 Lưu ý khi so với số cũ: `tools/wazuh_coverage.run_wazuh`, `wazuh_noise.py` và `wazuh_rule_test.inject` vẫn dùng vòng gửi cũ, vòng
@@ -446,7 +454,7 @@ của AI gửi có chờ hàng đợi nên không mất event.
 ## 6. Điểm yếu
 
 - **Độ phủ trên dataset vẫn thấp** (mục 4.6): Wazuh bắt 1.484/15.088 mẫu web, 74/2.218 mẫu Windows, 12/1.146 mẫu Linux dựng lại.
-  SigmaHQ lô 1 chỉ thêm 186 mẫu.
+  SigmaHQ thêm 190 mẫu (lô 1 186 + lô 2 4).
 - **Rule Windows sinh tự động có giới hạn:** chưa khớp được giá trị có `>`, `<`, `&` (R77); regex Windows có `\` trần bị từ chối.
   Rule dự án `0965-windows.xml` dưới 61603 có thể bị rule gom level 0 (92025...) che như ứng viên AI từng bị (R75): **chưa kiểm**.
 - **Rule anh em và cây con:** rule thắng ở tầng cha cắt cả cây con của anh em (mục 9.6); ca ghim chỉ chứng minh đường tới được, không

@@ -19,7 +19,7 @@ from .condition import regex_risk
 from ..wazuh_fields import escape_literal
 from .sigma import MAX_TERMS, SigmaError
 
-EMITTER_VERSION = "2"      # 2: dấu `\` trong trường Windows khớp cả dạng đơn lẫn nhân đôi (eventchannel)
+EMITTER_VERSION = "3"      # 3: thêm OriginalFileName/Description/Product/Company + trường Windows có < > & khớp cả dạng thực thể XML (19c); 2: dấu `\` trong trường Windows khớp cả dạng đơn lẫn nhân đôi (eventchannel)
 LEVEL = {"low": 5, "medium": 7, "high": 10, "critical": 10}      # R70: không thắng rule gốc level 11-12 cùng cha
 _WEB_PARENTS = "31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123"
 PARENTS: dict[str, dict] = {
@@ -39,7 +39,11 @@ FIELDS: dict[str, dict[str, tuple[str, str]]] = {
                 "process.parent.name": ("win.eventdata.parentImage", "base"),
                 "process.parent.command_line": ("win.eventdata.parentCommandLine", ""),
                 "user.name": ("win.eventdata.user", ""),
-                "winlog.event_data.CurrentDirectory": ("win.eventdata.currentDirectory", "")},
+                "winlog.event_data.CurrentDirectory": ("win.eventdata.currentDirectory", ""),
+                "winlog.event_data.OriginalFileName": ("win.eventdata.originalFileName", ""),
+                "winlog.event_data.Description": ("win.eventdata.description", ""),
+                "winlog.event_data.Product": ("win.eventdata.product", ""),
+                "winlog.event_data.Company": ("win.eventdata.company", "")},
     "linux": {"process.executable": ("exe", ""), "process.command_line": ("cmd", ""), "process.name": ("name", ""),
               "process.parent.name": ("parent", "")},
     "web": {**_URL, "http.request.method": ("protocol", ""), "http.response.status_code": ("id", ""),
@@ -73,8 +77,13 @@ def _url_lit(value: str) -> str:
 
 
 def _win_lit(value: str) -> str:
-    """Eventchannel của Wazuh NHÂN ĐÔI mọi dấu gạch chéo ngược trong win.eventdata.*: khớp cả một lẫn hai dấu (đo trên Wazuh 4.14.8, Task 21)."""
-    return escape_literal(value).replace(r"\x5c", r"(?:\x5c){1,2}")
+    """Eventchannel của Wazuh NHÂN ĐÔI mọi dấu gạch chéo ngược trong win.eventdata.*: khớp cả một lẫn hai dấu (đo trên Wazuh 4.14.8, Task 21).
+    Và `< > &` được Wazuh lưu nguyên dạng THỰC THỂ XML (`&lt; &gt; &amp;`): khớp cả ký tự lẫn thực thể (đo 19c trên 4.14.8).
+    `escape_literal` đã đổi `< > &` thành `\\x3c \\x3e \\x26`; chữ `&gt;`… ở đây là văn bản sẽ được `_element` escape XML tiếp."""
+    out = escape_literal(value).replace(r"\x5c", r"(?:\x5c){1,2}")
+    for hexesc, entity in ((r"\x3e", "&gt;"), (r"\x3c", "&lt;"), (r"\x26", "&amp;")):
+        out = out.replace(hexesc, f"(?:{hexesc}|{entity})")
+    return out
 
 
 def _has_literal_backslash(rx: str) -> bool:
@@ -126,16 +135,20 @@ def _map_leaf(leaf: dict, domain: str) -> dict:
     if op not in _OPS:
         raise SigmaError(f"phép so {op} không dịch được sang rule Wazuh")
     w, mode = FIELDS[domain][f]
-    # shortcut: Wazuh giữ thực thể XML (&gt; &lt; &amp;) trong win.eventdata.*, mẫu viết < > & không khớp (lá âm thì rule
-    # rộng hơn bản đã kiểm định): từ chối cả hai cực, tới khi làm 19c (khớp cả ký tự lẫn thực thể)
-    if domain == "windows" and any(c in v for v in _vals(leaf) for c in "<>&"):
-        raise SigmaError(f"giá trị Windows có < > & (Wazuh giữ thực thể XML, chưa khớp được): {_vals(leaf)[0][:80]}")
     out = {**leaf, "op": op, "w": w, "mode": mode, "url": mode == "url", "win": domain == "windows"}
     if mode == "base":                      # tên tiến trình = phần sau dấu `\` cuối của đường dẫn đầy đủ
         if op not in ("eq", "neq", "in", "endswith"):
             raise SigmaError(f"phép so {op} trên {f} không dịch được (chỉ eq / in / endswith)")
         out["value"] = [("" if op == "endswith" else "\\") + v for v in _vals(leaf)]
         out["op"] = "not_endswith" if op == "neq" else "endswith"
+    if f == "winlog.event_data.OriginalFileName" and op == "endswith":
+        # Sysmon lưu OriginalFileName là TÊN FILE (không đường dẫn): `endswith: \reg.exe` thành so bằng `reg.exe`
+        vs = _vals(leaf)
+        lead = [v.startswith(("\\", "/")) for v in vs]
+        if any(lead):
+            if not all(lead):
+                raise SigmaError("OriginalFileName: không trộn giá trị có và không có dấu gạch chéo đầu trong một điều kiện")
+            out["op"], out["value"] = "eq", [v[1:] for v in vs]
     if op == "regex":                       # giá trị từ LLM / SigmaHQ: phải tự cân ngoặc (không thoát được `(?:…)`) và không ReDoS
         for v in _vals(leaf):
             try:
@@ -145,6 +158,10 @@ def _map_leaf(leaf: dict, domain: str) -> dict:
             # shortcut: regex có dấu \\ chữ trên eventchannel bị từ chối (Wazuh nhân đôi dấu, không sửa được regex tùy ý), khi cần thì tự viết lại \\ thành \\{1,2}
             if domain == "windows" and _has_literal_backslash(v):
                 raise SigmaError("regex có dấu \\ chưa hỗ trợ trên eventchannel")
+            # shortcut: regex Windows có < > & bị từ chối (Wazuh lưu dạng thực thể XML, không biến đổi regex tùy ý được như _win_lit);
+            # chỉ giá trị chữ (eq/contains/…) mới khớp cả ký tự lẫn thực thể. Nâng cấp khi cần: viết lại regex theo (?:ký tự|thực thể)
+            if domain == "windows" and any(c in v for c in "<>&"):
+                raise SigmaError(f"regex Windows có < > & chưa hỗ trợ (Wazuh giữ thực thể XML): {v[:80]}")
             if (why := regex_risk(v)):
                 raise SigmaError(f"{why}: {v[:80]}")
     if mode == "ua" and op != "contains":

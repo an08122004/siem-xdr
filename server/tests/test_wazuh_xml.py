@@ -156,19 +156,55 @@ def test_windows_regex_with_literal_backslash_raises_but_classes_ok():
     assert wx.emit({"field": "process.command_line", "op": "regex", "value": r"\d{3}\s+x"}, **KW).ids
     assert wx.emit({"field": "process.command_line", "op": "regex", "value": r"C:\\x"}, **{**KW, "domain": "linux"}).ids
 
-def test_emitter_version_is_2():
-    assert wx.EMITTER_VERSION == "2"
+def test_emitter_version_is_3():
+    assert wx.EMITTER_VERSION == "3"
 
 def test_windows_parents_pinned():
     assert wx.PARENTS["windows"]["if_sid"] == "61603,92025,92028,92042,92069"
 
-# ---- M1: Wazuh giữ thực thể XML (&gt; &lt; &amp;) trong win.eventdata.*: giá trị có < > & không khớp được, lá âm thì
-# rule rộng hơn bản đã kiểm định (fail-open) -> từ chối cả hai cực
-@pytest.mark.parametrize("op", ["contains", "not_contains", "neq", "eq", "regex"])
+# ---- Task 19c: Wazuh lưu < > & dạng thực thể XML (&lt; &gt; &amp;) trong win.eventdata.* (đo trên 4.14.8).
+# Giá trị chữ (eq/contains/…) sinh pcre2 khớp CẢ ký tự lẫn thực thể; regex tùy ý thì vẫn từ chối (không biến đổi được).
 @pytest.mark.parametrize("ch", ["<", ">", "&"])
-def test_windows_value_with_xml_entity_chars_raises(op, ch):
-    pos = {"field": "process.executable", "op": "endswith", "value": "\cmd.exe"}
-    leaf = {"field": "process.command_line", "op": op, "value": f"x {ch} nul"}
+def test_windows_regex_with_xml_entity_chars_still_raises(ch):
     with pytest.raises(SigmaError, match="thực thể XML"):
-        wx.emit({"all": [pos, leaf]}, **KW)
-    assert wx.emit({"all": [pos, leaf]}, **{**KW, "domain": "linux"}).ids == [109000]
+        wx.emit({"field": "process.command_line", "op": "regex", "value": f"x {ch} nul"}, **KW)
+    assert wx.emit({"field": "process.command_line", "op": "regex", "value": f"x {ch} nul"},
+                   **{**KW, "domain": "linux"}).ids == [109000]
+
+@pytest.mark.parametrize("op,value,hit,miss", [
+    ("contains", "> nul", "cmd /c foo > nul", "cmd /c foo | nul"),
+    ("contains", "a & b", "echo a & b here", "echo a | b here"),
+    ("eq", "x<y", "x<y", "x>y"),
+])
+def test_windows_value_with_xml_entity_chars_matches_literal_and_entity(op, value, hit, miss):
+    r, = rules(wx.emit({"field": "process.command_line", "op": op, "value": value}, **KW).xml)
+    # findtext của ElementTree đã giải thực thể XML -> đúng chuỗi mà engine Wazuh so khớp (đo 19c)
+    py = re.compile(r.findtext("field").replace(r"\z", r"\Z"))
+    ent = {"<": "&lt;", ">": "&gt;", "&": "&amp;"}
+    entity_form = "".join(ent.get(c, c) for c in hit)      # dạng Wazuh thật sự lưu (đo 19c)
+    assert py.search(hit), f"không khớp dạng ký tự: {hit}"
+    assert py.search(entity_form), f"không khớp dạng thực thể: {entity_form}"
+    assert not py.search(miss)
+
+
+def test_emit_original_file_name_to_wazuh_field():
+    tree = {"field": "winlog.event_data.OriginalFileName", "op": "endswith", "value": "\\reg.exe"}
+    r, = rules(wx.emit(tree, **{**KW, "domain": "windows"}).xml)
+    f = r.find("field")
+    assert f.get("name") == "win.eventdata.originalFileName"
+    py = re.compile(f.text.replace(r"\z", r"\Z"))
+    assert py.search("reg.exe") and py.search("REG.EXE")          # Wazuh lưu tên file, không đường dẫn
+    assert not py.search("xreg.exe")
+    assert wx.EMITTER_VERSION == "3"
+
+
+def test_new_field_backslash_is_doubled_like_other_windows_fields():
+    tree = {"field": "winlog.event_data.Description", "op": "contains", "value": "a\\b"}
+    r, = rules(wx.emit(tree, **{**KW, "domain": "windows"}).xml)
+    assert r"a(?:\x5c){1,2}b" in r.find("field").text
+
+
+def test_original_file_name_mixed_leading_separator_rejected():
+    tree = {"field": "winlog.event_data.OriginalFileName", "op": "endswith", "value": ["\\reg.exe", "cmd.exe"]}
+    with pytest.raises(SigmaError):
+        wx.emit(tree, **{**KW, "domain": "windows"})

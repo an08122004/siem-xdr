@@ -312,4 +312,48 @@
     <info type="text">author=Florian Roth (Nextron Systems), oscd.community, Jonhnathan Ribeiro</info>
     <group>siem,sigmahq,shadow,</group>
   </rule>
+  <rule id="108030" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:(?:\x5c){1,2}System(?:\x5c){1,2}CurrentControlSet(?:\x5c){1,2}Services(?:\x5c){1,2}))(?=[\s\S]*?(?:(?:\x5c){1,2}NetworkProvider))</field>
+    <description>SHQ-031 Potential Credential Dumping Attempt Using New NetworkProvider - CLI</description>
+    <mitre><id>T1003</id></mitre>
+    <info type="text">shadow_since=2026-11-16</info>
+    <info type="text">sigmahq_id=baef1ec6-2ca9-47a3-97cc-4cf2bda10b77</info>
+    <info type="text">author=Nasreddine Bencherchali (Nextron Systems)</info>
+    <group>siem,sigmahq,shadow,</group>
+  </rule>
+  <rule id="108031" level="7">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)^(?=[\s\S]*?(?:(?:\x5c){1,2}regsvr32\.exe)\z)</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:\x20-i:|\x20/i:|\x20–i:))(?![\s\S]*?(?:\x20-n\x20|\x20/n\x20|\x20–n\x20))</field>
+    <description>SHQ-032 Potential Regsvr32 Commandline Flag Anomaly</description>
+    <mitre><id>T1218.010</id></mitre>
+    <info type="text">shadow_since=2026-11-16</info>
+    <info type="text">sigmahq_id=b236190c-1c61-41e9-84b3-3fe03f6d76b0</info>
+    <info type="text">author=Florian Roth (Nextron Systems)</info>
+    <group>siem,sigmahq,shadow,</group>
+  </rule>
+  <rule id="108032" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)^(?=[\s\S]*?(?:(?:\x5c){1,2}cmd\.exe|(?:\x5c){1,2}cscript\.exe|(?:\x5c){1,2}powershell\.exe|(?:\x5c){1,2}powershell_ise\.exe|(?:\x5c){1,2}pwsh\.exe|(?:\x5c){1,2}wscript\.exe)\z)</field>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^(?=(?:Cmd\.EXE|cscript\.exe|PowerShell\.EXE|PowerShell_ISE\.EXE|pwsh\.dll|wscript\.exe)\z)</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:ˣ|˪|ˢ|∕|⁄|―|—| |¯|®|¶|⠀))</field>
+    <description>SHQ-033 Potential CommandLine Obfuscation Using Unicode Characters From Suspicious Image</description>
+    <mitre><id>T1027</id></mitre>
+    <info type="text">shadow_since=2026-11-16</info>
+    <info type="text">sigmahq_id=584bca0f-3608-4402-80fd-4075ff6072e3</info>
+    <info type="text">author=frack113, Florian Roth (Nextron Systems), Josh Nickels</info>
+    <group>siem,sigmahq,shadow,</group>
+  </rule>
+  <rule id="108033" level="10">
+    <if_sid>61603,92025,92028,92042,92069</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=[\s\S]*?(?:gatherNetworkInfo\.vbs))</field>
+    <field name="win.eventdata.image" type="pcre2">(?i)^(?![\s\S]*?(?:(?:\x5c){1,2}cscript\.exe|(?:\x5c){1,2}wscript\.exe)\z)</field>
+    <description>SHQ-034 Suspicious Reconnaissance Activity Via GatherNetworkInfo.VBS</description>
+    <mitre><id>T1615</id><id>T1059.005</id></mitre>
+    <info type="text">shadow_since=2026-11-16</info>
+    <info type="text">sigmahq_id=07aa184a-870d-413d-893a-157f317f6f58</info>
+    <info type="text">author=Nasreddine Bencherchali (Nextron Systems)</info>
+    <group>siem,sigmahq,shadow,</group>
+  </rule>
 </group>

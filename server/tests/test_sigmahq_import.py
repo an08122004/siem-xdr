@@ -77,6 +77,23 @@ def test_pick_counts_only_samples_wazuh_has_not_hit_yet():
     assert imp.pick(cands, ITEMS, covered={0, 1}, batch=30) == []           # đã bắt hết: không nhập
 
 
+def test_pick_excludes_samples_won_by_written_batch_rules():
+    items = [win(0, RUNDLL + " javascript:a", "attack"), win(1, RUNDLL + " javascript:b", "attack"),
+             win(2, RUNDLL + " shell32.dll,Control_RunDLL desk.cpl", "normal")]
+    row, text = sigma_rule("rules/a.yml", "Rundll32 JavaScript", JS, EVASION)
+    cands, _ = imp.candidates(items, [row], {row["path"]: text}, CONFIG)
+    picked = imp.pick(cands, items, covered=set(), batch=30, already={0})       # mẫu 0 đã bị rule 108xxx cũ bắt
+    assert picked and picked[0].hits_new == {1} and picked[0].pos["i"] == 1
+
+
+def test_pick_drops_candidate_fully_shadowed_by_batch():
+    items = [win(0, RUNDLL + " javascript:a", "attack"), win(1, RUNDLL + " javascript:b", "attack"),
+             win(2, RUNDLL + " shell32.dll,Control_RunDLL desk.cpl", "normal")]
+    row, text = sigma_rule("rules/a.yml", "Rundll32 JavaScript", JS, EVASION)
+    cands, _ = imp.candidates(items, [row], {row["path"]: text}, CONFIG)
+    assert imp.pick(cands, items, covered=set(), batch=30, already={0, 1}) == []
+
+
 @pytest.fixture
 def three_sigma_rules():
     rows = [sigma_rule(f"rules/{n}.yml", f"Rundll32 rule {n}", JS.replace("javascript:", w), EVASION)
@@ -116,10 +133,18 @@ def test_license_header(tmp_path, three_sigma_rules):
     assert "DRL 1.1" in (tmp_path / "r.xml").read_text(encoding="utf-8")[:600]
 
 
-def test_skips_values_wazuh_keeps_as_xml_entities():
+def test_literal_value_with_xml_entity_chars_skipped_r77():
+    # 19c định dịch được, NHƯNG Task 4 đo end-to-end: ca eventchannel của rule <>& không khớp trên Wazuh 4.14.8 thật
+    # (commandLine mang >/&/UNC $ không matchable qua đường ca test) -> sigmahq_import loại lại rule <>& (R77)
     row, text = sigma_rule("rules/g.yml", "Redirect", "  sel:\n    CommandLine|contains: ' > '\n  condition: sel", EVASION)
     cands, skipped = imp.candidates(ITEMS, [row], {row["path"]: text}, CONFIG)
-    assert cands == [] and skipped == {"không dịch được sang Wazuh": 1}         # emit từ chối < > & trên Windows (M1)
+    assert cands == [] and skipped == {"giá trị / regex có < > & (ca eventchannel không khớp được, R77)": 1}
+
+def test_regex_with_xml_entity_chars_still_skipped():
+    # regex tùy ý có < > & vẫn bị emit từ chối (không biến đổi dạng thực thể được)
+    row, text = sigma_rule("rules/h.yml", "Redirect re", "  sel:\n    CommandLine|re: 'foo > bar'\n  condition: sel", EVASION)
+    cands, skipped = imp.candidates(ITEMS, [row], {row["path"]: text}, CONFIG)
+    assert cands == [] and skipped == {"không dịch được sang Wazuh": 1}
 
 
 def test_positive_sample_is_not_shadowed_by_an_earlier_rule_of_the_batch():
