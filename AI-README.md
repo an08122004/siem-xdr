@@ -935,6 +935,22 @@ Windows, Linux, web) nạp được qua `write_dynamic`, `ossec.log` không có 
 mẫu tấn công Windows + web (cây Python ước 186), 0 mẫu bị lô cướp phát hiện của rule khác (đo có / không có lô), 60 ca test 0 sai
 (`RULES.md` mục 2.10, 4.6).
 
+### 9.12 Hình cho báo cáo
+
+`python tools/report_figures.py` (cần `matplotlib`, dùng Python của máy, không phải venv server) vẽ lại 5 hình từ số đo ở các
+mục trên, ra `docs/figures/`:
+
+| Hình | Nội dung | Số liệu |
+|---|---|---|
+| [ai-1-so-sanh-model.png](docs/figures/ai-1-so-sanh-model.png) | 4 model: số nhóm qua, tỉ lệ bắt tập kiểm tra, thời gian | 9.4 |
+| [ai-2-dong-gop-rag.png](docs/figures/ai-2-dong-gop-rag.png) | Đóng góp của vế model, lượt kiến thức và vế SigmaHQ truy hồi (RAG) | 9.9 |
+| [ai-3-sigmahq-va-model.png](docs/figures/ai-3-sigmahq-va-model.png) | SigmaHQ và model bổ sung cho nhau (4 góc: cả hai / chỉ một bên / không bên nào đạt) | 9.5, 9.9 |
+| [ai-4-ly-do-loai.png](docs/figures/ai-4-ly-do-loai.png) | Lý do loại 352 vế ứng viên | 9.7 |
+| [ai-5-on-dinh.png](docs/figures/ai-5-on-dinh.png) | Dao động giữa 3 lần chạy cùng nhóm | 9.9 |
+
+Trục SigmaHQ của hình 3 lấy bảng 9.5, không lấy `datasets/sigmahq_baseline_2026-10-07.json`: file đó đánh dấu báo nhầm nhiều
+rule hơn bảng (ví dụ T1059.001: 6 rule so với 2), nên chỉ 5 thay vì 6/14 nhóm đạt 30%.
+
 ## 10. Đánh giá các model và vì sao tỉ lệ đạt thấp
 
 ### 10.1 Từng model
