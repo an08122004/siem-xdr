@@ -357,7 +357,9 @@ Atomic Red Team; 16.882 mẫu còn là khoảng trống. SigmaHQ lô 1 bắt th�
 thật (≥ 48 giờ và ≥ 200 cửa sổ), ngưỡng là phân vị trên tập giữ lại, cửa sổ của IP có alert thật không vào tập học, mỗi IP báo
 tối đa 1 lần mỗi 30 phút, alert nêu đặc trưng lệch nhất (`n_paths=340 (thường 8)`). Mặc định `ML_MODE=shadow`: alert gắn
 `alert.shadow`, SOAR và KPI bỏ qua; `ML_MODE=active` khi đạt tiêu chí chạy bóng ([SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 4).
-Thiết kế D1–D11 và cách bật: [AI-README.md](AI-README.md) mục 16.
+Thiết kế D1–D11 và cách bật: [AI-README.md](AI-README.md) mục 16. Đo trên lab (17/11/2026): bắt 4–5/7 kịch bản tấn công, gồm
+`password_spray` và `slow_scan` mà rule Wazuh không bắt; báo nhầm 1/568 cửa sổ người dùng thường (0,18%); bỏ sót `scraper`, `exfil`
+([docs/ml-eval-2026-11-17.md](docs/ml-eval-2026-11-17.md)). Stack thật chạy bóng từ 19/11/2026.
 
 **Lịch sử: cảnh báo từ ruleset Wazuh khi còn engine YAML (trước R65)**: rule của SIEM/XDR chạy trên MỌI event lấy từ
 `archives.json`. Ruleset Wazuh (hơn 3.000 rule) phần lớn trùng việc với rule tự viết (web, SSH, đăng nhập Windows...), nên

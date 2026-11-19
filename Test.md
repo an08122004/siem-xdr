@@ -1,9 +1,31 @@
 # Kết quả kiểm thử toàn bộ siem-xdr
 
-Ba đợt: **08/11/2026** (mã P4, mục 0.1), **05/11/2026** (nhánh `feature/wazuh-unified-ruleset`, mục 0.2) và **15/10/2026** (phần còn lại
-của tài liệu, giữ làm lịch sử).
+Bốn đợt: **17–19/11/2026** (triển khai `main` 16f8657 và ML bất thường, mục 0.0), **08/11/2026** (mã P4, mục 0.1), **05/11/2026**
+(nhánh `feature/wazuh-unified-ruleset`, mục 0.2) và **15/10/2026** (phần còn lại của tài liệu, giữ làm lịch sử).
 
-## 0. Kiểm thử bộ rule Wazuh XML
+## 0. Kiểm thử bộ rule Wazuh XML và ML
+
+### 0.0 Triển khai `main` 16f8657, ML bất thường chạy bóng (17–19/11/2026)
+
+Kế hoạch: [2026-11-14-ml-anomaly.md](docs/superpowers/plans/2026-11-14-ml-anomaly.md) Task 4. Mã chạy trước đó: image
+`siem-xdr-server` 4ff0f15 (P4, `main` 10d3fa2).
+
+| Hạng mục | Kết quả |
+|---|---|
+| Sao lưu (17/11) | `D:\GSANM\BTL\backup\stack-2026-11-17`: 12 volume (Wazuh, Grafana, nhật ký console, `mldata`, `esdata`), `.env`; snapshot `siem-snap-2026.11.17-inglqy9krucpi0todqkaaa` **SUCCESS**; image cũ gắn tag `siem-xdr-server:rollback-20261117` |
+| Triển khai | build lại `siem-xdr-server` (6dca8c7e), `up -d --no-build --remove-orphans` với `docker-compose.gpu.yml`, profile `demo` + `ai`: chỉ tạo lại analyzer, manager, soar, ai-worker; cả 4 khởi động không lỗi |
+| **E2E** (`tools/e2e_test.py`) trên stack thật | **43/43 đạt** |
+| Đo offline (`tools/ml_eval.py eval`, 7 kịch bản `attacks.py`) | lần 1 (thử 2,4 giờ): 4/7 kịch bản, báo nhầm 1/51 cửa sổ = 1,96%; lần 2 (thử 26,4 giờ): 5/7, báo nhầm 1/568 = 0,18%. Chi tiết và chẩn đoán: [docs/ml-eval-2026-11-17.md](docs/ml-eval-2026-11-17.md), [AI-README.md](AI-README.md) mục 16.4 |
+| Bật chạy bóng (19/11) | `ml_eval.py train` → `/data/models/ml-state.json` (web 1.279, auth 174 cửa sổ); `ML_ENABLED=true`; log analyzer `ML web: chuyển sang active (1279 cửa sổ, ngưỡng -0.189)`; auth còn học (< 200 cửa sổ) |
+| Kiểm trên live (`attacks.py --scenario scan_dirs`, 10.10.1.60, 03:55:38 UTC) | alert `ML-WEB` **bóng** lúc 04:00:38 (5 phút), medium, T1595, `n_404=396 (thường 0)`; SOAR không có hành động, không case nào chứa alert ML (case PB-02 của cùng lượt quét chỉ gom alert Wazuh thật `WZH-31151`) |
+
+**Lỗi tìm thấy, chưa sửa:** log lỗi Apache (`/var/log/apache2/error.log`) ghi giờ địa phương không kèm múi giờ; `parse_apache_error`
+(`server/siem/pipeline/normalize.py`) đọc giờ đó và `_iso` coi là UTC, nên trên VM múi giờ +07 event lỗi Apache lệch +7 giờ (37 event
+trên `lab-web` đến 17/11). ML không bị ảnh hưởng (event lỗi không có mã HTTP, cả hai model bỏ qua); dòng thời gian và dashboard
+hiển thị sai giờ các event này.
+
+**Chưa kiểm:** ô ML trên dashboard Grafana (mới kiểm alert trong `siem-alerts`); alert `ML-AUTH` trên live (model auth chưa đủ 200 cửa sổ);
+giai đoạn bóng 7 ngày.
 
 ### 0.1 Mã P4: rule AI và SigmaHQ ra Wazuh XML, xóa engine YAML (08/11/2026)
 
