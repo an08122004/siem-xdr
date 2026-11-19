@@ -176,9 +176,11 @@ _SYSLOG_ISO = re.compile(
     r"^(?P<time>\d{4}-\d\d-\d\dT\S+) (?P<host>\S+) (?P<prog>[^:\[\s]+)(?:\[(?P<pid>\d+)\])?:? ?(?:- - )?(?P<msg>.*)$"
 )
 
-_SSH_FAILED = re.compile(r"Failed (?P<method>\S+) for (?P<invalid>invalid user )?(?P<user>\S+) from (?P<ip>\S+) port (?P<port>\d+)")
+# Neo cuối dòng: username có thể chứa "x from 10.0.0.53 port 1" (sshd ghi nguyên khoảng trắng) -> IP thật là cụm "from" CUỐI
+_SSH_TAIL = r" from (?P<ip>\S+) port (?P<port>\d+)(?: ssh2)?(?:: \S+ SHA256:\S+)?(?: \[preauth\])?\s*$"
+_SSH_FAILED = re.compile(r"Failed (?P<method>\S+) for (?P<invalid>invalid user )?(?P<user>.+?)" + _SSH_TAIL)
 _SSH_ACCEPTED = re.compile(r"Accepted (?P<method>\S+) for (?P<user>\S+) from (?P<ip>\S+) port (?P<port>\d+)")
-_SSH_INVALID = re.compile(r"Invalid user (?P<user>\S*) from (?P<ip>\S+)(?: port (?P<port>\d+))?")
+_SSH_INVALID = re.compile(r"Invalid user (?P<user>.*?) from (?P<ip>\S+)(?: port (?P<port>\d+))?(?: \[preauth\])?\s*$")
 _PAM_FAIL = re.compile(r"authentication failure;.*?(?:rhost=(?P<ip>\S*))?(?:\s+user=(?P<user>\S+))?$")
 _SUDO = re.compile(r"^\s*(?P<user>\S+) : (?:(?P<fail>.*?) ; )?TTY=(?P<tty>\S+) ; PWD=(?P<pwd>\S+) ; USER=(?P<target>\S+) ; COMMAND=(?P<cmd>.*)$")
 _USERADD = re.compile(r"new user: name=(?P<user>[^,\s]+)")
@@ -392,7 +394,7 @@ def parse_windows(data: Doc, doc: Doc) -> None:
         put(doc, "event.category", "malware")
         put(doc, "event.type", "info")
         put(doc, "event.action", "malware_detected" if eid == 1116 else "malware_action_taken")
-        put(doc, "threat.name", f.get("Threat Name"))
+        put(doc, "threat.name", f.get("ThreatName") or f.get("Threat Name"))     # Wazuh: threatName -> ThreatName
         put(doc, "file.path", f.get("Path"))
         return
 
@@ -425,7 +427,9 @@ def parse_windows(data: Doc, doc: Doc) -> None:
     elif eid in (4728, 4732, 4756):
         _iam(doc, "group_member_added", "change", f)
         put(doc, "group.name", f.get("TargetUserName"))
-        put(doc, "user.target.name", f.get("MemberName") or f.get("MemberSid"))
+        put(doc, "group.id", f.get("TargetSid"))                      # so nhóm theo SID (S-1-5-32-544), không theo tên dễ trùng
+        # tài khoản cục bộ: MemberName = "-" -> dùng MemberSid; ghi đè user.target.name mà _iam đặt bằng tên NHÓM
+        put(doc, "user.target.name", next((v for v in (f.get("MemberName"), f.get("MemberSid")) if v not in (None, "", "-")), None))
     elif eid == 4740:
         _iam(doc, "account_locked", "change", f)
     elif eid == 1102 or (eid == 104 and channel == "System"):

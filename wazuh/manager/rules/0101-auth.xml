@@ -57,6 +57,19 @@
        (2) rule nối vào 101010 bằng if_matched_sid làm 101002 hết nhận 101010 hoặc chính nó không báo. Phần hở: nhịp 4-5 lần sai/phút từ một IP (dưới 5/60s của AUTH-001 cũ,
        trên 8/120s của gốc): chỉ còn 101010 (level 2, im) và 101002 nếu sau đó đăng nhập được. Rule YAML cũ không có ngưỡng này nên không thua rule cũ, chỉ thua ruleset gốc;
        Task 12 (tuning) cân nhắc lại. Từ đây, event bị ghi nhận là 101000 (không còn là 5760/5710) -> mọi bộ đếm dùng if_matched_sid 101000. -->
+  <!-- AUTH-009: username chứa cụm "from <IP> port <N>" giả -> decoder sshd gốc (regex không neo) lấy IP GIẢ làm srcip. Đứng TRƯỚC 101000 để event này
+       không vào bộ đếm brute-force (101001/101003 -> playbook block_ip scope all): kẻ tấn công không thể khiến SOAR chặn IP tùy ý (vd DNS, gateway). -->
+  <rule id="101009" level="8">
+    <if_sid>5760, 5710</if_sid>
+    <regex type="pcre2">from \S+ port \d+ .*from \S+ port \d+</regex>
+    <description>AUTH-009 Username SSH chứa địa chỉ IP giả (né/lợi dụng chặn IP tự động): $(srcip) có thể không phải IP thật</description>
+    <mitre>
+      <id>T1110.001</id>
+      <id>T1036</id>
+    </mitre>
+    <group>siem,auth,</group>
+  </rule>
+
   <rule id="101000" level="2">
     <if_sid>5760, 5710, 101021</if_sid>
     <description>AUTH-000 Thất bại đăng nhập SSH hoặc console (bộ đếm chung cho AUTH-001/002/003)</description>

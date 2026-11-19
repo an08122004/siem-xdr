@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from elasticsearch import ConnectionError as ESConnectionError, ConnectionTimeout as ESConnectionTimeout
 
 from .. import priority as prio
 from .. import settings, store
@@ -33,6 +34,9 @@ from .cases import CasePlaybooks
 from .wazuh import PROC_NAME
 from ..detection.alerts import SEVERITY_SCORE
 from ..pipeline.normalize import get
+
+# ES không kết nối được: KHÔNG ghi bước "error" rồi bỏ alert (offset đã done -> mất hành động) mà để vòng chính thử lại
+INFRA_ERRORS = (ESConnectionError, ESConnectionTimeout)
 
 log = logging.getLogger("soar")
 
@@ -162,6 +166,8 @@ class Soar:
                     continue
                 try:
                     res = self.run_step(step, alert)
+                except INFRA_ERRORS:
+                    raise
                 except Exception as e:  # noqa: BLE001
                     log.exception("bước %s lỗi", action)
                     res = {"status": "error", "detail": str(e)}
@@ -361,7 +367,8 @@ class Soar:
         now = store.now_iso()
         retry = (datetime.now(timezone.utc) - timedelta(minutes=REVERT_RETRY_MINUTES)).isoformat()
         expired = store.search(self.es, settings.IDX_ACTIONS, size=100, query={"bool": {
-            "filter": [{"term": {"type": "block_ip"}}, {"term": {"status": "success"}}, {"term": {"reverted": False}},
+            # timeout: agent không báo kết quả nhưng có thể ĐÃ chặn -> vẫn phải gỡ (lệnh gỡ chạy lặp an toàn)
+            "filter": [{"term": {"type": "block_ip"}}, {"terms": {"status": ["success", "timeout"]}}, {"term": {"reverted": False}},
                        {"range": {"expires_at": {"lte": now}}}],
             "should": [{"bool": {"must_not": [{"exists": {"field": "revert_requested_at"}}]}},
                        {"range": {"revert_requested_at": {"lte": retry}}}],

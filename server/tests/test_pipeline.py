@@ -55,6 +55,19 @@ def test_ssh_auth_parse():
     assert get(d2, "event.outcome") == "success" and get(d2, "user.name") == "root"
 
 
+@pytest.mark.parametrize("msg,user,ip", [
+    # username chứa "from <IP giả> port" -> IP thật là cụm cuối, không để SOAR chặn IP do kẻ tấn công chọn
+    ("Failed password for invalid user x from 10.0.0.53 port 1 from 203.0.113.66 port 51234 ssh2",
+     "x from 10.0.0.53 port 1", "203.0.113.66"),
+    ("Invalid user x from 10.0.0.53 port 1 from 203.0.113.66 port 51234", "x from 10.0.0.53 port 1", "203.0.113.66"),
+    ("Failed publickey for root from 203.0.113.5 port 22 ssh2: RSA SHA256:AbC/def+1", "root", "203.0.113.5"),
+    ("Invalid user  from 203.0.113.6 port 22", "", "203.0.113.6"),
+])
+def test_ssh_ip_is_last_from_clause(msg, user, ip):
+    d = normalize(raw("auth", {"message": f"Sep 24 10:00:01 web01 sshd[811]: {msg}"}))
+    assert get(d, "source.ip") == ip and (get(d, "user.name") or "") == user
+
+
 def test_windows_4625_and_sysmon():
     d = normalize(raw("windows_event", {"event_id": 4625, "channel": "Security", "computer": "PC-01",
                                         "fields": {"TargetUserName": "admin", "IpAddress": "10.0.0.66", "LogonType": "10"}},
@@ -71,6 +84,18 @@ def test_windows_4625_and_sysmon():
     assert get(s, "process.parent.name") == "WINWORD.EXE"
     assert get(s, "process.hash.sha256") == "def"
     assert get(s, "process.pid") == 4242
+
+
+def test_windows_group_member_and_defender_threat():
+    g = normalize(raw("windows_event", {"event_id": 4732, "channel": "Security", "computer": "PC-01", "fields": {
+        "SubjectUserName": "admin", "TargetUserName": "Administrators", "TargetSid": "S-1-5-32-544",
+        "MemberName": "-", "MemberSid": "S-1-5-21-1-2-3-1009"}}, source="eventlog", agent="A001-PC-01"))
+    assert get(g, "user.target.name") == "S-1-5-21-1-2-3-1009"            # thành viên được thêm, không phải tên nhóm
+    assert get(g, "group.name") == "Administrators" and get(g, "group.id") == "S-1-5-32-544"
+    m = normalize(raw("windows_event", {"event_id": 1116, "channel": "Microsoft-Windows-Windows Defender/Operational",
+                                        "fields": {"ThreatName": "Trojan:Win32/Wacatac", "Path": "C:\\x.exe"}},
+                      source="eventlog", agent="A001-PC-01"))
+    assert get(m, "threat.name") == "Trojan:Win32/Wacatac"
 
 
 def test_firewall_iptables_and_pfsense():
@@ -250,6 +275,24 @@ class FakeES:
 
     def search(self, index, query=None, **_):
         return {"hits": {"hits": []}}
+
+
+def test_soar_es_outage_propagates_so_alert_is_retried(monkeypatch):
+    from elasticsearch import ConnectionError as ESConnectionError
+    from siem import store
+    from siem.soar.engine import Notifier, Soar, load_playbooks
+
+    class DownES(FakeES):
+        def index(self, *a, **kw):
+            raise ESConnectionError("es down")
+
+    monkeypatch.setattr(store, "list_agents", lambda _es: [{"agent_id": "S001-Web-01", "status": "online"}])
+    soar = Soar(DownES(), load_playbooks(ROOT / "config" / "playbooks.yml"), whitelist=["127.0.0.0/8"], notifier=Notifier())
+    alert = {"alert": {"id": "a1", "status": "open", "source": "rule"}, "rule": {"id": "WZH-101001", "name": "bf", "tags": []},
+             "severity": "high", "severity_score": 3, "source": {"ip": "10.9.9.9"}, "agent": {"id": "S001-Web-01"}, "count": 5,
+             "message": "x"}
+    with pytest.raises(ESConnectionError):          # không nuốt thành bước "error" (mất lệnh chặn vĩnh viễn)
+        soar.handle(alert)
 
 
 def test_soar_playbook_blocks_ip(monkeypatch):

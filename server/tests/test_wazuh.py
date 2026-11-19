@@ -265,7 +265,7 @@ def test_stock_rule_outside_old_groups_is_shadow_when_setting_on(enricher, monke
 def test_suppress_key_uses_source_or_agent_and_ignores_dead_srcip(enricher):
     d = enricher.enrich(normalize(wz("wazuh_alert", data={"srcip": "9.9.9.9"},
                                      rule={"id": "5710", "level": 8, "groups": ["sshd"]})))
-    assert bridge.suppress_key(d) == ("WZH-5710", get(d, "agent.id"), get(d, "agent.id"), None, None)   # không còn data.srcip
+    assert bridge.suppress_key(d) == ("WZH-5710", get(d, "agent.id"), get(d, "agent.id"), None, None, None)   # không còn data.srcip
 
 
 def test_suppress_key_keeps_distinct_processes_on_one_agent(enricher):
@@ -442,6 +442,20 @@ def test_dispatch_sends_validated_commands(actions):
     assert ("002", ["kill_process", "4242", "b" * 32], "siem-xdr.cmd") in api.calls     # agent Windows
     assert finished["c" * 32][0] == "failed" and "not active" in finished["c" * 32][1]   # Wazuh từ chối
     assert finished["d" * 32][0] == "failed" and not any(c[1][2] == "d" * 32 for c in api.calls)  # IP bẩn: không gửi
+
+
+def test_dispatch_requeues_when_wazuh_unreachable(actions):
+    acts, finished = actions
+
+    class DownAPI(FakeAPI):
+        def active_response(self, agent_id, arguments, script):
+            raise soar_wazuh.WazuhUnreachable("Connection refused")
+
+    es = FakeES()
+    assert soar_wazuh.Responder(es, DownAPI()).dispatch() == 0
+    requeued = {i for _, i, doc in es.updates if doc.get("status") == "pending" and doc.get("dispatch_attempts") == 1}
+    assert {"a" * 32, "b" * 32, "c" * 32} <= requeued and "a" * 32 not in finished     # không mất lệnh chặn
+    assert finished["d" * 32][0] == "failed"                                           # IP bẩn vẫn bị loại ngay
 
 
 def test_collect_results_only_from_same_agent(monkeypatch):

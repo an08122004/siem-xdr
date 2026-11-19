@@ -45,7 +45,9 @@ class RetroHunter:
 
     def run(self) -> list[dict[str, Any]]:
         now = store.now_iso()
-        current = {ioc_id(m): m for m in self.indicators()}
+        if (inds := self.indicators()) is None:     # nguồn IOC chưa sẵn sàng (MISP chưa tải lần đầu): không coi IOC là hết hạn
+            return []
+        current = {ioc_id(m): m for m in inds}
         known = self.known()
         new = [m for k, m in current.items() if k not in known or known[k].get("status") != "active"]
         gone = [k for k, d in known.items() if d.get("status") == "active" and k not in current]
@@ -63,9 +65,12 @@ class RetroHunter:
         # IOC đang hiệu lực chưa dò: mới thêm lần này, hoặc còn lại từ chu kỳ trước (vượt giới hạn mỗi chu kỳ)
         pending = [m for k, m in current.items() if k not in known or known[k].get("status") != "active"
                    or not known[k].get("retro_hunted_at")][:self.max_per_run]
-        alerts = [a for m in pending if (a := self.hunt(m, now))]
-        for a in alerts:
-            self.emit(a)
+        alerts = []
+        for m in pending:
+            if (a := self.hunt(m, now)):
+                self.emit(a)        # phát TRƯỚC rồi mới đánh dấu đã dò: emit/ES lỗi giữa chừng -> lần sau dò lại, không mất TI-002
+                self.es.update(index=IDX_INTEL, id=ioc_id(m), doc={"retro_hunted_at": now, "hits": a["count"]})
+                alerts.append(a)
         if new or gone or pending:
             log.info("IOC: %d mới, %d hết hiệu lực; dò ngược %d IOC trong %d ngày, %d khớp",
                      len(new), len(gone), len(pending), self.days, len(alerts))
@@ -97,8 +102,8 @@ class RetroHunter:
             log.warning("dò ngược %s lỗi: %s", v, e)
             return None
         n = res["hits"]["total"]["value"]
-        self.es.update(index=IDX_INTEL, id=ioc_id(m), doc={"retro_hunted_at": now, "hits": n})
         if not n:
+            self.es.update(index=IDX_INTEL, id=ioc_id(m), doc={"retro_hunted_at": now, "hits": 0})
             return None
         ag = res["aggregations"]
         first_ev = (res["hits"]["hits"] or [{}])[0].get("_source") or {}

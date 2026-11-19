@@ -75,8 +75,9 @@ def suppress_key(doc: Doc) -> tuple:
     agent = get(doc, "agent.id")
     # file.path: syscheck 550/554 trên các file KHÁC nhau của một agent là các thay đổi riêng (như main: mỗi thay đổi một alert)
     # process.pid: hai tiến trình độc hại khác nhau trên cùng agent là hai alert (mỗi cái một lệnh kill), không được gộp
+    # user.target.name: thêm 2 tài khoản KHÁC nhau vào Administrators trong cửa sổ là 2 sự kiện critical, không phải một
     return (f"WZH-{get(doc, 'wazuh.rule.id')}", get(doc, "source.ip") or agent, agent, get(doc, "file.path"),
-            get(doc, "process.pid"))
+            get(doc, "process.pid"), get(doc, "user.target.name"))
 
 
 def is_shadow_stock(rule: dict, active_groups: set[str] | None = None, any_level: int | None = None) -> bool:

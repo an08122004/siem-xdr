@@ -293,7 +293,7 @@ def claim_pending_actions(es: Elasticsearch, agent_id: str | None = None) -> lis
         except Exception:  # noqa: BLE001 - đã bị request khác nhận
             continue
         src = h["_source"]
-        claimed.append({k: src.get(k) for k in ("id", "agent_id", "type", "params", "alert_id", "created_at")})
+        claimed.append({k: src.get(k) for k in ("id", "agent_id", "type", "params", "alert_id", "created_at", "dispatch_attempts")})
     return claimed
 
 

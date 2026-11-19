@@ -467,7 +467,8 @@ function showList() {
 function paint(view, rows, build, auto) {
   const sig = JSON.stringify(rows), c = $('#content');
   // làm mới tự động: bỏ qua nếu dữ liệu không đổi, hoặc người dùng đang gõ trong form trên trang (không xóa chữ đang nhập)
-  if (auto && (listState[view] === sig || c.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) return;
+  // ...kể cả khi đã bấm ra ngoài: ô có chữ gõ dở (data-dirty) giữ nguyên tới khi người dùng tự lưu/chuyển trang
+  if (auto && (listState[view] === sig || c.querySelector('[data-dirty]') || c.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) return;
   listState[view] = sig;
   const top = c.scrollTop, focused = document.activeElement && document.activeElement.closest && document.activeElement.closest('#content tr.row');
   // như el(): bỏ null (vd form đang đóng) và làm phẳng mảng lồng nhau, không thì replaceChildren in ra chữ "null"
@@ -476,6 +477,7 @@ function paint(view, rows, build, auto) {
   markSelected();
   if (focused && focused.dataset.id) c.querySelector(`tr.row[data-id="${CSS.escape(focused.dataset.id)}"]`)?.focus({ preventScroll: true });
 }
+document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#content')) e.target.dataset.dirty = '1'; });
 function markSelected() {
   const r = route();
   for (const tr of document.querySelectorAll('#content tr.row')) tr.setAttribute('aria-selected', String(tr.dataset.id === r.id));
@@ -622,7 +624,7 @@ VIEWS.hunts = {
           tr.addEventListener('keydown', e => { if (e.key === 'Enter') toggle(); });
           return [tr, open ? el('tr', {}, el('td', { colspan: '6' }, huntDetail(h))) : null];
         })))
-        : this.creating ? null : empty('Chưa có cuộc hunt nào.', 'Bắt đầu từ một giả thuyết mẫu của kế hoạch SOC (Kerberoasting, tác vụ hẹn giờ, DNS tunneling...).')]);
+        : this.creating ? null : empty('Chưa có cuộc hunt nào.', 'Bắt đầu từ một giả thuyết mẫu của kế hoạch SOC (Kerberoasting, tác vụ hẹn giờ, DNS tunneling...).')], auto);
   },
 };
 function huntForm(view, starters) {
@@ -772,11 +774,11 @@ VIEWS.cases = {
 };
 
 // ---------------------------------------------------------------- Điều tra (dashboard Grafana lọc theo thực thể)
-function entityQuery(t) {
+function entityQuery(t, typed) {          // typed: analyst tự gõ; giá trị từ alert/case (kẻ tấn công kiểm soát) KHÔNG được thành Lucene thô
   t = (t || '').trim();
-  if (!t || t === '*') return '*';
+  if (!t || typed && t === '*') return '*';
   if (isIP(t)) return `source.ip:${luceneValue(t)} OR destination.ip:${luceneValue(t)}`;
-  if (/[:*()]|\s(AND|OR|NOT)\s/.test(t)) return t;                 // đã là truy vấn Lucene
+  if (typed && /[:*()]|\s(AND|OR|NOT)\s/.test(t)) return t;        // đã là truy vấn Lucene
   return `host.name:${luceneValue(t)} OR user.name:${luceneValue(t)} OR agent.name:${luceneValue(t)}`;
 }
 // ---------------------------------------------------------------- Thư viện rule (dashboard Grafana siem-rules)
@@ -797,7 +799,7 @@ VIEWS.investigate = {
     const r = route(), q = r.params.get('q') || '';
     const input = el('input', { cls: 'field search', type: 'search', value: q === '*' ? '' : q, style: 'width:340px',
       placeholder: 'IP, tên máy, tài khoản hoặc truy vấn Lucene', 'aria-label': 'Thực thể cần điều tra' });
-    const submit = () => go('#/investigate?q=' + encodeURIComponent(entityQuery(input.value)));
+    const submit = () => go('#/investigate?q=' + encodeURIComponent(entityQuery(input.value, true)));
     input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
     const sugg = el('div', { cls: 'btns' });
     api('/api/v1/alerts?size=100&status=open,acknowledged,in_progress&since=7d').then(rows => {

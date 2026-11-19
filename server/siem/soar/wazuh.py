@@ -38,6 +38,13 @@ class WazuhError(RuntimeError):
     pass
 
 
+class WazuhUnreachable(WazuhError):
+    """Lỗi kết nối (Wazuh API chết / đang khởi động lại): lệnh nên được gửi lại, không phải bị từ chối."""
+
+
+DISPATCH_RETRIES = 60          # dispatch chạy 2 giây/lần -> ~2 phút chờ Wazuh khởi động lại rồi mới coi là failed
+
+
 class WazuhAPI:
     """Client tối giản cho Wazuh API (JWT, tự lấy lại token khi hết hạn). Chỉ dùng thư viện chuẩn."""
 
@@ -57,7 +64,7 @@ class WazuhAPI:
             body = e.read().decode(errors="replace")[:300]
             raise WazuhError(f"HTTP {e.code} {req.full_url}: {body}") from e
         except (urllib.error.URLError, OSError) as e:
-            raise WazuhError(f"không kết nối được Wazuh API {self.url}: {e}") from e
+            raise WazuhUnreachable(f"không kết nối được Wazuh API {self.url}: {e}") from e
 
     def token(self) -> str:
         if self._token and time.time() - self._token_at < 600:     # token mặc định sống 900 giây
@@ -145,6 +152,15 @@ class Responder:
         for a in store.claim_pending_actions(self.es):
             try:
                 res = self.api.active_response(a["agent_id"], ar_arguments(a), ar_script(self._platform(a["agent_id"])))
+            except WazuhUnreachable as e:          # Wazuh đang khởi động lại: trả lệnh về hàng đợi, không làm mất lệnh chặn
+                n = (a.get("dispatch_attempts") or 0) + 1
+                if n < DISPATCH_RETRIES:
+                    self.es.update(index=settings.IDX_ACTIONS, id=a["id"],
+                                   doc={"status": "pending", "dispatch_attempts": n, "updated_at": store.now_iso()})
+                    log.warning("Wazuh API chưa sẵn sàng (lần %d), lệnh %s chờ gửi lại: %s", n, a["id"], e)
+                    continue
+                store.finish_action(self.es, a["id"], a["agent_id"], "failed", str(e))
+                continue
             except (ValueError, WazuhError) as e:
                 store.finish_action(self.es, a["id"], a["agent_id"], "failed", str(e))
                 log.warning("lệnh %s (%s) trên agent %s lỗi: %s", a["id"], a["type"], a["agent_id"], e)
