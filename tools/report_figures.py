@@ -362,6 +362,21 @@ def roc(pos: list[float], neg: list[float]) -> tuple[list[tuple[float, float]], 
 assert roc([2.0], [1.0])[1] == 1.0 and roc([1.0], [1.0])[1] == 0.5 and roc([1.0], [2.0])[1] == 0.0
 
 
+def pr_curve(pos: list[float], neg: list[float]) -> tuple[list[tuple[float, float]], float]:
+    """Đường (recall, precision) theo ngưỡng giảm dần, dừng khi recall đạt 100% (như sklearn), và average precision
+    = Σ (R_n − R_{n−1}) · P_n."""
+    pts = []
+    for t in sorted(set(pos) | set(neg), reverse=True):
+        tp, fp = sum(p >= t for p in pos), sum(n >= t for n in neg)
+        pts.append((tp / len(pos), tp / (tp + fp)))
+        if tp == len(pos):
+            break
+    return pts, sum((r2 - r1) * p2 for (r1, _), (r2, p2) in zip([(0.0, 1.0)] + pts, pts))
+
+
+assert pr_curve([2.0], [1.0])[1] == 1.0 and pr_curve([1.0], [2.0])[1] == 0.5
+
+
 def fig_ml_roc() -> None:
     rows, _ = ml_rows()
     # gộp 2 model theo khoảng cách tới ngưỡng riêng của từng model: > 0 nghĩa là bị gắn cờ ở cả hai model
@@ -396,6 +411,45 @@ def fig_ml_roc() -> None:
     save(fig, "ml-2-roc.png")
 
 
+def fig_ml_pr() -> None:
+    rows, _ = ml_rows()
+    pos = [r["threshold"] - r["score"] for r in rows if r["label"] == "attack"]
+    neg = [r["threshold"] - r["score"] for r in rows if r["label"] == "normal"]
+    pts, ap = pr_curve(pos, neg)
+    base = len(pos) / (len(pos) + len(neg))
+    tp, fp = sum(p > 0 for p in pos), sum(n > 0 for n in neg)
+    op = (tp / len(pos), tp / (tp + fp))
+    full = pts[-1][1]                                       # precision tại ngưỡng đầu tiên bắt đủ mọi cửa sổ tấn công
+    fig, ax = plt.subplots(figsize=(6.4, 4.4))
+    ax.axhline(base, color=AXIS, linewidth=0.9, zorder=1)
+    ax.text(0.01, base + 0.02, f"đoán ngẫu nhiên = tỉ lệ cửa sổ tấn công trong tập thử ({vn(100 * base, 1)}%)",
+            fontsize=7.5, color=INK2, va="bottom")
+    ax.step([0.0] + [r for r, _ in pts], [pts[0][1]] + [p for _, p in pts], where="pre", color=S1, linewidth=2,
+            zorder=2)
+    ax.scatter(*op, s=48, color=INK, edgecolor=SURFACE, linewidth=1.5, zorder=3)
+    ax.annotate(f"ngưỡng đang dùng: {tp} đúng / {tp + fp} cảnh báo\nprecision {vn(100 * op[1], 0)}%, "
+                f"recall {vn(100 * op[0], 0)}%", op, xytext=(0.30, 0.72), fontsize=7.5, color=INK,
+                arrowprops={"arrowstyle": "-", "color": INK2, "lw": 0.8})
+    ax.scatter(1.0, full, s=48, color=SURFACE, edgecolor=INK, linewidth=1.5, zorder=3)
+    ax.annotate(f"bắt đủ {len(pos)}/{len(pos)} cửa sổ: precision chỉ còn {vn(100 * full, 0)}%", (1.0, full),
+                xytext=(0.30, 0.13), fontsize=7.5, color=INK, arrowprops={"arrowstyle": "-", "color": INK2, "lw": 0.8})
+    ax.set_xlim(-0.02, 1.04)
+    ax.set_ylim(-0.02, 1.06)
+    ax.set_xlabel("Recall: tỉ lệ cửa sổ tấn công bị gắn cờ")
+    ax.set_ylabel("Precision: tỉ lệ cảnh báo là tấn công thật")
+    ax.xaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0, decimals=0))
+    ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0, decimals=0))
+    ax.grid(True)
+    frame(fig, f"Precision–Recall của ML bất thường (AP = {vn(ap, 2)})",
+          f"{len(pos)} cửa sổ tấn công (7 kịch bản), {len(neg)} cửa sổ người dùng thường; gộp model web và auth theo "
+          f"khoảng cách tới ngưỡng riêng\n" + ML_SUB.split("\n", 1)[1])
+    fig.text(0.01, -0.04, "Precision phụ thuộc tỉ lệ tấn công trong tập thử: 7 kịch bản chạy dồn trong 70 phút nên tấn công "
+             f"chiếm {vn(100 * base, 1)}% cửa sổ.\nThực tế tấn công hiếm hơn, cùng ngưỡng thì precision thấp hơn; tỉ lệ "
+             "báo nhầm ở hình ROC không phụ thuộc điều này.", fontsize=7.5, color=INK2, va="top", linespacing=1.4)
+    save(fig, "ml-3-precision-recall.png")
+
+
 if __name__ == "__main__":
-    for f in (fig_models, fig_ablation, fig_complement, fig_rejections, fig_stability, fig_ml_hist, fig_ml_roc):
+    for f in (fig_models, fig_ablation, fig_complement, fig_rejections, fig_stability, fig_ml_hist, fig_ml_roc,
+              fig_ml_pr):
         f()
