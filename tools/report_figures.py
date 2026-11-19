@@ -21,6 +21,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Patch, Rectangle  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA, OUT = ROOT / "datasets", ROOT / "docs" / "figures"
@@ -502,7 +503,200 @@ def fig_ml_target() -> None:
     save(fig, "ml-4-danh-doi-target-fp.png")
 
 
+# ---------------------------------------------------------------- sơ đồ pipeline AI (AI-README mục 2)
+NEUTRAL = "#f0efec"
+PALE_BLUE, PALE_AQUA = "#dfebf9", "#ddf3eb"
+
+
+def _box(ax, x: float, y: float, w: float, h: float, title: str, body: str, fc: str = NEUTRAL, ec: str | None = None,
+         tc: str = INK) -> None:
+    ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0,rounding_size=0.1", fc=fc, ec=ec or fc, lw=1.3))
+    ax.text(x + 0.12, y + h - 0.13, title, ha="left", va="top", fontsize=7.0, fontweight="bold", color=tc)
+    ax.text(x + 0.12, y + h - 0.42, body, ha="left", va="top", fontsize=6.0, color=INK2 if tc == INK else tc,
+            linespacing=1.35)
+
+
+def _arrow(ax, p: tuple[float, float], q: tuple[float, float], rad: float = 0.0, label: str = "",
+           at: tuple[float, float] | None = None) -> None:
+    ax.add_patch(FancyArrowPatch(p, q, arrowstyle="-|>", mutation_scale=9, lw=0.9, color=INK2,
+                                 connectionstyle=f"arc3,rad={rad}", shrinkA=1, shrinkB=1, zorder=1))
+    if label:
+        ax.text(*(at or ((p[0] + q[0]) / 2, (p[1] + q[1]) / 2)), label, ha="center", va="center", fontsize=6.4,
+                color=INK2, linespacing=1.3)
+
+
+def fig_pipeline() -> None:
+    # khung 12 x 6,2 đơn vị lấp đúng vùng vẽ 7,2 x 3,72 inch (tỉ lệ 1:1 để góc bo tròn không méo)
+    fig, ax = plt.subplots(figsize=(7.2, 4.56))
+    ax.set_xlim(0, 12)
+    ax.set_ylim(0, 6.2)
+    ax.set_aspect("equal")
+    ax.axis("off")
+    w, g, h, top, bot = 2.12, 0.3, 1.35, 3.7, 1.25
+    xs = [0.1 + i * (w + g) for i in range(5)]
+    _box(ax, xs[0], top, w, h, "Ứng viên", "mẫu tấn công Wazuh\nchưa bắt (khoảng trống);\nalert báo nhầm")
+    _box(ax, xs[1], top, w, h, "Chuẩn bị", "gom nhóm theo kỹ thuật,\ntách train / kiểm tra,\ntập bình thường")
+    _box(ax, xs[2], top, w, h, "Truy hồi (RAG)", "SigmaHQ: 3.302 rule;\nxếp theo từ khóa, cùng\nkỹ thuật ATT&CK, cùng\nnguồn log", PALE_AQUA, S3)
+    _box(ax, xs[3], top, w, h, "LLM cục bộ", "qwen3.5:9b (Ollama)\n→ rule Sigma YAML", PALE_BLUE, S1)
+    _box(ax, xs[4], top, w, h, "Biên dịch + ghép vế", "Sigma → cây điều kiện;\nđo từng vế trên train\nvà tập bình thường")
+    _box(ax, xs[4], bot, w, h, "Kiểm định độc lập", "tập kiểm tra model\nchưa thấy, báo nhầm,\nreplay 7 ngày")
+    _box(ax, xs[3], bot, w, h, "Cổng Wazuh", "dịch sang XML, bơm log\nthô vào sandbox; đo bắt,\nbáo nhầm, che rule khác")
+    _box(ax, xs[2], bot, w, h, "Người duyệt", "trên console; kiểm tra\nlại với dữ liệu mới nhất")
+    _box(ax, xs[0], bot, 2 * w + g, h, "Triển khai", "ghi rules-dynamic/ai.xml, reload Wazuh,\nchạy bóng (SOAR bỏ qua); "
+         "đạt tiêu chí\nbóng thì bật chính thức")
+    _box(ax, xs[3], 0.05, 2 * w + g, 0.8, "Loại", "lưu lý do để xem lại; sửa bộ dịch thì thử lại ngay (R81)", tc=MUTED)
+    y = top + h / 2
+    for i in range(4):
+        _arrow(ax, (xs[i] + w, y), (xs[i + 1], y))
+    _arrow(ax, (xs[4] + 0.75, top + h), (xs[3] + w - 0.6, top + h), rad=0.5,
+           label="vế bị loại kèm lý do, biến thể còn sót (nhiều lượt)", at=(xs[4] - 0.02, top + h + 0.78))
+    _arrow(ax, (xs[2] + w / 2, top), (xs[4] + 0.5, top), rad=0.18)
+    ax.text((xs[2] + xs[4]) / 2 + 0.75, top - 0.62, "vế ứng viên SigmaHQ", ha="center", va="center", fontsize=6.2,
+            color=INK2)
+    xc = xs[4] + w / 2
+    _arrow(ax, (xc, top), (xc, bot + h))
+    yb = bot + h / 2
+    for i in (4, 3, 2):
+        _arrow(ax, (xs[i], yb), (xs[i - 1] + w if i > 2 else xs[1] + w, yb))
+    for x in (xs[3] + w / 2, xc):
+        _arrow(ax, (x, bot), (x, 0.85))
+    frame(fig, "Pipeline AI sinh rule phát hiện: LLM kết hợp RAG",
+          "Tự động từ ứng viên tới cổng Wazuh, con người duyệt trước khi triển khai; xanh dương = model, xanh lục = "
+          "SigmaHQ truy hồi\nNguồn: AI-README mục 2, server/siem/ai/ (worker, golden, sigma, validate, wazuh_gate, "
+          "deploy)")
+    fig.subplots_adjust(bottom=0.0, left=0.0, right=1.0)
+    save(fig, "ai-0-pipeline.png")
+
+
+# ---------------------------------------------------------------- ATT&CK
+TACTICS = ["reconnaissance", "resource-development", "initial-access", "execution", "persistence",
+           "privilege-escalation", "defense-evasion", "credential-access", "discovery", "lateral-movement",
+           "collection", "command-and-control", "exfiltration", "impact"]
+RAMP = [(1, "#86b6ef"), (2, "#3987e5"), (5, "#1c5cab"), (20, "#0d366b")]   # số rule ra alert từ ... -> bậc màu
+ATTACK_SUB = "Nguồn: catalog siem-rules của stack thật ngày 19/11/2026 (datasets/attack_rules_2026-11-19.csv), " \
+             "danh mục ATT&CK đi kèm Wazuh 4.14.8 (mitre.db)"
+
+
+def attack_data() -> tuple[dict[str, list[str]], dict[tuple[str, str], dict[str, set[str]]]]:
+    """Kỹ thuật cha theo tactic, và (nguồn, trạng thái) -> kỹ thuật -> rule. Trạng thái `alert` theo định nghĩa phủ của
+    KPI (rules_catalog.attack_coverage, R49): qua cầu nối, mode active, không bóng, đang bật; `bong` = chạy bóng. Kỹ thuật
+    con tính cho kỹ thuật cha; mã không có trong danh mục (rule ghi '(không có)') bị bỏ."""
+    tactics: dict[str, list[str]] = {t: [] for t in TACTICS}
+    with (DATA / "attack_enterprise_wazuh-4.14.8.csv").open(encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            if "." not in r["technique"]:
+                tactics[r["tactic"]].append(r["technique"])
+    known = {t for ts in tactics.values() for t in ts}
+    cov: dict[tuple[str, str], dict[str, set[str]]] = {}
+    with (DATA / "attack_rules_2026-11-19.csv").open(encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            src = "sigmahq" if r["file"].endswith("0966-sigmahq.xml") else "du_an" if r["file"].startswith("etc/") \
+                else "goc"
+            bong = r["shadow"] == "True" or r["mode"] == "shadow"
+            alert = not bong and r["bridged"] == "True" and r["mode"] == "active" and r["status"].lower() == "enabled"
+            if alert or bong:
+                for t in {x.split(".")[0] for x in r["techniques"].split()} & known:
+                    cov.setdefault((src, "bong" if bong else "alert"), {}).setdefault(t, set()).add(r["rule_id"])
+    return tactics, cov
+
+
+def tactic_name(t: str) -> str:
+    return " ".join(w if w == "and" else w.capitalize() for w in t.split("-"))
+
+
+HEAD = {"reconnaissance": "Recon-\nnaissance", "exfiltration": "Exfil-\ntration", "command-and-control": "Command\nand Control"}
+
+
+def tactic_head(t: str) -> str:
+    """Tên tactic cho cột hẹp: hai dòng, không ngắt giữa từ (trừ hai từ quá dài, ngắt có gạch nối)."""
+    return HEAD.get(t) or tactic_name(t).replace(" ", "\n", 1)
+
+
+def fig_attack_matrix() -> None:
+    tactics, cov = attack_data()
+    alert: dict[str, set[str]] = {}
+    for (_, st), d in cov.items():
+        if st == "alert":
+            for t, ids in d.items():
+                alert.setdefault(t, set()).update(ids)
+    bong = {t for (_, st), d in cov.items() if st == "bong" for t in d} - alert.keys()
+    total = {t for ts in tactics.values() for t in ts}
+    rows = max(len(v) for v in tactics.values())
+    fig, ax = plt.subplots(figsize=(7.4, 8.6))
+    for c, tac in enumerate(TACTICS):
+        techs = sorted(tactics[tac], key=lambda t: (-len(alert.get(t, ())), t not in bong, t))
+        ax.text(c + 0.5, -1.0, tactic_head(tac), ha="center", va="bottom", fontsize=6.0, fontweight="bold", color=INK,
+                linespacing=1.15)
+        ax.text(c + 0.5, -0.25, f"{sum(t in alert for t in techs)}/{len(techs)}", ha="center", va="bottom",
+                fontsize=6.8, color=INK2)
+        for i, t in enumerate(techs):
+            k = len(alert.get(t, ()))
+            if k:
+                fc = next(col for lo, col in reversed(RAMP) if k >= lo)
+                tc, ec = (INK if fc == RAMP[0][1] else "#ffffff"), fc
+            elif t in bong:
+                fc, tc, ec = SURFACE, INK, S2
+            else:
+                fc, tc, ec = NEUTRAL, MUTED, NEUTRAL
+            ax.add_patch(Rectangle((c + 0.05, i + 0.06), 0.9, 0.88, fc=fc, ec=ec, lw=1.0 if ec == S2 else 0))
+            ax.text(c + 0.5, i + 0.52, t, ha="center", va="center", fontsize=5.2, color=tc)
+    ax.set_xlim(0, len(TACTICS))
+    ax.set_ylim(rows + 0.1, -2.3)
+    ax.axis("off")
+    labels = ["1 rule", "2–4 rule", "5–19 rule", "≥ 20 rule"]
+    handles = [Patch(fc=col, ec=col, label=lab) for (_, col), lab in zip(RAMP, labels)]
+    handles += [Patch(fc=SURFACE, ec=S2, label="chỉ có rule chạy bóng"), Patch(fc=NEUTRAL, ec=NEUTRAL, label="chưa có")]
+    fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.01, 1 - 0.84 / 8.6), ncol=6, fontsize=7.5,
+               handlelength=1.4, columnspacing=1.2)
+    n = sum(t in alert for t in total)
+    frame(fig, f"Độ phủ MITRE ATT&CK của rule ra alert: {n}/{len(total)} kỹ thuật ({round(100 * n / len(total))}%)",
+          "Mỗi ô là một kỹ thuật cha, màu theo số rule Wazuh ra alert thật (không tính rule chạy bóng); kỹ thuật con "
+          "tính cho kỹ thuật cha\n" + ATTACK_SUB, above=0.38)
+    fig.subplots_adjust(left=0.01, right=0.99, bottom=0.01)
+    save(fig, "attack-1-ma-tran.png")
+
+
+def fig_attack_sources() -> None:
+    tactics, cov = attack_data()
+    cols = [("Wazuh gốc\n(ra alert)", [("goc", "alert")]), ("Rule dự án\n(ra alert)", [("du_an", "alert")]),
+            ("SigmaHQ\n(chạy bóng)", [("sigmahq", "bong")]), ("Tổng\n(ra alert)", [("goc", "alert"), ("du_an", "alert")])]
+    ramp = matplotlib.colors.LinearSegmentedColormap.from_list(
+        "seq", ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"])
+    fig, ax = plt.subplots(figsize=(6.6, 5.6))
+    for r, tac in enumerate(TACTICS):
+        techs = set(tactics[tac])
+        for c, (_, keys) in enumerate(cols):
+            got = set().union(*(cov.get(k, {}).keys() for k in keys)) & techs
+            frac = len(got) / len(techs)
+            fc = ramp(frac) if got else NEUTRAL
+            ax.add_patch(Rectangle((c + 0.04, r + 0.06), 0.92, 0.88, fc=fc, ec=fc, lw=0))
+            text = f"{len(got)}" + (f" · {round(100 * frac)}%" if c == len(cols) - 1 else "")
+            ax.text(c + 0.5, r + 0.52, text, ha="center", va="center", fontsize=7.5,
+                    color="#ffffff" if got and frac >= 0.45 else (INK if got else MUTED))
+    ax.set_xlim(0, len(cols))
+    ax.set_ylim(len(TACTICS), -0.05)
+    ax.set_yticks([r + 0.5 for r in range(len(TACTICS))],
+                  [f"{tactic_name(t)} ({len(tactics[t])})" for t in TACTICS], fontsize=7.5)
+    ax.set_xticks([c + 0.5 for c in range(len(cols))], [n for n, _ in cols], fontsize=7.5)
+    ax.tick_params(axis="x", labelcolor=INK)
+    ax.xaxis.tick_top()
+    for s in ax.spines.values():
+        s.set_visible(False)
+    ax.tick_params(length=0)
+    sm = matplotlib.cm.ScalarMappable(cmap=ramp, norm=matplotlib.colors.Normalize(0, 100))
+    cb = fig.colorbar(sm, ax=ax, orientation="horizontal", fraction=0.035, pad=0.03, aspect=40)
+    cb.set_label("Tỉ lệ kỹ thuật của tactic được phủ (%)", fontsize=7.5, color=INK2)
+    cb.outline.set_visible(False)
+    cb.ax.tick_params(labelsize=7, colors=MUTED, length=0)
+    frame(fig, "Kỹ thuật ATT&CK được phủ, theo tactic và nguồn rule",
+          "Số kỹ thuật cha có ít nhất một rule (trong ngoặc: tổng kỹ thuật của tactic); chưa có rule AI nào được "
+          "duyệt\n" + ATTACK_SUB, above=0.45)
+    fig.text(0.01, -0.02, "Tổng = hợp của Wazuh gốc và rule dự án, không cộng SigmaHQ vì đang chạy bóng (chưa ra alert).",
+             fontsize=7.5, color=INK2)
+    save(fig, "attack-2-theo-nguon.png")
+
+
 if __name__ == "__main__":
     for f in (fig_models, fig_ablation, fig_complement, fig_rejections, fig_stability, fig_ml_hist, fig_ml_roc,
-              fig_ml_pr, fig_ml_target):
+              fig_ml_pr, fig_ml_target, fig_pipeline, fig_attack_matrix, fig_attack_sources):
         f()

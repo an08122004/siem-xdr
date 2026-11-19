@@ -937,11 +937,12 @@ mẫu tấn công Windows + web (cây Python ước 186), 0 mẫu bị lô cư�
 
 ### 9.12 Hình cho báo cáo
 
-`python tools/report_figures.py` (cần `matplotlib`, dùng Python của máy, không phải venv server) vẽ lại 9 hình từ số đo ở các
-mục trên và mục 16, ra `docs/figures/`:
+`python tools/report_figures.py` (cần `matplotlib`, dùng Python của máy, không phải venv server) vẽ lại 12 hình từ số đo ở các
+mục trên, mục 16 và catalog rule, ra `docs/figures/`:
 
 | Hình | Nội dung | Số liệu |
 |---|---|---|
+| [ai-0-pipeline.png](docs/figures/ai-0-pipeline.png) | Sơ đồ pipeline LLM + RAG: ứng viên → truy hồi SigmaHQ → LLM → ghép vế → kiểm định → cổng Wazuh → người duyệt → chạy bóng | mục 2 |
 | [ai-1-so-sanh-model.png](docs/figures/ai-1-so-sanh-model.png) | 4 model: số nhóm qua, tỉ lệ bắt tập kiểm tra, thời gian | 9.4 |
 | [ai-2-dong-gop-rag.png](docs/figures/ai-2-dong-gop-rag.png) | Đóng góp của vế model, lượt kiến thức và vế SigmaHQ truy hồi (RAG) | 9.9 |
 | [ai-3-sigmahq-va-model.png](docs/figures/ai-3-sigmahq-va-model.png) | SigmaHQ và model bổ sung cho nhau (4 góc: cả hai / chỉ một bên / không bên nào đạt) | 9.5, 9.9 |
@@ -951,6 +952,13 @@ mục trên và mục 16, ra `docs/figures/`:
 | [ml-2-roc.png](docs/figures/ml-2-roc.png) | ML: đường ROC gộp 2 model (AUC 0,98), ngưỡng đang dùng bắt 12/16 cửa sổ tấn công, báo nhầm 1/568 | 16 |
 | [ml-3-precision-recall.png](docs/figures/ml-3-precision-recall.png) | ML: Precision–Recall (AP 0,80), ngưỡng đang dùng precision 92% / recall 75%; precision phụ thuộc tỉ lệ tấn công 2,7% của tập thử | 16 |
 | [ml-4-danh-doi-target-fp.png](docs/figures/ml-4-danh-doi-target-fp.png) | ML: đánh đổi theo `ML_TARGET_FP` 0,1–10%: kịch bản bắt được (1, 2, 5, 5, 5, 5, 6 trên 7) và báo nhầm (1 → 31/568); 0,5% bắt nhiều nhất với báo nhầm thấp nhất | 16 |
+| [attack-1-ma-tran.png](docs/figures/attack-1-ma-tran.png) | Ma trận MITRE ATT&CK: 87/196 kỹ thuật cha (44%) có rule ra alert thật; ô tô theo số rule, ô viền cam = chỉ có rule chạy bóng | catalog 19/11 |
+| [attack-2-theo-nguon.png](docs/figures/attack-2-theo-nguon.png) | Số kỹ thuật được phủ theo tactic và nguồn rule (Wazuh gốc, dự án, SigmaHQ chạy bóng, tổng) | catalog 19/11 |
+
+Hai hình ATT&CK đọc `datasets/attack_rules_2026-11-19.csv` (bản chụp `siem-rules`, `origin: wazuh_rule`, của stack thật chạy
+`main` 16f8657 với 30 rule SigmaHQ) và `datasets/attack_enterprise_wazuh-4.14.8.csv` (kỹ thuật chưa thu hồi / ngừng dùng trong
+`/var/ossec/var/db/mitre.db` của wazuh-manager, kèm tactic). "Phủ" theo đúng KPI (`rules_catalog.attack_coverage`, R49): rule qua
+cầu nối, `mode: active`, không bóng, đang bật; kỹ thuật con tính cho kỹ thuật cha. Chưa có rule AI nào được duyệt nên không có cột AI.
 
 Hình đánh đổi lấy ngưỡng từng mức từ `ml_eval.py eval --target-fp` (cùng khoảng học / thử bên dưới, lưu ở
 `datasets/ml_target_fp_2026-11-17.csv`). Forest giống nhau ở mọi mức (`random_state=0`, điểm từng cửa sổ trùng khớp giữa 7 lần
