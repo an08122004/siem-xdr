@@ -1418,7 +1418,7 @@ chưa có tập bình thường thật (mục 10: điểm nghẽn là dữ liệ
 
 Module `server/siem/detection/ml.py` (Isolation Forest của scikit-learn) thay bản ML cũ `ML-001`. Bản cũ tắt từ 26/09 vì báo
 nhầm khoảng 32% lưu lượng bình thường và 100% với IP chỉ có 1 event. Bản mới sửa từng nguyên nhân. Mục 16.1–16.3 mô tả thiết kế,
-mục 16.4 là số đo trên lab; stack thật chạy bóng từ 19/11/2026.
+mục 16.4 là số đo trên lab; stack thật chạy bóng từ 19/11/2026 03:55 UTC, chạy thật (`ML_MODE=active`) từ 05:09 UTC cùng ngày.
 
 ### 16.1 Quyết định thiết kế
 
@@ -1485,6 +1485,13 @@ analyzer nạp trạng thái, log `ML web: chuyển sang active (1279 cửa sổ
 `attacks.py --scenario scan_dirs` từ 10.10.1.60 lúc 03:55:38 UTC sinh alert `ML-WEB` bóng lúc 04:00:38 (5 phút), mức medium,
 `n_404=396 (thường 0), n_paths=297 (thường 12), n_requests=400 (thường 23)`; SOAR không có hành động, không case nào chứa alert ML.
 
-**Việc tiếp theo:** theo dõi 7 ngày chạy bóng (tiêu chí [SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 4) trước khi đặt
-`ML_MODE=active`; cổng bổ sung khi một đặc trưng đếm vượt k lần giá trị lớn nhất của tập học (bắt `exfil`, ổn định `ssh_bruteforce`);
+**Chuyển chạy thật (19/11, 05:09 UTC), theo yêu cầu chủ dự án để làm báo cáo:** đặt `ML_MODE=active` và `ML_MIN_WINDOWS=150`,
+**bỏ qua** 7 ngày chạy bóng của [SOC-OPERATIONS.md](SOC-OPERATIONS.md) mục 4 (số đo báo nhầm trên dữ liệu thật vì thế chỉ có từ lab,
+mục trên). Analyzer nạp trạng thái web 1.334 / auth 183 cửa sổ, log `ML web: chuyển sang active (1334 cửa sổ, ngưỡng -0.185)` và
+`ML auth: chuyển sang active (183 cửa sổ, ngưỡng -0.238)`. Kiểm lại bằng `scan_dirs` từ 10.10.1.60 lúc 05:09:21: alert `ML-WEB`
+không còn `alert.shadow` lúc 05:10:31, `n_404=255 (thường 0)`; SOAR khớp playbook "Mở case cho mọi cảnh báo từ mức medium", mở case
+PB-05; không chặn IP (hành động phá hủy chỉ theo mã rule Wazuh đã duyệt, R60). Quay lại chạy bóng: bỏ `ML_MODE` trong `.env` rồi tạo
+lại analyzer.
+
+**Việc tiếp theo:** theo dõi báo nhầm của alert ML trên stack (case PB-05 có kết luận); cổng bổ sung khi một đặc trưng đếm vượt k lần giá trị lớn nhất của tập học (bắt `exfil`, ổn định `ssh_bruteforce`);
 thêm lần đăng nhập thất bại vào lưu lượng auth bình thường của `labsim`; đặc trưng nhịp request cho `scraper`.
