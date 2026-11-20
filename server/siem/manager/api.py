@@ -31,7 +31,7 @@ from typing import Any
 
 from elasticsearch import ConflictError, NotFoundError
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from .. import priority as prio
@@ -161,6 +161,21 @@ async def activity_log(request: Request, call_next):
                                 auth.client_ip(request), role=s.role, op=op, method=request.method,
                                 path=request.url.path, status=resp.status_code, change=activity_detail(body))
     return resp
+
+
+MAX_BODY = 5 * 1024 * 1024          # dashboard Grafana lớn nhất ~100 KB; API JSON vài KB
+
+
+@app.middleware("http")               # thêm sau -> chạy TRƯỚC activity_log (đọc body trước cả bước xác thực)
+async def limit_body(request: Request, call_next):
+    # shortcut: chỉ chặn theo Content-Length; body chunked không khai độ dài vẫn đọc hết, nâng cấp bằng giới hạn ở reverse proxy
+    try:
+        too_big = int(request.headers.get("content-length") or 0) > MAX_BODY
+    except ValueError:
+        too_big = True
+    if too_big:
+        return JSONResponse({"detail": "body quá lớn"}, status_code=413)
+    return await call_next(request)
 
 
 def es():

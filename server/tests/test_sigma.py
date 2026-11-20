@@ -63,6 +63,12 @@ def test_image_endswith_maps_to_program_name_for_logs_without_full_path():
     assert m(linux) and m({"process": {"executable": "/usr/bin/cat", "name": "cat", "command_line": "cat /etc/shadow"}})
 
 
+def test_yaml_alias_bomb_rejected():
+    bomb = "a: &a [x, x, x, x, x, x, x, x, x]\nb: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a]\nc: [*b, *b, *b, *b, *b, *b, *b, *b, *b]\n"
+    with pytest.raises(sigma.SigmaError):
+        sigma.parse(bomb)
+
+
 def test_modifiers_wildcards_and_windash():
     m = matcher(r"""detection:
   sel_enc:
@@ -74,6 +80,8 @@ def test_modifiers_wildcards_and_windash():
   condition: 1 of sel_*
 """)
     assert m(proc("powershell /enc SQBFAFgA", "p.exe")) and m(proc("powershell -enc SQBFAFgA", "p.exe"))
+    assert m(proc("powershell —enc SQBFAFgA", "p.exe")) and m(proc("powershell ―enc SQBFAFgA", "p.exe"))
+    assert sigma._windash("-nop -w hidden").count("/nop /w hidden") == 1 and len(sigma._windash("-a -b")) == 25
     assert m(proc("rundll32.exe x.dll,#2", "r.exe")) and not m(proc("rundll32.exe x.dll,Open", "r.exe"))
     assert m(proc("CERTUTIL.exe -urlcache -f http://x", "c.exe"))           # regex cũng không phân biệt hoa thường
     assert sigma._glob("C:\\\\Win*", None) == ("startswith", "C:\\Win")    # '\\' trước ký tự thường = 1 dấu '\'

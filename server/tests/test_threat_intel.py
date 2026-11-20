@@ -79,6 +79,17 @@ def test_misp_feed_refresh_keeps_last_good_set_on_error():
     assert {(m["type"], m["value"]) for m in ti.indicators()} >= {("ip", "203.0.113.6"), ("hash", "ab" * 32)}
 
 
+def test_expired_feed_ioc_and_ipv6_forms():
+    class Feed:
+        def snapshot(self):
+            return IOCSet([{"type": "ip", "value": "203.0.113.77", "source": "misp", "expires": "2000-01-01"},
+                           {"type": "ip", "value": "2001:0db8::0001", "source": "misp", "expires": None}])
+    ti = ThreatIntel(__import__("pathlib").Path("khong-co-thu-muc"), feed=Feed())
+    assert ti.match_ip("203.0.113.77") is None                                # MISP mất kết nối: snapshot cũ vẫn không khớp IOC hết hạn
+    assert ("ip", "203.0.113.77") not in {(m["type"], m["value"]) for m in ti.indicators()}
+    assert ti.match_ip("2001:db8::1") and ti.match_ip("2001:DB8:0:0::1")       # IPv6 nhiều cách viết
+
+
 class RES:
     """ES giả cho RetroHunter: siem-intel trong bộ nhớ, event khớp theo IOC."""
 

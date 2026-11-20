@@ -54,14 +54,14 @@
   .me .links { display: flex; gap: 12px; margin-top: 8px; }
   .linkbtn { background: none; border: 0; padding: 0; color: var(--mute); cursor: pointer; font-size: 13px; }
   .linkbtn:hover { color: var(--fg); text-decoration: underline; }
-  .me .idle { margin-top: 6px; color: var(--faint); font-size: 12px; }
+  .me .idle { margin-top: 6px; color: var(--mute); font-size: 12px; }      /* --faint chỉ 3,6:1 với chữ 12px */
 
   .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 20px;
          border-bottom: 1px solid var(--line); min-height: 58px; }
   .bar h1 { margin: 0 6px 0 0; font: 600 21px/1.1 var(--display); letter-spacing: .01em; }
   .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 1; }
-  .sync { margin-left: auto; color: var(--faint); font-size: 12px; white-space: nowrap; }
+  .sync { margin-left: auto; color: var(--mute); font-size: 12px; white-space: nowrap; }
   .sync.bad { color: var(--critical); }
   .content { flex: 1; overflow: auto; min-height: 0; }
   .frame { flex: 1; min-height: 0; display: flex; }
@@ -424,7 +424,8 @@ function syncFail(e) { if (e.code === 401) return; const s = $('#sync'); s.class
 // ============================================================================ dashboard Grafana nhúng
 const RANGES = [['now-1h', '1 giờ'], ['now-24h', '24 giờ'], ['now-7d', '7 ngày'], ['now-30d', '30 ngày']];
 function grafanaUrl(uid, from, vars = {}, { showVars = false } = {}) {
-  const p = new URLSearchParams({ orgId: '1', from, to: 'now', refresh: '30s', theme: 'dark' });
+  // không ép refresh: mỗi dashboard tự đặt (soc-kpi 5m, siem-rules 1m với now-20y) -> tránh truy vấn ES nặng 30 giây/lần
+  const p = new URLSearchParams({ orgId: '1', from, to: 'now', theme: 'dark' });
   for (const [k, v] of Object.entries(vars)) p.set('var-' + k, v);
   // kiosk: bỏ thanh điều hướng Grafana; ẩn bộ chọn thời gian / biến của Grafana vì console đã có điều khiển riêng
   // (Thư viện rule giữ lại ô lọc của Grafana: lọc là cách dùng chính của trang đó)
@@ -467,7 +468,8 @@ function showList() {
 function paint(view, rows, build, auto) {
   const sig = JSON.stringify(rows), c = $('#content');
   // làm mới tự động: bỏ qua nếu dữ liệu không đổi, hoặc người dùng đang gõ trong form trên trang (không xóa chữ đang nhập)
-  if (auto && (listState[view] === sig || c.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) return;
+  // ...kể cả khi đã bấm ra ngoài: ô có chữ gõ dở (data-dirty) giữ nguyên tới khi người dùng tự lưu/chuyển trang
+  if (auto && (listState[view] === sig || c.querySelector('[data-dirty]') || c.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) return;
   listState[view] = sig;
   const top = c.scrollTop, focused = document.activeElement && document.activeElement.closest && document.activeElement.closest('#content tr.row');
   // như el(): bỏ null (vd form đang đóng) và làm phẳng mảng lồng nhau, không thì replaceChildren in ra chữ "null"
@@ -476,6 +478,7 @@ function paint(view, rows, build, auto) {
   markSelected();
   if (focused && focused.dataset.id) c.querySelector(`tr.row[data-id="${CSS.escape(focused.dataset.id)}"]`)?.focus({ preventScroll: true });
 }
+document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#content')) e.target.dataset.dirty = '1'; });
 function markSelected() {
   const r = route();
   for (const tr of document.querySelectorAll('#content tr.row')) tr.setAttribute('aria-selected', String(tr.dataset.id === r.id));
@@ -559,7 +562,7 @@ VIEWS.handover = {
     const [s, past] = await Promise.all([api('/api/v1/handover', { auto }), api('/api/v1/handovers?size=10', { auto })]);
     const note = el('textarea', { cls: 'field', placeholder: 'Việc bàn giao cho ca sau: đang theo dõi gì, chờ ai phản hồi, lưu ý...' });
     const to = el('input', { cls: 'field', type: 'text', placeholder: 'giao cho (tài khoản ca sau)', style: 'width:220px', 'aria-label': 'Giao cho' });
-    const alertLi = a => el('li', { cls: 'link', tabindex: '0', onClick: () => go('#/alerts/' + a._id) }, prioTag(a.priority), ' ', el('b', {}, a.rule || ''),
+    const alertLi = a => el('li', { cls: 'link', tabindex: '0', onClick: () => go('#/alerts/' + a._id), onKeydown: e => { if (e.key === 'Enter') go('#/alerts/' + a._id); } }, prioTag(a.priority), ' ', el('b', {}, a.rule || ''),
       el('span', { cls: 'sub' }, ` ${a.host || a.source_ip || ''} ${a.status ? '· ' + (ALERT_ST[a.status] || [a.status])[0] : ''}`));
     const text = () => [`BIÊN BẢN GIAO CA ${fmt(s.generated_at)}`, `Alert đang mở: ${s.alerts_open} (${Object.entries(s.alerts_by_priority).map(([p, n]) => p + ': ' + n).join(', ')})`,
       `Case đang xử lý: ${s.cases.length}, quá hạn xác nhận: ${s.cases_overdue}`,
@@ -575,7 +578,7 @@ VIEWS.handover = {
       el('h3', {}, `Alert P1 / P2 đang mở (${s.alerts_top.length})`),
       s.alerts_top.length ? el('ul', { cls: 'items' }, s.alerts_top.map(alertLi)) : el('p', { cls: 'sub' }, 'Không có.'),
       el('h3', {}, `Case đang xử lý (${s.cases.length})`),
-      s.cases.length ? el('ul', { cls: 'items' }, s.cases.map(c => el('li', { cls: 'link', tabindex: '0', onClick: () => go('#/cases/' + c._id) },
+      s.cases.length ? el('ul', { cls: 'items' }, s.cases.map(c => el('li', { cls: 'link', tabindex: '0', onClick: () => go('#/cases/' + c._id), onKeydown: e => { if (e.key === 'Enter') go('#/cases/' + c._id); } },
         prioTag(c.priority), ' ', el('b', {}, c.title), ' ', stLabel(CASE_ST, c.status), el('span', { cls: 'sub' }, ` ${c.assignee || 'chưa giao'}`),
         c.overdue ? el('span', { cls: 'late' }, ' quá hạn xác nhận') : null, c.major ? el('span', { cls: 'late' }, ' sự cố lớn') : null))) : el('p', { cls: 'sub' }, 'Không có.'),
       el('h3', {}, 'Lệnh chặn IP hết hạn trong 12 giờ tới'),
@@ -622,7 +625,7 @@ VIEWS.hunts = {
           tr.addEventListener('keydown', e => { if (e.key === 'Enter') toggle(); });
           return [tr, open ? el('tr', {}, el('td', { colspan: '6' }, huntDetail(h))) : null];
         })))
-        : this.creating ? null : empty('Chưa có cuộc hunt nào.', 'Bắt đầu từ một giả thuyết mẫu của kế hoạch SOC (Kerberoasting, tác vụ hẹn giờ, DNS tunneling...).')]);
+        : this.creating ? null : empty('Chưa có cuộc hunt nào.', 'Bắt đầu từ một giả thuyết mẫu của kế hoạch SOC (Kerberoasting, tác vụ hẹn giờ, DNS tunneling...).')], auto);
   },
 };
 function huntForm(view, starters) {
@@ -772,11 +775,11 @@ VIEWS.cases = {
 };
 
 // ---------------------------------------------------------------- Điều tra (dashboard Grafana lọc theo thực thể)
-function entityQuery(t) {
+function entityQuery(t, typed) {          // typed: analyst tự gõ; giá trị từ alert/case (kẻ tấn công kiểm soát) KHÔNG được thành Lucene thô
   t = (t || '').trim();
-  if (!t || t === '*') return '*';
+  if (!t || typed && t === '*') return '*';
   if (isIP(t)) return `source.ip:${luceneValue(t)} OR destination.ip:${luceneValue(t)}`;
-  if (/[:*()]|\s(AND|OR|NOT)\s/.test(t)) return t;                 // đã là truy vấn Lucene
+  if (typed && /[:*()]|\s(AND|OR|NOT)\s/.test(t)) return t;        // đã là truy vấn Lucene
   return `host.name:${luceneValue(t)} OR user.name:${luceneValue(t)} OR agent.name:${luceneValue(t)}`;
 }
 // ---------------------------------------------------------------- Thư viện rule (dashboard Grafana siem-rules)
@@ -797,7 +800,7 @@ VIEWS.investigate = {
     const r = route(), q = r.params.get('q') || '';
     const input = el('input', { cls: 'field search', type: 'search', value: q === '*' ? '' : q, style: 'width:340px',
       placeholder: 'IP, tên máy, tài khoản hoặc truy vấn Lucene', 'aria-label': 'Thực thể cần điều tra' });
-    const submit = () => go('#/investigate?q=' + encodeURIComponent(entityQuery(input.value)));
+    const submit = () => go('#/investigate?q=' + encodeURIComponent(entityQuery(input.value, true)));
     input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
     const sugg = el('div', { cls: 'btns' });
     api('/api/v1/alerts?size=100&status=open,acknowledged,in_progress&since=7d').then(rows => {

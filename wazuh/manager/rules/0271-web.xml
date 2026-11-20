@@ -6,7 +6,10 @@
   User-Agent KHÔNG được giải mã thành trường: WEB-005 khớp <regex> trên chuỗi trong ngoặc kép CUỐI của dòng (không khớp tên công cụ chỉ nằm trong URL).
 
   URL MÃ HÓA (S5): Wazuh KHÔNG giải mã URL (trường url giữ nguyên %xx), còn rule cũ khớp url.decoded. Mỗi regex vì thế bắt cả dạng thô lẫn dạng mã hóa của dấu nháy
-  (' %27 %2527 %u0027), =, (, ), ;, :, ., /, \, <, >, $ và dấu cách (+ %20 %2520 %09 và comment SQL rỗng /**/); UNION/SELECT còn bắt mã hóa từng chữ (%55NION, %53ELECT).
+  (' %27 %2527 %u0027), =, (, ), ;, :, ., /, \, <, >, $ và dấu cách (+ %20 %2520); UNION/SELECT còn bắt mã hóa từng chữ (%55NION, %53ELECT).
+  Sửa 19/11/2026 (đã đo: lọt trước đó): giữa UNION và SELECT nhận thêm %09 %0a %0d %0b %0c %a0 và comment SQL có nội dung (/*x*/, tối đa 40 ký tự); WEB-001 thêm nhánh SQLi
+  số không dấu nháy (=1 OR 1=1, hai vế PHẢI bằng nhau); WEB-004 nhận %0a / %0d làm dấu nối lệnh, còn | và & ĐƠN (thường gặp trong query: "bread & cat food",
+  fields=name|id) chỉ tính khi sau lệnh có đối số dạng lệnh (- / . ~ $) hoặc lệnh là whoami / uname; ; ` || && giữ như cũ. Hệ quả: `?ip=1|id` (không đối số) không còn báo.
   Giới hạn: từ khóa khác (script, passwd, sleep...) chỉ viết thô (cờ (?i) lo hoa/thường) vì XML của Wazuh từ chối chuỗi dài quá ~2000 ký tự ("Maximum string size reached");
   mã hóa HAI lần ngoài dạng %25XX, hoặc mã hóa Unicode lạ (%c0%af, %ef%bc%87), chưa phủ. Mọi quantifier đều có chặn trên, không lồng nhau (ReDoS: WEB-001 cũ từng treo analyzer).
   `&` viết \x26, `<` `>` viết \x3c \x3e trong regex (XML).
@@ -23,7 +26,9 @@
 
   WEB-006 (>= 30 phản hồi 404/60 s) KHÔNG có rule ở đây: chỉ khác 31151 ở ngưỡng; Task 12 đã đè 31151 thành 30 lần 4xx/60 s, level 7 trong 0999-tuning.xml.
   WEB-007: wp-login.php và /administrator POST đã có 31509 -> 31510 (8 POST/30 s, level 8), nên 104070 loại hai đường dẫn đó (nếu không 104070 level 2 sẽ nuốt 31509 và 31510 mất đếm);
-  phần còn thiếu của rule cũ (login, signin, auth, admin) là 104070 -> 104007 (10 POST/60 s như rule cũ). "admin" khớp cả /wp-admin/admin-ajax.php như rule cũ.
+  phần còn thiếu của rule cũ (login, signin, auth, admin) là 104070 -> 104007 (10 POST/60 s như rule cũ). Từ 19/11/2026 bỏ /wp-admin/admin-ajax.php (rule cũ có): heartbeat
+  WordPress POST 15 s / tab nên một biên tập viên mở 2-3 tab là đủ 10 POST/60 s và bị chặn IP (đã đo). WEB-008: tham số một chữ `c` chỉ còn tính với tên webshell đã biết
+  (c99, r57, shell...), không tính cho file php bất kỳ trong uploads / images (thumb.php?c=1 từng ra level 12 + chặn IP).
   104070 phải là con của 31530 (level 3, "POST request received", no_log) vì anh em level 3 thắng level 2: ngược lại POST có dấu ? sẽ vào 31530, không vào bộ đếm.
 
   WEB-009 (>= 300 request/60 s cùng nguồn): event cuối ở rule level 0 (31108 "request đơn giản", 31100 chưa khớp gì) KHÔNG vào lịch sử đếm. 104090 (level 2, không ra alert vì
@@ -51,8 +56,22 @@
   <rule id="104004" level="12">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
-    <url type="pcre2">(?i)(?:[;|`\x26]|%(?:3b|7c|60|26))(?:[+\s]|%(?:25)?20){0,8}(?:cat|ls|id|whoami|uname|wget|curl|nc|bash|sh|powershell|cmd)\b(?!(?:[+\s]|%(?:25)?20){0,8}(?:=|%3d))|(?:\$|%24)(?:\(|%28)(?:id|whoami|cat|curl|wget)</url>
+    <url type="pcre2">(?i)(?:[;`]|%(?:3b|60|0a|0d)|\|\||\x26\x26|%7c%7c|%26%26)(?:[+\s]|%(?:25)?(?:20|09)){0,8}(?:cat|ls|id|whoami|uname|wget|curl|nc|bash|sh|powershell|cmd)\b(?!(?:[+\s]|%(?:25)?20){0,8}(?:=|%3d))|(?:\$|%24)(?:\(|%28)(?:id|whoami|cat|curl|wget)</url>
     <description>WEB-004 Chèn lệnh / RCE qua web: $(srcip) gửi $(url)</description>
+    <mitre>
+      <id>T1059</id>
+      <id>T1190</id>
+    </mitre>
+    <group>siem,web,legacy_WEB-004,</group>
+  </rule>
+
+  <!-- WEB-004, nhánh | và & ĐƠN (tách khỏi 104004 vì lint giới hạn 300 ký tự / regex): chỉ báo khi sau lệnh có đối số dạng lệnh (- / . ~ $) hoặc lệnh là whoami / uname.
+       Thêm 19/11/2026: CẦN thêm WZH-104044 vào playbook "Chặn nguồn tấn công Web nghiêm trọng" (server/config/playbooks.yml) như 104004. -->
+  <rule id="104044" level="12">
+    <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
+    <location type="pcre2">^\(</location>
+    <url type="pcre2">(?i)(?:[|\x26]|%(?:7c|26))(?:[+\s]|%(?:25)?(?:20|09)){0,8}(?:(?:cat|ls|id|whoami|uname|wget|curl|nc|bash|sh|powershell|cmd)(?:[+\s]|%(?:25)?(?:20|09)){1,8}(?:[-/.~$]|%(?:2d|2f|2e|24|7e))|(?:whoami|uname)\b(?!(?:[+\s]|%(?:25)?20){0,8}(?:=|%3d)))</url>
+    <description>WEB-004 Chèn lệnh / RCE qua web (nối lệnh bằng | hoặc &amp;): $(srcip) gửi $(url)</description>
     <mitre>
       <id>T1059</id>
       <id>T1190</id>
@@ -75,7 +94,7 @@
   <rule id="104008" level="12">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
-    <url type="pcre2">(?i)^(?:[^?]{0,200}/(?:uploads?|images?|tmp|files)/[^/?]{1,100}\.(?:php|phtml|jsp|aspx?)|[^?]{0,200}(?:c99|r57|b374k|wso|shell|cmd)\.(?:php|jsp|aspx?))\?(?:[^#]{0,300}\x26)?(?:cmd|exec|command|c)(?:=|%3d)</url>
+    <url type="pcre2">(?i)^(?:[^?]{0,200}/(?:uploads?|images?|tmp|files)/[^/?]{1,100}\.(?:php|phtml|jsp|aspx?)\?(?:[^#]{0,300}\x26)?(?:cmd|exec|command)|[^?]{0,200}(?:c99|r57|b374k|wso|shell|cmd)\.(?:php|jsp|aspx?)\?(?:[^#]{0,300}\x26)?(?:cmd|exec|command|c))(?:=|%3d)</url>
     <description>WEB-008 Truy cập webshell: $(srcip) gọi $(url)</description>
     <mitre>
       <id>T1505.003</id>
@@ -86,7 +105,7 @@
   <rule id="104001" level="10">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
-    <url type="pcre2">(?i)(?:u|%[57]5)(?:n|%[46]e)(?:i|%[46]9)(?:o|%[46]f)(?:n|%[46]e)(?:[\s\x2b]|%20|/\x2a\x2a/){1,8}(?:(?:a|%[46]1)(?:l|%[46]c)(?:l|%[46]c)(?:[\s\x2b]|%20|/\x2a\x2a/){1,8})?(?:s|%[57]3)(?:e|%[46]5)(?:l|%[46]c)(?:e|%[46]5)(?:c|%[46]3)(?:t|%[57]4)</url>
+    <url type="pcre2">(?i)(?:u|%[57]5)(?:n|%[46]e)(?:i|%[46]9)(?:o|%[46]f)(?:n|%[46]e)(?:[\s\x2b]|%(?:20|0[9a-d])|/\x2a[^\x2a]{0,40}\x2a/){1,8}(?:(?:a|%[46]1)(?:l|%[46]c)(?:l|%[46]c)(?:[\s\x2b]|%(?:20|0[9a-d])|/\x2a[^\x2a]{0,40}\x2a/){1,8})?(?:s|%[57]3)(?:e|%[46]5)(?:l|%[46]c)(?:e|%[46]5)(?:c|%[46]3)(?:t|%[57]4)</url>
     <description>WEB-001 SQL injection (UNION SELECT): $(srcip) gửi $(url)</description>
     <mitre>
       <id>T1190</id>
@@ -97,8 +116,8 @@
   <rule id="104013" level="10">
     <if_sid>31100,31101,31103,31104,31105,31106,31108,31120,31121,31122,31123</if_sid>
     <location type="pcre2">^\(</location>
-    <url type="pcre2">(?i)waitfor(?:[+\s]|%(?:25)?20){1,8}delay|(?:information_schema|sysobjects|(?:@|%40){2}version)</url>
-    <description>WEB-001 SQL injection (WAITFOR DELAY, information_schema, @@version): $(srcip) gửi $(url)</description>
+    <url type="pcre2">(?i)waitfor(?:[+\s]|%(?:25)?20){1,8}delay|(?:information_schema|sysobjects|(?:@|%40){2}version)|(?:=|%3d)\d{1,10}(?:[+\s]|%(?:20|0[9ad])){1,8}(?:or|and)(?:[+\s]|%(?:20|0[9ad])){1,8}(\d{1,10})(?:[+\s]|%(?:25)?20){0,8}(?:=|%3d)(?:[+\s]|%(?:25)?20){0,8}\1(?!\d)</url>
+    <description>WEB-001 SQL injection (WAITFOR DELAY, information_schema, @@version, số không nháy =1 OR 1=1): $(srcip) gửi $(url)</description>
     <mitre>
       <id>T1190</id>
     </mitre>
@@ -197,7 +216,7 @@
     <if_sid>31100,31101,31108,31530</if_sid>
     <location type="pcre2">^\(</location>
     <protocol>^POST$</protocol>
-    <url type="pcre2">(?i)^(?!/administrator)(?![^?]*wp-login\.php)[^?]*(?:login|signin|auth|admin)</url>
+    <url type="pcre2">(?i)^(?!/administrator)(?![^?]*(?:wp-login|admin-ajax)\.php)[^?]*(?:login|signin|auth|admin)</url>
     <description>WEB-007 Bộ đếm POST vào đường dẫn đăng nhập (cho WEB-007)</description>
     <mitre>
       <id>T1110.001</id>

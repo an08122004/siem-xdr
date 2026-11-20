@@ -30,8 +30,10 @@ for pid in $new; do
     case "$name" in wazuh-*) continue ;; esac          # chính daemon của Wazuh agent (khởi động lại)
     uid=$(awk '/^Uid:/{print $2; exit}' "/proc/$pid/status" 2>/dev/null)
     exe=$(readlink "/proc/$pid/exe" 2>/dev/null)
-    cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-2000)
+    # Mọi ký tự điều khiển (\0, \n, \r...) -> khoảng trắng: một \n trong argv/comm/exe do user thường đặt sẽ in thêm một dòng
+    # "siem-proc: ..." GIẢ (pid/name tùy ý) mà manager tin là telemetry thật -> SOAR kill_process tự động
+    cmd=$(tr '\000-\037\177' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-2000)
     printf 'siem-proc: pid=%s ppid=%s uid=%s name=%s parent=%s exe=%s cmd=%s\n' \
-        "$pid" "$ppid" "$uid" "$(printf '%s' "$name" | tr ' ' '_')" "$(printf '%s' "$pname" | tr ' ' '_')" \
-        "$(printf '%s' "${exe:--}" | tr ' ' '_')" "$cmd"
+        "$pid" "$ppid" "$uid" "$(printf '%s' "$name" | tr -c '[:graph:]' '_')" "$(printf '%s' "$pname" | tr -c '[:graph:]' '_')" \
+        "$(printf '%s' "${exe:--}" | tr -c '[:graph:]' '_')" "$cmd"
 done

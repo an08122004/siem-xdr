@@ -6,6 +6,9 @@
   trường win.* vẫn không tạo được cảnh báo Windows (ca âm location 10.10.40.254 trong 0965-windows.yml).
   Cha chọn theo rule gốc ĐANG khớp event đó (rule con đứng cạnh anh em gốc nạp trước thì thua anh em), nên treo thẳng dưới rule gốc cụ thể:
     4625 -> 60122, 4728/4732 -> 60141/60144, 7045 -> 61138, Sysmon 1 -> 61603, Sysmon 10 -> 61612, Defender 1117 -> 62124, 4698 -> 60228, System 104 -> 63104, 4697 -> 60103.
+  Sysmon 1 (R75, sửa 19/11/2026): bốn rule gốc level 0 dạng if_group sysmon_event1 (92025 reg.exe, 92028 powershell chạy .ps1/.bat/.js..., 92042 netsh, 92069 cha WmiPrvSE)
+  nhận event TRƯỚC các con if_sid 61603 dù level 0 (đã đo: cradle tải a.ps1 chỉ ra rule bóng 108000, vssadmin có cha WmiPrvSE không ra alert nào). Vì vậy mọi rule Sysmon 1
+  ở đây treo vào 61603 VÀ bốn rule đó, như rule SigmaHQ (0966). Trường eventchannel nhân đôi dấu "\" (C:\\Windows\\...): regex đường dẫn nhiều đoạn dùng \\+.
   Nhánh thiếu của rule gốc có rule ở đây: WIN-002 System/104 (log khác bị xóa; 1102 chỉ khác 63103 ở mức độ), WIN-006 dòng lệnh Sysmon 1, WIN-009 Security/4697.
   Phần chỉ khác MỨC ĐỘ so với rule gốc để Task 12: WIN-002 1102 (63103 level 5), WIN-003 (60109 level 8), WIN-006 script block 4104 (91837 level 4).
   99919 (rule gốc 0999, level 9, 4625 từ IP trong danh sách malicious-ip) là con của 60122 và nạp SAU 0965 (0999 > 0965): bộ đếm 105001 chỉ móc vào 60122 nên KHÔNG đếm event đã
@@ -51,12 +54,13 @@
     <group>siem,windows,legacy_WIN-004,</group>
   </rule>
 
-  <!-- WIN-005: PowerShell -EncodedCommand (mọi dạng viết tắt), trừ lớp vỏ của Ansible qua WinRM (hai lệnh nền ghi thật của Splunk Attack Range, 12/10/2026; kẻ tấn
+  <!-- WIN-005: PowerShell -EncodedCommand (mọi tiền tố -e ... -encodedcommand và bí danh -ec; dấu mở đầu là - / hoặc gạch ngang Unicode – — ― mà PowerShell
+       cũng nhận, viết thành nhánh chữ chứ không phải lớp ký tự vì PCRE2 của Wazuh so theo byte), trừ lớp vỏ của Ansible qua WinRM (hai lệnh nền ghi thật của Splunk Attack Range, 12/10/2026; kẻ tấn
        công chép đúng chuỗi tham số này sẽ lọt, máy không quản trị bằng Ansible / WinRM thì xóa hai dòng negate). -->
   <rule id="105005" level="10">
-    <if_sid>61603</if_sid>
+    <if_sid>61603, 92025, 92028, 92042, 92069</if_sid>
     <field name="win.eventdata.image" type="pcre2">(?i)(^|\\)(powershell|pwsh)\.exe$</field>
-    <field name="win.eventdata.commandLine" type="pcre2">(?i)\s-(e|ec|en|enc|enco|encod|encode|encoded|encodedcommand)\s+[A-Za-z0-9+/=]{20,}</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)\s(?:-|/|–|—|―)(?:ec|e(?:n(?:c(?:o(?:d(?:e(?:d(?:c(?:o(?:m(?:m(?:a(?:nd?)?)?)?)?)?)?)?)?)?)?)?)?)\s+(?:\\?['"])?[A-Za-z0-9+/=]{20,}</field>
     <field name="win.eventdata.commandLine" type="pcre2" negate="yes">(?i)-NoProfile\s+-NonInteractive\s+-ExecutionPolicy\s+Unrestricted\s+-EncodedCommand\s</field>
     <field name="win.eventdata.commandLine" type="pcre2" negate="yes">(?i)-noninteractive\s+-encodedcommand\s+WwBDAG8AbgBzAG8AbABlAF0AOgA6AEkAbgBwAHUAdABFAG4AYwBvAGQAaQBuAGcA</field>
     <description>WIN-005 PowerShell chạy lệnh mã hóa base64 (-EncodedCommand)</description>
@@ -69,12 +73,14 @@
 
   <!-- WIN-006: nhánh dòng lệnh (Sysmon 1) của YAML cũ: powershell/pwsh có downloadstring(, iwr | iex, invoke-webrequest | iex hoặc -nop ... -w hidden.
        Nhánh script block 4104 (91837 level 4) chỉ khác mức độ, Task 12.
-       Lệnh -EncodedCommand (WIN-005, 105005) bị loại khỏi rule này để hai rule không tranh nhau cùng một event (anh em: rule nào đứng trước thắng, không theo thứ tự file). -->
+       Lệnh -EncodedCommand (WIN-005, 105005) bị loại khỏi rule này để hai rule không tranh nhau cùng một event (anh em: rule nào đứng trước thắng, không theo thứ tự file).
+       Ngoại lệ: lệnh cài Chocolatey chính thức (URL duy nhất là https://community.chocolatey.org/install.ps1, đúng một iex); thêm URL khác hoặc iex thứ hai vẫn báo. -->
   <rule id="105006" level="12">
-    <if_sid>61603</if_sid>
+    <if_sid>61603, 92025, 92028, 92042, 92069</if_sid>
     <field name="win.eventdata.image" type="pcre2">(?i)(^|\\)(powershell|pwsh)\.exe$</field>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)downloadstring\(|iwr\s+.*\|\s*iex|invoke-webrequest.*\|\s*iex|-nop.*-w\s+hidden</field>
-    <field name="win.eventdata.commandLine" type="pcre2" negate="yes">(?i)\s-(e|ec|en|enc|enco|encod|encode|encoded|encodedcommand)\s+[A-Za-z0-9+/=]{20,}</field>
+    <field name="win.eventdata.commandLine" type="pcre2" negate="yes">(?i)\s(?:-|/|–|—|―)(?:ec|e(?:n(?:c(?:o(?:d(?:e(?:d(?:c(?:o(?:m(?:m(?:a(?:nd?)?)?)?)?)?)?)?)?)?)?)?)?)\s+(?:\\?['"])?[A-Za-z0-9+/=]{20,}</field>
+    <field name="win.eventdata.commandLine" type="pcre2" negate="yes">(?i)^(?![\s\S]*://(?!community\.chocolatey\.org/install\.ps1['"]))(?![\s\S]*(?:iex|invoke-expression)[\s\S]*(?:iex|invoke-expression))[\s\S]*\.downloadstring\(\s*['"]https://community\.chocolatey\.org/install\.ps1['"]\s*\)</field>
     <description>WIN-006 PowerShell độc hại trên dòng lệnh (download cradle / ẩn cửa sổ)</description>
     <mitre>
       <id>T1059.001</id>
@@ -83,10 +89,13 @@
   </rule>
 
   <!-- WIN-007: Mimikatz / dump LSASS, ba nhánh của YAML cũ: dòng lệnh (105007), tên file mimikatz.exe (105107), Sysmon 10 mở LSASS với quyền đọc bộ nhớ (105207).
-       Rule gốc 92900 (level 12) đứng trước 105207 và nhận riêng 0x1010 / 0x40 khi nguồn không nằm trong Program Files; 105207 báo các quyền còn lại và 0x1010 từ Program Files. -->
+       Rule gốc 92900 (level 12) đứng trước 105207 và nhận riêng 0x1010 / 0x40 khi nguồn không nằm trong Program Files; 105207 báo các quyền còn lại và 0x1010 từ Program Files.
+       Ordinal comsvcs viết lệch (#+24, #0024, #-4294967272) vẫn là MiniDump. procdump -ma <PID> (không nêu tên lsass) KHÔNG thêm vào 105007: debug tiến trình khác cũng
+       dùng y hệt; dump lsass theo PID do 105207 (Sysmon 10) bắt. 105207 bỏ nguồn hệ thống / Defender ở ĐÚNG đường dẫn cài đặt (MsMpEng, WmiPrvSE, svchost mở lsass
+       0x1410 khi quét / WMI: đã đo ra level 12 mỗi lần quét); file cùng tên ở thư mục khác vẫn báo. Giới hạn: mã độc tiêm vào chính các tiến trình này bị bỏ qua. -->
   <rule id="105007" level="12">
-    <if_sid>61603</if_sid>
-    <field name="win.eventdata.commandLine" type="pcre2">(?i)sekurlsa::|lsadump::|procdump.*lsass|comsvcs\.dll.*minidump|rundll32.*comsvcs.*#24</field>
+    <if_sid>61603, 92025, 92028, 92042, 92069</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)sekurlsa::|lsadump::|procdump.*lsass|comsvcs.*mini\s*dump|rundll32.*comsvcs.*#\s*(?:\+?0*24|-0*4294967272)\b</field>
     <description>WIN-007 Đánh cắp thông tin đăng nhập (Mimikatz / dump LSASS) qua dòng lệnh</description>
     <mitre>
       <id>T1003.001</id>
@@ -95,7 +104,7 @@
   </rule>
 
   <rule id="105107" level="12">
-    <if_sid>61603</if_sid>
+    <if_sid>61603, 92025, 92028, 92042, 92069</if_sid>
     <field name="win.eventdata.image" type="pcre2">(?i)(^|\\)mimikatz\.exe$</field>
     <description>WIN-007 Tiến trình mimikatz.exe được chạy</description>
     <mitre>
@@ -108,6 +117,7 @@
     <if_sid>61612</if_sid>
     <field name="win.eventdata.targetImage" type="pcre2">(?i)(^|\\)lsass\.exe$</field>
     <field name="win.eventdata.grantedAccess" type="pcre2">(?i)^0x(1010|1410|1fffff|143a)$</field>
+    <field name="win.eventdata.sourceImage" type="pcre2" negate="yes">(?i)^c:\\+(?:windows\\+system32\\+(?:wbem\\+wmiprvse|svchost)\.exe|programdata\\+microsoft\\+windows defender\\+platform\\+[0-9.-]+\\+msmpeng\.exe|program files\\+windows defender\\+msmpeng\.exe)$</field>
     <description>WIN-007 Tiến trình $(win.eventdata.sourceImage) mở LSASS với quyền đọc bộ nhớ ($(win.eventdata.grantedAccess))</description>
     <mitre>
       <id>T1003.001</id>
@@ -115,10 +125,10 @@
     <group>siem,windows,legacy_WIN-007,</group>
   </rule>
 
-  <!-- WIN-008: ứng dụng Office sinh ra shell / trình thông dịch. -->
+  <!-- WIN-008: ứng dụng Office (kể cả OneNote: mồi .one phổ biến từ 2023) sinh ra shell / trình thông dịch. -->
   <rule id="105008" level="10">
-    <if_sid>61603</if_sid>
-    <field name="win.eventdata.parentImage" type="pcre2">(?i)(^|\\)(winword|excel|powerpnt|outlook|mspub)\.exe$</field>
+    <if_sid>61603, 92025, 92028, 92042, 92069</if_sid>
+    <field name="win.eventdata.parentImage" type="pcre2">(?i)(^|\\)(winword|excel|powerpnt|outlook|mspub|onenote)\.exe$</field>
     <field name="win.eventdata.image" type="pcre2">(?i)(^|\\)(cmd|powershell|pwsh|wscript|cscript|mshta|rundll32|regsvr32)\.exe$</field>
     <description>WIN-008 Ứng dụng Office ($(win.eventdata.parentImage)) sinh ra shell ($(win.eventdata.image))</description>
     <mitre>
@@ -151,10 +161,12 @@
     <group>siem,windows,legacy_WIN-009,</group>
   </rule>
 
-  <!-- WIN-010: xóa shadow copy / tắt phục hồi (dấu hiệu ransomware). -->
+  <!-- WIN-010: xóa shadow copy / tắt phục hồi (dấu hiệu ransomware). Tên chương trình có thể nằm trong đường dẫn có ngoặc kép ("C:\...\vssadmin.exe" delete shadows;
+       trường eventchannel ghi dấu nháy kép thành \" nên regex nhận \\?["']),
+       wmic có thể kèm tùy chọn toàn cục (/node:...) và mệnh đề where trước delete. -->
   <rule id="105010" level="12">
-    <if_sid>61603</if_sid>
-    <field name="win.eventdata.commandLine" type="pcre2">(?i)vssadmin(\.exe)?\s+delete\s+shadows|wmic(\.exe)?\s+shadowcopy\s+delete|bcdedit.*recoveryenabled\s+no|wbadmin\s+delete\s+catalog</field>
+    <if_sid>61603, 92025, 92028, 92042, 92069</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)vssadmin(?:\.exe)?(?:\\?['"])?\s+delete\s+shadows|wmic(?:\.exe)?(?:\\?['"])?\s+(?:/\S*\s)?(?:/\S*\s)?\s*shadowcopy\s+(?:where\s.{0,200}?\s)?delete|bcdedit.*recoveryenabled\s+no|wbadmin(?:\.exe)?(?:\\?['"])?\s+delete\s+catalog</field>
     <description>WIN-010 Xóa Shadow Copy / vô hiệu hóa phục hồi (dấu hiệu ransomware)</description>
     <mitre>
       <id>T1490</id>
@@ -175,7 +187,7 @@
 
   <!-- WIN-012: bốn nhánh LOLBin mà rule gốc thiếu (mshta, regsvr32 /i:http, rundll32 javascript:, bitsadmin /transfer); certutil -urlcache / -decode đã có rule gốc 92018 / 92075 (level >= 7). -->
   <rule id="105012" level="10">
-    <if_sid>61603</if_sid>
+    <if_sid>61603, 92025, 92028, 92042, 92069</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)mshta(\.exe)?\s+(http|javascript|vbscript)|regsvr32(\.exe)?.*/i:http|rundll32(\.exe)?.*javascript:|bitsadmin(\.exe)?.*/transfer</field>
     <description>WIN-012 Lạm dụng LOLBin để tải / thực thi mã (mshta, regsvr32, rundll32, bitsadmin)</description>
     <mitre>
@@ -189,10 +201,10 @@
        4698 (105113, con của rule gốc 60228 level 4; nhánh event.action = scheduled_task_created của YAML cũ, không lọc nội dung nên rộng hơn). Giới hạn của YAML cũ giữ nguyên: tác vụ ghi file .bat / .exe
        trong thư mục thường (vd C:\Scripts\backup.bat) bị bỏ qua. -->
   <rule id="105013" level="7">
-    <if_sid>61603</if_sid>
+    <if_sid>61603, 92025, 92028, 92042, 92069</if_sid>
     <field name="win.eventdata.image" type="pcre2">(?i)(^|\\)schtasks\.exe$</field>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)/create</field>
-    <field name="win.eventdata.commandLine" type="pcre2">(?i)(^|[\\/\s"'])(cmd|powershell|pwsh|wscript|cscript|mshta|rundll32|regsvr32|certutil|bitsadmin|javaw?)(\.exe)?([\s"']|$)|\.(msc|js|jse|vbs|vbe|hta|ps1)([\s"']|$)|%(temp|tmp|appdata|localappdata|public|programdata)%|\\(appdata|users\\public|programdata|windows\\temp)\\</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(^|[\\/\s"'])(cmd|powershell|pwsh|wscript|cscript|mshta|rundll32|regsvr32|certutil|bitsadmin|javaw?)(\.exe)?([\s"']|$)|\.(msc|js|jse|vbs|vbe|hta|ps1)([\s"']|$)|%(temp|tmp|appdata|localappdata|public|programdata)%|\\(appdata|users\\+public|programdata|windows\\+temp)\\</field>
     <description>WIN-013 Tạo Scheduled Task đáng ngờ bằng schtasks (cơ chế duy trì truy cập)</description>
     <mitre>
       <id>T1053.005</id>

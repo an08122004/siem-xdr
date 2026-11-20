@@ -42,6 +42,20 @@ def parse_line(line: str, kind: str, today: date | None = None) -> Meta | None:
     return {"type": kind, "value": value, "source": "local", "description": note or None, "expires": expires}
 
 
+def _live(m: Meta | None) -> Meta | None:
+    """IOC còn hạn: snapshot MISP chỉ lọc hạn lúc tải; MISP mất kết nối thì snapshot cũ giữ mãi IOC đã hết hạn (TI-001 chặn IP 24 giờ)."""
+    return m if m and not (m.get("expires") and str(m["expires"]) < datetime.now(timezone.utc).date().isoformat()) else None
+
+
+def _canon_ip(v: str) -> str:
+    """2001:0db8::0001 == 2001:db8::1, ::ffff:1.2.3.4 == 1.2.3.4: so khớp IOC theo địa chỉ, không theo chuỗi."""
+    try:
+        a = ipaddress.ip_address(v.strip())
+    except ValueError:
+        return v.lower()
+    return str(getattr(a, "ipv4_mapped", None) or a)
+
+
 class IOCSet:
     """Chỉ báo theo loại (ip / domain / hash) và dải IP (CIDR), mỗi giá trị kèm metadata."""
 
@@ -58,7 +72,7 @@ class IOCSet:
                 self.networks.append((ipaddress.ip_network(v, strict=False), m))
             except ValueError:
                 return
-        self.values.setdefault(kind, {})[v] = m
+        self.values.setdefault(kind, {})[_canon_ip(v) if kind == "ip" else v] = m
 
     def counts(self) -> dict[str, int]:
         return {k: len(v) for k, v in self.values.items()}
@@ -67,10 +81,10 @@ class IOCSet:
         return [m for vals in self.values.values() for m in vals.values()]
 
     def ip(self, ip: str) -> Meta | None:
-        if (m := self.values["ip"].get(ip.lower())):
+        if (m := self.values["ip"].get(_canon_ip(ip))):
             return m
         try:
-            addr = ipaddress.ip_address(ip)
+            addr = ipaddress.ip_address(_canon_ip(ip))
         except ValueError:
             return None
         return next((m for n, m in self.networks if addr.version == n.version and addr in n), None)
@@ -133,17 +147,18 @@ class ThreatIntel:
         seen: dict[tuple[str, str], Meta] = {}
         for s in self.sets():
             for m in s.all():
-                seen.setdefault((m["type"], m["value"]), m)
+                if _live(m):
+                    seen.setdefault((m["type"], m["value"]), m)
         return list(seen.values())
 
     def match_ip(self, ip: str | None) -> Meta | None:
-        return next((m for s in self.sets() if (m := s.ip(ip))), None) if ip else None
+        return next((m for s in self.sets() if (m := _live(s.ip(ip)))), None) if ip else None
 
     def match_domain(self, domain: str | None) -> Meta | None:
-        return next((m for s in self.sets() if (m := s.domain(domain))), None) if domain else None
+        return next((m for s in self.sets() if (m := _live(s.domain(domain)))), None) if domain else None
 
     def match_hash(self, h: str | None) -> Meta | None:
-        return next((m for s in self.sets() if (m := s.hash(h))), None) if h else None
+        return next((m for s in self.sets() if (m := _live(s.hash(h)))), None) if h else None
 
     def enrich(self, doc: Doc) -> None:
         for field in ("source.ip", "destination.ip"):
@@ -208,6 +223,9 @@ _PRIVATE_NETS = [ipaddress.ip_network(n) for n in (
     "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16", "fc00::/7", "fe80::/10")]
 
 
+_BENCH = ipaddress.ip_network("198.18.0.0/15")
+
+
 def ip_scope(ip: str | None) -> str | None:
     if not ip:
         return None
@@ -217,7 +235,8 @@ def ip_scope(ip: str | None) -> str | None:
         return None
     if a.is_loopback:
         return "loopback"
-    if any(a in n for n in _PRIVATE_NETS if n.version == a.version):
+    # multicast / :: / dải benchmark 198.18/15 / reserved không định tuyến ra Internet: không phải "public" (tra TI, geo)
+    if a.is_multicast or a.is_unspecified or a.is_reserved or a in _BENCH or             any(a in n for n in _PRIVATE_NETS if n.version == a.version):
         return "private"
     return "public"
 

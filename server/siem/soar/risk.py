@@ -5,6 +5,11 @@ sản, detection/alerts.py) vào máy (host.name) và tài khoản (user.name) l
 tổng điểm ≥ RBA_THRESHOLD và đến từ ≥ RBA_MIN_RULES rule KHÁC NHAU, SOAR sinh alert RBA-001 gom mọi alert góp điểm (mức
 high; critical khi gấp đôi ngưỡng). Vượt tiếp mỗi bội số của ngưỡng thì bắn lại để nâng mức.
 
+Điểm được tính (từ 22/10/2026, `_counted`): một event kích hoạt chỉ tính alert điểm cao nhất (rule phân bậc rộng -> hẹp
+cùng khớp một event là MỘT bằng chứng), rồi mỗi rule chỉ tính một lần trong cửa sổ, lấy điểm cao nhất (rule ồn khớp 100
+lần không tự đẩy thực thể qua ngưỡng). Trước đó một event khớp 3 bậc (25 + 50 + 75) tự sinh RBA-001, và 100 alert low của
+một rule cộng 1 alert khác sinh RBA-001 critical. Alert RBA vẫn liệt kê mọi alert góp điểm.
+
 Ý nghĩa: rule mức low (không mở case, không thông báo) dùng được làm tín hiệu săn tìm (tạo tài khoản, tạo dịch vụ, dò
 tài khoản domain...): từng cái không đáng mở case, nhiều cái khác loại trên cùng một máy trong một ngày thì đáng. Trước
 13/10/2026 5 alert medium khác nhau trên một máy vẫn chỉ là 5 alert rời (RULES.md mục 6)."""
@@ -41,6 +46,20 @@ class Contribution:
     tactic: str | None
     criticality: str | None
     agent_id: str | None
+    event_id: str = ""          # event kích hoạt (trigger_event.event.id); rỗng thì alert tự là một bằng chứng
+
+
+def _counted(items: Iterable[Contribution]) -> dict[str, float]:
+    """rule -> điểm được tính: mỗi event giữ alert điểm cao nhất, rồi mỗi rule giữ điểm cao nhất (docstring module)."""
+    per_event: dict[str, Contribution] = {}
+    for x in items:
+        k = x.event_id or x.alert_id
+        if k not in per_event or x.score > per_event[k].score:
+            per_event[k] = x
+    per_rule: dict[str, float] = {}
+    for x in per_event.values():
+        per_rule[x.rule_id] = max(per_rule.get(x.rule_id, 0.0), x.score)
+    return per_rule
 
 
 def _ts(alert: dict[str, Any]) -> float:
@@ -98,7 +117,8 @@ class RiskTracker:
         c = Contribution(_ts(alert), aid, str(get(alert, "rule.id")), str(get(alert, "rule.name") or ""),
                          float(alert.get("risk_score") or SEVERITY_SCORE.get(str(alert.get("severity")), 1) * 25),
                          tuple(tech if isinstance(tech, list) else [tech]), get(alert, "rule.mitre.tactic"),
-                         get(alert, "asset.criticality"), get(alert, "agent.id"))
+                         get(alert, "asset.criticality"), get(alert, "agent.id"),
+                         str(get(alert, "trigger_event.event.id") or ""))
         if c.at < now - self.window:
             return []
         out = []
@@ -106,9 +126,9 @@ class RiskTracker:
             q = self.entries.setdefault(key, deque())
             q.append(c)
             q = self._prune(key, now)
-            total = sum(x.score for x in q)
+            rules = _counted(q)
+            total = sum(rules.values())
             level = int(total // self.threshold)
-            rules = {x.rule_id for x in q}
             if level < 1:
                 self.fired.pop(key, None)
             elif len(rules) >= self.min_rules and level > self.fired.get(key, 0):

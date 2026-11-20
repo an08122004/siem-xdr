@@ -98,12 +98,14 @@ class Analyzer:
                      st["dropped_entities"])
 
     def install_signal_handlers(self) -> None:
-        """docker stop gửi SIGTERM: lưu trạng thái ML rồi thoát, để khởi động lại không học lại từ đầu."""
+        """docker stop (stop_signal: SIGINT trong compose) / SIGTERM: lưu trạng thái ML rồi thoát, để khởi động lại không
+        học lại từ đầu. Trước đây chỉ gắn SIGTERM nên SIGINT thành KeyboardInterrupt bị nuốt ở main(), mất tới 1 giờ cửa sổ."""
         def stop(signum, frame):  # noqa: ARG001
             if self.detector:
                 self.detector.save()
             raise SystemExit(0)
-        signal.signal(signal.SIGTERM, stop)
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            signal.signal(sig, stop)
 
     def run(self) -> None:
         log.info("analyzer bắt đầu tiêu thụ topic %s", settings.TOPIC_RAW)

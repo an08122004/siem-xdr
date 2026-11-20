@@ -288,7 +288,11 @@ const REGISTER = location.pathname === '/register' || !!params.get('register'); 
 // chỉ cho chuyển tiếp tới đường dẫn nội bộ (chống open redirect: //evil.com, /\evil.com, http://...)
 // Hết phiên khi đang xem dashboard nhúng trong console: trang này được tải trong khung -> thoát ra cả cửa sổ
 if (window.top !== window.self) { try { window.top.location.replace(location.href); } catch (e) {} }
-const safeNext = n => (n && n.startsWith('/') && !n.startsWith('//') && !n.includes('\\')) ? n : '/';
+// so origin sau khi trình duyệt phân tích URL: lọc chuỗi bị lách bằng tab/xuống dòng ("/\t/evil.com" -> //evil.com)
+const safeNext = n => {
+  try { const u = new URL(n, location.origin); return n.startsWith('/') && u.origin === location.origin ? u.pathname + u.search + u.hash : '/'; }
+  catch (e) { return '/'; }
+};
 // giữ phần #/... (vd #/alerts/<id> từ liên kết Grafana) khi máy chủ chuyển hướng sang đây vì chưa đăng nhập
 const NEXT = (n => n.includes('#') ? n : n + location.hash)(safeNext(params.get('next')));
 const HDR = { 'Content-Type': 'application/json', 'X-Requested-With': 'siem-console' };

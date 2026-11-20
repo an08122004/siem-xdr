@@ -72,7 +72,7 @@ def _clean_ip(v: Any) -> str | None:
     if v is None:
         return None
     s = str(v).strip().strip("[]")
-    if s.startswith("::ffff:"):
+    if s.lower().startswith("::ffff:") and "." in s:      # IPv4 ánh xạ (Windows có thể ghi ::FFFF:)
         s = s[7:]
     if s in ("", "-", "::1", "127.0.0.1", "0.0.0.0", "localhost"):
         return s if s in ("::1", "127.0.0.1") else None
@@ -176,9 +176,11 @@ _SYSLOG_ISO = re.compile(
     r"^(?P<time>\d{4}-\d\d-\d\dT\S+) (?P<host>\S+) (?P<prog>[^:\[\s]+)(?:\[(?P<pid>\d+)\])?:? ?(?:- - )?(?P<msg>.*)$"
 )
 
-_SSH_FAILED = re.compile(r"Failed (?P<method>\S+) for (?P<invalid>invalid user )?(?P<user>\S+) from (?P<ip>\S+) port (?P<port>\d+)")
+# Neo cuối dòng: username có thể chứa "x from 10.0.0.53 port 1" (sshd ghi nguyên khoảng trắng) -> IP thật là cụm "from" CUỐI
+_SSH_TAIL = r" from (?P<ip>\S+) port (?P<port>\d+)(?: ssh2)?(?:: \S+ SHA256:\S+)?(?: \[preauth\])?\s*$"
+_SSH_FAILED = re.compile(r"Failed (?P<method>\S+) for (?P<invalid>invalid user )?(?P<user>.+?)" + _SSH_TAIL)
 _SSH_ACCEPTED = re.compile(r"Accepted (?P<method>\S+) for (?P<user>\S+) from (?P<ip>\S+) port (?P<port>\d+)")
-_SSH_INVALID = re.compile(r"Invalid user (?P<user>\S*) from (?P<ip>\S+)(?: port (?P<port>\d+))?")
+_SSH_INVALID = re.compile(r"Invalid user (?P<user>.*?) from (?P<ip>\S+)(?: port (?P<port>\d+))?(?: \[preauth\])?\s*$")
 _PAM_FAIL = re.compile(r"authentication failure;.*?(?:rhost=(?P<ip>\S*))?(?:\s+user=(?P<user>\S+))?$")
 _SUDO = re.compile(r"^\s*(?P<user>\S+) : (?:(?P<fail>.*?) ; )?TTY=(?P<tty>\S+) ; PWD=(?P<pwd>\S+) ; USER=(?P<target>\S+) ; COMMAND=(?P<cmd>.*)$")
 _USERADD = re.compile(r"new user: name=(?P<user>[^,\s]+)")
@@ -392,7 +394,7 @@ def parse_windows(data: Doc, doc: Doc) -> None:
         put(doc, "event.category", "malware")
         put(doc, "event.type", "info")
         put(doc, "event.action", "malware_detected" if eid == 1116 else "malware_action_taken")
-        put(doc, "threat.name", f.get("Threat Name"))
+        put(doc, "threat.name", f.get("ThreatName") or f.get("Threat Name"))     # Wazuh: threatName -> ThreatName
         put(doc, "file.path", f.get("Path"))
         return
 
@@ -425,7 +427,9 @@ def parse_windows(data: Doc, doc: Doc) -> None:
     elif eid in (4728, 4732, 4756):
         _iam(doc, "group_member_added", "change", f)
         put(doc, "group.name", f.get("TargetUserName"))
-        put(doc, "user.target.name", f.get("MemberName") or f.get("MemberSid"))
+        put(doc, "group.id", f.get("TargetSid"))                      # so nhóm theo SID (S-1-5-32-544), không theo tên dễ trùng
+        # tài khoản cục bộ: MemberName = "-" -> dùng MemberSid; ghi đè user.target.name mà _iam đặt bằng tên NHÓM
+        put(doc, "user.target.name", next((v for v in (f.get("MemberName"), f.get("MemberSid")) if v not in (None, "", "-")), None))
     elif eid == 4740:
         _iam(doc, "account_locked", "change", f)
     elif eid == 1102 or (eid == 104 and channel == "System"):
@@ -642,8 +646,10 @@ def parse_wazuh(ev: Doc, doc: Doc) -> None:
         # bản ghi), dòng trong alerts.json khớp dòng archives.json của cùng event, còn event khác nhau thì khác id.
         body = ev.get("full_log") or json.dumps(ev.get("syscheck") or ev.get("data") or {}, sort_keys=True, default=str)
         basis = "\x1f".join(str(x) for x in (ev.get("timestamp"), ag.get("id"), ev.get("location"), body))
-        digest = hashlib.sha1(basis.encode("utf-8", "replace")).hexdigest()[:12]
-        doc["event"]["id"] = f"wazuh-{ag.get('id', '000')}-{ev['id']}-{digest}"
+        digest = hashlib.sha1(basis.encode("utf-8", "replace")).hexdigest()[:16]
+        # KHÔNG ghép ev["id"]: cùng một event có id khác nhau ở archives.json và alerts.json (vị trí trong từng file)
+        # -> related_events của alert trỏ tới event không tồn tại (đo 19/11: 227/500 alert)
+        doc["event"]["id"] = f"wazuh-{ag.get('id', '000')}-{digest}"
     doc["agent"] = {k: v for k, v in {"id": ag.get("id"), "name": ag.get("name"), "hostname": ag.get("name"),
                                       "ip": ag.get("ip"), "type": "wazuh"}.items() if v}
     put(doc, "host.name", ag.get("name"))
@@ -686,7 +692,7 @@ def parse_wazuh(ev: Doc, doc: Doc) -> None:
     elif full and _SIEM_PROC_LOC.search(loc) and (m := _SIEM_PROC.match(full)):
         parse_process({"pid": m["pid"], "ppid": m["ppid"], "uid": m["uid"], "name": m["name"], "executable": m["exe"],
                        "command_line": m["cmd"], "parent_name": m["parent"]}, doc)
-    elif isinstance(data.get("audit"), dict) and _wazuh_audit(data["audit"], doc):
+    elif isinstance(data.get("audit"), dict) and _wazuh_audit(data["audit"], doc, full):
         pass
     elif isinstance(data.get("sca"), dict):
         _wazuh_sca(data["sca"], doc, full)
@@ -781,13 +787,34 @@ def _wazuh_windows(win: Doc, doc: Doc, agent_name: Any) -> None:
         put(doc, "message", sysd["message"].strip('"'))
 
 
-def _wazuh_audit(audit: Doc, doc: Doc) -> bool:
+_EXECVE_REC = re.compile(r"type=EXECVE\b.*?(?=\stype=|$)", re.S)
+_EXECVE_ARG = re.compile(r'\ba(\d+)=("[^"]*"|[0-9A-Fa-f]+)(?=\s|$)')
+
+
+def _execve_args(full: str) -> list[str]:
+    """Đối số EXECVE từ dòng auditd gốc: đối số có khoảng trắng / ký tự lạ bị auditd ghi dạng HEX không nháy, decoder
+    Wazuh bỏ qua -> `bash -c <payload>` chỉ còn `bash -c`. Chỉ đọc bản ghi EXECVE (a0.. của SYSCALL là số thô)."""
+    rec = _EXECVE_REC.search(full or "")
+    out: dict[int, str] = {}
+    for m in _EXECVE_ARG.finditer(rec.group(0) if rec else ""):
+        v = m[2]
+        if v.startswith('"'):
+            out[int(m[1])] = v[1:-1]
+        else:
+            try:
+                out[int(m[1])] = bytes.fromhex(v).decode("utf-8", "replace").replace("\0", " ")
+            except ValueError:
+                out[int(m[1])] = v
+    return [out[i] for i in sorted(out)]
+
+
+def _wazuh_audit(audit: Doc, doc: Doc, full: str = "") -> bool:
     """auditd (Linux thật, log_format audit): EXECVE / SYSCALL execve -> tiến trình mới.
     auditd không ghi tên tiến trình cha, nên rule cần process.parent.name (LNX-002) không bắt được từ nguồn này."""
     execve = audit.get("execve") if isinstance(audit.get("execve"), dict) else {}
     if not execve and str(audit.get("syscall")) not in ("59", "322"):
         return False
-    args = [str(execve[f"a{i}"]) for i in range(len(execve)) if f"a{i}" in execve]
+    args = _execve_args(full) or [str(execve[f"a{i}"]) for i in range(len(execve)) if f"a{i}" in execve]
     exe = audit.get("exe")
     parse_process({"pid": audit.get("pid"), "ppid": audit.get("ppid"), "uid": audit.get("auid") or audit.get("uid"),
                    "name": audit.get("command") or _basename(exe), "executable": exe,

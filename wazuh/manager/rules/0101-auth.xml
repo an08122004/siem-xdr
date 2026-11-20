@@ -57,6 +57,19 @@
        (2) rule nối vào 101010 bằng if_matched_sid làm 101002 hết nhận 101010 hoặc chính nó không báo. Phần hở: nhịp 4-5 lần sai/phút từ một IP (dưới 5/60s của AUTH-001 cũ,
        trên 8/120s của gốc): chỉ còn 101010 (level 2, im) và 101002 nếu sau đó đăng nhập được. Rule YAML cũ không có ngưỡng này nên không thua rule cũ, chỉ thua ruleset gốc;
        Task 12 (tuning) cân nhắc lại. Từ đây, event bị ghi nhận là 101000 (không còn là 5760/5710) -> mọi bộ đếm dùng if_matched_sid 101000. -->
+  <!-- AUTH-009: username chứa cụm "from <IP> port <N>" giả -> decoder sshd gốc (regex không neo) lấy IP GIẢ làm srcip. Đứng TRƯỚC 101000 để event này
+       không vào bộ đếm brute-force (101001/101003 -> playbook block_ip scope all): kẻ tấn công không thể khiến SOAR chặn IP tùy ý (vd DNS, gateway). -->
+  <rule id="101009" level="8">
+    <if_sid>5760, 5710</if_sid>
+    <regex type="pcre2">from \S+ port \d+ .*from \S+ port \d+</regex>
+    <description>AUTH-009 Username SSH chứa địa chỉ IP giả (né/lợi dụng chặn IP tự động): $(srcip) có thể không phải IP thật</description>
+    <mitre>
+      <id>T1110.001</id>
+      <id>T1036</id>
+    </mitre>
+    <group>siem,auth,</group>
+  </rule>
+
   <rule id="101000" level="2">
     <if_sid>5760, 5710, 101021</if_sid>
     <description>AUTH-000 Thất bại đăng nhập SSH hoặc console (bộ đếm chung cho AUTH-001/002/003)</description>
@@ -132,11 +145,36 @@
 
   <!-- AUTH-006: sudo mở shell/su, hoặc sudo thất bại. Con của các rule sudo gốc (đứng sau chúng mới thấy được).
        Giới hạn: sudo thất bại qua PAM ("pam_unix(sudo:auth): authentication failure") đi vào nhóm PAM gốc (5503), không phải rule sudo -> chưa phủ;
-       trường hợp phổ biến còn lại "incorrect password attempt" thì có. -->
+       trường hợp phổ biến còn lại "incorrect password attempt" thì có.
+       Sửa 19/11/2026: MỘT lần sudo thất bại (gõ sai mật khẩu, user không có trong sudoers, lệnh không được phép) không còn ra alert level 7 (playbook mở case cho mọi
+       WZH-* từ medium nên mỗi lần gõ sai là một case). Thất bại vào bộ đếm 101016 (level 2, không alert); 101026 báo khi >= 3 lần thất bại của CÙNG user trên
+       cùng máy trong 5 phút. 101006 chỉ còn nhánh mở shell root, và loại dòng thất bại (dòng thất bại cũng mang COMMAND=). Dòng "3 incorrect password attempts"
+       vẫn do rule gốc 5404 (level 10, con của 5401, level cao hơn) nhận, không vào bộ đếm. -->
   <rule id="101006" level="7">
     <if_sid>5401, 5402, 5403, 5405, 5406, 5407</if_sid>
-    <regex type="pcre2">incorrect password attempt|NOT in sudoers|command not allowed|COMMAND=\S*/(ba|z|da)?sh(\s|$)|COMMAND=(\S*/)?su(\s+-?)?\s*$|COMMAND=.*\s-i$</regex>
-    <description>AUTH-006 Sudo mở shell root hoặc sudo thất bại: $(dstuser)</description>
+    <regex type="pcre2">^(?!.*(?:incorrect password attempt|NOT in sudoers|command not allowed)).*(?:COMMAND=\S*/(ba|z|da)?sh(\s|$)|COMMAND=(\S*/)?su(\s+-?)?\s*$|COMMAND=.*\s-i$)</regex>
+    <description>AUTH-006 Sudo mở shell root: $(dstuser)</description>
+    <mitre>
+      <id>T1548.003</id>
+    </mitre>
+    <group>siem,auth,legacy_AUTH-006,</group>
+  </rule>
+
+  <rule id="101016" level="2">
+    <if_sid>5401, 5405, 5406</if_sid>
+    <regex type="pcre2">incorrect password attempt|NOT in sudoers|command not allowed</regex>
+    <description>AUTH-006 Sudo thất bại (bộ đếm cho 101026)</description>
+    <mitre>
+      <id>T1548.003</id>
+    </mitre>
+    <group>siem,auth,legacy_AUTH-006,</group>
+  </rule>
+
+  <rule id="101026" level="7" frequency="3" timeframe="300">
+    <if_matched_sid>101016</if_matched_sid>
+    <same_srcuser />
+    <same_location />
+    <description>AUTH-006 Sudo thất bại lặp lại: $(srcuser) thất bại &gt;= 3 lần trong 5 phút</description>
     <mitre>
       <id>T1548.003</id>
     </mitre>

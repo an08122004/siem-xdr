@@ -195,10 +195,18 @@ def events_index(ts: str | None) -> str:
     return f"{settings.IDX_EVENTS}-{day}"
 
 
+_BULK_RETRY = {429, 502, 503, 504}
+
+
 def bulk_index(es: Elasticsearch, actions: Iterable[dict[str, Any]]) -> int:
     ok, errors = helpers.bulk(es, actions, raise_on_error=False, stats_only=False)
     if errors:
         log.warning("bulk có %d lỗi, ví dụ: %s", len(errors), errors[:1])
+        # ES đang quá tải / khởi động lại (shard chưa sẵn sàng): ném lỗi để caller giữ lô và ghi lại cả lô (mọi bản ghi
+        # có _id cố định nên ghi lại không thành bản trùng). Trước đây bỏ lặng lẽ rồi analyzer vẫn xác nhận offset -> mất event.
+        # Lỗi mapping (400) ghi lại cũng vô ích: vẫn chỉ ghi log.
+        if any((next(iter(e.values()), None) or {}).get("status") in _BULK_RETRY for e in errors):
+            raise RuntimeError(f"bulk: {len(errors)} phần tử bị từ chối tạm thời (429/5xx), giữ lô để ghi lại")
     return ok
 
 
@@ -293,7 +301,7 @@ def claim_pending_actions(es: Elasticsearch, agent_id: str | None = None) -> lis
         except Exception:  # noqa: BLE001 - đã bị request khác nhận
             continue
         src = h["_source"]
-        claimed.append({k: src.get(k) for k in ("id", "agent_id", "type", "params", "alert_id", "created_at")})
+        claimed.append({k: src.get(k) for k in ("id", "agent_id", "type", "params", "alert_id", "created_at", "dispatch_attempts")})
     return claimed
 
 

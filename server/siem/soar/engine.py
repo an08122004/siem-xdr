@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from elasticsearch import ConnectionError as ESConnectionError, ConnectionTimeout as ESConnectionTimeout
 
 from .. import priority as prio
 from .. import settings, store
@@ -33,6 +34,9 @@ from .cases import CasePlaybooks
 from .wazuh import PROC_NAME
 from ..detection.alerts import SEVERITY_SCORE
 from ..pipeline.normalize import get
+
+# ES không kết nối được: KHÔNG ghi bước "error" rồi bỏ alert (offset đã done -> mất hành động) mà để vòng chính thử lại
+INFRA_ERRORS = (ESConnectionError, ESConnectionTimeout)
 
 log = logging.getLogger("soar")
 
@@ -89,6 +93,12 @@ def endpoint_agent(alert: dict[str, Any]) -> str | None:
 def case_entity(alert: dict[str, Any]) -> str:
     """Thực thể chính của alert: gom case và gộp thông báo theo (rule, thực thể)."""
     return str(get(alert, "source.ip") or get(alert, "user.name") or get(alert, "host.name") or "unknown")
+
+
+def case_host(alert: dict[str, Any]) -> str | None:
+    """Thực thể không phải IP (user www-data, SYSTEM...) thì máy cũng phân biệt sự cố: webshell trên web-01 và web-02
+    là hai case, không gộp vào case mang host=web-01 và ghìm thông báo của máy thứ hai."""
+    return None if get(alert, "source.ip") else get(alert, "host.name")
 
 
 class Playbook:
@@ -162,6 +172,8 @@ class Soar:
                     continue
                 try:
                     res = self.run_step(step, alert)
+                except INFRA_ERRORS:
+                    raise
                 except Exception as e:  # noqa: BLE001
                     log.exception("bước %s lỗi", action)
                     res = {"status": "error", "detail": str(e)}
@@ -307,7 +319,7 @@ class Soar:
         existing = store.search(self.es, settings.IDX_CASES, size=1, query={"bool": {"filter": [
             {"term": {"rule_id": get(alert, "rule.id")}}, {"term": {"entity": entity}},
             {"terms": {"status": list(OPEN_CASE_STATUSES)}}, {"range": {"created_at": {"gte": since}}},
-        ]}}, sort=[{"created_at": "desc"}])
+        ] + ([{"term": {"host": h}}] if (h := case_host(alert)) else [])}}, sort=[{"created_at": "desc"}])
         alert_id, now = get(alert, "alert.id"), store.now_iso()
         level = alert.get("priority")
         if level not in prio.PRIORITIES:                # alert tạo trước khi có priority.py
@@ -361,7 +373,8 @@ class Soar:
         now = store.now_iso()
         retry = (datetime.now(timezone.utc) - timedelta(minutes=REVERT_RETRY_MINUTES)).isoformat()
         expired = store.search(self.es, settings.IDX_ACTIONS, size=100, query={"bool": {
-            "filter": [{"term": {"type": "block_ip"}}, {"term": {"status": "success"}}, {"term": {"reverted": False}},
+            # timeout: agent không báo kết quả nhưng có thể ĐÃ chặn -> vẫn phải gỡ (lệnh gỡ chạy lặp an toàn)
+            "filter": [{"term": {"type": "block_ip"}}, {"terms": {"status": ["success", "timeout"]}}, {"term": {"reverted": False}},
                        {"range": {"expires_at": {"lte": now}}}],
             "should": [{"bool": {"must_not": [{"exists": {"field": "revert_requested_at"}}]}},
                        {"range": {"revert_requested_at": {"lte": retry}}}],
@@ -400,7 +413,7 @@ class Notifier:
         """None: đang trong thời gian chờ, gộp alert này. Ngược lại: số alert đã gộp kể từ lần gửi trước."""
         if self.cooldown <= 0:
             return 0
-        key, now = (str(get(alert, "rule.id")), case_entity(alert)), self.clock()
+        key, now = (str(get(alert, "rule.id")), case_entity(alert), case_host(alert)), self.clock()
         last = self._last.get(key)
         if last and now - last[0] < self.cooldown:
             self._last[key] = (last[0], last[1] + 1)

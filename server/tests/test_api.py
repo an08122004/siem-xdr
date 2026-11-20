@@ -160,6 +160,44 @@ def test_wrong_password_and_lockout(env):
     assert login(env, "admin", ADMIN_TMP).status_code == 200
 
 
+def test_strangers_failures_do_not_lock_other_accounts(env):
+    # mọi client sau NAT Docker cùng một IP: tên ngẫu nhiên sai mật khẩu không được khóa admin
+    from siem.manager import auth
+    auth.throttle.__init__()
+    for i in range(settings.CONSOLE_MAX_FAILURES + 2):
+        assert login(env, f"khongco{i}", "sai-mat-khau").status_code == 401
+    assert login(env, "admin", ADMIN_TMP).status_code == 200
+
+
+def test_login_does_not_undo_concurrent_disable(env, monkeypatch):
+    from siem.manager import auth
+    real = auth.verify_password
+
+    def racing(pw, h):
+        ok = real(pw, h)
+        env.users.users["admin"]["disabled"] = True      # admin khác khóa tài khoản đúng lúc login đang tính scrypt
+        return ok
+    monkeypatch.setattr(auth, "verify_password", racing)
+    login(env, "admin", ADMIN_TMP)
+    assert env.users.get("admin")["disabled"] is True and env.users.get("admin")["last_login"]
+
+
+def test_oversized_body_rejected_before_auth(env):
+    r = env.post("/api/v1/actions", content=b"{}", headers={**H, "Content-Type": "application/json",
+                                                             "Content-Length": str(50 * 1024 * 1024)})
+    assert r.status_code == 413
+
+
+def test_password_change_respects_lockout(env):
+    from siem.manager import auth
+    auth.throttle.__init__()
+    admin_login(env)
+    for _ in range(settings.CONSOLE_MAX_FAILURES):
+        env.post("/api/v1/auth/password", json={"current": "sai", "new": "Moi-Hoan-Toan-2026!"}, headers=H)
+    r = env.post("/api/v1/auth/password", json={"current": ADMIN_TMP, "new": "Moi-Hoan-Toan-2026!"}, headers=H)
+    assert r.status_code == 429                                                  # đang khóa: mật khẩu đúng cũng không thử được
+
+
 def test_csrf_header_required(env):
     r = env.post("/api/v1/auth/login", json={"username": "admin", "password": ADMIN_TMP})
     assert r.status_code == 403                                                  # form từ trang lạ không có header

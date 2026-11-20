@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+from re import _parser as _sre          # cây cú pháp regex của CPython (3.11+): bắt lượng từ lồng ở mọi độ sâu
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -201,9 +202,39 @@ def regex_risk(pattern: str) -> str | None:
         return "regex dài quá 300 ký tự"
     if _NESTED_QUANTIFIER.search(pattern):
         return "regex có lượng từ lồng nhau (vd (a+)+), nguy cơ ReDoS"
+    # \z là PCRE2 hợp lệ (emit dùng) nhưng Python < 3.14 chỉ có \Z: đổi để kiểm cú pháp không lệch theo bản Python
+    py = re.sub(r"(?<!\\)((?:\\\\)*)\\z", r"\1\\Z", pattern)
     try:
-        # \z là PCRE2 hợp lệ (emit dùng) nhưng Python < 3.14 chỉ có \Z: đổi để kiểm cú pháp không lệch theo bản Python
-        re.compile(re.sub(r"(?<!\\)((?:\\\\)*)\\z", r"\1\\Z", pattern))
+        re.compile(py)
     except re.error as e:
         return f"regex không hợp lệ: {e}"
+    if _redos(_sre.parse(py), big=False):
+        return "regex có lượng từ lồng nhau / nhánh chồng lấn trong lượng từ (vd ((a+))+, (a|aa)+), nguy cơ ReDoS"
     return None
+
+
+_REPEATS = {_sre.MAX_REPEAT, _sre.MIN_REPEAT} | ({_sre.POSSESSIVE_REPEAT} if hasattr(_sre, "POSSESSIVE_REPEAT") else set())
+
+
+def _redos(sp, big: bool) -> bool:
+    """big: đang nằm trong lượng từ không giới hạn hoặc > 10 lần. Trong đó mà còn lượng từ khác (kể cả ?) hoặc nhánh
+    có hai lựa chọn mở đầu giống nhau thì số cách khớp tăng theo hàm mũ. Lượng từ nhỏ ({3} của địa chỉ IP) vẫn cho qua."""
+    for op, av in sp:
+        if op in _REPEATS:
+            lo, hi, body = av
+            if big and (hi > 1 or lo == 0):
+                return True
+            if _redos(body, big or hi == _sre.MAXREPEAT or hi > 10):
+                return True
+        elif op is _sre.BRANCH:
+            alts = av[1]
+            # re tách tiền tố chung: (a|aa) -> a(?:|a), nhánh rỗng = một "?" nằm trong lượng từ
+            if big and (any(not list(a) for a in alts) or len({repr(list(a)[:1]) for a in alts}) < len(alts)):
+                return True
+            if any(_redos(a, big) for a in alts):
+                return True
+        else:
+            for x in av if isinstance(av, (tuple, list)) else (av,):
+                if isinstance(x, _sre.SubPattern) and _redos(x, big):
+                    return True
+    return False

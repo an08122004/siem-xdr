@@ -201,6 +201,10 @@ class UserStore:
     def put(self, user: dict[str, Any]) -> None:
         self.es.index(index=settings.IDX_USERS, id=user["username"], document=user, refresh="wait_for")
 
+    def patch(self, username: str, fields: dict[str, Any]) -> None:
+        """Cập nhật một phần (ES gộp object lồng nhau): không ghi đè trường admin vừa đổi (disabled, role...) như put()."""
+        self.es.update(index=settings.IDX_USERS, id=username, doc=fields, refresh="wait_for")
+
     def list(self) -> list[dict[str, Any]]:
         try:
             res = self.es.search(index=settings.IDX_USERS, size=500, query={"match_all": {}})
@@ -240,6 +244,13 @@ class MemoryUserStore(UserStore):
 
     def put(self, user):
         self.users[user["username"]] = dict(user)
+
+    def patch(self, username, fields):
+        def merge(dst, src):
+            for k, v in src.items():
+                dst[k] = merge(dict(dst.get(k) or {}), v) if isinstance(v, dict) else v
+            return dst
+        self.users[username] = merge(dict(self.users[username]), fields)
 
     def list(self):
         return [dict(u) for _, u in sorted(self.users.items())]
@@ -664,11 +675,18 @@ def roles(s: Session = Depends(current_user)) -> list[dict[str, Any]]:
     return [{"role": r, "label": ROLE_LABELS[r], "permissions": sorted(p)} for r, p in PERMISSIONS.items()]
 
 
+def _check_lock(username: str) -> None:
+    """Endpoint cần mật khẩu/mã hiện tại: đang bị khóa thì từ chối luôn (không cho đoán tiếp bằng phiên bị bỏ quên)."""
+    if (wait := throttle.wait(f"user:{username}")):
+        raise HTTPException(429, f"sai quá nhiều lần, thử lại sau {int(wait // 60) + 1} phút")
+
+
 @router.post("/api/v1/auth/login")
 def login(body: LoginBody, request: Request, response: Response) -> dict[str, Any]:
     _check_csrf(request)
     ip, username = client_ip(request), body.username.strip().lower()
-    keys = (f"user:{username}", f"ip:{ip}")
+    # chỉ khóa theo tài khoản: sau NAT của Docker mọi client cùng một IP (gateway) -> khóa theo IP = người lạ khóa được cả SOC
+    keys = (f"user:{username}",)
     if (wait := throttle.wait(*keys)):
         audit("login", "failure", username, ip, reason="locked")
         raise HTTPException(429, f"đăng nhập sai quá nhiều lần, thử lại sau {int(wait // 60) + 1} phút")
@@ -692,8 +710,8 @@ def login(body: LoginBody, request: Request, response: Response) -> dict[str, An
         user["mfa"]["last_step"] = step
     throttle.success(keys[0])
     token, s = sessions.create(user, ip)
-    user["last_login"] = store.now_iso()
-    users.put(user)
+    # cập nhật một phần: put(user) cả document đọc TRƯỚC scrypt sẽ hoàn tác thao tác khóa/đổi vai trò của admin chen giữa
+    users.patch(username, {"last_login": store.now_iso()} | ({"mfa": {"last_step": step}} if mfa_enabled(user) else {}))
     response.set_cookie(COOKIE, token, httponly=True, secure=True, samesite="strict", path="/",
                         max_age=settings.CONSOLE_SESSION_HOURS * 3600)
     audit("login", "success", username, ip, role=user["role"])
@@ -760,8 +778,9 @@ def me(s: Session = Depends(session)) -> dict[str, Any]:
 @router.post("/api/v1/auth/password")
 def change_password(body: PasswordBody, request: Request, s: Session = Depends(session)) -> dict[str, Any]:
     user, ip = users.get(s.username), client_ip(request)
+    _check_lock(s.username)
     if not user or not verify_password(body.current, user["password_hash"]):
-        throttle.failure(f"user:{s.username}", f"ip:{ip}")
+        throttle.failure(f"user:{s.username}")
         audit("password_changed", "failure", s.username, ip, reason="bad_current_password")
         raise HTTPException(400, "mật khẩu hiện tại không đúng")
     if (problem := password_problem(body.new, s.username)):
@@ -795,12 +814,13 @@ def mfa_setup(request: Request, s: Session = Depends(session)) -> dict[str, Any]
 @router.post("/api/v1/auth/mfa/enable")
 def mfa_enable(body: MfaCode, request: Request, s: Session = Depends(session)) -> dict[str, Any]:
     user, ip = users.get(s.username), client_ip(request)
+    _check_lock(s.username)
     pending = (user.get("mfa") or {}).get("pending")
     if not pending:
         raise HTTPException(400, "chưa tạo khóa xác thực, bấm thiết lập lại")
     step = totp_match(pending, body.code)
     if step is None:
-        throttle.failure(f"user:{s.username}", f"ip:{ip}")
+        throttle.failure(f"user:{s.username}")
         audit("mfa_enabled", "failure", s.username, ip, reason="bad_otp")
         raise HTTPException(400, "mã không đúng: kiểm tra giờ trên điện thoại và nhập mã đang hiện")
     user["mfa"] = {"enabled": True, "secret": pending, "pending": None, "last_step": step, "enabled_at": store.now_iso()}
@@ -818,8 +838,9 @@ def mfa_disable(body: MfaDisable, request: Request, s: Session = Depends(current
     if mfa_required(s.role):
         raise HTTPException(400, "vai trò của bạn bắt buộc xác thực 2 lớp, không tắt được")
     user, ip = users.get(s.username), client_ip(request)
+    _check_lock(s.username)
     if not verify_password(body.password, user["password_hash"]):
-        throttle.failure(f"user:{s.username}", f"ip:{ip}")
+        throttle.failure(f"user:{s.username}")
         raise HTTPException(400, "mật khẩu không đúng")
     user["mfa"] = {"enabled": False, "secret": None, "pending": None}
     users.put(user)

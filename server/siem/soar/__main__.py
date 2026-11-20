@@ -10,7 +10,7 @@ from ..pipeline.misp_cdb import MispListSync
 from ..wazuh_rules import WazuhApi as RulesApi        # cùng lớp WazuhAPI + put_list / reload; đăng nhập bằng user siem-soar
 from . import risk
 from .cases import CasePlaybooks
-from .engine import Notifier, Soar, load_playbooks
+from .engine import INFRA_ERRORS, Notifier, Soar, load_playbooks
 from .health import HealthMonitor, kafka_lag_reader
 from .retrohunt import RetroHunter
 from .wazuh import Responder, WazuhAPI
@@ -71,7 +71,9 @@ def main() -> None:
             sync.push(ti.indicators())
         tasks.append(Every(60, "xuất IOC IP / domain / hash sang danh sách Wazuh (TI-001)", export_ioc))
     if settings.RETROHUNT_ENABLED:
-        def indicators() -> list:
+        def indicators() -> list | None:
+            if feed is not None and feed.snapshot() is None:
+                return None                         # MISP chưa tải xong: IOC MISP vắng mặt KHÔNG phải hết hạn (lần sau dò lại -> TI-002 trùng)
             ti.maybe_reload()                       # file IOC vừa sửa / IOC vừa hết hạn
             return ti.indicators()
         hunter = RetroHunter(es, indicators, soar.emit, days=settings.RETROHUNT_DAYS,
@@ -89,10 +91,18 @@ def main() -> None:
     stream = bus.consume("siem-soar", [settings.TOPIC_ALERTS])
     for alert in stream:
         if alert is not None:
-            try:
-                soar.handle(alert)
-            except Exception:  # noqa: BLE001
-                log.exception("xử lý alert lỗi")
+            delay = 1.0
+            while True:
+                try:
+                    soar.handle(alert)
+                except INFRA_ERRORS as e:   # ES chết: chưa done(), thử lại CHÍNH alert này (bước đã chạy có chống trùng)
+                    log.warning("Elasticsearch không kết nối được (%s): thử lại alert sau %.0f giây", e, delay)
+                    time.sleep(delay)
+                    delay = min(delay * 2, 60)
+                    continue
+                except Exception:  # noqa: BLE001
+                    log.exception("xử lý alert lỗi")
+                break
             stream.done()          # xác nhận sau khi xử lý xong (dừng giữa chừng thì lần sau xử lý lại alert này)
         for t in tasks:
             t()
