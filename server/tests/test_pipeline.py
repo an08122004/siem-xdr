@@ -438,6 +438,15 @@ def test_soar_opens_case_for_every_medium_alert():
         assert len(notified) == (1 if score >= SEVERITY_SCORE["high"] else 0), sev
 
 
+def test_bulk_index_keeps_batch_on_temporary_rejections(monkeypatch):
+    from siem import store
+    monkeypatch.setattr(store.helpers, "bulk", lambda es, a, **kw: (1, [{"index": {"_id": "e1", "status": 429}}]))
+    with pytest.raises(RuntimeError):                # ES đang khởi động / quá tải: analyzer giữ buffer, không done()
+        store.bulk_index(None, [])
+    monkeypatch.setattr(store.helpers, "bulk", lambda es, a, **kw: (1, [{"index": {"_id": "e1", "status": 400}}]))
+    assert store.bulk_index(None, []) == 1           # lỗi mapping: ghi lại vô ích, chỉ log như cũ
+
+
 def test_ip_scope_special_ranges():
     from siem.pipeline.enrich import ip_scope
     assert [ip_scope(x) for x in ("224.0.0.251", "::", "198.18.0.5", "ff02::1", "203.0.113.9", "8.8.8.8")] == \
